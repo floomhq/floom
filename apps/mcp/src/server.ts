@@ -8,7 +8,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { readCredentials } from "./lib/credentials.js";
 
-const DEFAULT_API_BASE = "https://workers-api.floom.dev";
+const DEFAULT_API_BASE = "https://localhost:8000";
 const TERMINAL_RUN_STATUSES = new Set([
   "success",
   "error",

@@ -127,7 +127,7 @@ def test_list_visible_workers_shows_stock_off_cloud(wa, monkeypatch):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     wa._tracked_worker_ids.cache_clear()
     stock_id = _a_stock_id(wa)
-    visible = wa._list_visible_workers(user_id="federico", repos=_StubRepos())
+    visible = wa._list_visible_workers(user_id="local-user", repos=_StubRepos())
     ids = {w["id"] for w in visible}
     assert stock_id in ids, (
         f"stock template {stock_id} must still surface off-cloud; got {sorted(ids)}"
@@ -154,7 +154,7 @@ def test_get_visible_worker_allowed_off_cloud(wa, monkeypatch):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     wa._tracked_worker_ids.cache_clear()
     stock_id = _a_stock_id(wa)
-    got = wa._get_visible_worker(stock_id, user_id="federico", repos=_StubRepos())
+    got = wa._get_visible_worker(stock_id, user_id="local-user", repos=_StubRepos())
     assert got is not None and got.get("id") == stock_id
 
 

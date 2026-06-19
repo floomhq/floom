@@ -35,14 +35,14 @@ os.environ["WORKEROS_API_ENV_FILE"] = str(_TEST_DIR / "api.env")
 # Blobs land next to the test DB so screenshot uploads are isolated + cleaned.
 os.environ["FLOOM_BLOBS_DIR"] = str(_TEST_DIR / "blobs")
 # Deterministic secret -> stable public-link HMAC token + authed writes. We do
-# NOT set WORKEROS_USER_ID (keep the default `federico`) so we don't leak a
+# NOT set WORKEROS_USER_ID (keep the default `local-user`) so we don't leak a
 # custom owner into other test modules sharing this process.
 os.environ["FLOOM_SECRET"] = "test-secret-x4-annotations"
 
 import main  # noqa: E402
 
 _AUTH = {"x-floom-secret": "test-secret-x4-annotations"}
-_OWNER = "federico"
+_OWNER = "local-user"
 
 
 @pytest.fixture(autouse=True)

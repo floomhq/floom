@@ -407,7 +407,7 @@ def claim_whatsapp_sender(
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy == "local":
         # In local mode, the auth context user_id may already be workspace-scoped
-        # (e.g. "federico__ws_abc123").  We pin the workspace embedded in it, or
+        # (e.g. "local-user__ws_abc123").  We pin the workspace embedded in it, or
         # fall back to local-default.
         base_user_id = local_workspace_base_user_id(auth.user_id)
         # Extract the workspace segment from the scoped user_id.
@@ -1125,7 +1125,7 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
 
     # Validate the bound user still exists (hardening: user deleted after bind).
     # bound_user_is_valid() treats the bootstrap/legacy owner id as always-valid
-    # so a "federico" binding on a non-empty users table is never wrongly reset.
+    # so a "local-user" binding on a non-empty users table is never wrongly reset.
     try:
         deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
         if deploy == "local":

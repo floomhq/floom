@@ -599,7 +599,7 @@ def _persist_one_worker(
     # the row (#698). Stock/example demos (PROTECTED_STOCK_WORKER_IDS or
     # is_example:true) ship with the product and are meant for every member
     # to run (e.g. outbound-approval-demo). They were persisted 'private' +
-    # fede-owned, so a fresh member hit "worker <id> does not belong to
+    # local-owned, so a fresh member hit "worker <id> does not belong to
     # <uid>" at RunsRepository.create (owner OR 'workspace' only). Seed them
     # 'workspace' too, without leaking a tenant's real private workers.
     is_system_worker = bool(manifest.get("system_worker"))

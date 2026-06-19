@@ -386,7 +386,7 @@ def test_m09_default_tool_visibility_uses_shared_helper(monkeypatch, tmp_path):
 def test_m04_generic_error_no_internal_leak(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
 
-    secret = "SQLSTATE-42P01 column federico::float infinity boom"
+    secret = "SQLSTATE-42P01 column local-user::float infinity boom"
 
     async def _boom(tool_name, arguments):
         raise RuntimeError(secret)
@@ -408,7 +408,7 @@ def test_m04_generic_error_no_internal_leak(monkeypatch, tmp_path):
     # none of the raw internals leak to the client
     assert secret not in json.dumps(body)
     assert "SQLSTATE" not in json.dumps(body)
-    assert "federico" not in json.dumps(body)
+    assert "local-user" not in json.dumps(body)
 
 
 # ---------------------------------------------------------------------------

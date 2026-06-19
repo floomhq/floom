@@ -639,7 +639,7 @@ export const api = {
       return res.json() as Promise<import("./types").ApprovalUploadResponse>;
     },
   },
-  // NovaSearch Review Pack (reltix pilot) — public, no Workeros login. The
+  // ReviewPack Review Pack (demo-client pilot) — public, no Workeros login. The
   // token in the path is the share secret; the pack password gates the body.
   // A 401/403 surfaces as an inline "wrong password" in the UI (the proxy path
   // is allow-listed in isSignedApprovalProxyPath, so it never redirects to /login).

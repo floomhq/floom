@@ -49,7 +49,7 @@ def _is_expired(expires_at: str | None) -> bool:
 
 
 def _local_shared_secret_context(request: Request) -> AuthContext:
-    user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
+    user_id = (os.environ.get("WORKEROS_USER_ID") or "local-user").strip() or "local-user"
     if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
         header_user = (request.headers.get("x-floom-user") or "").strip()
         if header_user:
@@ -171,7 +171,7 @@ class MultiMemberAuthProvider:
         from db import get_repositories
         repos = get_repositories()
         if repos.users is not None and repos.users.count() == 0:
-            user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
+            user_id = (os.environ.get("WORKEROS_USER_ID") or "local-user").strip() or "local-user"
             return AuthContext(
                 user_id=user_id,
                 role="admin",

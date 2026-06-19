@@ -29,8 +29,8 @@ export type StoredCredentials = {
   authed_at: string;
 };
 
-const DEFAULT_OSS_API_BASE = "https://workers-api.floom.dev";
-const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
+const DEFAULT_OSS_API_BASE = "https://localhost:8000";
+const DEFAULT_CLOUD_API_BASE = "https://api.example.com";
 
 function envApiBase(defaultBase: string): string {
   return (process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE || defaultBase).replace(/\/+$/, "");

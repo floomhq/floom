@@ -27,7 +27,7 @@ WORKER_DIR = Path(__file__).parent.resolve()
 STATE_FILE = WORKER_DIR / "state.json"
 RULES_FILE = WORKER_DIR / "rules.yaml"
 BRAIN_FILE = WORKER_DIR / "brain.md"
-WORKEROS_API_URL_STR = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev").rstrip("/")
+WORKEROS_API_URL_STR = os.environ.get("WORKEROS_API_URL", "https://localhost:8000").rstrip("/")
 FLOOM_RUN_ID = os.environ.get("FLOOM_RUN_ID", "")
 WORKEROS_RUN_TOKEN = os.environ.get("WORKEROS" + "_RUN_TOKEN", "")
 

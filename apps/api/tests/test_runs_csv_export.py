@@ -17,7 +17,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 SECRET = "test-secret-runscsv"
-OWNER = "federico"
+OWNER = "local-user"
 
 _YML = """\
 schema_version: "0.3"

@@ -1,4 +1,4 @@
-"""Tests for PR B: connections backend, scopes, account_label, test endpoint, daily sweep.
+﻿"""Tests for PR B: connections backend, scopes, account_label, test endpoint, daily sweep.
 
 Run from repo root:
     cd apps/api && python3 -m pytest ../../tests/test_connections_backend.py -x -q
@@ -150,7 +150,7 @@ class TestAccountInfoEndpoint:
             mock_fetch.return_value = {
                 "email": "user@example.com",
                 "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
-                "user_id": "federico",
+                "user_id": "local-user",
                 "auth_config_id": "ac_abc123",
                 "status": "active",
             }
@@ -187,9 +187,9 @@ class TestAccountInfoEndpoint:
 
         with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
-                "email": "fede@example.com",
+                "email": "local@example.com",
                 "scopes": ["r_liteprofile"],
-                "user_id": "federico",
+                "user_id": "local-user",
                 "auth_config_id": None,
                 "status": "active",
             }
@@ -206,8 +206,8 @@ class TestAccountInfoEndpoint:
         items = list_resp.json()
         item = next((c for c in items if c["id"] == local_id), None)
         assert item is not None
-        assert item["account_label"] == "fede@example.com"
-        assert item["display_name"] == "fede@example.com"
+        assert item["account_label"] == "local@example.com"
+        assert item["display_name"] == "local@example.com"
         assert "r_liteprofile" in item["scopes"]
 
 
@@ -221,7 +221,7 @@ class TestComposioScopeParsing:
         with patch("requests.get") as mock_get:
             mock_get.return_value.ok = True
             mock_get.return_value.json.return_value = account_payload
-            return main._fetch_composio_account_info("ca_test", user_id="federico")
+            return main._fetch_composio_account_info("ca_test", user_id="local-user")
 
     def test_parses_comma_delimited_github_scope_string(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
@@ -413,10 +413,10 @@ class TestConnectionsListProjection:
 class TestConnectionCallbackAndComposio503:
     def test_callback_accepts_connected_account_id_alias_and_persists_status(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
-        # #1073 dropped the hardcoded floom.dev default for the callback redirect
+        # #1073 dropped the hardcoded example.com default for the callback redirect
         # base (OSS default is now localhost). Pin WORKERS_FRONTEND_URL so the
         # redirect target is deterministic instead of asserting on a default.
-        monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+        monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
         client = TestClient(main.app, raise_server_exceptions=True)
         conn = _seed_connection(client, app_name="gmail")
 
@@ -427,7 +427,7 @@ class TestConnectionCallbackAndComposio503:
             )
 
         assert resp.status_code in {302, 307}
-        assert resp.headers["location"].startswith("https://workers.floom.dev/connections?connected=1")
+        assert resp.headers["location"].startswith("https://localhost:3000/connections?connected=1")
         listed = client.get("/connections", headers=AUTH_HEADERS)
         item = next(c for c in listed.json() if c["id"] == conn["id"])
         assert item["status"] == "active"
@@ -824,7 +824,7 @@ class TestMCPConnections:
                 last_check_error TEXT,
                 scopes_json TEXT,
                 account_label TEXT,
-                user_id TEXT NOT NULL DEFAULT 'federico'
+                user_id TEXT NOT NULL DEFAULT 'local-user'
             );
             CREATE TABLE skill_versions (
                 id TEXT PRIMARY KEY,
@@ -851,7 +851,7 @@ class TestMCPConnections:
                 input_values_json TEXT,
                 enabled INTEGER DEFAULT 1 NOT NULL,
                 created_at TEXT NOT NULL,
-                owner_id TEXT NOT NULL DEFAULT 'federico',
+                owner_id TEXT NOT NULL DEFAULT 'local-user',
                 composio_trigger_id TEXT,
                 composio_event TEXT,
                 triggers_json TEXT,

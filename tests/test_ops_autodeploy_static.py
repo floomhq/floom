@@ -21,14 +21,9 @@ def test_autodeploy_script_avoids_pull_and_checks_drift():
     assert "curl -fsS" in text
 
 
-def test_autodeploy_units_are_versioned_for_oss_and_cloud():
+def test_autodeploy_unit_is_versioned():
     oss = (ROOT / "ops" / "workeros-api-autodeploy.service").read_text(encoding="utf-8")
-    cloud = (ROOT / "ops" / "workeros-cloud-api-autodeploy.service").read_text(encoding="utf-8")
 
-    assert "WORKEROS_ROOT=/root/workeros" in oss
-    assert "WORKEROS_DEPLOY_CMD=/root/workeros/ops/deploy-api.sh" in oss
-    assert "ExecStart=/root/workeros/ops/autodeploy-api.sh" in oss
-
-    assert "WORKEROS_ROOT=/opt/workeros-cloud-deploy" in cloud
-    assert "WORKEROS_DEPLOY_CMD=/opt/workeros-cloud-deploy/ops/deploy-api.sh" in cloud
-    assert "ExecStart=/usr/local/bin/workeros-api-autodeploy" in cloud
+    assert "WORKEROS_ROOT=/opt/workeros" in oss
+    assert "WORKEROS_DEPLOY_CMD=/opt/workeros/ops/deploy-api.sh" in oss
+    assert "ExecStart=/opt/workeros/ops/autodeploy-api.sh" in oss

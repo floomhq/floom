@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-// R13 HIGH-9: workers.floom.dev was missing 5 security headers the API
+// R13 HIGH-9: localhost:3000 was missing 5 security headers the API
 // already sets. CSP is intentionally NOT the API's `default-src 'none'`
 // policy — that would break a Next.js app shell. Started from a pragmatic
 // baseline and loosened only the directives Next's runtime needs:
@@ -10,7 +10,7 @@ import type { NextConfig } from "next";
 //   - blob: on frame-src for authenticated PDF previews fetched through the
 //     app proxy and rendered from object URLs
 //   - blob: on media-src for authenticated video previews
-// Verify with: `curl -I https://workers.floom.dev/` and a browser console
+// Verify with: `curl -I https://localhost:3000/` and a browser console
 // CSP-violation check after deploy.
 //
 // #926 — CSP moved to middleware.ts. The policy needs a per-request nonce on
@@ -121,13 +121,13 @@ const nextConfig: NextConfig = {
     ];
   },
   // Branded claim short-link: /c/:token is served by the FastAPI app (the
-  // /c/{token} route lives on workers-api.floom.dev, NOT here). Proxy it so the
-  // branded workers.floom.dev/c/:token also resolves. The upstream then 302s to
+  // /c/{token} route lives on localhost:8000, NOT here). Proxy it so the
+  // branded localhost:3000/c/:token also resolves. The upstream then 302s to
   // /settings?whatsapp_claim= | ?slack_claim= on this web app (auth-gated, which
   // is correct — only the short-link hop is public, via middleware below).
   async rewrites() {
     const apiBase = (
-      process.env.FLOOM_API_BASE || "https://workers-api.floom.dev"
+      process.env.FLOOM_API_BASE || "https://localhost:8000"
     ).replace(/\/$/, "");
     return [
       {

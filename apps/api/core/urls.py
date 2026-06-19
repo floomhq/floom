@@ -25,7 +25,7 @@ def _public_api_base_url() -> str:
         or os.environ.get("WORKEROS_API_BASE")
         or os.environ.get("WORKEROS_API_URL")
         or os.environ.get("WORKERS_API_URL")
-        or "https://workeros-api.floom.dev"
+        or "https://api.example.com"
     )
     return raw.rstrip("/")
 
@@ -38,7 +38,7 @@ def _api_public_base() -> str:
     return (
         os.environ.get("WORKEROS_API_BASE")
         or os.environ.get("WORKEROS_PUBLIC_API_URL")
-        or "https://workeros-api.floom.dev"
+        or "https://api.example.com"
     ).rstrip("/")
 
 

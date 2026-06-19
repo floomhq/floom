@@ -68,7 +68,7 @@ def _rpc(method, request_id=1, params=None):
 def test_concurrent_record_candidate_feedback_calls_create_distinct_files(monkeypatch, tmp_path):
     main, contexts_dir = _load_api(monkeypatch, tmp_path)
     with TestClient(main.app) as client:
-        created = client.post("/contexts/novasearch-data", json={"writeable": True}, headers=_secret_headers())
+        created = client.post("/contexts/review_pack-data", json={"writeable": True}, headers=_secret_headers())
         assert created.status_code == 200, created.text
 
         payloads = [
@@ -94,7 +94,7 @@ def test_concurrent_record_candidate_feedback_calls_create_distinct_files(monkey
 
         def _post(payload):
             return client.post(
-                "/contexts/novasearch-data/record-candidate-feedback",
+                "/contexts/review_pack-data/record-candidate-feedback",
                 json=payload,
                 headers=_secret_headers(),
             )
@@ -109,7 +109,7 @@ def test_concurrent_record_candidate_feedback_calls_create_distinct_files(monkey
     assert len(paths) == 2
     assert all(path.startswith("feedback/raw/") and path.endswith(".json") for path in paths)
 
-    files = sorted((contexts_dir / "novasearch-data" / "feedback" / "raw").glob("*/*.json"))
+    files = sorted((contexts_dir / "review_pack-data" / "feedback" / "raw").glob("*/*.json"))
     assert len(files) == 2
     stored = [json.loads(path.read_text()) for path in files]
     assert {item["uuid"] for item in stored} == {record["uuid"] for record in records}
@@ -120,7 +120,7 @@ def test_concurrent_record_candidate_feedback_calls_create_distinct_files(monkey
 def test_mcp_record_candidate_feedback_writes_event_file(monkeypatch, tmp_path):
     main, contexts_dir = _load_api(monkeypatch, tmp_path)
     with TestClient(main.app) as client:
-        created = client.post("/contexts/novasearch-data", json={"writeable": True}, headers=_secret_headers())
+        created = client.post("/contexts/review_pack-data", json={"writeable": True}, headers=_secret_headers())
         response = client.post(
             "/api/mcp",
             data=json.dumps(
@@ -129,7 +129,7 @@ def test_mcp_record_candidate_feedback_writes_event_file(monkeypatch, tmp_path):
                     params={
                         "name": "record_candidate_feedback",
                         "arguments": {
-                            "name": "novasearch-data",
+                            "name": "review_pack-data",
                             "run_id": "run-mcp",
                             "candidate_id": "candidate-mcp",
                             "rank": 3,
@@ -150,7 +150,7 @@ def test_mcp_record_candidate_feedback_writes_event_file(monkeypatch, tmp_path):
     assert result["isError"] is False
     record = result["structuredContent"]
     assert record["path"].startswith("feedback/raw/")
-    stored_path = contexts_dir / "novasearch-data" / record["path"]
+    stored_path = contexts_dir / "review_pack-data" / record["path"]
     stored = json.loads(stored_path.read_text())
     assert stored["uuid"] == record["uuid"]
     assert stored["run_id"] == "run-mcp"

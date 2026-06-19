@@ -1,4 +1,4 @@
-/* PR S20: Inter + JetBrains Mono replaced by Geist Sans + Geist Mono
+﻿/* PR S20: Inter + JetBrains Mono replaced by Geist Sans + Geist Mono
    (loaded via next/font in layout.tsx). The previous @import added a
    network hop the new approach inlines instead. */
 @import "tailwindcss";
@@ -102,7 +102,7 @@
 }
 
 :root {
-  /* v4 Cool palette (APP-UI-V4-SPEC §1, design.floom.dev/app — Phase 1 token swap).
+  /* v4 Cool palette (APP-UI-V4-SPEC §1, design-system/app — Phase 1 token swap).
      Source of truth: docs/design/final.html :root. Warm OS palette superseded. */
   --bg-app: #FBFBFC;
   --bg-card: #FFFFFF;
@@ -932,7 +932,7 @@ html.dark .grain {
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
 /* Tab cell: round only the TOP corners so the active underline reads as a
-   STRAIGHT, square-ended rule (round-09 Federico: underline must be straight,
+   STRAIGHT, square-ended rule (round-09 Maintainer: underline must be straight,
    not swirled/boxed; accent is links-only). */
 .c-dtab { display:inline-flex; align-items:center; gap:7px; padding:5px 11px 6px; border-radius:9px 9px 0 0; color:var(--muted-foreground); font-size:13px; white-space:nowrap; position:relative; }
 .c-dtab:hover { background:var(--bg-2); }

@@ -150,8 +150,8 @@ def test_run_token_put_allowed(app_main, client, path):
     """AI worker-authoring must still pass the guard."""
     # auth_method='run_token' is what the guard checks; no header needed (a real
     # wrt_ header would be validated by middleware before the override applies).
-    _as_role(app_main, user_id="federico", role="member", auth_method="run_token",
-             run_token_payload={"user_id": "federico"})
+    _as_role(app_main, user_id="local-user", role="member", auth_method="run_token",
+             run_token_payload={"user_id": "local-user"})
     resp = client.put(path, content="# authored by a worker",
                       headers={"content-type": "text/markdown"})
     assert resp.status_code == 204, resp.text
@@ -193,7 +193,7 @@ def test_admin_sibling_writes_pass_guard(app_main, client, method, path):
     ("post", "/workspace/base/rollback/deadbeef"),
 ])
 def test_run_token_sibling_writes_pass_guard(app_main, client, method, path):
-    _as_role(app_main, user_id="federico", role="member", auth_method="run_token",
-             run_token_payload={"user_id": "federico"})
+    _as_role(app_main, user_id="local-user", role="member", auth_method="run_token",
+             run_token_payload={"user_id": "local-user"})
     resp = getattr(client, method)(path)
     assert resp.status_code != 403, resp.text

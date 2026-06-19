@@ -51,7 +51,7 @@ def test_whatsapp_status_not_connected(monkeypatch, tmp_path):
 def test_whatsapp_status_active_binding(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
     # the shared-secret context resolves to the WORKEROS_USER_ID default
-    user_id = (__import__("os").environ.get("WORKEROS_USER_ID") or "federico")
+    user_id = (__import__("os").environ.get("WORKEROS_USER_ID") or "local-user")
     with main.get_db() as conn:
         conn.execute(
             """

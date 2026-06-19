@@ -71,7 +71,7 @@ def _insert_minimal_worker(
     main,
     worker_id: str,
     *,
-    owner_id: str = "federico",
+    owner_id: str = "local-user",
     visibility: str = "private",
 ) -> None:
     import json as _json
@@ -473,7 +473,7 @@ class TestDrainLoopDbMethods:
         run_id = run_service.create_run(
             "claim-worker",
             {},
-            user_id="federico",
+            user_id="local-user",
             repos=repos,
         )
         stale_queue_row = repos.runs.get_queued(limit=1)[0]
@@ -493,7 +493,7 @@ class TestDrainLoopDbMethods:
 
         assert dispatched == [run_id]
 
-        row = repos.runs.get(user_id="federico", run_id=run_id)
+        row = repos.runs.get(user_id="local-user", run_id=run_id)
         assert row is not None
         assert row["status"] == "running"
 
@@ -511,12 +511,12 @@ class TestDrainLoopDbMethods:
         run_id = run_service.create_run(
             "lost-claim-worker",
             {},
-            user_id="federico",
+            user_id="local-user",
             repos=repos,
         )
         stale_queue_row = repos.runs.get_queued(limit=1)[0]
         repos.runs.claim_queued(
-            user_id="federico",
+            user_id="local-user",
             run_id=run_id,
             started_at=main.now_iso(),
         )
@@ -538,7 +538,7 @@ class TestDrainLoopDbMethods:
         assert sem.acquire(blocking=False) is True
         sem.release()
 
-        row = repos.runs.get(user_id="federico", run_id=run_id)
+        row = repos.runs.get(user_id="local-user", run_id=run_id)
         assert row is not None
         assert row["status"] == "running"
 
@@ -552,7 +552,7 @@ class TestDrainLoopDbMethods:
         run_id = run_service.create_run(
             "claim-worker",
             {},
-            user_id="federico",
+            user_id="local-user",
             repos=repos,
         )
         dispatched: list[str] = []
@@ -568,11 +568,11 @@ class TestDrainLoopDbMethods:
             run_service._drain_one_batch()
             run_service._drain_one_batch()
 
-        row = repos.runs.get(user_id="federico", run_id=run_id)
+        row = repos.runs.get(user_id="local-user", run_id=run_id)
         assert row is not None
         assert row["status"] == "running"
         assert dispatched == [run_id]
-        logs = repos.runs.list_logs(user_id="federico", run_id=run_id)
+        logs = repos.runs.list_logs(user_id="local-user", run_id=run_id)
         assert any("Queue drain claimed run" in log["message"] for log in logs)
 
         with run_service._active_runs_lock:
@@ -589,7 +589,7 @@ class TestDrainLoopDbMethods:
         run_id = run_service.create_run(
             "start-fail-worker",
             {},
-            user_id="federico",
+            user_id="local-user",
             repos=repos,
         )
 
@@ -602,7 +602,7 @@ class TestDrainLoopDbMethods:
         with run_service._active_runs_lock:
             assert run_id not in run_service._active_runs
 
-        row = repos.runs.get(user_id="federico", run_id=run_id)
+        row = repos.runs.get(user_id="local-user", run_id=run_id)
         assert row is not None
         assert row["status"] == "queued"
 
@@ -622,7 +622,7 @@ class TestDrainLoopDbMethods:
             run_id="retry-run",
             worker_id="retry-worker",
             inputs={"foo": "bar"},
-            owner_id="federico",
+            owner_id="local-user",
             config=None,
             result_retryable=True,
             result_error_code="worker_runtime_error",
@@ -650,7 +650,7 @@ class TestDrainLoopDbMethods:
             run_id="permanent-run",
             worker_id="permanent-worker",
             inputs={"foo": "bar"},
-            owner_id="federico",
+            owner_id="local-user",
             config=None,
             result_retryable=False,
             result_error_code="worker_reported_error",

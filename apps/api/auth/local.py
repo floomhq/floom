@@ -25,7 +25,7 @@ class SharedSecretAuthProvider:
         expected = self._secret.encode("latin-1")
         if provided is None or not hmac.compare_digest(provided, expected):
             raise HTTPException(status_code=401, detail="unauthorized")
-        user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
+        user_id = (os.environ.get("WORKEROS_USER_ID") or "local-user").strip() or "local-user"
         if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
             header_user = (request.headers.get("x-floom-user") or "").strip()
             if header_user:

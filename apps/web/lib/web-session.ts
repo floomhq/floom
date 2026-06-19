@@ -1,7 +1,7 @@
 // Single-tenant web access gate.
 //
-// The public frontend (workers.floom.dev) proxies every request to
-// workers-api.floom.dev with a server-injected `x-floom-secret`. Without a
+// The public frontend (localhost:3000) proxies every request to
+// localhost:8000 with a server-injected `x-floom-secret`. Without a
 // client-auth gate, ANY anonymous visitor could read/write the owner's data
 // through /api/proxy/*. This module is the minimal session primitive that
 // closes that hole.

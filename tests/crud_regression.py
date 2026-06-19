@@ -6,7 +6,7 @@ Exits non-zero on any failure.
 
 Usage:
     python3 tests/crud_regression.py
-    python3 tests/crud_regression.py --base https://workers-api.floom.dev
+    python3 tests/crud_regression.py --base https://localhost:8000
 
 Environment:
     FLOOM_API_BASE   — overrides --base (default: http://localhost:8000)

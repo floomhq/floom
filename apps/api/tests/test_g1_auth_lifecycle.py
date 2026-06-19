@@ -216,7 +216,7 @@ def test_cli_token_minted_with_expiry_and_expired_token_rejected(monkeypatch, tm
 def test_cli_token_for_legacy_install_without_users_still_works(monkeypatch, tmp_path):
     """Empty users table (legacy single-user install) keeps working."""
     main = _load_main(monkeypatch, tmp_path)
-    token = _mint_cli_token(main, "federico", role="admin")
+    token = _mint_cli_token(main, "local-user", role="admin")
     with _client(main) as client:
         resp = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200, resp.text
@@ -316,7 +316,7 @@ def test_scheduler_owner_is_active(monkeypatch, tmp_path):
     repos = db_mod.get_repositories()
 
     # Empty users table → legacy ids stay active.
-    assert scheduler._owner_is_active(repos, "federico") is True
+    assert scheduler._owner_is_active(repos, "local-user") is True
 
     with _client(main) as client:
         bob_id = _setup_admin_and_member(client)

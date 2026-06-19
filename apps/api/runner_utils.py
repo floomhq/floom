@@ -44,7 +44,7 @@ def _extra_worker_roots() -> list[Path]:
     """Additional legitimate worker-source roots beyond FLOOM_WORKERS_DIR.
 
     Cloud historically materialized a class of seeded/example worker bundles
-    under ``/opt/workeros-cloud/var/workers`` (the ``var/workers`` dir the
+    under ``/opt/workeros/var/workers`` (the ``var/workers`` dir the
     #1048 audit flagged) and stored their absolute path in
     ``skill_versions.bundle_path``. Those bundles live ONLY there, not under
     the deployed ``engine/workers`` tree, so a scheduled run must be allowed to
@@ -66,7 +66,7 @@ def _safe_path(base: Path, *parts: str) -> Path:
     """Join *parts* under *base*, rejecting traversal escapes.
 
     Containment is checked against the lexically-normalised path (not the
-    symlink-followed realpath) so a symlinked deploy root (e.g. Railway's
+    symlink-followed realpath) so a symlinked deploy root (e.g. hosted platform's
     ``/opt/.../var`` -> ``/data/var``) does not falsely trip the guard on a
     valid ``<base>/<worker_id>`` path. Absolute parts and ``..`` segments are
     still rejected.
@@ -134,7 +134,7 @@ def _resolve_worker_bundle_dir(
     Fixes the ``var/workers`` vs ``engine/workers`` drift (#1048 follow-up):
     a worker's ``runtime.bundle_path`` can be a STALE ABSOLUTE path baked at
     registration time from an older ``FLOOM_WORKERS_DIR`` (e.g.
-    ``/opt/workeros-cloud/var/workers/job-digest``). At run time
+    ``/opt/workeros/var/workers/job-digest``). At run time
     ``FLOOM_WORKERS_DIR`` points at ``.../engine/workers``, so the stale
     absolute path resolves outside the current root and the traversal guard
     rejected a legitimate scheduled run.

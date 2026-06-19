@@ -315,7 +315,7 @@ export async function createAuthenticatedClient(): Promise<{
 }
 
 export function createPublicClient(
-  base = process.env.WORKEROS_API_BASE || "https://workers-api.floom.dev",
+  base = process.env.WORKEROS_API_BASE || "https://localhost:8000",
 ): WorkerosApiClient {
   return new WorkerosApiClient(normalizeBase(base));
 }
@@ -329,5 +329,5 @@ export function resolveLoginApiBase(opts: { cloud?: boolean } = {}): string {
     opts.cloud === true ||
     (process.env.WORKEROS_CLOUD || "").trim() === "1" ||
     (process.env.WORKEROS_CLOUD || "").trim().toLowerCase() === "true";
-  return cloud ? "https://workeros-api.floom.dev" : "https://workers-api.floom.dev";
+  return cloud ? "https://api.example.com" : "https://localhost:8000";
 }

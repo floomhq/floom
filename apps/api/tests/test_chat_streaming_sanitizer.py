@@ -18,11 +18,11 @@ import chat_service
 
 TOKEN = "e281b976e2b6ff521b00fc5202a099374b6f33cf464800ed8f33e790d6412c5a"
 APPROVAL_URL = (
-    "https://workers.floom.dev/approvals/review"
+    "https://localhost:3000/approvals/review"
     f"?id=apr_6c46bcaffa6a&token={TOKEN}"
 )
 EXPECTED_URL = (
-    "https://workers.floom.dev/approvals/review"
+    "https://localhost:3000/approvals/review"
     "?id=apr_6c46bcaffa6a&token=[redacted]"
 )
 
@@ -56,7 +56,7 @@ def test_redacts_approval_token_when_every_character_is_a_delta():
 def test_redacts_token_value_that_ends_at_stream_eof():
     rendered, _emitted = _sanitize_chunks(
         [
-            "Review https://workers.floom.dev/approvals/review?id=apr_1&tok",
+            "Review https://localhost:3000/approvals/review?id=apr_1&tok",
             "en=",
             TOKEN[:17],
             TOKEN[17:],
@@ -88,7 +88,7 @@ def test_preserves_delimiters_and_sanitizes_later_query_params():
 
 def test_preserves_normal_text_and_benign_query_params_across_chunks():
     text = (
-        "Normal text with https://workers.floom.dev/approvals"
+        "Normal text with https://localhost:3000/approvals"
         "?status=pending&worker=gmail_sender stays intact."
     )
     chunks = [text[:1], text[1:19], text[19:48], text[48:73], text[73:]]
@@ -201,7 +201,7 @@ def test_stream_chat_emits_and_persists_only_sanitized_text(monkeypatch, tmp_pat
         queue = asyncio.Queue()
         await service.stream_chat(
             message="show the pending approval",
-            user_id="federico",
+            user_id="local-user",
             conversation_id=None,
             part_queue=queue,
         )

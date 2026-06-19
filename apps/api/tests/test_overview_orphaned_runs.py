@@ -108,7 +108,7 @@ def client_and_main(monkeypatch, tmp_path):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
 
     from fastapi.testclient import TestClient
     with TestClient(main.app, headers={"x-floom-secret": "test-secret-orphan"}) as client:
@@ -119,7 +119,7 @@ def client_and_main(monkeypatch, tmp_path):
 def _seed_run(repos, worker_id: str, status: str) -> str:
     run_id = f"run_{uuid.uuid4().hex[:12]}"
     repos.runs.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id=worker_id,
         run_id=run_id,
         status=status,
@@ -133,7 +133,7 @@ def test_orphaned_worker_runs_excluded_from_overview_feeds(client_and_main):
     # Sanity: the hidden id is treated as hidden by the API; its DB row exists.
     assert main._worker_hidden_from_api("smoke-orphan-listener") is True
     assert main._worker_hidden_from_api("visible-probe") is False
-    assert repos.workers.get(user_id="federico", worker_id="smoke-orphan-listener") is not None
+    assert repos.workers.get(user_id="local-user", worker_id="smoke-orphan-listener") is not None
 
     # Visible worker: a completed run that SHOULD surface in the activity feed.
     visible_run = _seed_run(repos, "visible-probe", "completed")

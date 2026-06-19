@@ -95,7 +95,7 @@ def _load_connections():
 def composio_execute(app, tool_slug, arguments):
     """Execute a declared Composio tool through the Workeros API proxy."""
     run_id = os.environ.get("FLOOM_RUN_ID", "")
-    api_url = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev").rstrip("/")
+    api_url = os.environ.get("WORKEROS_API_URL", "https://localhost:8000").rstrip("/")
     run_token = os.environ.get("WORKEROS_RUN_TOKEN", "")
     connection_id = str(_load_connections().get(app) or "").strip()
     if not run_id:

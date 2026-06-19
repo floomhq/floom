@@ -365,7 +365,7 @@ function ChatEmptyState({
   // #1363 — First-run opener: proactive builder message + action-oriented pills
   const headline = isNewWorkspace
     ? "Hi, describe what you want to automate and I’ll build the worker for you right now."
-    // Brand call made by Federico (2026-06-16): the assistant is the "chief of
+    // Brand call made by Maintainer (2026-06-16): the assistant is the "chief of
     // staff", not "COO". Greeting follows the persona ("I'm Emily, your chief of
     // staff") instead of the old hardcoded COO string.
     : `I am ${assistantName}, your chief of staff`;
@@ -399,7 +399,7 @@ function ChatEmptyState({
 
 // ── Create-worker hero (full-width hero for create mode, no messages) ─────────
 
-// Round-09 (Federico 2026-06-18): "The new worker should literally just be an
+// Round-09 (Maintainer 2026-06-18): "The new worker should literally just be an
 // Emily chat with some pills. It's literally an Emily chat. That's it. Don't make
 // it anything more." Earlier rounds kept layering chrome on top (a greeting card,
 // then example CARDS with integration badges + an "Or start from an example"
@@ -477,7 +477,7 @@ function CreateWorkerHeroState({
         </div>
       </div>
 
-      {/* Previous-chat note (Federico spec): if the user was chatting with Emily
+      {/* Previous-chat note (Maintainer spec): if the user was chatting with Emily
           before, the create-mode chat is a fresh ephemeral thread; tell them the
           old one is still there. */}
       {hasPreviousChat && (
@@ -886,7 +886,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
 // fullscreen (Emily fills the main content area, sidebar stays) is a separate
 // state owned by EmilyFullscreenContext (consumed by AppShell to hide the page
 // pane). The `full` overlay mode was removed — it covered the nav too, which is
-// not what Federico wanted.
+// not what Maintainer wanted.
 type DockMode = "collapsed" | "rail" | "wide";
 
 // Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px.
@@ -903,7 +903,7 @@ export function EmilyDock({ className }: { className?: string }) {
   // this dock flex-grows to fill the main area — the left sidebar stays put).
   const { fullscreen: isFull, setFullscreen } = useEmilyFullscreen();
   const open = mode !== "collapsed" || isFull;
-  // Round-09 (Federico 2026-06-17): the PRIMARY expand control is TRUE
+  // Round-09 (Maintainer 2026-06-17): the PRIMARY expand control is TRUE
   // fullscreen — one click in (Emily takes over the main area, nav stays), one
   // click out (back to the right rail). No multi-step cycle through "wide".
   const enterFull = () => {
@@ -996,7 +996,7 @@ export function EmilyDock({ className }: { className?: string }) {
             />
           </div>
           {/* Secondary in-rail widen (rail ↔ wide) — only when NOT fullscreen.
-              Lets Federico nudge the rail wider without taking over the page. */}
+              Lets Maintainer nudge the rail wider without taking over the page. */}
           {!isFull && (
             <Button
               size="sm"
@@ -1010,7 +1010,7 @@ export function EmilyDock({ className }: { className?: string }) {
             </Button>
           )}
           {/* PRIMARY make-fullscreen toggle — true one-click fullscreen: Emily
-              takes over the main content area, the left nav stays (Federico
+              takes over the main content area, the left nav stays (Maintainer
               2026-06-17). High-contrast so the affordance is clearly visible in
               BOTH light and night mode (the muted icon was hard to see). */}
           <Button
@@ -1023,7 +1023,7 @@ export function EmilyDock({ className }: { className?: string }) {
           >
             {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </Button>
-          {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,
+          {/* Full-screen CLOSE control (Maintainer 2026-06-17): only in full mode,
               one click exits fullscreen straight back to the right rail. */}
           {isFull && (
             <Button
@@ -1113,7 +1113,7 @@ export function EmilyDock({ className }: { className?: string }) {
       {/* Chat content — ALWAYS mounted so useChatStream state survives collapse.
           In full screen, render with fullPage layout so the message thread takes
           the full height and the composer is anchored to the bottom (fixes the
-          dead whitespace below the prompt box Federico flagged 2026-06-17). */}
+          dead whitespace below the prompt box Maintainer flagged 2026-06-17). */}
       <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
         <EmilyChatCore
           fullPage={isFull}

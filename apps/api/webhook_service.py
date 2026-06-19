@@ -164,7 +164,7 @@ def build_webhook_url(
         base_url
         or os.environ.get("WORKERS_API_URL")
         or os.environ.get("FLOOM_API_BASE")
-        or "https://workers-api.floom.dev"
+        or "https://localhost:8000"
     ).rstrip("/")
     return f"{api_base}/webhooks/{worker_id}?token={token}"
 

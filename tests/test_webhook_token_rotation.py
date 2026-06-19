@@ -48,7 +48,7 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
     monkeypatch.setenv("FLOOM_SECRET", _AUTH_HEADER["x-floom-secret"])
     monkeypatch.delenv("WORKEROS_WEBHOOK_LEGACY_TOKEN_GRACE", raising=False)
-    monkeypatch.setenv("WORKERS_API_URL", "https://workers-api.floom.dev")
+    monkeypatch.setenv("WORKERS_API_URL", "https://localhost:8000")
 
     reset_prefixes = ("auth.", "db.")
     reset_exact = {
@@ -69,7 +69,7 @@ def _load_api(monkeypatch, tmp_path):
     return main
 
 
-def _insert_webhook_worker(main, worker_id, *, owner_id="federico", with_secret=True):
+def _insert_webhook_worker(main, worker_id, *, owner_id="local-user", with_secret=True):
     """Insert a worker whose trigger is a webhook (optionally with secret=true)."""
     now = main.now_iso()
     skill_version_id = f"skill_{worker_id}"

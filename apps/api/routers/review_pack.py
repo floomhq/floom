@@ -1,4 +1,4 @@
-"""Public Review Pack routes (NovaSearch reltix pilot)."""
+"""Public Review Pack routes (ReviewPack demo-client pilot)."""
 
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ def get_review_pack_summary(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    """Fede dashboard: pack + vote summary."""
+    """Maintainer dashboard: pack + vote summary."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id, repos=repos)
     rel = f"review-packs/{pack_id}/pack.json"
     pack = _load_pack_document(safe_name, rel)

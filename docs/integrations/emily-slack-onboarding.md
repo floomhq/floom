@@ -7,8 +7,8 @@ staged as a brain pack. Companion references: `docs/slack-events.md`
 (receiver contract), `docs/slack-self-test.md` (live verification checklist),
 `docs/slack-app-manifest.example.yml` (app manifest).
 
-Applies to OSS/self-host (`https://workers-api.floom.dev`) and Cloud
-(`https://workeros-api.floom.dev`); substitute your API base below.
+Applies to OSS/self-host (`https://localhost:8000`) and Cloud
+(`https://api.example.com`); substitute your API base below.
 
 ---
 

@@ -13,7 +13,7 @@ if str(API_DIR) not in sys.path:
 
 
 SECRET = "test-secret-emily-async"
-OWNER = "federico"
+OWNER = "local-user"
 
 _YML = """\
 schema_version: "0.3"

@@ -54,13 +54,13 @@ describe("#927/#941 proxy route hardening", () => {
 
   function proxyReq() {
     return [
-      new NextRequest("https://workers.floom.dev/api/proxy/me"),
+      new NextRequest("https://localhost:3000/api/proxy/me"),
       { params: Promise.resolve({ path: ["me"] }) },
     ] as const;
   }
 
   it("adds Secure to backend cookies missing it", async () => {
-    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    process.env.FLOOM_API_BASE = "https://localhost:8000";
     const upstream = new Response("{}", { status: 200 });
     upstream.headers.append(
       "set-cookie",
@@ -76,7 +76,7 @@ describe("#927/#941 proxy route hardening", () => {
   });
 
   it("defaults cache-control to private no-store when upstream is silent", async () => {
-    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    process.env.FLOOM_API_BASE = "https://localhost:8000";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
     const { GET } = await import("@/app/api/proxy/[...path]/route");
 
@@ -85,7 +85,7 @@ describe("#927/#941 proxy route hardening", () => {
   });
 
   it("replaces a public upstream cache policy with private no-store", async () => {
-    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    process.env.FLOOM_API_BASE = "https://localhost:8000";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("{}", {
         status: 200,
@@ -99,7 +99,7 @@ describe("#927/#941 proxy route hardening", () => {
   });
 
   it("keeps an upstream policy that is already private/no-store", async () => {
-    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    process.env.FLOOM_API_BASE = "https://localhost:8000";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("{}", {
         status: 200,
@@ -129,7 +129,7 @@ describe("#927 auth routes", () => {
     const { POST } = await import("@/app/api/auth/login/route");
 
     const res = await POST(
-      new NextRequest("https://workers.floom.dev/api/auth/login", {
+      new NextRequest("https://localhost:3000/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username: "u", password: "p" }),
@@ -143,7 +143,7 @@ describe("#927 auth routes", () => {
     const { POST } = await import("@/app/api/auth/logout/route");
 
     const res = await POST(
-      new NextRequest("https://workers.floom.dev/api/auth/logout", { method: "POST" }),
+      new NextRequest("https://localhost:3000/api/auth/logout", { method: "POST" }),
     );
     const cookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
     const wos = cookies.find((c) => c.startsWith("wos_session="));
@@ -161,7 +161,7 @@ describe("#927 auth routes", () => {
     const { POST } = await import("@/app/api/auth/setup/route");
 
     const res = await POST(
-      new NextRequest("https://workers.floom.dev/api/auth/setup", {
+      new NextRequest("https://localhost:3000/api/auth/setup", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username: "u", password: "p" }),

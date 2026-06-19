@@ -40,7 +40,7 @@ def _close_db() -> None:
 
 def _create_worker(repos, worker_id: str) -> None:
     repos.workers.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id=worker_id,
         name=worker_id,
         manifest_json={
@@ -61,7 +61,7 @@ def _create_worker(repos, worker_id: str) -> None:
 
 def _create_run(repos, run_id: str, worker_id: str, status: str, created_at: str) -> None:
     repos.runs.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id=worker_id,
         run_id=run_id,
         status=status,
@@ -108,7 +108,7 @@ def test_overview_perf_queries_return_grouped_and_bounded_rows(monkeypatch, tmp_
     rollup = {
         (row["worker_id"], row["status"]): row
         for row in repos.runs.overview_status_rollup(
-            user_id="federico",
+            user_id="local-user",
             since="2026-06-01T00:00:00+00:00",
             window_7d="2026-06-08T00:00:00+00:00",
             today_start="2026-06-15T00:00:00+00:00",
@@ -119,7 +119,7 @@ def test_overview_perf_queries_return_grouped_and_bounded_rows(monkeypatch, tmp_
     assert int(rollup[("active", "failed")]["count_today"]) == 2
 
     buckets = repos.runs.overview_sparkline_buckets(
-        user_id="federico",
+        user_id="local-user",
         since="2026-06-15T00:00:00+00:00",
         until="2026-06-15T01:00:00+00:00",
         bucket_seconds=3600,
@@ -127,20 +127,20 @@ def test_overview_perf_queries_return_grouped_and_bounded_rows(monkeypatch, tmp_
     assert sum(int(row["total"] or 0) for row in buckets) == 5
 
     current = repos.runs.overview_current_counts(
-        user_id="federico",
+        user_id="local-user",
         statuses=["queued", "running"],
     )
     assert current == {"queued": 1}
 
     recent = repos.runs.overview_recent_visible_runs(
-        user_id="federico",
+        user_id="local-user",
         worker_ids=["active"],
         limit=2,
     )
     assert [row["id"] for row in recent] == ["today-fail-b", "today-fail-a"]
 
     failures = repos.runs.overview_latest_failures_by_worker(
-        user_id="federico",
+        user_id="local-user",
         worker_ids=["active", "visible"],
         since="2026-06-15T00:00:00+00:00",
         limit=3,
@@ -150,7 +150,7 @@ def test_overview_perf_queries_return_grouped_and_bounded_rows(monkeypatch, tmp_
     assert int(failures[0]["failure_count"]) == 2
 
     terminal = repos.runs.overview_terminal_runs(
-        user_id="federico",
+        user_id="local-user",
         worker_ids=["active"],
         since="2026-06-01T00:00:00+00:00",
     )
@@ -187,7 +187,7 @@ def test_overview_terminal_runs_are_bounded_per_worker(monkeypatch, tmp_path):
         )
 
     terminal = repos.runs.overview_terminal_runs(
-        user_id="federico",
+        user_id="local-user",
         worker_ids=["active", "visible"],
         since="2026-06-01T00:00:00+00:00",
         per_worker_limit=3,

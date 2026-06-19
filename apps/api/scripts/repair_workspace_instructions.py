@@ -26,7 +26,7 @@ USAGE
     python scripts/repair_workspace_instructions.py --apply
 
     # Point at an explicit path (defaults to the resolved WORKSPACE_MD_PATH).
-    python scripts/repair_workspace_instructions.py --path /root/workeros/workspace.md --apply
+    python scripts/repair_workspace_instructions.py --path /opt/workeros/workspace.md --apply
 
 IDEMPOTENT
     A second run finds nothing to unwrap (the file is already raw markdown) and is a

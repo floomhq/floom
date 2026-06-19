@@ -1,4 +1,4 @@
-"""g1 security batch — input/output safety fixes.
+﻿"""g1 security batch — input/output safety fixes.
 
 Covers:
   #913 — worker-manifest output paths are confined to the run's artifact dir
@@ -7,7 +7,7 @@ Covers:
   #932 — /workers/from-bundle strips secret-bearing files (.env, *.key, ...).
   #929 — /uploads downloads carry nosniff + attachment headers.
   #920 — the ValueError handler returns a generic message to clients.
-  #921 — CORS: no wildcard *.floom.dev default; explicit methods/headers.
+  #921 — CORS: no wildcard *.example.com default; explicit methods/headers.
 
 Run:
     cd apps/api && python -m pytest tests/test_g1_input_safety.py -v
@@ -269,7 +269,7 @@ class TestCorsLockdown:
             resp = client.options(
                 "/healthz",
                 headers={
-                    "Origin": "https://evil.floom.dev",
+                    "Origin": "https://evil.example.com",
                     "Access-Control-Request-Method": "GET",
                 },
             )
@@ -281,11 +281,11 @@ class TestCorsLockdown:
             resp = client.options(
                 "/healthz",
                 headers={
-                    "Origin": "https://workers.floom.dev",
+                    "Origin": "https://localhost:3000",
                     "Access-Control-Request-Method": "GET",
                 },
             )
-        assert resp.headers.get("access-control-allow-origin") == "https://workers.floom.dev"
+        assert resp.headers.get("access-control-allow-origin") == "https://localhost:3000"
 
     def test_wildcard_headers_not_reflected(self, monkeypatch, tmp_path):
         main = _load_main(monkeypatch, tmp_path)
@@ -293,7 +293,7 @@ class TestCorsLockdown:
             resp = client.options(
                 "/healthz",
                 headers={
-                    "Origin": "https://workers.floom.dev",
+                    "Origin": "https://localhost:3000",
                     "Access-Control-Request-Method": "GET",
                     "Access-Control-Request-Headers": "x-evil-header",
                 },

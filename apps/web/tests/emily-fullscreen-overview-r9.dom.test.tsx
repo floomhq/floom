@@ -1,4 +1,4 @@
-// Round-09 r9 (Federico 2026-06-17) — proves the BEHAVIOR, not just presence:
+﻿// Round-09 r9 (Maintainer 2026-06-17) — proves the BEHAVIOR, not just presence:
 //   1. Emily TRUE fullscreen: clicking the make-fullscreen control hides the
 //      page pane (<main>) so Emily fills the main content area, while the left
 //      sidebar stays mounted. Clicking close restores the page pane. Verified at
@@ -86,7 +86,7 @@ describe("Emily fullscreen — AppShell hides the page pane, keeps the sidebar",
     await user.click(screen.getByRole("button", { name: /enter emily fullscreen/i }));
     // Page pane is now hidden (display:none, still mounted) — Emily fills the area.
     expect(findPagePane(container).className).toContain("hidden");
-    // Sidebar STAYS visible (Federico spec: keep nav).
+    // Sidebar STAYS visible (Maintainer spec: keep nav).
     expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
 
     // Exit fullscreen → page pane restored.
@@ -125,7 +125,7 @@ describe("Overview — content column fills the container (no fixed width cap)",
       }),
     }));
     vi.doMock("@/lib/api", () => ({
-      api: { me: vi.fn().mockResolvedValue({ display_name: "Fede", email: "fede@floom.dev" }) },
+      api: { me: vi.fn().mockResolvedValue({ display_name: "Maintainer", email: "local@example.com" }) },
     }));
     const { OverviewDashboard } = await import("@/components/overview/OverviewDashboard");
     const { container } = render(<OverviewDashboard />);

@@ -28,7 +28,7 @@ CONNECTIONS = [
     {
         "id": "local-gmail",
         "app_name": "gmail",
-        "composio_connection_id": "conn_gmail_federico_stub",
+        "composio_connection_id": "conn_gmail_local-user_stub",
         "status": "active",
         "created_at": "2026-05-26T00:00:00Z",
         "updated_at": "2026-05-26T00:00:00Z",
@@ -51,7 +51,7 @@ WORKER = {
             "type": "composio",
             "composio": {
                 "event": "GMAIL_NEW_EMAIL",
-                "connection_id": "conn_gmail_federico_stub",
+                "connection_id": "conn_gmail_local-user_stub",
                 "filters": {},
             },
         },
@@ -90,9 +90,9 @@ with sync_playwright() as p:
     page.get_by_text("Select a Composio event").click()
     page.get_by_role("option", name=re.compile("New Gmail Email")).click()
     page.get_by_text("Select connected account").click()
-    page.get_by_role("option", name=re.compile("conn_gmail_federico_stub")).click()
+    page.get_by_role("option", name=re.compile("conn_gmail_local-user_stub")).click()
     expect(page.get_by_text("GMAIL_NEW_EMAIL").first).to_be_visible()
-    expect(page.get_by_text("conn_gmail_federico_stub").first).to_be_visible()
+    expect(page.get_by_text("conn_gmail_local-user_stub").first).to_be_visible()
     page.screenshot(path="/tmp/workeros-t15a-new-composio.png", animations="disabled", timeout=10000)
 
     page.goto(f"{BASE_URL}/workers/gmail-composio/edit")

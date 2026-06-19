@@ -47,15 +47,15 @@ export type LoginOptions = {
   cloud?: boolean;
 };
 
-// Heuristic: the cloud verification_url points at workeros.floom.dev
-// (or /app/cli-auth). The OSS engine points at workers.floom.dev/cli-auth.
+// Heuristic: the cloud verification_url points at app.example.com
+// (or /app/cli-auth). The OSS engine points at localhost:3000/cli-auth.
 // Lets the CLI auto-detect cloud-vs-oss even when --cloud is omitted, so a
 // user running `floom login` against WORKEROS_API_BASE=<cloud> still gets
 // the right flow.
 function detectCloudFromVerificationUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    if (u.hostname === "workeros.floom.dev") return true;
+    if (u.hostname === "app.example.com") return true;
     if (u.pathname.startsWith("/app/")) return true;
     return false;
   } catch {

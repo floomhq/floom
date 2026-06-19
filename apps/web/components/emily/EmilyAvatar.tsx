@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
  * EmilyAvatar — the Floom Emily identity mark.
  *
  * Floom-blue accent circle with a Lucide Radar icon (white stroke).
- * Radar evokes active scanning/discovery — fitting for Emily as the NovaSearch
+ * Radar evokes active scanning/discovery — fitting for Emily as the ReviewPack
  * recruiting agent. The blue (#3E6FE0 light / #5B8DEF dark) is the Floom
  * accent, tokenized via --emily-mark.
  *

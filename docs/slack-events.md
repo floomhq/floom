@@ -2,8 +2,8 @@
 
 Workeros exposes a native Slack Events API receiver at:
 
-- OSS/self-host: `https://workers-api.floom.dev/slack/events`
-- Cloud: `https://workeros-api.floom.dev/api/slack/events` or `https://workeros-api.floom.dev/slack/events`
+- OSS/self-host: `https://localhost:8000/slack/events`
+- Cloud: `https://api.example.com/api/slack/events` or `https://api.example.com/slack/events`
 
 ## Required Env
 

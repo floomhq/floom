@@ -45,7 +45,7 @@ def cs(monkeypatch, tmp_path):
 
 def _activate(set_ctx, AuthContext, workspace_id):
     # OSS scoped user id embeds the workspace as base__ws_<hex>
-    uid = f"federico__{workspace_id}" if workspace_id else "federico"
+    uid = f"local-user__{workspace_id}" if workspace_id else "local-user"
     set_ctx(AuthContext(user_id=uid, email=None, role="admin"))
 
 
@@ -114,6 +114,6 @@ def test_workspace_root_follows_custom_workers_dir_when_workspace_dir_unset(monk
 def test_traversal_or_bad_workspace_id_rejected(cs):
     chat_service, AuthContext, set_ctx = cs
     # a malformed/forged workspace suffix must NOT produce a per-workspace path
-    set_ctx(AuthContext(user_id="federico__ws_../../etc", email=None, role="admin"))
+    set_ctx(AuthContext(user_id="local-user__ws_../../etc", email=None, role="admin"))
     assert chat_service._active_non_default_workspace_id() is None
     assert chat_service._workspace_md_path() == chat_service.WORKSPACE_MD_PATH

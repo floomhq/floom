@@ -21,7 +21,7 @@ import main  # noqa: E402
 # owner_id, webhook config, MCP urls/env).
 _WORKER = {
     "id": "weekly-digest",
-    "owner_id": "federico",
+    "owner_id": "local-user",
     "name": "Weekly Digest",
     "description": "Sends a weekly digest.",
     "long_description": "A worker that compiles a weekly digest from your inbox.",
@@ -40,7 +40,7 @@ _WORKER = {
             "type": "skill",
             "entrypoint": "run.py",
             # Sensitive internals that must never reach the public response:
-            "bundle_path": "/root/workeros/workers/weekly-digest",
+            "bundle_path": "/opt/workeros/workers/weekly-digest",
             "system_prompt": "INTERNAL SYSTEM PROMPT — do not leak",
             "model": "claude-opus",
         },
@@ -130,7 +130,7 @@ def test_valid_token_returns_only_safe_allowlisted_fields():
     for needle in (
         "OPENAI_API_KEY", "INTERNAL_TOKEN", "sk-super-secret", "sk-leak-me",
         "secret-internal.example.com", "INTERNAL SYSTEM PROMPT",
-        "/root/workeros/workers", "federico", "bundle_path", "system_prompt",
+        "/opt/workeros/workers", "local-user", "bundle_path", "system_prompt",
     ):
         assert needle not in blob, f"leaked: {needle}"
 
@@ -156,7 +156,7 @@ def test_missing_token_is_rejected():
 
 def test_unknown_worker_is_not_found_even_with_a_token():
     # A token computed for a non-existent worker still 404s (worker resolves first).
-    token = main._worker_public_token({"id": "ghost", "owner_id": "federico"})
+    token = main._worker_public_token({"id": "ghost", "owner_id": "local-user"})
     try:
         client = _client()
         resp = client.get(f"/workers/public/ghost?token={token}")

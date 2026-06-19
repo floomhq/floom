@@ -701,7 +701,7 @@ test("install subcommand patches agent config idempotently", async () => {
     assert.equal(second.code, 0);
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(config.mcpServers.workeros.url, "https://workers-api.floom.dev/mcp-tools/serve");
+    assert.equal(config.mcpServers.workeros.url, "https://localhost:8000/mcp-tools/serve");
     assert.equal(config.mcpServers.workeros.headers["x-floom-secret"], "test-secret");
     assert.equal(config.mcpServers.workeros.command, undefined);
     assert.equal(config.mcpServers.workeros.args, undefined);
@@ -729,7 +729,7 @@ test("mcp add patches agent config", async () => {
     assert.doesNotMatch(result.stdout, /test-secret/);
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(config.mcpServers.workeros.url, "https://workers-api.floom.dev/mcp-tools/serve");
+    assert.equal(config.mcpServers.workeros.url, "https://localhost:8000/mcp-tools/serve");
     assert.equal(config.mcpServers.workeros.headers["x-floom-secret"], "test-secret");
     assert.equal(config.mcpServers.workeros.command, undefined);
     assert.equal(config.mcpServers.workeros.args, undefined);
@@ -747,7 +747,7 @@ test("install subcommand prints manual snippets when no agent config file exists
     assert.match(result.stdout, /- ~\/\.claude\/settings\.json/);
     assert.match(result.stdout, /- ~\/\.cursor\/mcp\.json/);
     assert.match(result.stdout, /- ~\/\.continue\/\.continuerc\.json/);
-    assert.match(result.stdout, /"url": "https:\/\/workers-api\.floom\.dev\/mcp-tools\/serve"/);
+    assert.match(result.stdout, /"url": "https:\/\/localhost:8000\/mcp-tools\/serve"/);
     assert.match(result.stdout, /"<x-floom-secret>"/);
     assert.doesNotMatch(result.stdout, /test-secret/);
   } finally {

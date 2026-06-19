@@ -136,7 +136,7 @@ def _install_api(monkeypatch, tmp_path, workers_dir: Path, *, secret: str):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
     return main, db
 
 

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo, useState } from "react";
 
-// Emily true-fullscreen state (Federico 2026-06-17): the make-fullscreen control
+// Emily true-fullscreen state (Maintainer 2026-06-17): the make-fullscreen control
 // in the Emily dock header must expand Emily into the MAIN CONTENT AREA — the
 // page pane collapses/hides while the LEFT app sidebar stays visible — not just
 // widen the right rail. The dock and the page pane are sibling flex children in

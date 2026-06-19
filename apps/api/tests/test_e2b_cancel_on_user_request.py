@@ -61,14 +61,14 @@ def _create_worker_and_run(repos, *, status: str) -> None:
         "connections": [],
     }
     repos.workers.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id="node-smoke-test",
         name="Node Smoke Test",
         manifest_json=manifest,
         bundle_path="workers/node-smoke-test",
     )
     repos.runs.create(
-        user_id="federico",
+        user_id="local-user",
         run_id="run-cancel",
         worker_id="node-smoke-test",
         status=status,
@@ -100,7 +100,7 @@ def test_running_run_cancel_kills_e2b_sandbox(monkeypatch, tmp_path):
     assert resp.json()["status"] == "cancelled"
     assert calls == [("run-cancel", "User requested cancellation.")]
 
-    row = repos.runs.get(user_id="federico", run_id="run-cancel")
+    row = repos.runs.get(user_id="local-user", run_id="run-cancel")
     assert row["cancel_requested"] == 1
     assert row["status"] == "cancelled"
     assert row["error_code"] == "user_cancel"
@@ -131,7 +131,7 @@ def test_running_run_cancel_still_records_request_when_no_e2b_sandbox(monkeypatc
     assert resp.json()["status"] == "cancelled"
     assert calls == ["run-cancel"]
 
-    row = repos.runs.get(user_id="federico", run_id="run-cancel")
+    row = repos.runs.get(user_id="local-user", run_id="run-cancel")
     assert row["cancel_requested"] == 1
     assert row["status"] == "cancelled"
     assert row["error_code"] == "user_cancel"
@@ -162,7 +162,7 @@ def test_queued_run_cancel_does_not_call_e2b_sandbox(monkeypatch, tmp_path):
     assert resp.json()["status"] == "cancelled"
     assert calls == []
 
-    row = repos.runs.get(user_id="federico", run_id="run-cancel")
+    row = repos.runs.get(user_id="local-user", run_id="run-cancel")
     assert row["cancel_requested"] == 1
     assert row["status"] == "failed"
     assert row["error_code"] == "cancelled_queued"
@@ -182,7 +182,7 @@ def test_terminal_run_cancel_is_idempotent_success(monkeypatch, tmp_path):
 
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "completed", "run_id": "run-cancel"}
-    row = repos.runs.get(user_id="federico", run_id="run-cancel")
+    row = repos.runs.get(user_id="local-user", run_id="run-cancel")
     assert row["status"] == "completed"
     assert row["cancel_requested"] == 0
     db.get_repositories.cache_clear()

@@ -42,7 +42,7 @@ main = None
 run_service = None
 
 _AUTH = {"x-floom-secret": "test-secret-toctou-280"}
-_OWNER = "federico"
+_OWNER = "local-user"
 
 
 def _reset_api_modules() -> None:

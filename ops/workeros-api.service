@@ -4,10 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/workeros/apps/api
-EnvironmentFile=/root/.config/workeros/api.env
+WorkingDirectory=/opt/workeros/apps/api
+EnvironmentFile=/etc/workeros/api.env
 Environment=WORKEROS_SHUTDOWN_RUN_DRAIN_SECONDS=75
-ExecStart=/root/workeros/apps/api/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8011 --timeout-graceful-shutdown 85
+ExecStart=/opt/workeros/apps/api/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8011 --timeout-graceful-shutdown 85
 KillSignal=SIGTERM
 TimeoutStopSec=90
 Restart=on-failure

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -62,7 +62,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/settings");
   apiMock.me.mockResolvedValue({
     user_id: "u1",
-    email: "member@floom.dev",
+    email: "member@example.com",
     display_name: "Member User",
     role: "member",
     is_admin: false,
@@ -112,7 +112,7 @@ beforeEach(() => {
       {
         workspace_id: "w1",
         user_id: "u1",
-        email: "member@floom.dev",
+        email: "member@example.com",
         display_name: "Member User",
         role: "member",
         status: "active",

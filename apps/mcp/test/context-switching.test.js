@@ -52,8 +52,8 @@ const CONNECTIONS = [
     id: "conn-gmail",
     kind: "composio",
     app_name: "gmail",
-    account_label: "federico",
-    display_name: "federico",
+    account_label: "local-user",
+    display_name: "local-user",
     status: "active",
     last_used_by: "Gmail Intake Brief",
   },
@@ -225,7 +225,7 @@ test("workspace create posts to API and persists new active workspace", async ()
 
 test("OSS auth headers carry the persisted active workspace", async () => {
   await withTempHome(async () => {
-    await writeOssCreds("https://workers-api.floom.dev", { workspace_id: "ws_0123456789abcd" });
+    await writeOssCreds("https://localhost:8000", { workspace_id: "ws_0123456789abcd" });
     const creds = await readCredentials();
     const client = new WorkerosApiClient(creds.api_base, creds);
     const headers = await client.authHeaders();
@@ -309,7 +309,7 @@ test("connections list separates app from account label", async () => {
       assert.match(out, /App/);
       assert.match(out, /Account/);
       assert.match(out, /gmail/);
-      assert.match(out, /federico/);
+      assert.match(out, /local-user/);
       assert.match(out, /Gmail Intake Brief/);
     });
   });
@@ -334,7 +334,7 @@ test("connections add works against cloud /api/connections", async () => {
 
 test("mcp install (OSS) bakes the active workspace header into the client config", async () => {
   await withTempHome(async (home) => {
-    await writeOssCreds("https://workers-api.floom.dev", { workspace_id: "ws_0123456789abcd" });
+    await writeOssCreds("https://localhost:8000", { workspace_id: "ws_0123456789abcd" });
     const code = await mcpInstallCommand({ target: "claude" });
     assert.equal(code, 0);
     const config = JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8"));
@@ -346,7 +346,7 @@ test("mcp install (OSS) bakes the active workspace header into the client config
 
 test("mcp install (OSS) omits the workspace header when no workspace is selected", async () => {
   await withTempHome(async (home) => {
-    await writeOssCreds("https://workers-api.floom.dev");
+    await writeOssCreds("https://localhost:8000");
     const code = await mcpInstallCommand({ target: "claude" });
     assert.equal(code, 0);
     const config = JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8"));

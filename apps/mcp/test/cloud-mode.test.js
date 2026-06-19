@@ -44,7 +44,7 @@ test("readCredentials back-compat treats legacy schema as OSS mode", async () =>
   await withTempHome(async () => {
     // Legacy schema: api_base + api_secret + authed_at, no `mode` field.
     await writeCredentials({
-      api_base: "https://workers-api.floom.dev",
+      api_base: "https://localhost:8000",
       mode: "oss",
       api_secret: "legacy-secret",
       authed_at: new Date().toISOString(),
@@ -60,7 +60,7 @@ test("readCredentials back-compat treats legacy schema as OSS mode", async () =>
 test("readCredentials rejects cloud creds missing refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://workeros-api.floom.dev",
+      api_base: "https://api.example.com",
       mode: "cloud",
       // refresh_token + supabase_url intentionally omitted
       authed_at: new Date().toISOString(),
@@ -73,7 +73,7 @@ test("readCredentials rejects cloud creds missing refresh_token", async () => {
 test("updateCredentials persists workspace_id without dropping refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://workeros-api.floom.dev",
+      api_base: "https://api.example.com",
       mode: "cloud",
       refresh_token: "rt-1",
       supabase_url: "https://abc.supabase.co",
@@ -91,13 +91,13 @@ test("updateCredentials persists workspace_id without dropping refresh_token", a
 
 test("readCredentials accepts cloud PAT from environment", async () => {
   await withTempHome(async () => {
-    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
+    process.env.WORKEROS_API_BASE = "https://api.example.com";
     process.env.WORKEROS_API_TOKEN = "floom_pat_123";
     process.env.WORKEROS_WORKSPACE_ID = "ws_env";
     const creds = await readCredentials();
     assert.ok(creds);
     assert.equal(creds.mode, "cloud");
-    assert.equal(creds.api_base, "https://workeros-api.floom.dev");
+    assert.equal(creds.api_base, "https://api.example.com");
     assert.equal(creds.api_token, "floom_pat_123");
     assert.equal(creds.workspace_id, "ws_env");
   });
@@ -106,7 +106,7 @@ test("readCredentials accepts cloud PAT from environment", async () => {
 test("WORKEROS_CLOUD=1 does not silently reuse saved OSS credentials", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://workers-api.floom.dev",
+      api_base: "https://localhost:8000",
       mode: "oss",
       api_secret: "legacy-secret",
       authed_at: new Date().toISOString(),

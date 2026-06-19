@@ -84,7 +84,7 @@ def _insert_completed_run(main, run_id="run_s188"):
                 "INSERT OR IGNORE INTO workers (id, skill_version_id, name, trigger_type, grants_json,"
                 " input_values_json, enabled, created_at, owner_id)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("s188-worker", "sv_s188_worker_0_1_0", "S188 Worker", "manual", "{}", "{}", 1, now, "federico"),
+                ("s188-worker", "sv_s188_worker_0_1_0", "S188 Worker", "manual", "{}", "{}", 1, now, "local-user"),
             )
         else:
             conn.execute(
@@ -123,7 +123,7 @@ def test_completed_run_replays_logs_then_finish(monkeypatch, tmp_path):
     messages = ["starting up", "fetched 3 records", "wrote output", "done"]
     for i, msg in enumerate(messages):
         repos.runs.add_log(
-            user_id="federico",
+            user_id="local-user",
             run_id=run_id,
             level="info",
             message=msg,

@@ -9,7 +9,7 @@ The script creates a disposable worker that:
 
 Example:
   python scripts/smoke_git_context_worker.py \
-    --api https://workers-api.floom.dev \
+    --api https://localhost:8000 \
     --secret "$FLOOM_SECRET"
 """
 
@@ -86,7 +86,7 @@ def _request(session: requests.Session, method: str, api: str, path: str, **kwar
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--api", default="https://workers-api.floom.dev")
+    parser.add_argument("--api", default="https://localhost:8000")
     parser.add_argument("--secret", required=True)
     parser.add_argument("--workspace", default=None)
     parser.add_argument("--repo-url", default=DEFAULT_GIT_REPO)

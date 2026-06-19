@@ -551,7 +551,7 @@ def test_sandbox_api_url_prefers_e2b_specific_origin(monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
 
-    monkeypatch.setenv("WORKEROS_API_URL", "https://workers-api.floom.dev")
+    monkeypatch.setenv("WORKEROS_API_URL", "https://localhost:8000")
     monkeypatch.setenv("WORKEROS_SANDBOX_API_URL", "https://origin-api.internal/")
 
     assert _sandbox_api_url() == "https://origin-api.internal"
@@ -1233,7 +1233,7 @@ def test_driver_upload_contexts_uses_module_level_context_dir(tmp_path, monkeypa
             name="Hydrate Test",
             trigger=WorkerTrigger(type="manual"),
             runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
-            contexts=["novasearch-candidates"],
+            contexts=["review_pack-candidates"],
             outputs=[],
         )
 
@@ -1247,11 +1247,11 @@ def test_driver_upload_contexts_uses_module_level_context_dir(tmp_path, monkeypa
 
         assert err is None
         # Hydration hook must have been called because the dir did not exist.
-        assert "novasearch-candidates" in hydration_calls
+        assert "review_pack-candidates" in hydration_calls
         # After hydration the file must be uploaded to the sandbox.
         assert (
             sandbox.files._files.get(
-                "/home/user/worker/context/novasearch-candidates/candidates.db"
+                "/home/user/worker/context/review_pack-candidates/candidates.db"
             )
             == b"SQLITE_DATA"
         )

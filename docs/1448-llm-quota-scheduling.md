@@ -2,7 +2,7 @@
 
 ## Problem
 WorkerOS had no coordination of the downstream LLM provider quota across
-concurrent runs. Measured on NovaSearch (Vertex `gemini-3-flash-preview`): one
+concurrent runs. Measured on ReviewPack (Vertex `gemini-3-flash-preview`): one
 search's judge burst (12 concurrent calls) = 12/12 OK, but two searches stacked
 (24 concurrent) = ~16/24 HTTP 429. The only existing limits were run-creation
 rate limits and worker-author chat throttles - API-abuse protection, not
@@ -20,8 +20,8 @@ A worker that makes heavy/bursty LLM calls opts in via its manifest:
 
 ```yaml
 # worker.yml
-id: novasearch-vivek
-name: NovaSearch
+id: review_pack-maintainer
+name: ReviewPack
 llm_intensive: true        # <- #1448: scheduler gates concurrent heavy runs
 runtime: { type: python, runner: e2b }
 ```

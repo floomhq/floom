@@ -55,7 +55,7 @@ def _fake_transcript(monkeypatch, text="user: remember I prefer tables\nassistan
 def test_persist_creates_private_writeable_pack(memory_env, monkeypatch):
     _fake_transcript(monkeypatch)
     _fake_summary(monkeypatch)
-    wrote = asyncio.run(conversation_memory.persist_conversation_memory("conv_1", "federico"))
+    wrote = asyncio.run(conversation_memory.persist_conversation_memory("conv_1", "local-user"))
     assert wrote is True
 
     pack = memory_env / "memory"
@@ -67,23 +67,23 @@ def test_persist_creates_private_writeable_pack(memory_env, monkeypatch):
     from contexts import load_context_metadata
 
     meta = load_context_metadata()["memory"]
-    assert meta["owner_id"] == "federico"   # owner-scoped == private by default
+    assert meta["owner_id"] == "local-user"   # owner-scoped == private by default
     assert meta["writeable"] is True
 
 
 def test_rate_limit_one_write_per_conversation_interval(memory_env, monkeypatch):
     _fake_transcript(monkeypatch)
     _fake_summary(monkeypatch)
-    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_rl", "federico")) is True
-    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_rl", "federico")) is False
+    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_rl", "local-user")) is True
+    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_rl", "local-user")) is False
     # a different conversation still writes
-    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_rl2", "federico")) is True
+    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_rl2", "local-user")) is True
 
 
 def test_nothing_durable_writes_nothing(memory_env, monkeypatch):
     _fake_transcript(monkeypatch)
     monkeypatch.setattr(conversation_memory, "_summarize", lambda e, t: None)
-    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_nd", "federico")) is False
+    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_nd", "local-user")) is False
     assert not (memory_env / "memory").exists()
 
 
@@ -94,14 +94,14 @@ def test_summarizer_failure_never_raises(memory_env, monkeypatch):
         raise RuntimeError("Error code: 429 - insufficient_quota")
 
     monkeypatch.setattr(conversation_memory, "_summarize", _boom)
-    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_f", "federico")) is False
+    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_f", "local-user")) is False
 
 
 def test_secret_lines_are_redacted(memory_env, monkeypatch):
     _fake_transcript(monkeypatch)
     leaked = "- aws key is AKIAIOSFODNN7EXAMPLE"
     _fake_summary(monkeypatch, entry=leaked, index=f"## Facts\n{leaked}")
-    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_s", "federico")) is True
+    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_s", "local-user")) is True
     index = (memory_env / "memory" / "index.md").read_text(encoding="utf-8")
     assert "AKIAIOSFODNN7EXAMPLE" not in index
     assert "[redacted" in index
@@ -110,8 +110,8 @@ def test_secret_lines_are_redacted(memory_env, monkeypatch):
 def test_memory_prompt_section_round_trip(memory_env, monkeypatch):
     _fake_transcript(monkeypatch)
     _fake_summary(monkeypatch)
-    asyncio.run(conversation_memory.persist_conversation_memory("conv_p", "federico"))
-    section = conversation_memory.memory_prompt_section("federico")
+    asyncio.run(conversation_memory.persist_conversation_memory("conv_p", "local-user"))
+    section = conversation_memory.memory_prompt_section("local-user")
     assert "## User memory" in section
     assert "prefers tables over prose" in section
 
@@ -131,14 +131,14 @@ def test_disabled_via_env(memory_env, monkeypatch):
     monkeypatch.setenv("WORKEROS_MEMORY_ENABLED", "0")
     _fake_transcript(monkeypatch)
     _fake_summary(monkeypatch)
-    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_d", "federico")) is False
-    assert conversation_memory.memory_prompt_section("federico") == ""
+    assert asyncio.run(conversation_memory.persist_conversation_memory("conv_d", "local-user")) is False
+    assert conversation_memory.memory_prompt_section("local-user") == ""
 
 
 def test_system_prompt_includes_memory_section(memory_env, monkeypatch):
     _fake_transcript(monkeypatch)
     _fake_summary(monkeypatch)
-    asyncio.run(conversation_memory.persist_conversation_memory("conv_sp", "federico"))
+    asyncio.run(conversation_memory.persist_conversation_memory("conv_sp", "local-user"))
 
     import chat_service
 
@@ -149,7 +149,7 @@ def test_system_prompt_includes_memory_section(memory_env, monkeypatch):
         "_build_capabilities_snapshot",
         lambda uid: "## What you can do here (capabilities snapshot)\n(stub)",
     )
-    prompt = chat_service.build_system_prompt_for_source("federico", "web", message="hi")
+    prompt = chat_service.build_system_prompt_for_source("local-user", "web", message="hi")
     assert "## User memory" in prompt
     assert "prefers tables over prose" in prompt
 

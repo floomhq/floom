@@ -6,7 +6,7 @@ import { NextRequest } from "next/server";
 
 // Fake fixture value, not a real credential. gitleaks:allow
 const SECRET = "fake-test-secret-not-real";
-const HOST = "workers.floom.dev";
+const HOST = "localhost:3000";
 
 async function validCookie(): Promise<string> {
   const { deriveSessionToken, SESSION_COOKIE } = await import("@/lib/web-session");
@@ -143,8 +143,8 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
     const res = await middleware(
       req("/api/proxy/workers", {
         forwardedHost: "internal-deploy.vercel.app",
-        xForwardedHost: "workeros.floom.dev",
-        origin: "https://workeros.floom.dev",
+        xForwardedHost: "app.example.com",
+        origin: "https://app.example.com",
         cookie: await validCookie(),
       }),
     );

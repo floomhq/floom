@@ -85,7 +85,7 @@ def client_and_main(monkeypatch, tmp_path):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
 
     from fastapi.testclient import TestClient
     client = TestClient(main.app, headers={"x-floom-secret": "test-secret-batchj"})
@@ -105,7 +105,7 @@ def test_enabled_worker_run_is_not_gated(client_and_main):
 def test_disabled_worker_run_returns_409(client_and_main):
     client, main, repos = client_and_main
     # Disable it the way the smoke gate does.
-    repos.workers.update(user_id="federico", worker_id="gated-probe", enabled=False)
+    repos.workers.update(user_id="local-user", worker_id="gated-probe", enabled=False)
 
     resp = client.post("/workers/gated-probe/runs", json={"inputs": {"x": "v"}})
     assert resp.status_code == 409, resp.text
@@ -139,16 +139,16 @@ def test_worker_detail_does_not_leak_bundle_path(client_and_main):
     bundle_path = runtime.get("bundle_path")
     # If present at all, it must be a bare basename — never an absolute host path.
     if bundle_path:
-        assert "/root/workeros" not in bundle_path, bundle_path
+        assert "/opt/workeros" not in bundle_path, bundle_path
         assert not bundle_path.startswith("/"), bundle_path
         assert "/" not in bundle_path, bundle_path
     # Belt: the whole serialized detail never contains the deploy dir.
-    assert "/root/workeros/workers" not in resp.text
+    assert "/opt/workeros/workers" not in resp.text
 
 
 def test_paused_worker_detail_reports_enabled_false(client_and_main):
     client, main, repos = client_and_main
-    repos.workers.update(user_id="federico", worker_id="gated-probe", enabled=False)
+    repos.workers.update(user_id="local-user", worker_id="gated-probe", enabled=False)
     resp = client.get("/workers/gated-probe")
     assert resp.status_code == 200, resp.text
     body = resp.json()

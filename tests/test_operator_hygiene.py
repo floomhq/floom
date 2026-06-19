@@ -208,12 +208,12 @@ def test_run_error_raw_strips_filesystem_paths(api):
 
     server_raw = api._run_error_raw(
         "Command exited with code 1 and error: Traceback (most recent call last):\n"
-        '  File "/root/workeros/apps/api/run_service.py", line 10\n'
+        '  File "/opt/workeros/apps/api/run_service.py", line 10\n'
         "RuntimeError: boom",
         "run_execution_exception",
     )
     assert server_raw is not None
-    assert "/root/workeros" not in server_raw
+    assert "/opt/workeros" not in server_raw
 
 
 # ---------------------------------------------------------------------------

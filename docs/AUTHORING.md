@@ -343,7 +343,7 @@ Worker secrets are stored encrypted in `.secrets.enc` in your workspace. The dec
 
 | Setup | Key location | Notes |
 |---|---|---|
-| Cloud (workeros.floom.dev) | Supabase Vault | Managed automatically, no action needed |
+| Cloud (app.example.com) | Supabase Vault | Managed automatically, no action needed |
 | Self-hosted + GitHub remote | GitHub repo Variable `WORKEROS_SECRETS_KEY` | Set automatically on first write; shared across team |
 | Self-hosted, local git only | `~/.config/workeros/secrets.key` (mode 600) | Generated automatically on first write |
 
@@ -391,7 +391,7 @@ inputs:
     options: [search, profile]
 
 contexts:
-  - name: novasearch-data
+  - name: review_pack-data
     source: local
     when:
       input: operation
@@ -404,7 +404,7 @@ For memory packs that are read on most runs but written only by a specific opera
 
 ```yaml
 memory:
-  context: memory-novasearch-v5
+  context: memory-review_pack-v5
   writeable_when:
     input: operation
     equals: record_candidate_feedback

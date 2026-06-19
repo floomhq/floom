@@ -112,7 +112,7 @@ def _simulate_fresh_process():
 def test_scheduled_run_resolves_owner_scoped_secrets(repo_bundle, run_service):
     repos, _db, _manifest = repo_bundle
 
-    owner = "federico"
+    owner = "local-user"
     worker_id = "ai-news-discord-digest"
 
     repos.workers.create(
@@ -163,7 +163,7 @@ def test_scheduled_run_resolves_owner_scoped_secrets(repo_bundle, run_service):
 def test_scheduled_run_still_fails_when_secret_genuinely_missing(repo_bundle, run_service):
     repos, _db, _manifest = repo_bundle
 
-    owner = "federico"
+    owner = "local-user"
     worker_id = "ai-news-discord-digest"
 
     repos.workers.create(
@@ -267,7 +267,7 @@ def test_shared_worker_run_scopes_secrets_to_owner_not_runner(repo_bundle, run_s
 def test_secret_store_path_is_db_anchored_not_source_relative(monkeypatch, tmp_path):
     """The N4-1 root cause: the secret-value store must be anchored to the DB
     directory, NOT to the source tree. A source-relative path diverges across
-    deploy directories (/root/workeros vs /opt/workeros-live) while the DB
+    deploy directories (/opt/workeros vs /opt/workeros-live) while the DB
     (absolute) is shared, orphaning secret values.
 
     With no explicit WORKEROS_API_ENV_FILE, the store must co-locate with the
@@ -331,7 +331,7 @@ def test_secret_value_survives_deploy_directory_change(monkeypatch, tmp_path):
     db.get_repositories.cache_clear()
     repos = db.get_repositories()
 
-    repos.secrets.set(user_id="federico", name="NEWS_API_KEY", value="news-xyz")
+    repos.secrets.set(user_id="local-user", name="NEWS_API_KEY", value="news-xyz")
 
     # The value landed in the DB-anchored store, not a source-relative file.
     assert (db_dir / "secrets.env").is_file()

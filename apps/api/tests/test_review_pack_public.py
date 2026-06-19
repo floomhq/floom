@@ -1,4 +1,4 @@
-"""Smoke tests for NovaSearch Review Pack public routes."""
+"""Smoke tests for ReviewPack Review Pack public routes."""
 
 from __future__ import annotations
 
@@ -55,12 +55,12 @@ def _secret_headers():
 
 def test_review_pack_public_vote_roundtrip(monkeypatch, tmp_path):
     main, contexts_dir = _load_api(monkeypatch, tmp_path)
-    pack_id = "rp_reltix_gmbh_2026-06-22"
+    pack_id = "rp_demo-client_gmbh_2026-06-22"
     rel = f"review-packs/{pack_id}/pack.json"
     pack = {
         "schema_version": "1.0",
         "id": pack_id,
-        "client": {"slug": "reltix-gmbh", "name": "reltix GmbH"},
+        "client": {"slug": "demo-client-gmbh", "name": "demo-client GmbH"},
         "meta": {
             "title": "t",
             "published_at": "2026-06-22T00:00:00Z",
@@ -92,19 +92,19 @@ def test_review_pack_public_vote_roundtrip(monkeypatch, tmp_path):
     }
 
     with TestClient(main.app) as client:
-        created = client.post("/contexts/novasearch-reltix", json={"writeable": True}, headers=_secret_headers())
+        created = client.post("/contexts/review_pack-demo-client", json={"writeable": True}, headers=_secret_headers())
         assert created.status_code == 200, created.text
 
         encoded_rel = "/".join(quote(part) for part in rel.split("/"))
         put = client.put(
-            f"/contexts/novasearch-reltix/files/{encoded_rel}",
+            f"/contexts/review_pack-demo-client/files/{encoded_rel}",
             json={"content": json.dumps(pack, indent=2)},
             headers=_secret_headers(),
         )
         assert put.status_code == 200, put.text
 
         mint = client.post(
-            f"/contexts/novasearch-reltix/review-packs/{pack_id}/share-link",
+            f"/contexts/review_pack-demo-client/review-packs/{pack_id}/share-link",
             headers=_secret_headers(),
         )
         assert mint.status_code == 200, mint.text
@@ -134,5 +134,5 @@ def test_review_pack_public_vote_roundtrip(monkeypatch, tmp_path):
         assert vote.status_code == 200, vote.text
         assert vote.json()["consensus"][0]["counts"]["interested"] == 1
 
-    feedback_files = list((contexts_dir / "novasearch-reltix" / "feedback" / "review" / pack_id).glob("*.json"))
+    feedback_files = list((contexts_dir / "review_pack-demo-client" / "feedback" / "review" / pack_id).glob("*.json"))
     assert len(feedback_files) == 1

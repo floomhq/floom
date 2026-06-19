@@ -356,7 +356,7 @@ def _redact_public_log_message(message: str) -> str:
     redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
     redacted = _SECRET_ASSIGNMENT_RE.sub("[redacted-secret]", redacted)
     # PATH-1 (2026-05-29): logs[].message still leaked host paths
-    # (/root/workeros/...) and sandbox paths (/home/user/worker/run.py),
+    # (/opt/workeros/...) and sandbox paths (/home/user/worker/run.py),
     # unlike error_raw which already strips them. Apply the SAME redaction so
     # the log surface never discloses the deploy dir or sandbox topology.
     redacted = _SANDBOX_PATH_RE.sub("[worker file]", redacted)
@@ -373,7 +373,7 @@ def _public_artifact_path(raw_path: Optional[str]) -> str:
     """Return an artifact path safe to expose in an API response (PATH-1).
 
     The artifacts table stores the absolute host path
-    (e.g. /root/workeros/data/artifacts/run_x/out/sorted.csv). Returning it
+    (e.g. /opt/workeros/data/artifacts/run_x/out/sorted.csv). Returning it
     discloses the deploy dir + storage layout. Strip the artifacts-root prefix
     so callers see only the relative path (run_x/out/sorted.csv). The download
     endpoint resolves the real on-disk path server-side from the artifact id,
@@ -552,7 +552,7 @@ def _run_error_raw(
         return None
     redacted = _redact_public_log_message(raw)
     # FIX 5 (2026-05-29): the debug 'Raw' tab still leaked real filesystem paths
-    # (sandbox /home/user/worker/, server /root/workeros/...). error_raw must
+    # (sandbox /home/user/worker/, server /opt/workeros/...). error_raw must
     # never carry a real path. Strip them — the operator headline is unchanged.
     redacted = _SANDBOX_PATH_RE.sub("[worker file]", redacted)
     return redacted or None

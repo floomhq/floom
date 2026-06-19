@@ -6,7 +6,7 @@ drive an E2B sandbox via a **blocking** `sandbox.commands.run(...)`
 (`runner_sandbox/e2b_driver.py`). A restart/deploy kills those threads, so the
 `running` rows are orphaned and reaped as
 `run abandoned (server restarted): no active executor after timeout window`.
-For interactive workers (e.g. NovaSearch, ~1-4 min/run) any deploy during a run
+For interactive workers (e.g. ReviewPack, ~1-4 min/run) any deploy during a run
 surfaced a hard failure with no recovery.
 
 ## What is implemented (this change) - auto-requeue, tested

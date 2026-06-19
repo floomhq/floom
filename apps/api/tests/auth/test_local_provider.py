@@ -25,7 +25,7 @@ def test_valid_secret_returns_auth_context(monkeypatch):
 
     ctx = asyncio.run(provider.verify(_request({"x-floom-secret": "test-secret"})))
 
-    assert ctx.user_id == "federico"
+    assert ctx.user_id == "local-user"
     assert ctx.email is None
     assert ctx.role == "member"
     assert ctx.scopes == ()
@@ -113,4 +113,4 @@ def test_compare_digest_is_used(monkeypatch):
     ctx = asyncio.run(provider.verify(_request({"x-floom-secret": "test-secret"})))
 
     compare_digest.assert_called_once_with(b"test-secret", b"test-secret")
-    assert ctx.user_id == "federico"
+    assert ctx.user_id == "local-user"

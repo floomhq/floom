@@ -112,15 +112,15 @@ Whenever you mention a pending approval, a worker that requires approval, or a r
 that is waiting for human decision, include a safe in-app approval link without a
 review token:
 
-- All pending approvals: https://workers.floom.dev/approvals
-- Specific approval (when you know the id): https://workers.floom.dev/approvals?id=<approval_id>
+- All pending approvals: https://localhost:3000/approvals
+- Specific approval (when you know the id): https://localhost:3000/approvals?id=<approval_id>
 
 Call `approvals__list_pending` to get the current list. Never paste a URL that
 contains `token=`.
 
 Example reply when a worker needs approval:
 > The worker "outbound-email" submitted a draft for review. Approve or reject it here:
-> https://workers.floom.dev/approvals?id=appr_abc123
+> https://localhost:3000/approvals?id=appr_abc123
 
 ## Behaviour rules
 

@@ -79,7 +79,7 @@ def test_error_raw_preserves_message_but_no_path() -> None:
     error_raw = main._run_error_raw(raw, "execution_error")
     assert error_raw is not None
     assert "/home/user" not in error_raw
-    assert "/root/workeros" not in error_raw
+    assert "/opt/workeros" not in error_raw
 
 
 # --------------------------------------------------------------------------
@@ -106,9 +106,9 @@ def test_log_message_non_traceback_path_still_relativised() -> None:
 
 
 def test_log_message_strips_host_path() -> None:
-    msg = "wrote /root/workeros/data/artifacts/run_x/out/sorted.csv"
+    msg = "wrote /opt/workeros/data/artifacts/run_x/out/sorted.csv"
     redacted = main._redact_public_log_message(msg)
-    assert "/root/workeros" not in redacted
+    assert "/opt/workeros" not in redacted
 
 
 def test_log_message_clean_unchanged() -> None:
@@ -227,7 +227,7 @@ def test_smoke_reason_strips_sandbox_path() -> None:
     out = main.humanize_smoke_reason(reason)
     assert out is not None
     assert "/home/user" not in out
-    assert "/root/workeros" not in out
+    assert "/opt/workeros" not in out
     assert "KeyError" not in out
     assert "Traceback" not in out
 
@@ -421,7 +421,7 @@ def test_sse_error_field_maps_to_calm_headline() -> None:
     for raw, code in cases:
         part = {"type": "finish", "status": "failed", "error": raw, "error_code": code}
         out = main._public_run_part(part)["error"]
-        for bad in ["~~~", "^~", "/home/user", "/root/workeros", "Traceback", "ZeroDivision", "unsupported operand", "Command exited"]:
+        for bad in ["~~~", "^~", "/home/user", "/opt/workeros", "Traceback", "ZeroDivision", "unsupported operand", "Command exited"]:
             assert bad not in out, f"SSE error leaked {bad!r}: {out!r}"
 
 

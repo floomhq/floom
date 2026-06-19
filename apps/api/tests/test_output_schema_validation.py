@@ -1,6 +1,6 @@
 """Regression coverage for worker output-schema validation across ALL drivers.
 
-Audit (docs/audits/worker-system-test-matrix.md, 2026-06-04, Vivek's P0):
+Audit (docs/audits/worker-system-test-matrix.md, 2026-06-04, maintainer's P0):
 the E2B script driver (.py/.sh/.js — the common case) NEVER ran
 `_validate_output_schema`, so declared output `type` (json/csv/markdown/text),
 CSV `columns`, and `json_required_keys` were silently unenforced. The fix routes

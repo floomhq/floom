@@ -320,21 +320,21 @@ def test_build_config_maps_db_connections(chat_env):
 
     # Active Composio app + active registered MCP + an INACTIVE composio (excluded).
     repos.connections.upsert(
-        user_id="federico", id="c1", app_name="gmail",
+        user_id="local-user", id="c1", app_name="gmail",
         composio_connection_id="ca_x", status="active",
     )
     repos.connections.upsert(
-        user_id="federico", id="m1", app_name="notionmcp", kind="mcp",
+        user_id="local-user", id="m1", app_name="notionmcp", kind="mcp",
         composio_connection_id="m1", status="active",
         mcp_label="notion", mcp_url="https://mcp.example.com/sse",
         mcp_transport="sse",
     )
     repos.connections.upsert(
-        user_id="federico", id="c2", app_name="slack",
+        user_id="local-user", id="c2", app_name="slack",
         composio_connection_id="ca_y", status="revoked",
     )
 
-    config = chat.build_workspace_agent_config("federico")
+    config = chat.build_workspace_agent_config("local-user")
 
     from models import declared_composio_connections
     from runner_sandbox import agent_capabilities as cap
@@ -362,12 +362,12 @@ def test_build_config_respects_connection_permission_flags(chat_env):
     chat = chat_env["chat"]
     repos = db.get_repositories()
     repos.connections.upsert(
-        user_id="federico", id="c1", app_name="gmail",
+        user_id="local-user", id="c1", app_name="gmail",
         composio_connection_id="ca_x", status="active",
     )
 
     disabled = chat.build_workspace_agent_config(
-        "federico",
+        "local-user",
         {
             "brain_read": True,
             "brain_write": False,
@@ -380,7 +380,7 @@ def test_build_config_respects_connection_permission_flags(chat_env):
     assert declared_composio_connections(disabled) == {}
 
     writable = chat.build_workspace_agent_config(
-        "federico",
+        "local-user",
         {
             "brain_read": True,
             "brain_write": False,
@@ -404,11 +404,11 @@ def test_tool_metadata_includes_brain_and_composio(chat_env):
     chat = chat_env["chat"]
     repos = db.get_repositories()
     repos.connections.upsert(
-        user_id="federico", id="c1", app_name="gmail",
+        user_id="local-user", id="c1", app_name="gmail",
         composio_connection_id="ca_x", status="active",
     )
 
-    meta = chat.workspace_agent_tool_metadata("federico")
+    meta = chat.workspace_agent_tool_metadata("local-user")
     names = {m["name"] for m in meta}
     # Management tools + brain read tools + composio read tool all advertised.
     assert "workers__list_all" in names

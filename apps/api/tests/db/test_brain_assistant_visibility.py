@@ -69,41 +69,41 @@ def test_asset_tables_registered(repo_bundle):
 def test_ensure_brain_pack_defaults_private(repo_bundle):
     repos, _db, _manifest = repo_bundle
     row = repos.asset_access.ensure_brain_pack(
-        pack_id="research", workspace_id="local-default", owner_id="federico"
+        pack_id="research", workspace_id="local-default", owner_id="local-user"
     )
     assert row["visibility"] == "private"
-    assert row["owner_id"] == "federico"
+    assert row["owner_id"] == "local-user"
 
 
 def test_ensure_brain_pack_is_idempotent_and_preserves_visibility(repo_bundle):
     repos, _db, _manifest = repo_bundle
     repos.asset_access.ensure_brain_pack(
-        pack_id="kb", workspace_id="local-default", owner_id="federico"
+        pack_id="kb", workspace_id="local-default", owner_id="local-user"
     )
-    _seed_owner(_db := repo_bundle[1], "local-default", "federico")
+    _seed_owner(_db := repo_bundle[1], "local-default", "local-user")
     repos.asset_access.set_visibility(
         workspace_id="local-default",
-        actor_id="federico",
+        actor_id="local-user",
         asset_type="brain_pack",
         asset_id="kb",
         visibility="workspace",
     )
     # Re-ensure must NOT downgrade an already-shared pack.
     again = repos.asset_access.ensure_brain_pack(
-        pack_id="kb", workspace_id="local-default", owner_id="federico"
+        pack_id="kb", workspace_id="local-default", owner_id="local-user"
     )
     assert again["visibility"] == "workspace"
 
 
 def test_owner_has_full_brain_pack_permissions(repo_bundle):
     repos, db, _manifest = repo_bundle
-    _seed_owner(db, "local-default", "federico")
+    _seed_owner(db, "local-default", "local-user")
     repos.asset_access.ensure_brain_pack(
-        pack_id="p1", workspace_id="local-default", owner_id="federico"
+        pack_id="p1", workspace_id="local-default", owner_id="local-user"
     )
     perms = repos.asset_access.get_permissions(
         workspace_id="local-default",
-        user_id="federico",
+        user_id="local-user",
         asset_type="brain_pack",
         asset_id="p1",
     )
@@ -188,37 +188,37 @@ def test_assistant_backfilled_per_local_workspace(repo_bundle):
         )
         conn.execute(
             "INSERT OR IGNORE INTO local_workspaces (id, owner_user_id, name, created_at) "
-            "VALUES ('local-default', 'federico', 'Default', ?)",
+            "VALUES ('local-default', 'local-user', 'Default', ?)",
             (now,),
         )
     # Lazy upsert mirrors the backfill id + default.
     row = repos.asset_access.ensure_assistant(
         assistant_id="workspace-agent:local-default",
         workspace_id="local-default",
-        owner_id="federico",
+        owner_id="local-user",
     )
     assert row["visibility"] == "workspace"
-    assert row["owner_id"] == "federico"
+    assert row["owner_id"] == "local-user"
 
 
 def test_assistant_owner_can_make_private(repo_bundle):
     repos, db, _manifest = repo_bundle
-    _seed_owner(db, "local-default", "federico")
+    _seed_owner(db, "local-default", "local-user")
     repos.asset_access.ensure_assistant(
         assistant_id="workspace-agent:local-default",
         workspace_id="local-default",
-        owner_id="federico",
+        owner_id="local-user",
     )
     repos.asset_access.set_visibility(
         workspace_id="local-default",
-        actor_id="federico",
+        actor_id="local-user",
         asset_type="assistant",
         asset_id="workspace-agent:local-default",
         visibility="private",
     )
     perms = repos.asset_access.get_permissions(
         workspace_id="local-default",
-        user_id="federico",
+        user_id="local-user",
         asset_type="assistant",
         asset_id="workspace-agent:local-default",
     )

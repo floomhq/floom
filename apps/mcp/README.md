@@ -13,7 +13,7 @@ The CLI targets local, self-hosted, and cloud deployments:
 | Mode | API base | Auth | Workspaces |
 |------|----------|------|------------|
 | **OSS/self-hosted** (default) | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
-| **Cloud** | `https://workeros-api.floom.dev` (workeros.floom.dev dashboard) | Supabase refresh token -> JWT bearer, `X-Workeros-Workspace` header | multi-workspace |
+| **Cloud** | `https://api.example.com` (app.example.com dashboard) | Supabase refresh token -> JWT bearer, `X-Workeros-Workspace` header | multi-workspace |
 
 ## OSS quickstart
 

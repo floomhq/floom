@@ -5,7 +5,7 @@ Reads inputs.json and secrets from .env.local (python-dotenv), connections.json.
 Writes result.json.
 
 connections.json contains: {"gmail": "<composio_connection_id>"}
-Calls POST https://workers-api.floom.dev/runs/{FLOOM_RUN_ID}/composio-execute/GMAIL_FETCH_EMAILS
+Calls POST https://localhost:8000/runs/{FLOOM_RUN_ID}/composio-execute/GMAIL_FETCH_EMAILS
 so COMPOSIO_API_KEY never needs to be in the sandbox.
 """
 
@@ -21,7 +21,7 @@ except ImportError:
     pass  # dotenv optional
 
 
-_WORKEROS_API = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev")
+_WORKEROS_API = os.environ.get("WORKEROS_API_URL", "https://localhost:8000")
 _RUN_ID = os.environ.get("FLOOM_RUN_ID", "")
 _RUN_TOKEN = os.environ.get("WORKEROS_RUN_TOKEN", "")
 

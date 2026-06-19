@@ -34,7 +34,7 @@ def _fresh_scheduler():
     return importlib.import_module("scheduler")
 
 
-def _make_worker(repos, manifest, worker_id="w1", user_id="federico"):
+def _make_worker(repos, manifest, worker_id="w1", user_id="local-user"):
     repos.workers.create(
         user_id=user_id,
         worker_id=worker_id,
@@ -276,7 +276,7 @@ def test_scheduler_initializes_legacy_next_run_at_in_declared_timezone(repo_bund
 
     worker_id = "legacy-timezone-worker"
     repos.workers.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id=worker_id,
         name=worker_id,
         manifest_json={
@@ -338,7 +338,7 @@ def test_scheduler_advances_trigger_next_run_at_on_fire_failure(repo_bundle, mon
 
     worker_id = "trigger-failure-worker"
     repos.workers.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id=worker_id,
         name=worker_id,
         manifest_json={**manifest(worker_id, worker_id), "trigger": {"type": "schedule", "cron": "*/5 * * * *"}},
@@ -379,7 +379,7 @@ def test_scheduler_advances_legacy_next_run_at_on_fire_failure(repo_bundle, monk
 
     worker_id = "legacy-failure-worker"
     repos.workers.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id=worker_id,
         name=worker_id,
         manifest_json={**manifest(worker_id, worker_id), "trigger": {"type": "schedule", "cron": "*/5 * * * *"}},

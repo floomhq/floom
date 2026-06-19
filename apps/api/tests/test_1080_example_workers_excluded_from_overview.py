@@ -78,10 +78,10 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     # Pin the secret-auth identity to the same user the fixture persists workers
     # under, so the overview request (authenticated via x-floom-secret) resolves
-    # to "federico" and sees the seeded workers. Without this the dev .env loaded
+    # to "local-user" and sees the seeded workers. Without this the dev .env loaded
     # by WORKEROS_DEV=1 supplies a different default user id and the overview
     # would see zero workers regardless of the example/system reversal.
-    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
+    monkeypatch.setenv("WORKEROS_USER_ID", "local-user")
     monkeypatch.setenv("FLOOM_SECRET", "test-secret-1080")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
@@ -113,7 +113,7 @@ def client_and_main(monkeypatch, tmp_path):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
 
     from fastapi.testclient import TestClient
     with TestClient(main.app, headers={"x-floom-secret": "test-secret-1080"}) as client:

@@ -671,7 +671,7 @@ def _context_detail(
     metadata: dict[str, dict[str, Any]] | None = None,
     *,
     repos: Optional[Repositories] = None,
-    user_id: str = "federico",
+    user_id: str = "local-user",
     path_prefix: str | None = None,
 ) -> ContextDetail:
     from contexts import context_dir, context_file_metadata, context_mount_names, iter_context_files, load_context_metadata

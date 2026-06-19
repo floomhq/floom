@@ -1,4 +1,4 @@
-"""Workspace agent chat service — S37.
+﻿"""Workspace agent chat service — S37.
 
 Implements POST /chat: a streaming SSE endpoint that routes user messages
 through the workspace-agent worker (system_worker: true) and persists
@@ -342,7 +342,7 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
 
     #1139: also try the bootstrap/configured user ID as a fallback so that in
     OSS/multi-member setups where workers were originally created by the
-    bootstrap user (e.g. 'federico' or WORKEROS_USER_ID), a newly-enrolled
+    bootstrap user (e.g. 'local-user' or WORKEROS_USER_ID), a newly-enrolled
     admin who hasn't created any workers yet still sees them.
     """
     raw = str(user_id or "").strip()
@@ -1448,11 +1448,11 @@ from services.chat_tool_impls import (  # noqa: E402,F401
 # Honour the same host the rest of the engine uses: WORKEROS_PUBLIC_URL is the
 # explicit override; otherwise fall back to WORKERS_FRONTEND_URL (used by
 # main._frontend_base_url and the email/alert links) so a self-hosted deployment
-# that sets one host gets correct links everywhere, not a hardcoded floom.dev.
+# that sets one host gets correct links everywhere, not a hardcoded example.com.
 _APPROVALS_BASE_URL = (
     os.environ.get("WORKEROS_PUBLIC_URL")
     or os.environ.get("WORKERS_FRONTEND_URL")
-    or "https://workers.floom.dev"
+    or "https://localhost:3000"
 ).rstrip("/")
 
 

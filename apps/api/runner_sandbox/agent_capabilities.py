@@ -519,7 +519,7 @@ def composio_execute(
         return {"ok": False, "error": "COMPOSIO_API_KEY is not configured"}
 
     log_fn(f"Executing Composio tool {tool}", "debug")
-    entity_id = user_id or os.environ.get("FLOOM_USER_ID", "federico")
+    entity_id = user_id or os.environ.get("FLOOM_USER_ID", "local-user")
     response = requests.post(
         f"https://backend.composio.dev/api/v3/tools/execute/{tool}",
         headers={"x-api-key": api_key, "Content-Type": "application/json"},

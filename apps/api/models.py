@@ -981,7 +981,7 @@ class WorkerContextMount(BaseModel):
     source: str = "local"
     # #1433: optional per-run mount predicate. Example:
     # contexts:
-    #   - name: novasearch-data
+    #   - name: review_pack-data
     #     when: {input: operation, not_in: [profile]}
     # Existing mounts omit this and are always staged.
     when: Optional[Dict[str, Any]] = None
@@ -2135,7 +2135,7 @@ class Artifact(BaseModel):
     name: str
     type: Optional[str] = None
     # PATH-1 (2026-05-29): `path` must NOT expose the absolute host path
-    # (/root/workeros/data/artifacts/...). It now carries the path RELATIVE to
+    # (/opt/workeros/data/artifacts/...). It now carries the path RELATIVE to
     # the artifacts root (e.g. "run_x/out/sorted.csv"); the download endpoint
     # resolves the real on-disk path server-side from the artifact id.
     path: str

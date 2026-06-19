@@ -26,7 +26,7 @@ def client_and_db(monkeypatch, tmp_path):
 
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", "test-secret-workspaces")
-    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
+    monkeypatch.setenv("WORKEROS_USER_ID", "local-user")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
@@ -93,7 +93,7 @@ def _seed_legacy_worker(db, worker_id: str, *, workspace_id: str = "local-defaul
             """
             INSERT OR IGNORE INTO local_workspaces
                 (id, owner_user_id, name, created_at)
-            VALUES ('local-default', 'federico', 'federico', ?)
+            VALUES ('local-default', 'local-user', 'local-user', ?)
             """,
             (now,),
         )
@@ -101,13 +101,13 @@ def _seed_legacy_worker(db, worker_id: str, *, workspace_id: str = "local-defaul
             """
             INSERT OR IGNORE INTO workspace_members
                 (workspace_id, user_id, role, status, created_at, updated_at)
-            VALUES ('local-default', 'federico', 'owner', 'active', ?, ?)
+            VALUES ('local-default', 'local-user', 'owner', 'active', ?, ?)
             """,
             (now, now),
         )
     repos = db.get_repositories()
     repos.workers.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id=worker_id,
         name=worker_id,
         manifest_json=_manifest(worker_id, worker_id),
@@ -159,7 +159,7 @@ def test_local_workspaces_list_create_and_select(client_and_db):
     body = initial.json()
     assert body["active_id"] == "local-default"
     assert [(row["id"], row["name"]) for row in body["workspaces"]] == [
-        ("local-default", "federico")
+        ("local-default", "local-user")
     ]
 
     created = client.post("/workspaces", json={"name": "Side project"})
@@ -217,30 +217,30 @@ def test_secret_auth_sees_legacy_private_workers(client_and_db):
     detail = client.get("/workers/legacy-private-empty-workspace")
     assert detail.status_code == 200, detail.text
     body = detail.json()
-    assert body["owner_id"] == "federico"
+    assert body["owner_id"] == "local-user"
     assert body["visibility"] == "private"
     assert body["permissions"]["is_owner"] is True
 
 
-def test_federico_login_maps_to_legacy_worker_owner(client_and_db):
+def test_local-user_login_maps_to_legacy_worker_owner(client_and_db):
     client, db = client_and_db
     _seed_legacy_worker(db, "legacy-session-worker")
 
     setup = client.post(
         "/auth/setup",
-        json={"username": "federico", "password": "ramen-stapler-42"},
+        json={"username": "local-user", "password": "ramen-stapler-42"},
     )
     assert setup.status_code == 201, setup.text
     me = client.get("/auth/me", headers={"x-floom-secret": ""})
     assert me.status_code == 200, me.text
-    assert me.json()["username"] == "federico"
+    assert me.json()["username"] == "local-user"
     assert me.json()["auth_method"] == "session"
 
     listing = client.get("/workers")
     assert listing.status_code == 200, listing.text
     rows = listing.json()
     worker = next(row for row in rows if row["id"] == "legacy-session-worker")
-    assert worker["owner_id"] == "federico"
+    assert worker["owner_id"] == "local-user"
     assert worker["permissions"]["is_owner"] is True
 
     detail = client.get("/workers/legacy-session-worker")
@@ -253,31 +253,31 @@ def test_uuid_admin_session_sees_legacy_default_brain_packs(client_and_db, monke
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
 
     contexts_dir = Path(os.environ["FLOOM_CONTEXTS_DIR"])
-    legacy_pack = contexts_dir / "federico" / "company"
+    legacy_pack = contexts_dir / "local-user" / "company"
     legacy_pack.mkdir(parents=True)
     (legacy_pack / "README.md").write_text("# Company\nlegacy default brain.\n", encoding="utf-8")
-    (contexts_dir / "federico" / ".workeros-contexts.json").write_text(
-        '{"company": {"owner_id": "federico", "writeable": true}}\n',
+    (contexts_dir / "local-user" / ".workeros-contexts.json").write_text(
+        '{"company": {"owner_id": "local-user", "writeable": true}}\n',
         encoding="utf-8",
     )
 
     setup = client.post(
         "/auth/setup",
-        json={"username": "fede", "password": "ramen-stapler-42"},
+        json={"username": "local", "password": "ramen-stapler-42"},
     )
     assert setup.status_code == 201, setup.text
-    assert setup.json()["id"] != "federico"
+    assert setup.json()["id"] != "local-user"
 
     me = client.get("/auth/me")
     assert me.status_code == 200, me.text
-    assert me.json()["username"] == "fede"
+    assert me.json()["username"] == "local"
     assert me.json()["auth_method"] == "session"
 
     listing = client.get("/contexts")
     assert listing.status_code == 200, listing.text
     packs = {row["name"]: row for row in listing.json()}
     assert "company" in packs
-    assert packs["company"]["owner_id"] == "federico"
+    assert packs["company"]["owner_id"] == "local-user"
     assert packs["company"]["permissions"]["is_owner"] is True
     assert packs["company"]["permissions"]["can_edit"] is True
 
@@ -295,7 +295,7 @@ def test_side_workspace_workers_are_isolated_and_editable(client_and_db):
     created = client.post("/workspaces", json={"name": "Side workspace"})
     assert created.status_code == 200, created.text
     workspace_id = created.json()["id"]
-    scoped_user_id = local_workspace_user_id("federico", workspace_id)
+    scoped_user_id = local_workspace_user_id("local-user", workspace_id)
 
     _seed_workspace_owner(db, workspace_id, scoped_user_id)
     _seed_legacy_worker(db, "default-worker")
@@ -353,13 +353,13 @@ def test_connections_are_scoped_to_the_active_workspace(client_and_db):
     created = client.post("/workspaces", json={"name": "Connections workspace"})
     assert created.status_code == 200, created.text
     workspace_id = created.json()["id"]
-    scoped_user_id = local_workspace_user_id("federico", workspace_id)
+    scoped_user_id = local_workspace_user_id("local-user", workspace_id)
 
     _seed_workspace_owner(db, workspace_id, scoped_user_id)
     repos = db.get_repositories()
     now = db.now_iso()
     repos.connections.upsert(
-        user_id="federico",
+        user_id="local-user",
         id="default-gmail",
         app_name="gmail",
         composio_connection_id="ca_default",

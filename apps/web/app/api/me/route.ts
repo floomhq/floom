@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
+const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
 
 async function handler(req: NextRequest) {

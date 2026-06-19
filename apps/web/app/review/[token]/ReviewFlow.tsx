@@ -1,6 +1,6 @@
 "use client";
 
-// NovaSearch Review Pack — public client review flow (reltix pilot).
+// ReviewPack Review Pack — public client review flow (demo-client pilot).
 // German UI, mobile-first, no phone-frame chrome, no demo bar. Four screens:
 //   Gate (pack password) -> Identity (name/role) -> Review (job tabs, candidate
 //   cards, 👍/🤔/👎, auto-save) -> Done.

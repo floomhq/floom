@@ -618,22 +618,22 @@ def test_slack_short_claim_url_built_on_host_that_serves_c(monkeypatch, tmp_path
     """The short /c/ link MUST be built on the API host that actually serves /c/.
 
     The /c/{token} redirect route lives on the FastAPI app
-    (workers-api.floom.dev), NOT on the Next.js web app (workers.floom.dev).
+    (localhost:8000), NOT on the Next.js web app (localhost:3000).
     Building it on WORKERS_FRONTEND_URL produced a dead link. Must use the
     public API base.
     """
     main = _load_api(monkeypatch, tmp_path)
     import channels.slack as _slack_mod
 
-    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
-    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://workers-api.floom.dev")
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
+    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://localhost:8000")
 
     short_url = _slack_mod._slack_short_claim_url("tok456")
-    assert short_url == "https://workers-api.floom.dev/c/tok456"
+    assert short_url == "https://localhost:8000/c/tok456"
     assert "/c/" in short_url
     # The long claim URL still targets the frontend /settings page (unchanged).
     assert _slack_mod._slack_claim_url("tok456") == (
-        "https://workers.floom.dev/settings?slack_claim=tok456"
+        "https://localhost:3000/settings?slack_claim=tok456"
     )
 
 
@@ -644,7 +644,7 @@ def test_slack_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
 
     for var in ("WORKEROS_PUBLIC_API_URL", "WORKEROS_API_URL", "WORKERS_API_URL"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
 
     short_url = _slack_mod._slack_short_claim_url("deftok2")
-    assert short_url == "https://workeros-api.floom.dev/c/deftok2"
+    assert short_url == "https://api.example.com/c/deftok2"

@@ -88,7 +88,7 @@ def main_with_worker(monkeypatch, tmp_path):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
 
     yield main, db, wdir, repos
     db.get_repositories.cache_clear()
@@ -97,7 +97,7 @@ def main_with_worker(monkeypatch, tmp_path):
 def test_persist_worker_run_py_writes_disk_and_keeps_recipe(main_with_worker):
     main, db, wdir, repos = main_with_worker
 
-    main.persist_worker_run_py("persist-probe", _FIXED_RUN_PY, user_id="federico")
+    main.persist_worker_run_py("persist-probe", _FIXED_RUN_PY, user_id="local-user")
 
     # The executor reads run.py from disk on every run; the fix must be there.
     assert (wdir / "run.py").read_text(encoding="utf-8") == _FIXED_RUN_PY
@@ -111,13 +111,13 @@ def test_persist_worker_run_py_writes_disk_and_keeps_recipe(main_with_worker):
 def test_persist_worker_run_py_missing_worker_raises(main_with_worker):
     main, db, wdir, repos = main_with_worker
     with pytest.raises((FileNotFoundError, Exception)):
-        main.persist_worker_run_py("no-such-worker", _FIXED_RUN_PY, user_id="federico")
+        main.persist_worker_run_py("no-such-worker", _FIXED_RUN_PY, user_id="local-user")
 
 
 def test_persist_does_not_break_run_py_content_roundtrip(main_with_worker):
     main, db, wdir, repos = main_with_worker
-    main.persist_worker_run_py("persist-probe", _FIXED_RUN_PY, user_id="federico")
+    main.persist_worker_run_py("persist-probe", _FIXED_RUN_PY, user_id="local-user")
     # A second persist (idempotent) keeps the latest content.
     newer = "# fixed-again\nprint('v2')\n"
-    main.persist_worker_run_py("persist-probe", newer, user_id="federico")
+    main.persist_worker_run_py("persist-probe", newer, user_id="local-user")
     assert (wdir / "run.py").read_text(encoding="utf-8") == newer

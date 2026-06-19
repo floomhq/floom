@@ -36,8 +36,8 @@ def _load_api(
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "whsec-test")
-    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
-    monkeypatch.setenv("ALLOWED_ORIGINS", "https://workers.floom.dev,https://workeros.floom.dev")
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://localhost:3000,https://app.example.com")
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     if upload_hourly_cap_bytes is None:
         monkeypatch.delenv("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", raising=False)
@@ -91,12 +91,12 @@ def test_cors_preflight_allows_production_frontend(monkeypatch, tmp_path):
     resp = client.options(
         "/workers",
         headers={
-            "Origin": "https://workers.floom.dev",
+            "Origin": "https://localhost:3000",
             "Access-Control-Request-Method": "GET",
         },
     )
 
-    assert resp.headers.get("access-control-allow-origin") == "https://workers.floom.dev"
+    assert resp.headers.get("access-control-allow-origin") == "https://localhost:3000"
 
 
 def test_upload_accepts_text_plain_file(monkeypatch, tmp_path):

@@ -60,7 +60,7 @@ _CONTEXT_METADATA_SAVE_LOCK = threading.Lock()
 #
 # In cloud mode, startup.py registers a callable via set_context_hydration_hook
 # so that context_dir() transparently pulls the context from Supabase Storage
-# when the directory is absent on a fresh ephemeral container (Railway).
+# when the directory is absent on a fresh ephemeral container (hosted platform).
 #
 # Signature: hydrate_hook(scope: str | None, name: str, dest_dir: Path) -> None
 # The hook MUST be idempotent and MUST NOT raise (errors are logged internally).
@@ -116,7 +116,7 @@ def context_scope_for_user(user_id: str | None) -> str | None:
 
 def _bootstrap_context_user_id() -> str:
     configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
-    return configured or "federico"
+    return configured or "local-user"
 
 
 def _scope_has_context_dirs(scope: str) -> bool:
@@ -138,7 +138,7 @@ def _can_use_bootstrap_context_scope(user_id: str, bootstrap_id: str) -> bool:
     """True when a real local admin owns the bootstrap/default context scope.
 
     Multi-member setup can create a UUID admin while pre-existing Brain packs
-    remain under the bootstrap user scope (usually ``federico``). This check is
+    remain under the bootstrap user scope (usually ``local-user``). This check is
     intentionally narrow: it never applies in cloud mode, never applies to
     non-default derived workspace IDs, and requires either a single configured
     account or an active owner row for ``local-default``.
@@ -809,7 +809,7 @@ def context_mount_matches_inputs(raw: Any, inputs: Mapping[str, Any] | None) -> 
     #1433: large context packs can dominate light operations. A mount may include
     a simple input predicate, for example:
 
-        {"name": "novasearch-data", "when": {"input": "operation", "not_in": ["profile"]}}
+        {"name": "review_pack-data", "when": {"input": "operation", "not_in": ["profile"]}}
 
     Missing ``when`` preserves historical behavior: stage the pack on every run.
     """

@@ -4,7 +4,7 @@ Use this checklist to verify the Workeros Slack Agent in a real Slack workspace.
 
 ## Current Gate
 
-Production endpoint `https://workers-api.floom.dev/slack/events` is deployed, but live Slack verification returns:
+Production endpoint `https://localhost:8000/slack/events` is deployed, but live Slack verification returns:
 
 ```text
 503 {"detail":"SLACK_SIGNING_SECRET is not configured"}
@@ -24,9 +24,9 @@ Do not paste Slack tokens or signing secrets into chat. Add them through the ser
 1. Open Slack API app configuration.
 2. Create or update the app from `docs/slack-app-manifest.example.yml`.
 3. Install or reinstall the app into the test workspace after scopes/events change.
-4. Confirm Event Subscriptions verifies `https://workers-api.floom.dev/slack/events`.
-5. Confirm Interactivity is enabled for `https://workers-api.floom.dev/slack/events`.
-6. Confirm `/floom` points to `https://workers-api.floom.dev/slack/events`.
+4. Confirm Event Subscriptions verifies `https://localhost:8000/slack/events`.
+5. Confirm Interactivity is enabled for `https://localhost:8000/slack/events`.
+6. Confirm `/floom` points to `https://localhost:8000/slack/events`.
 
 ## Channel reading (consent = invite)
 
