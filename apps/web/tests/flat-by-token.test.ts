@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // Emily-home redesign (2026-06-19): the old OverviewDashboard was replaced by
-// the Emily-fullscreen HOME. The flat-by-token guard now covers EmilyHome.
+// the Emily-fullscreen HOME. The home is now the EXISTING Emily shown FULLSCREEN
+// (EmilyChat); its empty-state "stuff" (greeting + pulse + pills) lives in
+// EmilyHomeEmpty. The flat-by-token guard now covers EmilyHomeEmpty.
 const overviewSrc = readFileSync(
-  resolve(__dirname, "../components/home/EmilyHome.tsx"),
+  resolve(__dirname, "../components/home/EmilyHomeEmpty.tsx"),
   "utf8"
 );
 
@@ -236,7 +238,7 @@ describe("Phase 2 — Textarea primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
 // P5: the Emily-fullscreen HOME must be flat by token (spec rule #2). The
 // composer-anchored home is borderless — surfaces are bg tokens + the accent
 // focus ring, never hardcoded border colors.
-describe("P5 — EmilyHome is flat by token (spec rule #2)", () => {
+describe("P5 — EmilyHomeEmpty is flat by token (spec rule #2)", () => {
   it("uses no hardcoded border-default / border-strong utilities", () => {
     expect(overviewSrc).not.toContain("border-[var(--border-default)]");
     expect(overviewSrc).not.toContain("border border-[var(--border-default)]");

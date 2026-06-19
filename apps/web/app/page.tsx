@@ -1,21 +1,15 @@
-// Emily-fullscreen HOME — the default landing. Replaces the old Overview
-// dashboard. The home is composer-anchored (states: first-worker / active /
-// drafting) and reuses the real Emily chat + overview/workers data.
+// Home ("/") — the EXISTING Emily shown FULLSCREEN (Federico 2026-06-19).
 //
-// We still server-fetch the overview so the Active pulse hydrates without a
-// client round-trip; the workers gate fetches client-side (cache-first).
-import { fetchOverview } from "@/lib/server-api";
-import { EmilyHome } from "@/components/home/EmilyHome";
+// The home is NOT a separate composer. The EmilyDock (mounted in AppShell)
+// detects the home route, forces Emily into TRUE fullscreen (the page pane
+// hides, the sidebar stays), and renders the home greeting + lean pulse + pills
+// in Emily's OWN empty state — seeding Emily's real composer. This page only
+// renders a quiet placeholder for the pane (hidden once Emily goes fullscreen).
+import { HomePane } from "@/components/home/HomePane";
 
-// #945: authenticated, per-user data fetch must not be statically cached.
+// #945: authenticated, per-user dashboard must not be statically cached.
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
-  let initialData: import("@/lib/types").SystemOverview | null = null;
-  try {
-    initialData = await fetchOverview();
-  } catch {
-    // Fall through — EmilyHome fetches client-side (cache-first).
-  }
-  return <EmilyHome initialData={initialData} />;
+export default function HomePage() {
+  return <HomePane />;
 }

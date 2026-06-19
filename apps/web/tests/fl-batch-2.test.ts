@@ -119,18 +119,19 @@ function testAppShellLayout() {
     "AppShell main content wrapper must have 'flex flex-col min-h-full' for pages to fill height"
   );
 
-  // The other half of the fix: the home surface (now EmilyHome) must not use the
-  // fragile calc workaround that hard-coded the sidebar height offset; it fills
-  // the pane height it inherits from AppShell.
-  const overviewPath = path.resolve(__dirname, "../components/home/EmilyHome.tsx");
+  // The other half of the fix: the home surface (now HomePane — the quiet pane
+  // placeholder for the fullscreen-Emily home) must not use the fragile calc
+  // workaround that hard-coded the sidebar height offset; it fills the pane
+  // height it inherits from AppShell.
+  const overviewPath = path.resolve(__dirname, "../components/home/HomePane.tsx");
   const overview = fs.readFileSync(overviewPath, "utf8");
   assert(
     !overview.includes("calc(100dvh"),
-    "EmilyHome must not use calc(100dvh) height hack — inherit height from AppShell"
+    "HomePane must not use calc(100dvh) height hack — inherit height from AppShell"
   );
   assert(
     overview.includes("h-full"),
-    "EmilyHome must fill the pane height it inherits from AppShell (h-full)"
+    "HomePane must fill the pane height it inherits from AppShell (h-full)"
   );
 }
 
