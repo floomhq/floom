@@ -43,6 +43,7 @@ import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
 import { SETTINGS_NAV, settingsGroup, groupLabel, type SettingsScope } from "@/lib/settings/nav-groups";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
+import { McpInstallPanel } from "@/components/mcp/McpInstallPanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
 import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/ClaimSuccessOverlay";
@@ -1085,12 +1086,6 @@ function SystemInfoRow({
   );
 }
 
-const MCP_INSTALL_SNIPPET = `{
-  "mcpServers": {
-    "floom": { "command": "npx", "args": ["-y", "@floomhq/workeros", "mcp"] }
-  }
-}`;
-
 const CLI_INSTALL_SNIPPET = `npm i -g @floomhq/workeros
 workeros login
 workeros run <worker>`;
@@ -1260,11 +1255,7 @@ function ConnectSection() {
         </p>
       </TabsContent>
       <TabsContent value="mcp" className="space-y-4">
-        <CopyCodeCard
-          title="Agent install"
-          description="Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client."
-          value={MCP_INSTALL_SNIPPET}
-        />
+        <McpInstallPanel />
       </TabsContent>
       <TabsContent value="cli" className="space-y-4">
         <CopyCodeCard
@@ -2750,11 +2741,7 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           )}
         </TabsContent>
         <TabsContent value="agent-install" className="space-y-5">
-          <CopyCodeCard
-            title="Agent install"
-            description="Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client."
-            value={MCP_INSTALL_SNIPPET}
-          />
+          <McpInstallPanel />
           <CopyCodeCard
             title="CLI install"
             description="Install the CLI, authenticate, and run a worker from your terminal."
