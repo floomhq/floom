@@ -1,4 +1,4 @@
-"""Git-backed workspace operations.
+﻿"""Git-backed workspace operations.
 
 Every edit to a worker, context, or workspace file becomes a git commit.
 History = git log. Rollback = git checkout <sha>.
@@ -81,7 +81,7 @@ def _block_engine_source_versioning(workspace_dir: Path) -> bool:
 # Workspace ID resolver — cloud hook
 #
 # In OSS single-tenant mode this is never set; everything lives in one repo.
-# In cloud multi-tenant mode, managed-deployment registers a callable that returns
+# In hosted multi-tenant mode, a downstream host registers a callable that returns
 # the active workspace_id for the current request (same pattern as
 # contexts.set_context_scope_resolver). The engine uses it to scope the git
 # root to the right per-workspace directory.
@@ -93,7 +93,7 @@ _workspace_id_resolver: Optional[Callable[[], Optional[str]]] = None
 def set_workspace_id_resolver(fn: Optional[Callable[[], Optional[str]]]) -> None:
     """Register a callable that returns the active workspace_id per request.
 
-    Called by managed-deployment at startup. Pass ``None`` to clear (OSS mode).
+    Called by a downstream host at startup. Pass ``None`` to clear (OSS mode).
     The callable MUST return either a safe workspace_id string or None.
     """
     global _workspace_id_resolver

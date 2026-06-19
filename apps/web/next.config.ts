@@ -38,7 +38,7 @@ const SECURITY_HEADERS = [
 const APP_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 type RedirectRule = Awaited<ReturnType<NonNullable<NextConfig["redirects"]>>>[number];
 
-function cloudApexRedirects(): RedirectRule[] {
+function hostedBasePathRedirects(): RedirectRule[] {
   if (!APP_BASE_PATH) return [];
 
   const appPathRules = [
@@ -78,8 +78,7 @@ function cloudApexRedirects(): RedirectRule[] {
 
 const nextConfig: NextConfig = {
   // basePath seam: unset for the single-tenant OSS build (served at "/").
-  // The Downstream host serves the dashboard under "/app" and sets
-  // NEXT_PUBLIC_BASE_PATH="/app" so this file is consumed unmodified (no fork).
+  // A hosted app can serve the dashboard under a prefix, for example "/app".
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
   turbopack: {
     root: __dirname,
@@ -87,7 +86,7 @@ const nextConfig: NextConfig = {
   // /workers/<id>/edit is gone; redirect bookmarks to the split-pane detail.
   async redirects() {
     return [
-      ...cloudApexRedirects(),
+      ...hostedBasePathRedirects(),
       {
         source: "/workers/:id/edit",
         destination: "/workers?sel=:id&tab=Config",

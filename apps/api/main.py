@@ -1109,7 +1109,7 @@ def _cors_allowed_origins() -> List[str]:
         return [origin.strip() for origin in configured.split(",") if origin.strip()]
 
     # #921: explicit production origins only — no wildcard subdomain match.
-    origins = ["https://localhost:3000", "https://app.example.com"]
+    origins = ["http://localhost:3000", "https://localhost:3000"]
     if os.environ.get("WORKEROS_DEV"):
         origins.extend(["http://localhost:3000", "http://localhost:3011"])
     return origins
@@ -1120,7 +1120,7 @@ def _cors_allowed_origin_regex() -> Optional[str]:
     if configured.strip():
         return configured.strip()
     if os.environ.get("WORKEROS_DEV"):
-        return r"^https://[a-z0-9-]+\.workeros-[a-z0-9-]+\.vercel\.app$"
+        return None
     # #921: the old default `^https://([a-z0-9-]+\.)*floom\.dev$` allowed ANY
     # example.com subdomain to make credentialed requests — one compromised
     # subdomain meant workspace-wide CSRF. Production now relies on the explicit
@@ -3106,7 +3106,7 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
 # On completion the run outputs a bundle.json artifact the client reads via
 #   GET /runs/{run_id}/artifacts/bundle
 #
-# This eliminates the Vercel 60s timeout on draft-from-prompt (task #18).
+# This avoids web-host request timeouts on draft-from-prompt.
 # ---------------------------------------------------------------------------
 
 
@@ -4651,7 +4651,7 @@ def _webhook_receipt_ttl_seconds() -> int:
 # with the same delivery id). The default is SQLite, which on the ephemeral,
 # sometimes multi-instance managed cloud (a) loses receipts across redeploys, so
 # sender retries fire the worker again, and (b) can raise "database is locked"
-# under concurrent inbound webhooks. Cloud registers a Supabase-backed store via
+# under concurrent inbound webhooks. A downstream host registers a Supabase-backed store via
 # `set_webhook_delivery_store` so claims are atomic + durable across instances —
 # same seam pattern as set_context_scope_resolver / set_worker_call_secret_resolver.
 class WebhookDeliveryStore(Protocol):
@@ -5549,7 +5549,7 @@ def _workspace_agent_mcp_setup_card() -> Dict[str, Any]:
     return {
         "name": "Workeros",
         "description": "Remote MCP setup for Langdock, Claude Code, Cursor, and other agent clients.",
-        "server_url": "https://api.example.com/api/mcp",
+        "server_url": "http://localhost:8000/api/mcp",
         "transport": "STREAMABLE_HTTP",
         "authentication": {
             "method": "API Key",
@@ -6749,7 +6749,7 @@ def rotate_webhook_secret(
 # HTTP MCP server — JSON-RPC 2.0 over streamable HTTP
 # Exposes default WorkerOS management tools + custom workspace tools.
 # OSS:   POST /mcp-tools/serve   (x-floom-secret auth)
-# Cloud: POST /mcp/{workspace_id} (PAT Bearer auth, added in managed-deployment)
+# Hosted: POST /mcp/{workspace_id} (PAT Bearer auth, added in a downstream host)
 # All default tools proxy to the existing REST API via httpx ASGITransport
 # (in-process, no network round-trip).  Custom tools trigger a worker run.
 # ---------------------------------------------------------------------------

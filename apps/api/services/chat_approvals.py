@@ -1,4 +1,4 @@
-"""Agent-tool approval handling: list pending, resolve, approve/reject.
+﻿"""Agent-tool approval handling: list pending, resolve, approve/reject.
 
 Extracted verbatim from chat_service.py: the workspace-agent approval tools and
 the shared decision path (run approvals, destructive-action approvals, agent-tool
@@ -50,7 +50,7 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
             # Authoritative, tokenised deep link on the configured public host so
             # Emily surfaces a working link instead of inventing a fake URL.
             # DEGRADE, never raise: when no signer secret is configured (e.g.
-            # cloud mode), omit the link rather than 503 the whole pending-list
+            # hosted mode), omit the link rather than 503 the whole pending-list
             # tool — the operator still sees their pending approvals.
             review_url = None
             if approval_id and row["run_id"] and row["owner_id"]:

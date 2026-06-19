@@ -1,4 +1,4 @@
-"""Worker registration operations: manifest parsing, id allocation, file
+﻿"""Worker registration operations: manifest parsing, id allocation, file
 embedding, skill-version + git-commit + DB persistence.
 
 The subsystem that turns uploaded/drafted worker files into persisted workers,
@@ -50,7 +50,7 @@ from models import DraftFile  # re-export: DraftFile now lives in models.py
 
 
 def _git_join(*parts: str) -> str:
-    """Join path parts, skipping empty segments (handles empty prefix in cloud mode)."""
+    """Join path parts, skipping empty segments (handles empty prefix in hosted mode)."""
     return "/".join(p for p in parts if p)
 
 
@@ -148,7 +148,7 @@ def _free_worker_id(base_id: str, repos: "Repositories | None" = None) -> str:
     appending ``-2``, ``-3``, ... and finally a short random suffix so the
     create always succeeds. Protected stock ids are never reused.
 
-    #54 (follow-up to #200): in a multi-tenant deploy (managed-deployment) the
+    #54 (follow-up to #200): in a multi-tenant deploy (a downstream host) the
     canonical worker store is the DB, not the request's ephemeral filesystem
     view, and the worker id is a GLOBAL primary key (``id TEXT PRIMARY KEY``
     on the ``workers`` table — not a ``(owner_id, id)`` composite). A collision
@@ -162,7 +162,7 @@ def _free_worker_id(base_id: str, repos: "Repositories | None" = None) -> str:
     only). Consulting it in addition to the filesystem makes the dedupe correct
     for the global id namespace in both modes: in local OSS mode ``repos`` is
     the SQLite repo (and the filesystem is the source of truth anyway); in
-    cloud mode ``repos`` is the Supabase repo and is the source of truth.
+    hosted mode ``repos`` is the Supabase repo and is the source of truth.
     """
     from worker_registry import WORKERS_DIR
 
@@ -677,7 +677,7 @@ def _persist_one_worker(
         )
 
     # Mirror to the canonical repository so non-local deployments
-    # (e.g. managed-deployment -> Supabase) actually persist the row.
+    # (e.g. a downstream host -> Supabase) actually persist the row.
     # Local SQLite already writes through `conn` above. Calling the
     # repository here would open a second SQLite connection while the
     # first transaction is still active and can fail startup with

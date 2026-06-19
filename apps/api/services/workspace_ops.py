@@ -1,4 +1,4 @@
-"""Workspace operations: instructions/base-persona git commits, membership,
+﻿"""Workspace operations: instructions/base-persona git commits, membership,
 and the workspace-template export (zip build, share token, payload).
 
 The active-workspace resolver, member projection + owner-membership guard, the
@@ -78,7 +78,7 @@ def _ensure_owner_membership(
     very instance that is supposed to always show "you = Owner". So we upsert the
     owner row keyed by the request identity, carrying the caller's email when the
     auth context has one. Cloud overrides membership via its own repo + RLS, so
-    this no-ops there (cloud deploy short-circuits before calling it).
+    this no-ops there (hosted deploy short-circuits before calling it).
     """
     from db import get_db, now_iso
 

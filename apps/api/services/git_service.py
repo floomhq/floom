@@ -1,4 +1,4 @@
-"""Git workspace resolution and commit-identity helpers.
+﻿"""Git workspace resolution and commit-identity helpers.
 
 Extracted from main.py. These are pure resolution helpers used across the
 worker, context, and workspace route groups. They depend only on leaf modules
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("floom.api")
 
 
-# #1001: a host (managed-deployment) maintains its per-workspace git repos in its
+# #1001: a downstream host maintains its per-workspace git repos in its
 # own materialized tree (var/workspaces/{id}), NOT WORKERS_DIR/{id}. It registers
 # a resolver here so EVERY engine git op — versions read AND rollback — runs in
 # the same real tree (mirrors run_token.set_worker_call_secret_resolver). Pass
@@ -41,7 +41,7 @@ def set_workspace_git_bundle_restore_resolver(
 ) -> None:
     """Register a host restore hook for ephemeral per-workspace git repos.
 
-    Cloud registers a resolver that restores ``repo.bundle`` from Supabase
+    A downstream host registers a resolver that restores ``repo.bundle`` from Supabase
     Storage before an export push when the materialized workspace repo is absent.
     OSS keeps this unset and falls back to local git initialization.
     """
@@ -87,7 +87,7 @@ def _restore_workspace_git_bundle_if_missing(workspace: Path) -> bool:
     """Restore the active workspace git repo via the host hook when .git is gone.
 
     Returns True when the hook reports a restore. The hook is intentionally
-    dependency-free here; managed-deployment owns the Supabase Storage implementation
+    dependency-free here; a downstream host owns the Supabase Storage implementation
     and registers it at startup.
     """
     if (workspace / ".git").exists():
@@ -180,7 +180,7 @@ def _sync_workspace_tools_yml(user_id: str, repos) -> None:
 def _git_workspace_key(user_id: str) -> str:
     """Return the key for git_workspace_config rows.
 
-    Cloud: workspace_id — all members of a workspace share one GitHub repo.
+    Hosted: workspace_id — all members of a workspace share one GitHub repo.
     OSS:   user_id — single-user or first-admin owns the config.
     """
     import git_ops as _git_ops
@@ -276,7 +276,7 @@ def _git_cfg_delete(user_id: str) -> None:
 
 _SECRETS_ENC_FILENAME = ".secrets.enc"
 
-# Cloud hook — registered by managed-deployment startup.py to return the
+# Host hook — registered by a downstream host startup.py to return the
 # workspace's AES key from Supabase Vault (pgsodium DARE) instead of
 # reading from GitHub Variables.
 _secrets_key_resolver = None
@@ -285,7 +285,7 @@ _secrets_key_resolver = None
 def set_secrets_key_resolver(fn) -> None:
     """Register a callable returning the active workspace's AES-256 key bytes.
 
-    Cloud registers this at startup — keys come from Supabase Vault (pgsodium).
+    A downstream host registers this at startup — keys come from Supabase Vault (pgsodium).
     Pass None to clear (OSS fallback).
     """
     global _secrets_key_resolver
@@ -299,7 +299,7 @@ def _get_or_create_secrets_key(pat: str, repo_full_name: str) -> bytes:
     """Return the AES-256 key for .secrets.enc.
 
     Lookup order:
-      1. Cloud: _secrets_key_resolver() — Supabase Vault, never touches GitHub.
+      1. Hosted: _secrets_key_resolver() — Supabase Vault, never touches GitHub.
       2. OSS + GitHub: GitHub repo Variable (WORKEROS_SECRETS_KEY). Generates
          and stores a random key on first use.
       3. Local git (no GitHub): ~/.config/workeros/secrets.key. Generates and
@@ -454,13 +454,13 @@ def _workers_git_prefix() -> str:
     """Relative path of the workers dir within the workspace git root.
 
     OSS: git root is WORKERS_DIR.parent, so workers are at 'workers/'.
-    Cloud: git root IS WORKERS_DIR/workspace_id, so workers sit at root — prefix is ''.
+    Hosted: git root IS WORKERS_DIR/workspace_id, so workers sit at root — prefix is ''.
     """
     import git_ops as _git_ops
     from worker_registry import WORKERS_DIR
 
     if _git_ops.get_active_workspace_id():
-        return ""  # Cloud: worker_id/ is directly under the git root
+        return ""  # Hosted: worker_id/ is directly under the git root
     try:
         return WORKERS_DIR.relative_to(_git_workspace()).as_posix()
     except ValueError:

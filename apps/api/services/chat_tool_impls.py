@@ -1,4 +1,4 @@
-"""Workspace-agent tool implementations: workers, runs, secrets, connections,
+﻿"""Workspace-agent tool implementations: workers, runs, secrets, connections,
 MCP-tools, and contexts.
 
 Extracted verbatim from chat_service.py: the agent action handlers behind the
@@ -28,7 +28,7 @@ def _caller_is_workspace_admin(user_id: str) -> bool:
     #238: mirrors the HTTP route's ``auth.is_admin`` for Emily's mutation
     tools, backend-agnostically:
 
-    - Cloud: the per-request role is stashed in the workspace-context
+    - Hosted: the per-request role is stashed in the workspace-context
       contextvar by SupabaseAuthProvider.verify; read it via a soft import so
       the OSS engine never hard-depends on the cloud package.
     - OSS SQLite: fall back to the ``users`` table ``role`` column (the same
@@ -36,7 +36,7 @@ def _caller_is_workspace_admin(user_id: str) -> bool:
 
     Defaults to False (least privilege) when the role cannot be resolved.
     """
-    # Cloud: per-request active member role.
+    # Hosted: per-request active member role.
     try:
         from apps.api.auth.workspace_context import get_active_member_role
         role = get_active_member_role()
@@ -560,7 +560,7 @@ def _tool_secrets_set(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     # #238: apply the SAME per-action authz the HTTP route enforces
     # (_require_secret_mutation_allowed, #952). Without this, a low-priv member
     # could overwrite another user's / the owner's workspace secret through
-    # Emily — an action the direct API blocks. The cloud SupabaseSecretRepository
+    # Emily — an action the direct API blocks. The hosted SupabaseSecretRepository
     # upserts by (workspace_id, name) only, so we MUST gate on the existing
     # secret's creator here. On OSS SQLite, secrets are per-user so get() never
     # surfaces another user's row and this is a no-op.

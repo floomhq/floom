@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp, readFile } from "node:fs/promises";
@@ -247,7 +247,7 @@ test("workspace switch works against cloud /api/workspaces", async () => {
       assert.equal(code, 0);
       const creds = await readCredentials();
       assert.equal(creds.workspace_id, "ws_0123456789abcd");
-      assert.ok(!calls.some((call) => call.includes("/select")), "cloud mode does not call /select");
+      assert.ok(!calls.some((call) => call.includes("/select")), "hosted mode does not call /select");
     }, { cloud: true });
   });
 });

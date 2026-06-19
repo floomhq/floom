@@ -1,4 +1,4 @@
-"""Run-scoped capability tokens for sandbox workers.
+﻿"""Run-scoped capability tokens for sandbox workers.
 
 Every run that executes inside a sandbox (E2B micro-VM) receives a short-lived
 HMAC-signed token via the WORKEROS_RUN_TOKEN environment variable.  The token:
@@ -149,7 +149,7 @@ class WorkerCallSecretMissing(ValueError):
 
 
 # #992: the worker-call signing secret is decoupled from FLOOM_SECRET so a
-# multi-tenant host (managed-deployment) that deliberately strips FLOOM_SECRET (to
+# multi-tenant downstream host that deliberately strips FLOOM_SECRET (to
 # keep the x-floom-secret gate off; auth is Supabase JWT/PAT) can still sign
 # wrt_ tokens with a real secret. Resolution order:
 #   1. explicit `secret` arg
@@ -164,7 +164,7 @@ _worker_call_secret_resolver: "Callable[[], str | None] | None" = None
 def set_worker_call_secret_resolver(resolver: "Callable[[], str | None] | None") -> None:
     """Register a callable returning the worker-call signing secret, or None.
 
-    The host (e.g. managed-deployment) registers this at startup so wrt_ tokens are
+    The host (for example, a downstream host) registers this at startup so wrt_ tokens are
     signed with a real secret derived from its own config, without re-enabling
     the FLOOM_SECRET / x-floom-secret gate. Pass None to clear (OSS mode).
     """

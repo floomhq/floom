@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Live MCP parity checks for Workeros workspace-agent MCP.
 
 Defaults to production. Override with:
@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 
-BASE_URL = os.environ.get("MCP_BASE_URL", "https://api.example.com/api/mcp")
+BASE_URL = os.environ.get("MCP_BASE_URL", "https://api.workeros.example.com/api/mcp")
 API_KEY = (
     os.environ.get("MCP_API_KEY")
     or os.environ.get("WORKSPACE_AGENT_MCP_TOKEN")

@@ -1,41 +1,21 @@
-#!/usr/bin/env bash
-# Pre/post-deploy live-route smoke gate.
-# Compensating control for GitHub Actions being disabled or blocked.
-# Curls critical OS and Cloud routes and fails on any 508, 5xx, or curl failure.
+﻿#!/usr/bin/env bash
+# Pre/post-deploy live-route smoke gate for a self-hosted Workeros install.
 #
 # Usage:
-#   bash ops/smoke-routes.sh          # check both OS and Cloud
-#   bash ops/smoke-routes.sh cloud    # Cloud only
-#   bash ops/smoke-routes.sh os       # OS only
+#   bash ops/smoke-routes.sh
 #
-# Run this after every production deploy and before relying on a production alias.
+# Override hosts when needed:
+#   WORKEROS_SMOKE_WEB_BASE=https://workeros.example.com \
+#   WORKEROS_SMOKE_API_BASE=https://api.workeros.example.com \
+#   bash ops/smoke-routes.sh
 
 set -uo pipefail
 
-TARGET="${1:-all}"
 FAIL=0
+WEB_BASE="${WORKEROS_SMOKE_WEB_BASE:-http://localhost:3000}"
+API_BASE="${WORKEROS_SMOKE_API_BASE:-http://localhost:8000}"
 
-OS_HOST="https://localhost:3000"
-OS_API="https://localhost:8000"
-CLOUD_HOST="https://app.example.com"
-CLOUD_API="https://api.example.com"
-
-# Unauthenticated routes that must never return 508/5xx.
-# Authenticated pages can return 200, 3xx, or 4xx; route loops and server errors fail.
-CLOUD_ROUTES=(
-  "/"
-  "/app"
-  "/app/login"
-  "/app/overview"
-  "/app/workers"
-  "/app/runs"
-  "/app/connections"
-  "/app/assistant"
-  "/app/workers/granola-hubspot-meeting-actions"
-  "/app/runs/run_8290101e249b"
-)
-
-OS_ROUTES=(
+ROUTES=(
   "/"
   "/workers"
   "/runs"
@@ -58,29 +38,10 @@ check() {
   fi
 }
 
-case "$TARGET" in
-  all|cloud|os) ;;
-  *)
-    echo "Usage: bash ops/smoke-routes.sh [all|cloud|os]" >&2
-    exit 2
-    ;;
-esac
-
-if [[ "$TARGET" == "all" || "$TARGET" == "os" ]]; then
-  echo "== OS =="
-  check "os-api" "$OS_API/healthz"
-  for route in "${OS_ROUTES[@]}"; do
-    check "os" "$OS_HOST$route"
-  done
-fi
-
-if [[ "$TARGET" == "all" || "$TARGET" == "cloud" ]]; then
-  echo "== Cloud =="
-  check "cloud-api" "$CLOUD_API/healthz"
-  for route in "${CLOUD_ROUTES[@]}"; do
-    check "cloud" "$CLOUD_HOST$route"
-  done
-fi
+check "api" "$API_BASE/healthz"
+for route in "${ROUTES[@]}"; do
+  check "web" "$WEB_BASE$route"
+done
 
 if [[ "$FAIL" -ne 0 ]]; then
   echo "SMOKE FAILED - do not promote this deploy."

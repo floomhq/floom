@@ -1,4 +1,4 @@
-"""Tool-card / chat-event rendering pipeline.
+﻿"""Tool-card / chat-event rendering pipeline.
 
 Builds the redacted argument previews, tool-card metadata, and chat-event
 envelopes streamed to the UI. Extracted verbatim from chat_service.py; the few
@@ -277,7 +277,7 @@ def build_tool_event_metadata(
                     if not approval_id or not run_id or not owner_id:
                         continue
                     # DEGRADE, never 503: omit the "Open review" deep-link action
-                    # when no signer secret is configured (e.g. cloud mode) instead
+                    # when no signer secret is configured (e.g. hosted mode) instead
                     # of crashing the card render. The card still shows the pending
                     # approval; only the optional signed deep link is dropped.
                     token = try_approval_public_token(

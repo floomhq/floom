@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-// Inspired by Vercel AI Elements. MIT License.
+// Inspired by AI Elements. MIT License.
 
 import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";

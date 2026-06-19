@@ -1,6 +1,6 @@
-"""Tests for the #1007 WhatsApp binding-persistence seam.
+﻿"""Tests for the #1007 WhatsApp binding-persistence seam.
 
-A host (managed-deployment) registers a ``WhatsAppBindingStore`` via
+A downstream host registers a ``WhatsAppBindingStore`` via
 ``set_whatsapp_binding_store`` instead of monkeypatching the private
 ``_whatsapp_*`` helpers.  These tests prove:
 

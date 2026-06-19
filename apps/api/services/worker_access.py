@@ -1,4 +1,4 @@
-"""Worker access-control and visibility helpers.
+﻿"""Worker access-control and visibility helpers.
 
 Extracted from main.py as a single cohesive cluster (verified closed by call-graph
 analysis). These helpers answer "can the current request see / mutate this worker?"
@@ -86,7 +86,7 @@ def _shared_filesystem_fallback_allowed() -> bool:
 def _stock_filesystem_workers_allowed() -> bool:
     """True when the on-disk PUBLIC_STOCK_WORKER_IDS bypass may surface workers.
 
-    SECURITY (#264): in cloud mode the shared filesystem WORKERS_DIR holds
+    SECURITY (#264): in hosted mode the shared filesystem WORKERS_DIR holds
     bundles from MANY tenants (the vendored engine checkout's localtest tenant).
     The PUBLIC_STOCK_WORKER_IDS bypass exists for OSS single-tenant installs that
     ship example templates on disk and have an empty DB on first run. On cloud,

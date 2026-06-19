@@ -1,4 +1,4 @@
-import open from "open";
+﻿import open from "open";
 import {
   WorkerosApiClient,
   WorkerosApiError,
@@ -47,7 +47,7 @@ export type LoginOptions = {
   cloud?: boolean;
 };
 
-// Heuristic: the cloud verification_url points at app.example.com
+// Heuristic: the cloud verification_url points at workeros.example.com
 // (or /app/cli-auth). The OSS engine points at localhost:3000/cli-auth.
 // Lets the CLI auto-detect cloud-vs-oss even when --cloud is omitted, so a
 // user running `floom login` against WORKEROS_API_BASE=<cloud> still gets
@@ -55,7 +55,7 @@ export type LoginOptions = {
 function detectCloudFromVerificationUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    if (u.hostname === "app.example.com") return true;
+    if (u.hostname === "workeros.example.com") return true;
     if (u.pathname.startsWith("/app/")) return true;
     return false;
   } catch {
@@ -95,7 +95,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
   // The engine endpoint /cli-auth/devices lives at /api/cli-auth/devices
   // when the cloud FastAPI app mounts the engine under /api. We don't have
   // saved credentials yet, so resolvePath in the client can't help. Probe
-  // the cloud path first when --cloud (or WORKEROS_CLOUD=1) is set;
+  // the hosted path first when --cloud (or WORKEROS_CLOUD=1) is set;
   // otherwise default to the OSS path.
   const explicitCloud =
     options.cloud === true ||
@@ -188,7 +188,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
           return 1;
         }
         if (error.status === 404) {
-          // Cloud: 404 from /auth/cli-exchange means the user code has not
+          // Hosted: 404 from /auth/cli-exchange means the user code has not
           // yet been approved by a signed-in dashboard user. Keep polling.
           if (isCloud) {
             await sleep(started.polling_interval_seconds * 1000);
@@ -199,7 +199,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
           return 1;
         }
         if (error.status === 409 && isCloud) {
-          // Cloud: device code is still pending approval.
+          // Hosted: device code is still pending approval.
           await sleep(started.polling_interval_seconds * 1000);
           continue;
         }
@@ -231,7 +231,7 @@ async function pollCloudExchange(args: {
     const bootstrap = await fetchCloudBootstrap(loginApiBase);
     if (!bootstrap) {
       throw new Error(
-        "Cloud login succeeded but the server did not return supabase_url / supabase_anon_key. " +
+        "Hosted login succeeded but the server did not return supabase_url / supabase_anon_key. " +
           "Upgrade the cloud API to include /auth/cli-bootstrap or extend /auth/cli-exchange.",
       );
     }

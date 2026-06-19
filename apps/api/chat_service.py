@@ -129,7 +129,7 @@ CHAT_EVENT_VERSION = 2
 
 def _default_chat_model() -> str:
     """Emily's model id, resolved lazily from the live env (env may be injected
-    after import via the cloud dotenv path — see models.py).
+    after import via a deployment dotenv path - see models.py).
 
     Resolution order:
       1. WORKEROS_CHAT_MODEL — explicit chat override.
@@ -165,7 +165,7 @@ def _active_non_default_workspace_id() -> Optional[str]:
 
     workspace.md and workspace.base.md were process-global, so a second local
     workspace shared (and could overwrite or leak into) the first's
-    instructions. This resolves the active workspace from either the cloud
+    instructions. This resolves the active workspace from either a host-provided
     per-request resolver or the OSS scoped auth user id (``base__ws_<hex>``),
     returning a validated ``ws_<14hex>`` id that can never contain path
     traversal. Returns None for ``local-default`` so the default workspace
@@ -588,13 +588,12 @@ def get_workspace_md() -> str:
 def unwrap_workspace_body(body: str) -> str:
     """Normalise a workspace.md write body to raw markdown.
 
-    The OSS ``PUT /workspace`` contract is a RAW ``text/markdown`` body, but the
-    Downstream host (and some clients) send a JSON envelope ``{"content": "..."}``
-    instead. Without this, the JSON string is stored verbatim as the instructions
-    and prepended to every agent's system prompt (N3-1). This makes the write path
-    tolerant: if the body parses as a JSON object whose ONLY meaningful key is
-    ``content`` (a string), unwrap to that inner content; otherwise return the body
-    unchanged.
+    The OSS ``PUT /workspace`` contract is a RAW ``text/markdown`` body, but some
+    clients send a JSON envelope ``{"content": "..."}`` instead. Without this,
+    the JSON string is stored verbatim as the instructions and prepended to every
+    agent's system prompt (N3-1). This makes the write path tolerant: if the body
+    parses as a JSON object whose ONLY meaningful key is ``content`` (a string),
+    unwrap to that inner content; otherwise return the body unchanged.
 
     Legit markdown that merely starts with ``{`` (e.g. a JSON code block, or text
     that isn't the envelope shape) is NOT mangled — only the exact single-key

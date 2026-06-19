@@ -1,4 +1,4 @@
-import { createAuthenticatedClient, WorkerosApiError, type WorkerosApiClient } from "../lib/api.js";
+﻿import { createAuthenticatedClient, WorkerosApiError, type WorkerosApiClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
 import { updateCredentials, type StoredCredentials } from "../lib/credentials.js";
 import { log, printJson, renderTable } from "../lib/output.js";
@@ -15,7 +15,7 @@ type WorkspaceListResponse = {
   active_id: string | null;
 };
 
-// OSS serves GET /workspaces; in cloud mode the client rewrites the path to
+// OSS serves GET /workspaces; in hosted mode the client rewrites the path to
 // /api/workspaces. Both return { workspaces, active_id }.
 async function fetchWorkspaces(client: WorkerosApiClient): Promise<WorkspaceListResponse> {
   try {

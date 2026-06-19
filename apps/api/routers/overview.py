@@ -1,4 +1,4 @@
-"""Operator overview dashboard route.
+﻿"""Operator overview dashboard route.
 
 ``GET /system/overview`` — the composed dashboard payload (outcome stats,
 sparklines, recent runs, today's schedule, needs-attention items) plus its
@@ -355,7 +355,7 @@ def system_overview(
     # _list_operator_workers already drops those, so this is a defensive guard.
     # NOTE (cloud #1080): the headline must never count ANOTHER workspace's
     # seeded starters. OSS sqlite scopes the visible set via workspace_members;
-    # the cloud Supabase repo MUST do the same (verify before bumping the engine
+    # the hosted Supabase repo MUST do the same (verify before bumping the engine
     # there) — the fix for #1080 is per-workspace scoping, not hiding examples.
     def _is_hidden_worker(row: Dict[str, Any]) -> bool:
         manifest = row.get("manifest")

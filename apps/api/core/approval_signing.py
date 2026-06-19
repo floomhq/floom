@@ -1,4 +1,4 @@
-"""Single source of truth for the approval public-share link HMAC signer.
+﻿"""Single source of truth for the approval public-share link HMAC signer.
 
 The approval "public link" (`/approvals/review?id=...&token=...`) and the
 `/approvals/public/*` reviewer surface are gated by a deterministic HMAC token
@@ -11,10 +11,10 @@ Why the secret is decoupled from FLOOM_SECRET (#998 follow-up):
 
 `_approval_public_token()` historically read `FLOOM_SECRET` only and fail-closed
 (503) when it was empty (#998 — never sign a share token with a public constant).
-That is correct for OSS single-tenant, but the multi-tenant cloud (managed-deployment)
+That is correct for OSS single-tenant, but a downstream multi-tenant host
 DELIBERATELY strips FLOOM_SECRET at startup (and installs an os.environ guard that
 blocks it) so the engine's OSS `x-floom-secret` auth gate stays off while auth is
-Supabase JWT/PAT. The result: in cloud mode FLOOM_SECRET is intentionally absent,
+Supabase JWT/PAT. The result: in hosted mode FLOOM_SECRET is intentionally absent,
 so EVERY approval row's token mint 503'd — and because the list/detail serializer
 mints a link for every row, `GET /api/approvals` 503'd the whole list whenever any
 approval existed (the Approvals page showed "Could not load approvals").

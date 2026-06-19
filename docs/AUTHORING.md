@@ -343,7 +343,6 @@ Worker secrets are stored encrypted in `.secrets.enc` in your workspace. The dec
 
 | Setup | Key location | Notes |
 |---|---|---|
-| Cloud (app.example.com) | Supabase Vault | Managed automatically, no action needed |
 | Self-hosted + GitHub remote | GitHub repo Variable `WORKEROS_SECRETS_KEY` | Set automatically on first write; shared across team |
 | Self-hosted, local git only | `~/.config/workeros/secrets.key` (mode 600) | Generated automatically on first write |
 

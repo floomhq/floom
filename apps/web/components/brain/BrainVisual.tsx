@@ -1,7 +1,7 @@
-"use client";
+﻿"use client";
 
 /**
- * BrainVisual — ported from the managed-deployment landing reference visual.
+ * BrainVisual — adapted from the landing reference visual.
  * Shows a central "Company Brain" node with radiating folder cards and a
  * "used by workers" side. Adapted for the engine: no framer-motion (not
  * available), uses real ContextSummary data, shows real file-type chips.

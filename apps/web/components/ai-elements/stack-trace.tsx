@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-// Inspired by Vercel AI Elements. MIT License.
+// Inspired by AI Elements. MIT License.
 
 import { AlertTriangle } from "lucide-react";
 

@@ -1,4 +1,4 @@
-"""Workspace route group: instructions + base-persona docs, members, settings,
+﻿"""Workspace route group: instructions + base-persona docs, members, settings,
 template export/import, share link, and changelog.
 
 The /workspace surface: get/put workspace instructions (+versions/rollback), the
@@ -1219,7 +1219,7 @@ def set_workspace_secret(
     workspace_id = _active_workspace_id(request)
     # #1071 — route through the repo-agnostic seam with the REAL authenticated
     # actor + workspace_id instead of importing the SQLite-specific
-    # workspace_actor_id. Under the cloud Supabase repo, user_id must be a real
+    # workspace_actor_id. Under the hosted Supabase repo, user_id must be a real
     # auth.users UUID, so passing a synthetic SQLite actor id 500'd.
     set_ws = getattr(repos.secrets, "set_workspace_secret", None)
     if set_ws is not None:

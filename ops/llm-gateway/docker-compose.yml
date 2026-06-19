@@ -1,5 +1,5 @@
 # #1448 Managed LLM gateway - local / single-host deploy (LiteLLM Proxy + Redis).
-# For cloud, run the same image as a hosted platform service with these env vars and the
+# For hosted deployments, run the same image as a platform service with these env vars and the
 # config mounted (see README.md). Bring secrets via env / a .env file (NOT here).
 services:
   redis:

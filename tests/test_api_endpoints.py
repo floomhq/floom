@@ -1,4 +1,4 @@
-"""Unit tests for PATCH /workers/{id}, DELETE /workers/{id},
+﻿"""Unit tests for PATCH /workers/{id}, DELETE /workers/{id},
 GET /runs/{id}/events SSE, and auth gate on all routes.
 
 Run with:
@@ -527,7 +527,7 @@ class TestContextsAPI(unittest.TestCase):
         self.assertFalse((self.tmpdir.parent / "secret.txt").exists())
 
     def test_scope_resolver_isolates_tenants(self):
-        """In cloud mode, a registered scope resolver MUST prefix every
+        """In hosted mode, a registered scope resolver MUST prefix every
         context FS path with the active scope id, so workspace A's
         contexts are invisible to workspace B (and vice versa). This is
         the BUG #34 regression test."""
@@ -1213,7 +1213,7 @@ class TestHealthz(unittest.TestCase):
 
     def test_healthz_reports_instance_label(self):
         # `instance` distinguishes deployments (dev mirror vs prod) so the two
-        # are never confused when verifying "on the cloud".
+        # are never confused when verifying a hosted deployment.
         os.environ["WORKEROS_INSTANCE"] = "test-instance"
         try:
             r = client.get("/healthz")

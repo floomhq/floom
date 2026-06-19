@@ -1,4 +1,4 @@
-"""Regression tests for the two Emily cross-tenant breaches (managed-deployment).
+﻿"""Regression tests for the two Emily cross-tenant breaches (a downstream host).
 
 #237 — Emily ``workers__run`` leaked another tenant's PRIVATE worker ids /
        names / required-input schemas. The run-resolver
@@ -65,7 +65,7 @@ def _load_api(monkeypatch, tmp_path, *, deploy: str = "local"):
     main = importlib.import_module("main")
     if deploy != "local":
         import db.factory as _factory
-        # The engine standalone env cannot register the cloud Supabase repo;
+        # The engine standalone env cannot register the hosted Supabase repo;
         # register the built-in SQLite repos under the 'cloud' key (auto-reverts
         # via monkeypatch.setitem) so the repo-routed resolver resolves seeded
         # workers while deploy='cloud' keeps _worker_can_view strict.
@@ -280,7 +280,7 @@ class TestC237WorkerCrossTenant:
 # ===========================================================================
 
 class _FakeWorkspaceSecretRepo:
-    """Mimics the cloud SupabaseSecretRepository: keyed on (workspace, name),
+    """Mimics the hosted SupabaseSecretRepository: keyed on (workspace, name),
     so ``get`` returns the existing workspace row with its CREATOR's user_id,
     regardless of which caller asks."""
 

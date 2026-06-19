@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+﻿import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { readCredentials, updateCredentials, type StoredCredentials } from "./credentials.js";
 
@@ -130,7 +130,7 @@ async function refreshSupabaseJwt(
 async function getCloudJwt(creds: StoredCredentials): Promise<string> {
   if (!creds.refresh_token || !creds.supabase_url || !creds.supabase_anon_key) {
     throw new Error(
-      "Cloud credentials incomplete (missing refresh_token / supabase_url / supabase_anon_key). Run floom login --cloud again.",
+      "Hosted credentials incomplete (missing refresh_token / supabase_url / supabase_anon_key). Run floom login --cloud again.",
     );
   }
   const cacheKey = `${creds.supabase_url}|${creds.refresh_token.slice(-12)}`;
@@ -167,7 +167,7 @@ export class WorkerosApiClient {
     readonly credentials?: StoredCredentials,
   ) {}
 
-  // In cloud mode the workeros engine is mounted under /api on the cloud
+  // In hosted mode the workeros engine is mounted under /api on the cloud
   // FastAPI app, so engine paths like "/workers" become "/api/workers".
   // Paths the cloud owns directly (/auth/*, /api/workspaces, /healthz)
   // already start with /api or /auth and are NOT rewritten.
@@ -329,5 +329,5 @@ export function resolveLoginApiBase(opts: { cloud?: boolean } = {}): string {
     opts.cloud === true ||
     (process.env.WORKEROS_CLOUD || "").trim() === "1" ||
     (process.env.WORKEROS_CLOUD || "").trim().toLowerCase() === "true";
-  return cloud ? "https://api.example.com" : "https://localhost:8000";
+  return cloud ? "https://api.workeros.example.com" : "https://localhost:8000";
 }

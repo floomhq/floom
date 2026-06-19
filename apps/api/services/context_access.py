@@ -1,4 +1,4 @@
-"""Context (knowledge-pack) access-control and serialization helpers.
+﻿"""Context (knowledge-pack) access-control and serialization helpers.
 
 Extracted from main.py as a cohesive cluster (AST-verified closed). These helpers
 resolve which contexts a request may see, validate context file paths, and build
@@ -295,7 +295,7 @@ def _ensure_brain_pack_row(
 def _asset_workspace_id(owner_id: str | None) -> str:
     """Workspace id for asset access rows.
 
-    Cloud registers an active workspace resolver; local SQLite derives the
+    A downstream host registers an active workspace resolver; local SQLite derives the
     workspace from its scoped owner id. Prefer the cloud resolver when present.
     """
     from db import derive_workspace_id
@@ -558,7 +558,7 @@ def _contexts_git_prefix() -> str:
     """Relative path of the contexts dir within the workspace git root.
 
     OSS: git root is WORKERS_DIR.parent, contexts at 'contexts/'.
-    Cloud: contexts live under CONTEXTS_DIR/workspace_id which may be outside the
+    Hosted: contexts live under CONTEXTS_DIR/workspace_id which may be outside the
     workers-scoped git root. If so, fall back to 'contexts' and note that contexts
     versioning in cloud requires a unified workspace dir (v2 cloud work).
     """

@@ -1,4 +1,4 @@
-# Workeros Spec
+﻿# Workeros Spec
 
 ## The OS for Background Workers
 
@@ -127,7 +127,7 @@ Logs make runs observable. Human-readable first, technical second.
 
 **User-facing:** Create a worker. Give it tools. Let it run. See everything.
 
-**Internal framing:** Vercel + Cronitor + GitHub Actions for operational workers.
+**Internal framing:** GitHub Actions for operational workers.
 
 ---
 
@@ -596,7 +596,7 @@ Row: name, status, used-by.
 
 Feel: calm, operational, trustworthy, focused, premium, lightweight, not overly technical.
 
-Inspiration: Linear, Vercel, Notion Calendar, Raycast, Apple internal tools.
+Inspiration: Linear, Notion Calendar, Raycast, Apple internal tools.
 
 Use: warm off-white background, near-black text, subtle gray cards, soft shadows, rounded corners, whitespace, minimal borders, clean typography.
 

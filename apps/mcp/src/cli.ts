@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { readFileSync, realpathSync } from "node:fs";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
@@ -78,7 +78,7 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
 
   program.command("login")
     .description("Login via browser device authorization")
-    .option("--cloud", "Authenticate against Workeros Cloud (app.example.com)")
+    .option("--cloud", "Authenticate against a hosted Workeros instance")
     .action(async (options: { cloud?: boolean }) => runAction(runLoginCommand(options)));
 
   program.command("logout")

@@ -1,4 +1,4 @@
-"""Filesystem-backed worker contexts.
+﻿"""Filesystem-backed worker contexts.
 
 Contexts are named directories under ``CONTEXTS_DIR``. The directory contents
 are customer-managed knowledge and state files, so helpers here are deliberately
@@ -26,10 +26,10 @@ CONTEXT_METADATA_PATH = CONTEXTS_DIR / ".workeros-contexts.json"
 MAX_CONTEXT_BYTES = 50 * 1024 * 1024
 
 
-# --- Multi-tenant scoping (cloud mode) ---------------------------------------
+# --- Multi-tenant scoping (hosted mode) ---------------------------------------
 #
 # In single-tenant local/OSS mode every context lives directly under
-# CONTEXTS_DIR (e.g. /var/contexts/<name>). In multi-tenant cloud mode the
+# CONTEXTS_DIR (e.g. /var/contexts/<name>). In multi-tenant hosted mode the
 # same FS root is shared across workspaces; without scoping every authed
 # user sees every other tenant's contexts (P0 cross-tenant leak).
 #
@@ -58,7 +58,7 @@ _CONTEXT_METADATA_SAVE_LOCK = threading.Lock()
 # In OSS single-tenant mode this hook is never set and context_dir() behaves
 # exactly as before — a pure filesystem path resolver with no side effects.
 #
-# In cloud mode, startup.py registers a callable via set_context_hydration_hook
+# In hosted mode, startup.py registers a callable via set_context_hydration_hook
 # so that context_dir() transparently pulls the context from Supabase Storage
 # when the directory is absent on a fresh ephemeral container (hosted platform).
 #
@@ -139,7 +139,7 @@ def _can_use_bootstrap_context_scope(user_id: str, bootstrap_id: str) -> bool:
 
     Multi-member setup can create a UUID admin while pre-existing Brain packs
     remain under the bootstrap user scope (usually ``local-user``). This check is
-    intentionally narrow: it never applies in cloud mode, never applies to
+    intentionally narrow: it never applies in hosted mode, never applies to
     non-default derived workspace IDs, and requires either a single configured
     account or an active owner row for ``local-default``.
     """
@@ -236,7 +236,7 @@ def _current_scope() -> Optional[str]:
 def current_contexts_root() -> Path:
     """Return the active CONTEXTS_DIR root for the current request.
 
-    Scoped to a per-workspace subdir in cloud mode; equal to CONTEXTS_DIR
+    Scoped to a per-workspace subdir in hosted mode; equal to CONTEXTS_DIR
     otherwise. The returned path may not exist yet (callers should
     ``mkdir(parents=True, exist_ok=True)`` before iterating).
     """

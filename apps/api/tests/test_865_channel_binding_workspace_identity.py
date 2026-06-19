@@ -1,4 +1,4 @@
-"""#865 — channel bindings persist + validate workspace identity.
+﻿"""#865 — channel bindings persist + validate workspace identity.
 
 Pins:
   - migration 73: slack_sender_bindings has a workspace_id column
@@ -196,7 +196,7 @@ def test_whatsapp_cloud_claim_persists_null_workspace(monkeypatch, tmp_path):
         ).fetchone()
     assert row["status"] == "active"
     assert row["workspace_id"] is None, (
-        "cloud claims must not fabricate 'local-default'; the cloud repository "
+        "cloud claims must not fabricate 'local-default'; the hosted repository "
         "owns workspace resolution (#865)"
     )
 

@@ -13,9 +13,8 @@
 // message MUST trip this regex so the authoring rules load every time, not just
 // when the user happens to phrase the prompt with create/build/draft + worker.
 //
-// NOTE (engine-sync): EmilyChat.tsx is engine-synced. This create-intent wiring
-// is the cloud-deployed fix; it should be UPSTREAMED to the engine so it
-// survives a future submodule-present sync. See feedback/round-09 deliverable.
+// NOTE (engine-sync): EmilyChat.tsx is engine-synced. Keep this create-intent
+// wiring aligned with the backend worker-authoring intent detector.
 // Uses [\s\S] (not `.` with the `s`/dotAll flag) so it matches across newlines
 // while staying compatible with the project's pre-es2018 TS target. Mirrors the
 // engine's re.DOTALL semantics for the `.{0,90}` gaps.

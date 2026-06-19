@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from functools import lru_cache
@@ -10,8 +10,8 @@ from .multi_member import MultiMemberAuthProvider
 
 # Registry of AuthProvider factories keyed by WORKEROS_DEPLOY value.
 # workeros (OSS) ships with "local" built in.
-# managed-deployment registers its SupabaseAuthProvider at startup via
-# register_auth_provider("cloud", ...) — keeping Supabase deps out of
+# downstream hosts register their AuthProvider at startup via
+# register_auth_provider(...) - keeping hosted-only deps out of
 # the OSS engine entirely.
 _provider_factories: dict[str, Callable[[], AuthProvider]] = {
     "local": lambda: MultiMemberAuthProvider(),
@@ -23,7 +23,7 @@ def register_auth_provider(
 ) -> None:
     """Register an AuthProvider factory for a given WORKEROS_DEPLOY value.
 
-    Called by downstream packages (e.g. managed-deployment) at startup to plug
+    Called by downstream packages (for example, a downstream host) at startup to plug
     in their own provider without modifying the OSS engine.
     """
     _provider_factories[deploy_mode.strip().lower()] = factory

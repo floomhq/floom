@@ -1,5 +1,5 @@
-// #1455: the MCP server must send x-workeros-workspace on worker mutations in
-// cloud mode (it omitted it before, so every cloud worker write 400'd). This
+﻿// #1455: the MCP server must send x-workeros-workspace on worker mutations in
+// hosted mode (it omitted it before, so every cloud worker write 400'd). This
 // drives the real built dist/server.js over stdio against a mock API and asserts
 // the header (and the PAT) arrive on each worker-write request.
 import assert from "node:assert/strict";
@@ -55,10 +55,10 @@ async function startMock() {
   return { server, seen, baseUrl: `http://127.0.0.1:${server.address().port}` };
 }
 
-test("#1455 MCP sends x-workeros-workspace on worker writes in cloud mode", async () => {
+test("#1455 MCP sends x-workeros-workspace on worker writes in hosted mode", async () => {
   const mock = await startMock();
   const home = await mkdtemp(join(tmpdir(), "wos-wsh-"));
-  // Clean env: cloud mode via PAT + workspace id, NO api secret, isolated HOME so
+  // Clean env: hosted mode via PAT + workspace id, NO api secret, isolated HOME so
   // no real credentials.json interferes.
   const env = { ...process.env, HOME: home, USERPROFILE: home };
   delete env.WORKEROS_API_SECRET;

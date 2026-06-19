@@ -48,7 +48,7 @@ workeros doctor
 workeros workers list
 ```
 
-Cloud workspaces use the cloud login flow:
+Hosted workspaces use the hosted login flow:
 
 ```bash
 workeros login --cloud

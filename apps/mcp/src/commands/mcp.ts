@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+﻿import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createAuthenticatedClient, WorkerosApiClient } from "../lib/api.js";
@@ -8,7 +8,7 @@ import { log, printJson, renderTable } from "../lib/output.js";
 
 type JsonObject = Record<string, unknown>;
 
-const DEFAULT_CLOUD_API_BASE = "https://api.example.com";
+const DEFAULT_CLOUD_API_BASE = "https://api.workeros.example.com";
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
 
 // Targets that write a file (kind = "object" or "array" for config shape).
@@ -151,7 +151,7 @@ async function resolveMcpConfig(
     };
   }
 
-  // Cloud mode requires a PAT — JWTs expire hourly and cannot be embedded in
+  // Hosted mode requires a PAT — JWTs expire hourly and cannot be embedded in
   // a static MCP config. PATs do not expire.
   const pat = credentials.api_token;
   if (!pat) {

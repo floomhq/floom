@@ -27,9 +27,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// Exported so the Downstream host's sidebar overlay can compose the engine's
-// brand mark + nav + primary actions and only add its account/workspace
-// footer — keeping the dashboard UI in sync with the engine (no fork).
+// Exported so hosted wrappers can compose the engine's brand mark + nav +
+// primary actions and only add their account/workspace footer - keeping the
+// dashboard UI in sync with the engine (no fork).
 export function FloomMark({ size = 28 }: { size?: number }) {
   return (
     <svg
@@ -97,8 +97,8 @@ export function WorkspaceMark({
 }: {
   size?: number;
   name?: string;
-  /** Real workspace logo (e.g. from the Downstream host). When omitted, the OSS
-   *  engine has no per-workspace logo, so a neutral monogram is shown. */
+  /** Real workspace logo from a host. When omitted, the OSS engine has no
+   *  per-workspace logo, so a neutral monogram is shown. */
   logoUrl?: string | null;
 }) {
   const fetched = useActiveWorkspaceName();
@@ -567,7 +567,7 @@ export function UserProfileFooter({
   const secondary = workspaceName;
   // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
   // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this
-  // gracefully falls back to initials; the Downstream host's /me supplies it.
+  // gracefully falls back to initials; hosted /me implementations can supply it.
   const photoUrl =
     avatarUrl
     ?? (user as (CurrentUser & { picture?: string | null; avatar_url?: string | null }) | null)?.picture

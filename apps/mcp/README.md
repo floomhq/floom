@@ -1,4 +1,4 @@
-# Workeros CLI + MCP
+﻿# Workeros CLI + MCP
 
 Workeros lets agents create, update, run, watch, and delete worker automations through an HTTP MCP endpoint backed by the Workeros API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP HTTP or stdio server entry.
 
@@ -8,12 +8,12 @@ Workeros ships as a single npm package that exposes:
 - **HTTP MCP endpoint** - `workeros mcp install` writes an HTTP transport entry (`url` + `headers`) pointing at `/mcp-tools/serve` on the Workeros API. No local subprocess is required.
 - **`workeros-mcp` stdio server** - legacy stdio path; still works when run directly as `npx -p @floomhq/workeros workeros-mcp` (or `node dist/server.js`). Use this for harnesses that do not support HTTP MCP transport.
 
-The CLI targets local, self-hosted, and cloud deployments:
+The CLI targets local, self-hosted, and hosted deployments:
 
 | Mode | API base | Auth | Workspaces |
 |------|----------|------|------------|
 | **OSS/self-hosted** (default) | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
-| **Cloud** | `https://api.example.com` (app.example.com dashboard) | Supabase refresh token -> JWT bearer, `X-Workeros-Workspace` header | multi-workspace |
+| **Hosted** | your hosted API URL | bearer token or hosted login flow, `X-Workeros-Workspace` header | multi-workspace |
 
 ## OSS quickstart
 
