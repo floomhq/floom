@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
+import { ListEmpty, ListError } from "@/components/collection/CollectionStates";
 import type { CatalogToolItem, IntegrationCatalogItem, IntegrationCatalogResponse } from "@/lib/types";
 
 const PAGE_SIZE = 30;
@@ -587,17 +588,7 @@ export default function ConnectionsBrowsePage() {
           <CatalogSkeleton count={PAGE_SIZE} />
         </section>
       ) : loadError ? (
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-12 text-center">
-          <p className="text-sm font-medium text-ink">Could not load integrations</p>
-          <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
-          <button
-            type="button"
-            onClick={() => void loadCatalog()}
-            className="mt-3 text-xs underline text-muted-foreground hover:text-ink transition-colors"
-          >
-            Try again
-          </button>
-        </div>
+        <ListError message={loadError} onRetry={() => void loadCatalog()} />
       ) : catalog?.items.length ? (
         <div className="space-y-8">
           {/* Connected integrations — only show when not actively filtering */}
@@ -641,25 +632,26 @@ export default function ConnectionsBrowsePage() {
         </div>
       ) : (
         // Empty state — bridge to secrets for apps not in Composio catalog
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-6 py-12 text-center">
-          <p className="text-sm font-medium text-ink">No integrations found</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Clear filters or try a broader search.
-          </p>
-          {search.trim().length > 0 && (
-            <div className="mt-5 inline-flex flex-col items-center gap-2">
-              <p className="text-xs text-muted-foreground">
-                Does {search.trim()} expose an API key? Add it as a secret and any worker can use it.
-              </p>
-              <Link
-                href={`/connections/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] transition-opacity hover:opacity-90"
-              >
-                Add {search.trim()} as a secret
-              </Link>
-            </div>
-          )}
-        </div>
+        <ListEmpty
+          icon={Search}
+          title="No integrations found"
+          help="Clear filters or try a broader search."
+          action={
+            search.trim().length > 0 ? (
+              <div className="mt-1 inline-flex flex-col items-center gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Does {search.trim()} expose an API key? Add it as a secret and any worker can use it.
+                </p>
+                <Link
+                  href={`/connections/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] transition-opacity hover:opacity-90"
+                >
+                  Add {search.trim()} as a secret
+                </Link>
+              </div>
+            ) : undefined
+          }
+        />
       )}
 
       {/* Pagination — only shown when there are results */}

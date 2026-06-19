@@ -7,9 +7,9 @@ import { api } from "@/lib/api";
 import { useSecrets, useWorkers } from "@/lib/query/hooks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusPill } from "@/components/collection/StatusPill";
+import { ListLoading, ListEmpty, ListError } from "@/components/collection/CollectionStates";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { KeyRound, TestTube2, Trash2, Plus, Check, X, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
@@ -43,6 +43,9 @@ function SecretsContent() {
   const loading =
     isAdmin &&
     ((secretsQuery.isLoading && !secretsQuery.data) || (workersQuery.isLoading && !workersQuery.data));
+  // A failed fetch renders an explicit retry state, not an empty card that
+  // looks identical to "no secrets configured".
+  const loadError = isAdmin && secretsQuery.isError && !secretsQuery.data;
   const [addingName, setAddingName] = useState(prefillName);
   const [addingValue, setAddingValue] = useState("");
   const [addingOpen, setAddingOpen] = useState(Boolean(prefillName));
@@ -238,28 +241,29 @@ function SecretsContent() {
         <h2 className="text-sm font-medium text-muted-foreground">Environment secrets</h2>
         <div className="space-y-2">
           {loading ? (
-            Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
+            <ListLoading rows={4} />
+          ) : loadError ? (
+            <ListError
+              message="Could not load your secrets. Check your connection and try again."
+              onRetry={() => void refresh()}
+            />
           ) : secrets.length === 0 ? (
-            <div className="py-12 flex flex-col items-center gap-3 text-center">
-              <div className="w-10 h-10 rounded-[var(--radius-pill)] bg-muted flex items-center justify-center">
-                <KeyRound className="w-5 h-5 text-muted-foreground" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-foreground">No secrets configured</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                  Workers that call external APIs require secrets. Add them here and reference them in your worker YAML.
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setAddingOpen(true)}
-                className="mt-1 gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Add a secret
-              </Button>
-            </div>
+            <ListEmpty
+              icon={KeyRound}
+              title="No secrets configured"
+              help="Workers that call external APIs require secrets. Add them here and reference them in your worker YAML."
+              action={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setAddingOpen(true)}
+                  className="mt-1 gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add a secret
+                </Button>
+              }
+            />
           ) : (
             secrets.map((s) => {
               const usedByExpanded = expandedUsedBy.has(s.name);
