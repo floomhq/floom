@@ -60,6 +60,12 @@ function findPagePane(container: HTMLElement): HTMLElement {
   return main as HTMLElement;
 }
 
+// Check for the EXACT Tailwind `hidden` (display:none) class token — NOT a
+// substring, so `overflow-hidden` on the pane doesn't false-match.
+function isHidden(el: HTMLElement): boolean {
+  return el.className.split(/\s+/).includes("hidden");
+}
+
 describe("Emily fullscreen — AppShell hides the page pane, keeps the sidebar", () => {
   beforeEach(() => {
     pathname.mockReturnValue("/overview");
@@ -79,72 +85,24 @@ describe("Emily fullscreen — AppShell hides the page pane, keeps the sidebar",
     );
 
     // Before: page pane visible (not hidden), sidebar present.
-    expect(findPagePane(container).className).not.toContain("hidden");
+    expect(isHidden(findPagePane(container))).toBe(false);
     expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
 
     // Enter fullscreen.
     await user.click(screen.getByRole("button", { name: /enter emily fullscreen/i }));
     // Page pane is now hidden (display:none, still mounted) — Emily fills the area.
-    expect(findPagePane(container).className).toContain("hidden");
+    expect(isHidden(findPagePane(container))).toBe(true);
     // Sidebar STAYS visible (Federico spec: keep nav).
     expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
 
     // Exit fullscreen → page pane restored.
     await user.click(screen.getByRole("button", { name: /exit emily fullscreen/i }));
-    expect(findPagePane(container).className).not.toContain("hidden");
+    expect(isHidden(findPagePane(container))).toBe(false);
   });
 });
 
-describe("Overview — content column fills the container (no fixed width cap)", () => {
-  beforeEach(() => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
-    );
-  });
-
-  it("the overview content column carries no fixed width cap so it fills the pane, while the prose keeps its readable line-length", async () => {
-    // Drive the real component with seeded data so it renders the brief layout.
-    vi.doMock("@/lib/query/hooks", () => ({
-      useOverview: () => ({
-        data: {
-          stats: {
-            work_shipped_7d: 12,
-            work_shipped_previous_7d: 8,
-            success_rate_7d: 0.9,
-            runs_today: 3,
-            active_workers_count: 2,
-            paused_workers_count: 0,
-          },
-          needs_attention: [],
-          recent_runs: [],
-          outcomes: [],
-        },
-        isLoading: false,
-        refetch: vi.fn(),
-      }),
-    }));
-    vi.doMock("@/lib/api", () => ({
-      api: { me: vi.fn().mockResolvedValue({ display_name: "Fede", email: "fede@floom.dev" }) },
-    }));
-    const { OverviewDashboard } = await import("@/components/overview/OverviewDashboard");
-    const { container } = render(<OverviewDashboard />);
-
-    // The content column wraps the greeting. Find it and assert it FILLS the
-    // pane: width w-full and NO fixed max-width cap (no max-w-[640px] /
-    // max-w-[920px] / any max-w-[Npx]). A fixed cap is exactly what left the
-    // ~377px dead gap before the Emily panel.
-    const greeting = screen.getByText(/Good (morning|afternoon|evening)/i);
-    const column = greeting.parentElement as HTMLElement;
-    expect(column.className).toContain("w-full");
-    expect(column.className).not.toMatch(/max-w-\[\d+px\]/);
-    // Belt-and-braces: the old narrow 640px and the interim 920px caps are gone
-    // from the whole subtree.
-    expect(container.querySelector(".max-w-\\[640px\\]")).toBeNull();
-    expect(container.querySelector(".max-w-\\[920px\\]")).toBeNull();
-
-    // The prose summary paragraph KEEPS its own readable line-length so text
-    // lines don't sprawl across the full pane.
-    expect(container.querySelector(".max-w-\\[560px\\]")).not.toBeNull();
-  });
-});
+// NOTE: the old "Overview content column fills the container" describe was
+// removed with the OverviewDashboard brief layout (Emily-home redesign,
+// 2026-06-19). The home is now the composer-anchored EmilyHome, which fills the
+// pane via the AppShell full-bleed branch; its layout is covered by
+// emily-home.dom.test.tsx.

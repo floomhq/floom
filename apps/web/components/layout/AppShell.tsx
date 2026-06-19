@@ -13,6 +13,7 @@ import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { AlertsBell } from "@/components/overview/AlertsBell";
 import { BootSplash } from "@/components/layout/BootSplash";
+import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 
 // Render exactly one Emily surface so only one chat instance mounts: the
 // desktop dock (≥768px) or the mobile bottom-sheet (<768px). Defaults to
@@ -43,7 +44,9 @@ const noDockPrefixes = ["/chat", "/workers/new"];
 // must reach the bottom of the viewport). They render inside the standard
 // sidebar shell but WITHOUT the max-w-7xl/padding content wrapper so the
 // Collection's flex-column can fill the available height correctly. (#1101)
-const fullBleedCollectionPaths = ["/library", "/brain", "/workers", "/runs", "/connections", "/approvals"];
+// The Emily-fullscreen HOME ("/" and "/overview") is composer-anchored and must
+// fill the whole pane (no max-w-7xl/padding wrapper), like the collection pages.
+const fullBleedCollectionPaths = ["/", "/overview", "/library", "/brain", "/workers", "/runs", "/connections", "/approvals"];
 
 export type AppShellProps = {
   children: React.ReactNode;
@@ -96,7 +99,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   if (noDock) {
     // Full-page chat: sidebar + full-bleed main (no content padding, no dock)
     return (
-      <>
+      <McpModalProvider>
         <BootSplash />
         <IconSprite />
         <Ambient />
@@ -108,23 +111,25 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         </main>
         <CommandPalette />
         <Toaster position="bottom-right" closeButton />
-      </>
+      </McpModalProvider>
     );
   }
 
   return (
-    <EmilyFullscreenProvider>
-      <BootSplash />
-      <IconSprite />
-      <Ambient />
-      <DeepLinkRouter />
-      <Sidebar />
-      <StandardShellBody fullBleed={fullBleed} isDesktop={isDesktop}>
-        {children}
-      </StandardShellBody>
-      <CommandPalette />
-      <Toaster position="bottom-right" closeButton />
-    </EmilyFullscreenProvider>
+    <McpModalProvider>
+      <EmilyFullscreenProvider>
+        <BootSplash />
+        <IconSprite />
+        <Ambient />
+        <DeepLinkRouter />
+        <Sidebar />
+        <StandardShellBody fullBleed={fullBleed} isDesktop={isDesktop}>
+          {children}
+        </StandardShellBody>
+        <CommandPalette />
+        <Toaster position="bottom-right" closeButton />
+      </EmilyFullscreenProvider>
+    </McpModalProvider>
   );
 }
 

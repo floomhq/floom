@@ -1,27 +1,21 @@
-// S44: RSC — fetch overview on the server to eliminate client-side fetch round-trip.
-import { Suspense } from "react";
+// Emily-fullscreen HOME — the default landing. Replaces the old Overview
+// dashboard. The home is composer-anchored (states: first-worker / active /
+// drafting) and reuses the real Emily chat + overview/workers data.
+//
+// We still server-fetch the overview so the Active pulse hydrates without a
+// client round-trip; the workers gate fetches client-side (cache-first).
 import { fetchOverview } from "@/lib/server-api";
-import { OverviewDashboard } from "@/components/overview/OverviewDashboard";
-import { OverviewSkeleton } from "@/components/overview/OverviewSkeleton";
+import { EmilyHome } from "@/components/home/EmilyHome";
 
-// #945: was `revalidate = N` (ISR) — an authenticated, per-user data fetch
-// must not be baked into a statically-cached shell shared across requests.
+// #945: authenticated, per-user data fetch must not be statically cached.
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  return (
-    <Suspense fallback={<OverviewSkeleton />}>
-      <OverviewFetcher />
-    </Suspense>
-  );
-}
-
-async function OverviewFetcher() {
   let initialData: import("@/lib/types").SystemOverview | null = null;
   try {
     initialData = await fetchOverview();
   } catch {
-    // Fall through — OverviewDashboard will fetch client-side
+    // Fall through — EmilyHome fetches client-side (cache-first).
   }
-  return <OverviewDashboard initialData={initialData} />;
+  return <EmilyHome initialData={initialData} />;
 }
