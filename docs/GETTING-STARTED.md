@@ -1,6 +1,6 @@
 # Getting started
 
-Workeros is an open-source runtime for AI workers: small, versioned worker
+Workeros is a source-available runtime for AI workers: small, versioned worker
 bundles that can read inputs, use approved tools/connections, run in a sandbox,
 and leave behind logs, outputs, approvals, and history.
 

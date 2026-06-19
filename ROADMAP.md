@@ -1,7 +1,7 @@
 # Workeros Roadmap
 
 This roadmap is for contributors and users who want to understand where the
-open-source project is headed. It is intentionally deployment-neutral: Workeros
+source-available project is headed. It is intentionally deployment-neutral: Workeros
 can run locally, on your own server, or behind whatever hosting stack you choose.
 
 ## Current Focus
