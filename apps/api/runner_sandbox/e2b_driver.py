@@ -223,6 +223,32 @@ class E2BKeyExhaustedError(RuntimeError):
 
 
 _WORKER_AUTHOR_ID = "worker-author"
+
+
+class _E2BPerfTimer:
+    """Small stopwatch for sandbox startup attribution logs."""
+
+    def __init__(self) -> None:
+        self._start = time.monotonic()
+        self._last = self._start
+        self._marks: list[tuple[str, float, float]] = []
+
+    def mark(self, label: str) -> None:
+        now = time.monotonic()
+        self._marks.append((label, (now - self._last) * 1000.0, (now - self._start) * 1000.0))
+        self._last = now
+
+    def log(self, log_fn: Callable[[str, str], None], label: str, *, level: str = "debug") -> None:
+        if os.environ.get("WORKEROS_RUN_PERF_LOGS", "1").strip().lower() in {"0", "false", "no", "off"}:
+            return
+        if not self._marks:
+            return
+        total_ms = (time.monotonic() - self._start) * 1000.0
+        segments = ", ".join(
+            f"{name}={delta_ms:.1f}ms/{total_ms_at_mark:.1f}ms"
+            for name, delta_ms, total_ms_at_mark in self._marks
+        )
+        log_fn(f"[perf] {label} total={total_ms:.1f}ms segments: {segments}", level)
 _WORKER_AUTHOR_PROVIDER_ENV_VARS = (
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
@@ -1664,9 +1690,12 @@ class E2BSandboxDriver(SandboxDriver):
         connection_ids: Dict[str, str],
         user_id: str | None,
     ) -> WorkerResult:
+        perf = _E2BPerfTimer()
         from e2b import Sandbox  # e2b 2.x
+        perf.mark("import_e2b")
 
         api_keys = _configured_e2b_api_keys()
+        perf.mark("api_keys")
         if not api_keys:
             return WorkerResult(
                 status="error",
@@ -1676,6 +1705,7 @@ class E2BSandboxDriver(SandboxDriver):
 
         try:
             worker_dir = _worker_dir_for_run(worker_id, config)
+            perf.mark("worker_dir")
         except ValueError as exc:
             return WorkerResult(
                 status="error", error=str(exc), error_code="invalid_worker"
@@ -1694,6 +1724,7 @@ class E2BSandboxDriver(SandboxDriver):
                     worker_dir,
                     exc,
                 )
+            perf.mark("rematerialize_check")
 
         if not worker_dir.is_dir():
             return WorkerResult(
@@ -1703,6 +1734,7 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         effective_timeout_seconds = _effective_run_timeout(timeout_seconds)
+        perf.mark("effective_timeout")
         if effective_timeout_seconds < int(timeout_seconds):
             log_fn(
                 "[e2b] Capping worker command timeout at "
@@ -1711,12 +1743,14 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         log_fn(f"[e2b] Preparing sandbox for run {run_id}", "info")
+        perf.mark("preparing_log")
         install_timeout = _install_timeout_for_run(effective_timeout_seconds)
         sandbox_timeout = _sandbox_lifetime_timeout(effective_timeout_seconds, install_timeout)
         requested_sandbox_timeout = max(
             effective_timeout_seconds + install_timeout + SANDBOX_LIFETIME_BUFFER_SECONDS,
             MIN_INSTALL_TIMEOUT_SECONDS,
         )
+        perf.mark("sandbox_timeout")
         if sandbox_timeout < requested_sandbox_timeout:
             log_fn(
                 "[e2b] Capping sandbox lifetime at "
@@ -1729,6 +1763,7 @@ class E2BSandboxDriver(SandboxDriver):
         # e2b 2.x: use Sandbox.create()
         from run_token import make_run_token  # noqa: PLC0415
         _sandbox_api_url_val = _sandbox_api_url()
+        perf.mark("sandbox_api_url")
         # If the worker declares calls:, issue a wrt_ token so call_worker()
         # inside run.py can spawn child runs. The simple make_run_token is kept
         # for backwards-compat (composio-execute and run-status callbacks) but
@@ -1750,6 +1785,9 @@ class E2BSandboxDriver(SandboxDriver):
                 callable_workers=list(config.calls),
                 depth=_self_depth,
             )
+            perf.mark("worker_call_token")
+        else:
+            perf.mark("worker_call_token_skip")
         _sandbox_envs = {
             "FLOOM_RUN_ID": run_id,
             "FLOOM_TRACE_ID": trace_id,
@@ -1764,7 +1802,9 @@ class E2BSandboxDriver(SandboxDriver):
         # still receive only declared user secrets plus callback vars.
         _worker_author_env = _worker_author_platform_env() if worker_id == _WORKER_AUTHOR_ID else {}
         _sandbox_envs.update(_worker_author_env)
+        perf.mark("sandbox_env")
         sandbox_template, bundle_baked_template = _e2b_template_for_run(worker_dir, config, log_fn=log_fn)
+        perf.mark("template")
         python_template_deps_baked = _env_truthy("WORKEROS_E2B_PYTHON_DEPS_BAKED")
         node_template_deps_baked = _env_truthy("WORKEROS_E2B_NODE_DEPS_BAKED")
         if sandbox_template:
@@ -1773,6 +1813,7 @@ class E2BSandboxDriver(SandboxDriver):
                 "info",
             )
         log_fn(_sandbox_resource_log_line(config, sandbox_template), "info")
+        perf.mark("resource_log")
         warm_key, warm_key_error = _warm_pool_key(
             worker_id=worker_id,
             user_id=user_id,
@@ -1782,6 +1823,7 @@ class E2BSandboxDriver(SandboxDriver):
             secrets=secrets,
             sandbox_template=sandbox_template,
         )
+        perf.mark("warm_key")
         if warm_key_error:
             return WorkerResult(
                 status="error",
@@ -1790,11 +1832,13 @@ class E2BSandboxDriver(SandboxDriver):
                 retryable=True,
             )
         warm_entry = _warm_pool_lease(warm_key or "", log_fn=log_fn) if warm_key else None
+        perf.mark("warm_lease")
         sandbox_prepared = warm_entry is not None
         if warm_entry is not None:
             sandbox = warm_entry.sandbox
         else:
             log_fn(f"[e2b] Spawning sandbox for run {run_id}", "info")
+            perf.mark("spawn_log")
             sandbox = _create_sandbox_with_key_fallback(
                 Sandbox,
                 api_keys=api_keys,
@@ -1804,7 +1848,9 @@ class E2BSandboxDriver(SandboxDriver):
                 network=_e2b_network_policy(config, api_url=_sandbox_api_url_val),
                 log_fn=log_fn,
             )
+            perf.mark("sandbox_create")
         _register_sandbox(run_id, sandbox)
+        perf.mark("register_sandbox")
         keep_warm = False
 
         try:
@@ -1820,8 +1866,10 @@ class E2BSandboxDriver(SandboxDriver):
                 made_dirs = {workdir}
                 mounted_contexts = set(warm_entry.mounted_contexts if warm_entry else set())
                 writeable_contexts = set(warm_entry.writeable_contexts if warm_entry else set())
+                perf.mark("warm_cleanup")
             else:
                 sandbox.files.make_dir(workdir)
+                perf.mark("make_workdir")
 
             if not sandbox_prepared and not bundle_baked_template:
                 # Upload bundle files (read-only worker code; never contains inputs/).
@@ -1839,10 +1887,12 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn=log_fn,
                     label="worker bundle",
                 )
+                perf.mark("bundle_upload")
             if not sandbox_prepared:
                 if bundle_baked_template:
                     made_dirs = {workdir}
                     log_fn("[e2b] Skipping worker bundle upload; baked template already contains it", "info")
+                    perf.mark("bundle_baked_skip")
 
                 # Write workeros.py into the workdir so workers with calls: can do
                 # `from workeros import call_worker`. Only uploaded when the worker
@@ -1851,6 +1901,9 @@ class E2BSandboxDriver(SandboxDriver):
                     from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT  # noqa: PLC0415
                     sandbox.files.write(f"{workdir}/workeros.py", WORKEROS_PY_CONTENT.encode())
                     log_fn("[e2b] Uploaded workeros.py (worker-to-worker calling enabled)", "info")
+                    perf.mark("workeros_helper_upload")
+                else:
+                    perf.mark("workeros_helper_skip")
 
                 mounted_contexts: set[str] = set()
                 writeable_contexts: set[str] = set()
@@ -1865,6 +1918,7 @@ class E2BSandboxDriver(SandboxDriver):
                     mounted_contexts=mounted_contexts,
                     writeable_contexts=writeable_contexts,
                 )
+                perf.mark("contexts_upload")
                 if context_error:
                     return WorkerResult(
                         status="error",
@@ -1893,6 +1947,7 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn(f"[e2b] Uploaded input file {remote_name}", "debug")
                     # Remap to the relative path the worker expects inside the sandbox.
                     e2b_inputs[key] = f"inputs/{remote_name}"
+            perf.mark("input_files_upload")
             # Build sandbox-local inputs dict with remapped file paths.
             sandbox_inputs = {k: e2b_inputs.get(k, v) for k, v in inputs.items()}
 
@@ -1901,6 +1956,7 @@ class E2BSandboxDriver(SandboxDriver):
                 f"{workdir}/inputs.json",
                 json.dumps(sandbox_inputs, indent=2),
             )
+            perf.mark("inputs_json")
 
             # Write .env.local - industry-standard convention; workers load via
             # python-dotenv's load_dotenv(".env.local") + os.environ.
@@ -1909,6 +1965,7 @@ class E2BSandboxDriver(SandboxDriver):
                 f"{workdir}/.env.local",
                 "\n".join(env_local_lines) + ("\n" if env_local_lines else ""),
             )
+            perf.mark("env_local")
 
             # Write secrets.json - kept for ONE release as backward-compat with
             # user-uploaded workers still using json.load(open("secrets.json")).
@@ -1917,6 +1974,7 @@ class E2BSandboxDriver(SandboxDriver):
                 f"{workdir}/secrets.json",
                 json.dumps(secrets, indent=2),
             )
+            perf.mark("secrets_json")
 
             # Write connections.json: Composio app slug -> connection_id mapping.
             # Workers that declare connections: [...] in worker.yml read this to
@@ -1925,6 +1983,7 @@ class E2BSandboxDriver(SandboxDriver):
                 f"{workdir}/connections.json",
                 json.dumps(connection_ids, indent=2),
             )
+            perf.mark("connections_json")
 
             # Install dependencies if present.
             #
@@ -1971,6 +2030,9 @@ class E2BSandboxDriver(SandboxDriver):
                             error_code="install_failed",
                         )
                     log_fn("[e2b] Requirements installed", "info")
+                perf.mark("python_deps")
+            else:
+                perf.mark("python_deps_skip")
 
             pkg_path = worker_dir / "package.json"
             if not sandbox_prepared and pkg_path.exists() and pkg_path.read_text().strip():
@@ -1998,6 +2060,9 @@ class E2BSandboxDriver(SandboxDriver):
                             error_code="install_failed",
                         )
                     log_fn("[e2b] npm install complete", "info")
+                perf.mark("node_deps")
+            else:
+                perf.mark("node_deps_skip")
 
             # Bedrock via litellm needs boto3, which the sandbox image doesn't ship.
             # Only the platform-privileged worker-author runs an LLM call *inside*
@@ -2027,12 +2092,16 @@ class E2BSandboxDriver(SandboxDriver):
                             status="error", error=err, error_code="install_failed"
                         )
                     log_fn("[e2b] boto3 installed", "info")
+                perf.mark("boto3")
+            else:
+                perf.mark("boto3_skip")
 
             _refresh_sandbox_lifetime(
                 sandbox,
                 timeout=sandbox_timeout,
                 log_fn=log_fn,
             )
+            perf.mark("refresh_lifetime")
 
             # Run the worker - commands.run() is sync, returns CommandResult directly
             command = "python run.py"
@@ -2042,6 +2111,7 @@ class E2BSandboxDriver(SandboxDriver):
             # non-author workers) from the worker process environment.
             command = _scrub_internal_env_command(command, worker_id)
             log_fn(f"[e2b] Executing worker command: {command}", "info")
+            perf.mark("execute_log")
             streamed_stdout: list[str] = []
             streamed_stderr: list[str] = []
 
@@ -2069,6 +2139,8 @@ class E2BSandboxDriver(SandboxDriver):
             if _worker_call_token:
                 _cmd_envs["WORKEROS_RUN_TOKEN"] = _worker_call_token
                 _cmd_envs["WORKEROS_CALL_DEPTH"] = str(_self_depth)  # #994
+            perf.mark("command_env")
+            perf.log(log_fn, "e2b.before_worker_command")
             try:
                 proc = sandbox.commands.run(
                     command,

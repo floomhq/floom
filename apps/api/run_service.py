@@ -130,6 +130,32 @@ import contextlib
 logger = logging.getLogger("floom.run_service")
 
 
+class _RunPerfTimer:
+    """Small stopwatch for cold-start attribution logs."""
+
+    def __init__(self) -> None:
+        self._start = time.monotonic()
+        self._last = self._start
+        self._marks: list[tuple[str, float, float]] = []
+
+    def mark(self, label: str) -> None:
+        now = time.monotonic()
+        self._marks.append((label, (now - self._last) * 1000.0, (now - self._start) * 1000.0))
+        self._last = now
+
+    def log(self, log_fn: Callable[[str, str], None], label: str, *, level: str = "debug") -> None:
+        if os.environ.get("WORKEROS_RUN_PERF_LOGS", "1").strip().lower() in {"0", "false", "no", "off"}:
+            return
+        if not self._marks:
+            return
+        total_ms = (time.monotonic() - self._start) * 1000.0
+        segments = ", ".join(
+            f"{name}={delta_ms:.1f}ms/{total_ms_at_mark:.1f}ms"
+            for name, delta_ms, total_ms_at_mark in self._marks
+        )
+        log_fn(f"[perf] {label} total={total_ms:.1f}ms segments: {segments}", level)
+
+
 def workeros_role() -> str:
     """Runtime role for process split.
 
@@ -1589,6 +1615,7 @@ def _drain_one_batch() -> None:
                 continue
 
         try:
+            dispatch_perf = _RunPerfTimer()
             # Claim the run before spawning a worker thread so subsequent drain
             # passes cannot dispatch the same queued row twice. The repository
             # performs this as a conditional update so separate API replicas
@@ -1598,6 +1625,7 @@ def _drain_one_batch() -> None:
                 run_id=run_id,
                 started_at=_now_iso(),
             )
+            dispatch_perf.mark("claim_queued")
             if claimed is None:
                 logger.info("Queue drain: skipped run %s because another drainer claimed it", run_id)
                 _get_semaphore().release()
@@ -1615,8 +1643,10 @@ def _drain_one_batch() -> None:
                     timestamp=_now_iso(),
                     trace_id=None,
                 )
+                dispatch_perf.mark("claim_log")
             except Exception as log_exc:
                 logger.warning("Queue drain: failed to log claim for run %s: %s", run_id, log_exc)
+                dispatch_perf.mark("claim_log_error")
 
             # The semaphore is released inside _run_thread_entry_with_semaphore.
             thread = threading.Thread(
@@ -1625,13 +1655,30 @@ def _drain_one_batch() -> None:
                 daemon=True,
                 name=f"workeros-run-{run_id}",
             )
+            dispatch_perf.mark("thread_object")
             active_run = _ActiveRun(run_id=run_id, worker_id=worker_id, user_id=user_id, thread=thread)
             _register_active_run(active_run)
+            dispatch_perf.mark("register_active")
             try:
                 thread.start()
+                dispatch_perf.mark("thread_start")
             except Exception:
                 _unregister_active_run(run_id)
                 raise
+            try:
+                dispatch_perf.log(
+                    lambda msg, level: repos_obj.runs.add_log(
+                        user_id=user_id,
+                        run_id=run_id,
+                        level=level,
+                        message=msg,
+                        timestamp=_now_iso(),
+                        trace_id=None,
+                    ),
+                    "queue.dispatch",
+                )
+            except Exception:
+                logger.debug("Queue drain: failed to persist perf log for run %s", run_id, exc_info=True)
             logger.info("Queue drain: dispatched run %s for worker %s", run_id, worker_id)
         except Exception as exc:
             logger.warning("Queue drain: failed to dispatch run %s: %s", run_id, exc)
@@ -2092,24 +2139,31 @@ def execute_run(
     user_id: str | None = None,
     repos: Repositories | None = None,
 ) -> None:
+    perf = _RunPerfTimer()
     _mark_active_run_stage(run_id, "execute_start")
     repos_obj = _repos(repos)
+    perf.mark("repos")
     owner_id = user_id or _worker_owner_id(worker_id, repos_obj)
+    perf.mark("owner")
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
     loaded = _load_worker_recipe(worker_id, repos_obj)
+    perf.mark("load_recipe")
     config = loaded[1] if loaded else None
     instance = loaded[2] if loaded else None
     effective_inputs = _apply_config_input_defaults(
         config,
         _merge_instance_inputs(instance, inputs),
     )
+    perf.mark("merge_inputs")
     # #418: stamp the authoritative approval phase onto the inputs BEFORE the
     # worker runs, so an approvals.required worker can never fire a side effect
     # in the propose phase (and a caller cannot spoof approval via inputs).
     effective_inputs = _apply_approval_phase_inputs(
         effective_inputs, run_id, config, repos_obj
     )
+    perf.mark("approval_inputs")
     run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+    perf.mark("secrets")
 
     def log_fn(msg: str, level: str = "info") -> None:
         safe_msg = scrub_secrets(msg, run_secrets)
@@ -2124,6 +2178,7 @@ def execute_run(
 
     try:
         current_run = repos_obj.runs.get_any(run_id=run_id)
+        perf.mark("status_fetch")
         current_status = (current_run or {}).get("status")
         if current_status in {
             RunStatus.COMPLETED.value,
@@ -2139,8 +2194,11 @@ def execute_run(
             return
         if current_status != RunStatus.RUNNING.value:
             update_run_status(run_id, RunStatus.RUNNING.value, user_id=owner_id, repos=repos_obj)
+            perf.mark("status_update")
         log_fn("Run started")
+        perf.mark("run_started_log")
         log_fn("Validating inputs", level="debug")
+        perf.mark("validating_log")
 
         if not config:
             err = "Worker config not found"
@@ -2164,8 +2222,10 @@ def execute_run(
                 publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
                 log_fn(err, level="error")
                 return
+        perf.mark("validate_inputs")
 
         log_fn("Loading secrets", level="debug")
+        perf.mark("loading_secrets_log")
         secrets = run_secrets
         missing = [s for s in config.secrets if s not in secrets]
         if missing:
@@ -2185,6 +2245,7 @@ def execute_run(
                     level="warning",
                 )
             return
+        perf.mark("check_secrets")
 
         # Resolve Composio connections declared in worker.yml.
         connection_ids: Dict[str, str] = {}
@@ -2192,11 +2253,14 @@ def execute_run(
             log_fn("Resolving connections", level="debug")
             from runner_utils import _resolve_connections
             connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config, user_id=owner_id)
+            perf.mark("resolve_connections")
             if conn_err:
                 update_run_status(run_id, RunStatus.FAILED.value, error=conn_err, error_code="missing_connection", user_id=owner_id, repos=repos_obj)
                 publish_run_part(run_id, {"type": "finish", "status": "failed", "error": conn_err})
                 log_fn(conn_err, level="error")
                 return
+        else:
+            perf.mark("resolve_connections_skip")
 
         # Re-materialize worker files from DB if the dir is missing or empty
         # (empty dir can occur if a previous re-materialization was interrupted).
@@ -2206,16 +2270,20 @@ def execute_run(
                 import main as _main
                 if _main.rematerialize_worker_from_db(worker_id):
                     log_fn("Re-materialized worker files from DB", level="info")
+            perf.mark("rematerialize_check")
         except Exception as _rmat_exc:
             logger.warning("Worker re-materialization failed for %s: %s", worker_id, _rmat_exc)
+            perf.mark("rematerialize_error")
 
         bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
+        perf.mark("bundle_snapshot")
         if owner_id:
             repos_obj.runs.set_bundle_snapshot_path(
                 user_id=owner_id,
                 run_id=run_id,
                 bundle_snapshot_path=bundle_snapshot_path,
             )
+            perf.mark("bundle_snapshot_persist")
 
         # Dispatch to the appropriate sandbox driver based on worker config.
         # #603: default to "e2b" — "local" (in-process) runner was removed in
@@ -2227,9 +2295,12 @@ def execute_run(
         # #1127/#1314: resolve effective timeout — workspace default_timeout_seconds
         # can raise the ceiling up to MAX_RUN_TIMEOUT_SECONDS (3600 s = 1 hour).
         timeout_seconds = _resolved_worker_timeout_seconds(config)
+        perf.mark("resolve_timeout")
         log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
+        perf.mark("executing_log")
         _mark_active_run_stage(run_id, "pre_sandbox")
         latest_run = repos_obj.runs.get_any(run_id=run_id)
+        perf.mark("pre_sandbox_status_fetch")
         if (latest_run or {}).get("status") != RunStatus.RUNNING.value:
             logger.warning(
                 "Run %s left running before sandbox dispatch (status=%s); skipping stale executor",
@@ -2238,6 +2309,8 @@ def execute_run(
             )
             return
         driver = get_sandbox_driver(runner, config=config)
+        perf.mark("driver_lookup")
+        perf.log(log_fn, "run_service.pre_sandbox")
         _mark_active_run_stage(run_id, "driver_run")
         with use_context_scope(context_scope_for_user(owner_id)):
             result = driver.run(
@@ -2746,6 +2819,7 @@ def _run_thread_entry_with_semaphore(
     #1448: llm_slot is True when this run also holds an LLM-budget slot
     (llm-intensive worker); it is released alongside the main slot.
     """
+    perf = _RunPerfTimer()
     try:
         _mark_active_run_stage(run_id, "thread_entry")
         try:
@@ -2756,15 +2830,19 @@ def _run_thread_entry_with_semaphore(
                 user_id=user_id,
                 repos=repos,
             )
+            perf.mark("thread_entry_log")
         except Exception:
             logger.debug("Failed to persist executor entry log for run %s", run_id, exc_info=True)
+            perf.mark("thread_entry_log_error")
         # #1026: re-establish the run's tenant/workspace scope on this thread
         # (no-op in single-tenant OSS; cloud reconstructs it from the run row).
         with _run_execution_context(run_id):
             _mark_active_run_stage(run_id, "context_entered")
+            perf.mark("context_entered")
             # Check for pre-dispatch cancellation (cancelled while queued).
             repos_obj = _repos(repos)
             run_row = repos_obj.runs.get_any(run_id=run_id)
+            perf.mark("cancel_status_fetch")
             if run_row and run_row.get("cancel_requested"):
                 owner_id = user_id or run_row.get("user_id")
                 cancelled_at = _now_iso()
@@ -2788,6 +2866,20 @@ def _run_thread_entry_with_semaphore(
                 except Exception as exc:
                     logger.warning("Failed to mark pre-dispatch cancellation for run %s: %s", run_id, exc)
                 return
+            try:
+                owner_id = user_id or (run_row or {}).get("user_id")
+                perf.log(
+                    lambda msg, level: add_log(
+                        run_id,
+                        msg,
+                        level=level,
+                        user_id=owner_id,
+                        repos=repos_obj,
+                    ),
+                    "queue.thread_startup",
+                )
+            except Exception:
+                logger.debug("Failed to persist executor startup perf log for run %s", run_id, exc_info=True)
             execute_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
     except Exception as exc:
         logger.exception("Executor thread crashed before completing dispatch for run %s", run_id)
