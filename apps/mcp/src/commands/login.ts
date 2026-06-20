@@ -25,7 +25,8 @@ type OssPollApproved = { status: "approved"; api_secret: string; api_base: strin
 type OssPollResponse = OssPollPending | OssPollApproved;
 
 type CloudExchangeResponse = {
-  refresh_token: string;
+  refresh_token?: string;
+  api_token?: string;
   expires_in_seconds: number;
   user_id?: string;
   supabase_url?: string;
@@ -272,6 +273,24 @@ async function pollCloudExchange(args: {
   let supabaseUrl = exchanged.supabase_url;
   let supabaseAnonKey = exchanged.supabase_anon_key;
   let apiBase = exchanged.api_base || loginApiBase;
+  if (exchanged.api_token) {
+    const creds: StoredCredentials = {
+      api_base: apiBase,
+      mode: "cloud",
+      api_token: exchanged.api_token,
+      authed_at: new Date().toISOString(),
+    };
+    await writeCredentials(creds);
+    log.ok(`Logged in`);
+    log.kv("API", apiBase);
+    log.kv("Token saved to", credentialsPath());
+    log.blank();
+    log.info("Tip: run `floom workspaces list` to pick a workspace.");
+    return 0;
+  }
+  if (!exchanged.refresh_token) {
+    throw new Error("Hosted login succeeded but the server did not return a usable CLI credential.");
+  }
   if (!supabaseUrl || !supabaseAnonKey) {
     const bootstrap = await fetchCloudBootstrap(loginApiBase);
     if (!bootstrap) {
