@@ -33,9 +33,22 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   const [page, setPage] = useState(0);
   const gridEnabled = config.view?.grid ?? false;
 
+  // Items resolved on demand for deep-links absent from the (partial) list
+  // (#1558). Keyed by id; merged into the working set so the detail opens
+  // without a false "not found" toast. See the resolveMissing effect below.
+  const [resolved, setResolved] = useState<Map<string, T>>(() => new Map());
+  const { idOf, resolveMissing } = config;
+  const items = useMemo(() => {
+    if (resolved.size === 0) return config.items;
+    const present = new Set(config.items.map(idOf));
+    const extra: T[] = [];
+    for (const [id, item] of resolved) if (!present.has(id)) extra.push(item);
+    return extra.length ? [...extra, ...config.items] : config.items;
+  }, [config.items, idOf, resolved]);
+
   const filtered = useMemo(
-    () => filterItems(config.items, state, { searchOf: config.searchOf, tagsOf: config.tagsOf }),
-    [config.items, config.searchOf, config.tagsOf, state],
+    () => filterItems(items, state, { searchOf: config.searchOf, tagsOf: config.tagsOf }),
+    [items, config.searchOf, config.tagsOf, state],
   );
 
   // Reset to page 0 when the filtered set changes (search/tag churn).
@@ -46,15 +59,59 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
 
   const selected = useMemo(() => {
     if (!state.sel) return null;
-    const found = config.items.find((i) => config.idOf(i) === state.sel) ?? null;
+    const found = items.find((i) => idOf(i) === state.sel) ?? null;
     return found;
-  }, [config, state.sel]);
+  }, [items, idOf, state.sel]);
 
-  // Invalid ?sel → resting + toast (SPEC §3, §8b). Side effect, not in render.
+  // ?sel not in the (possibly partial) loaded list. Side effect, not in render.
   const selMissing = state.sel != null && selected == null && !config.loading;
+
+  // Track ids we've already tried to resolve, so we never re-fire for the same
+  // id (avoids loops and duplicate fetches). Cleared when resolveMissing changes
+  // (i.e. a new collection/api client).
+  const attemptedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (selMissing && state.sel) onInvalidSel?.(state.sel);
-  }, [selMissing, state.sel, onInvalidSel]);
+    attemptedRef.current = new Set();
+  }, [resolveMissing]);
+
+  // Invalid ?sel handling (SPEC §3, §8b + #1558):
+  //  - With resolveMissing: try to hydrate the deep-linked item once. On success
+  //    merge it (detail opens, no toast). Only a null/throw is a genuine miss →
+  //    onInvalidSel (toast + rest).
+  //  - Without resolveMissing: preserve the original toast-on-miss behavior.
+  useEffect(() => {
+    if (!selMissing || !state.sel) return;
+    const id = state.sel;
+    if (attemptedRef.current.has(id)) return;
+    attemptedRef.current.add(id);
+
+    if (!resolveMissing) {
+      onInvalidSel?.(id);
+      return;
+    }
+
+    let alive = true;
+    resolveMissing(id)
+      .then((item) => {
+        if (!alive) return;
+        if (item != null) {
+          setResolved((prev) => {
+            if (prev.has(idOf(item))) return prev;
+            const next = new Map(prev);
+            next.set(idOf(item), item);
+            return next;
+          });
+        } else {
+          onInvalidSel?.(id);
+        }
+      })
+      .catch(() => {
+        if (alive) onInvalidSel?.(id);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selMissing, state.sel, resolveMissing, idOf, onInvalidSel]);
 
   const patch = useCallback(
     (p: Partial<CollectionState>) => onChange({ ...state, ...p }),
@@ -140,10 +197,11 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
 
   const header = config.hideTitle ? null : (
     <div style={{ padding: `22px ${PAGE_X}px 0` }}>
-      {/* #1266: min-w-0 + overflow:hidden keeps the row from spilling on narrow
-          viewports. c-counts is horizontally scrollable at ≤389px. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 18, minWidth: 0, overflow: "hidden" }}>
-        <div style={{ minWidth: 0, flexShrink: 1 }}>
+      {/* #1544: c-headrow stacks at mobile (description full-width above the
+          counts) and goes horizontal at ≥768px. The counts wrap instead of
+          squishing the description or clipping the rightmost chip. */}
+      <div className="c-headrow">
+        <div className="c-headtitle">
           <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.02em" }}>
             {config.title}
           </div>
@@ -152,7 +210,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           )}
         </div>
         {config.counts && config.counts.length > 0 && (
-          <div className="c-counts" style={{ marginLeft: "auto", flexShrink: 0 }}>
+          <div className="c-counts">
             {config.counts.map((c, i) => (
               <span className="ct" key={i}>
                 <b>{c.value}</b> {c.label}

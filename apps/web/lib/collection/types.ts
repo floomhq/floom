@@ -144,6 +144,15 @@ export interface CollectionConfig<T> {
   error?: string | null;
 
   idOf: (item: T) => string;
+  /**
+   * Resolve an item that is deep-linked via `?sel=<id>` but absent from the
+   * loaded list (which is partial: paged Runs, cache-first/filtered Workers).
+   * Called once per missing id; a non-null result is merged into the displayed
+   * items so the detail opens — no toast. Only a null result or a throw is a
+   * genuine miss and surfaces the "couldn't open" toast. Omit for collections
+   * whose list is always complete (they keep the toast-on-miss behavior).
+   */
+  resolveMissing?: (id: string) => Promise<T | null>;
   /** Free-text fields searched by the search box. */
   searchOf: (item: T) => string;
   /** Optional placeholder override for the shared collection search box. */

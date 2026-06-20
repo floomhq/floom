@@ -236,6 +236,87 @@ describe("CollectionView — split detail (§8e)", () => {
   });
 });
 
+describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => {
+  // A valid id deep-linked via ?sel that isn't in the loaded (partial/paged)
+  // list must NOT false-toast: resolveMissing hydrates it, the detail opens.
+  it("hydrates a deep-linked id absent from the list and opens it WITHOUT a toast", async () => {
+    const onInvalidSel = vi.fn();
+    const resolveMissing = vi.fn(async (id: string) =>
+      id === "99"
+        ? { id: "99", name: "Hydrated Worker", status: "ok", content: ["recruiting"] }
+        : null,
+    );
+    render(
+      <CollectionView
+        config={makeConfig({ resolveMissing })}
+        // "99" is not in ITEMS — it only exists via resolveMissing.
+        state={{ ...emptyState("grid"), sel: "99" }}
+        onChange={() => {}}
+        onInvalidSel={onInvalidSel}
+      />,
+    );
+    // detail opens once hydration resolves; no false "not found" toast.
+    expect(await screen.findByText("About Hydrated Worker")).toBeInTheDocument();
+    expect(resolveMissing).toHaveBeenCalledWith("99");
+    expect(onInvalidSel).not.toHaveBeenCalled();
+  });
+
+  // A genuinely-missing id (resolveMissing → null) must still surface the toast.
+  it("still toasts (onInvalidSel) when resolveMissing returns null for a real miss", async () => {
+    const onInvalidSel = vi.fn();
+    const resolveMissing = vi.fn(async () => null);
+    render(
+      <CollectionView
+        config={makeConfig({ resolveMissing })}
+        state={{ ...emptyState("grid"), sel: "ghost-id" }}
+        onChange={() => {}}
+        onInvalidSel={onInvalidSel}
+      />,
+    );
+    await vi.waitFor(() => expect(onInvalidSel).toHaveBeenCalledWith("ghost-id"));
+    expect(resolveMissing).toHaveBeenCalledWith("ghost-id");
+    expect(screen.queryByText("About ghost-id")).not.toBeInTheDocument();
+  });
+
+  // A throw is a genuine miss too (e.g. 404/403 from the api client).
+  it("toasts when resolveMissing throws", async () => {
+    const onInvalidSel = vi.fn();
+    const resolveMissing = vi.fn(async () => {
+      throw new Error("404");
+    });
+    render(
+      <CollectionView
+        config={makeConfig({ resolveMissing })}
+        state={{ ...emptyState("grid"), sel: "boom-id" }}
+        onChange={() => {}}
+        onInvalidSel={onInvalidSel}
+      />,
+    );
+    await vi.waitFor(() => expect(onInvalidSel).toHaveBeenCalledWith("boom-id"));
+  });
+
+  // Guard: resolveMissing fires at most once per id (no loops/refetch storms).
+  it("calls resolveMissing only once for the same id", async () => {
+    const onInvalidSel = vi.fn();
+    const resolveMissing = vi.fn(async (id: string) => ({
+      id,
+      name: "Once",
+      status: "ok",
+      content: [],
+    }));
+    render(
+      <CollectionView
+        config={makeConfig({ resolveMissing })}
+        state={{ ...emptyState("grid"), sel: "once-id" }}
+        onChange={() => {}}
+        onInvalidSel={onInvalidSel}
+      />,
+    );
+    expect(await screen.findByText("About Once")).toBeInTheDocument();
+    expect(resolveMissing).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("CollectionView — states (§7)", () => {
   it("renders empty state with the page's add action", () => {
     render(<Harness config={makeConfig({ items: [] })} />);

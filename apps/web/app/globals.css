@@ -740,18 +740,24 @@ html.dark .grain {
    from the existing token layer so day/dark themes are automatic.
    ========================================================================== */
 
+/* page-header row — title+description on one side, count strip on the other.
+   #1544: at desktop widths this is a horizontal flex (description left, counts
+   right). At mobile widths it stacks so the description gets its own full-width
+   line(s) ABOVE the counts, and the counts wrap instead of squishing the
+   description or clipping the rightmost chip. */
+.c-headrow { display:flex; flex-direction:column; align-items:flex-start; gap:12px; min-width:0; }
+.c-headrow .c-headtitle { min-width:0; flex-shrink:1; }
+@media (min-width:768px) {
+  .c-headrow { flex-direction:row; align-items:center; gap:18px; }
+  .c-headrow .c-counts { margin-left:auto; }
+}
+
 /* count strip — inline on the right of the title row (SPEC §11) */
-.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
-.c-counts::-webkit-scrollbar { display:none; }
+.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:wrap; row-gap:6px; min-width:0; }
 .c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:var(--bd-div); white-space:nowrap; flex:0 0 auto; }
 .c-counts .ct:first-child { padding-left:0; }
 .c-counts .ct:last-child { border-right:0; }
 .c-counts .ct b { color:var(--ink); font-weight:600; font-size:14px; }
-/* #1266: on very small screens (<390px) hide secondary counts (active/attention)
-   to keep the header single-line — primary "X workers" count always shows. */
-@media (max-width:389px) {
-  .c-counts .ct:not(:first-child) { display:none; }
-}
 
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
