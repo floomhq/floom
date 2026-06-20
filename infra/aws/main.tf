@@ -19,6 +19,8 @@ locals {
   web_env      = merge(var.container_env, { WORKEROS_ROLE = "web", PORT = tostring(var.app_port) })
   worker_env   = merge(var.container_env, { WORKEROS_ROLE = "worker" })
   secrets_list = [for k, p in aws_ssm_parameter.secret : { name = k, valueFrom = p.arn }]
+  # secret NAMES are not sensitive (only values are) -> un-mark so they can drive for_each
+  secret_keys = nonsensitive(toset(keys(var.container_secrets)))
 }
 
 # ---------- ECR ----------
@@ -43,11 +45,11 @@ resource "aws_cloudwatch_log_group" "worker" {
 
 # ---------- Secrets -> SSM SecureString ----------
 resource "aws_ssm_parameter" "secret" {
-  for_each = var.container_secrets
-  name     = "/${var.project}/${var.environment}/${each.key}"
+  for_each = local.secret_keys
+  name     = "/${var.project}/${var.environment}/${each.value}"
   type     = "SecureString"
-  value    = each.value
-  tags     = { Name = each.key }
+  value    = var.container_secrets[each.value]
+  tags     = { Name = each.value }
 }
 
 # ---------- IAM ----------
