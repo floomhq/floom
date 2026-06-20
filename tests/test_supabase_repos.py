@@ -91,16 +91,30 @@ class _FakeTable:
 
 
 class _FakeClient:
-    def __init__(self, rows):
+    def __init__(self, rows, *, rpc_results=None):
         self.rows_by_table = rows if isinstance(rows, dict) else None
         self.rows = rows
         self.table_ref = _FakeTable([])
+        self.rpc_results = rpc_results or {}
+        self.rpc_calls: list[tuple[str, dict]] = []
 
     def table(self, name):
         rows = self.rows_by_table.get(name, []) if self.rows_by_table is not None else self.rows
         self.table_ref = _FakeTable(rows)
         self.table_ref.table_name = name
         return self.table_ref
+
+    def rpc(self, name, params):
+        self.rpc_calls.append((name, params))
+        return _FakeRpc(self.rpc_results.get(name))
+
+
+class _FakeRpc:
+    def __init__(self, data):
+        self.data = data
+
+    def execute(self):
+        return _FakeResponse(self.data)
 
 
 def test_approval_repository_get_public_loads_by_id_without_owner_scope():
@@ -209,6 +223,83 @@ def test_worker_get_exposes_archive_fields_from_manifest_json():
     assert result is not None
     assert result["archived"] is True
     assert result["archive_reason"] == "No longer needed"
+
+
+def test_secret_resolve_batches_vault_reads_and_last_used_updates():
+    vault_a = str(uuid4())
+    vault_b = str(uuid4())
+    now_iso = _now_iso()
+    rows = [
+        {
+            "user_id": "owner",
+            "workspace_id": "ws_default",
+            "name": "OPENAI_API_KEY",
+            "value": None,
+            "vault_secret_id": vault_a,
+            "last_used_at": None,
+        },
+        {
+            "user_id": "owner",
+            "workspace_id": "ws_default",
+            "name": "AWS_SECRET_ACCESS_KEY",
+            "value": None,
+            "vault_secret_id": vault_b,
+            "last_used_at": None,
+        },
+        {
+            "user_id": "owner",
+            "workspace_id": "ws_default",
+            "name": "LEGACY_TOKEN",
+            "value": _bytea_literal(encrypt_secret("legacy-value")),
+            "vault_secret_id": None,
+            "last_used_at": None,
+        },
+        {
+            "user_id": "owner",
+            "workspace_id": "ws_other",
+            "name": "OPENAI_API_KEY",
+            "value": None,
+            "vault_secret_id": str(uuid4()),
+            "last_used_at": now_iso,
+        },
+    ]
+    client = _FakeClient(
+        {"secrets": rows},
+        rpc_results={
+            "workeros_vault_read_secrets": [
+                {"id": vault_a, "secret": "sk-openai"},
+                {"id": vault_b, "secret": "aws-secret"},
+            ]
+        },
+    )
+
+    with active_workspace("ws_default", "admin"):
+        resolved = SupabaseSecretRepository(client=client).resolve(
+            user_id="owner",
+            names=[
+                "OPENAI_API_KEY",
+                "AWS_SECRET_ACCESS_KEY",
+                "LEGACY_TOKEN",
+                "MISSING",
+                "OPENAI_API_KEY",
+            ],
+        )
+
+    assert resolved == {
+        "OPENAI_API_KEY": "sk-openai",
+        "AWS_SECRET_ACCESS_KEY": "aws-secret",
+        "LEGACY_TOKEN": "legacy-value",
+    }
+    assert client.rpc_calls == [
+        (
+            "workeros_vault_read_secrets",
+            {"p_ids": [vault_a, vault_b]},
+        )
+    ]
+    assert rows[0]["last_used_at"] is not None
+    assert rows[1]["last_used_at"] is not None
+    assert rows[2]["last_used_at"] is not None
+    assert rows[3]["last_used_at"] == now_iso
 
 
 def test_run_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale():

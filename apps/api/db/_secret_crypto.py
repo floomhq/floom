@@ -114,6 +114,26 @@ def vault_read_secret(client, vault_id: UUID) -> Optional[str]:
     return result.data or None
 
 
+def vault_read_secrets(client, vault_ids: list[UUID]) -> dict[str, str]:
+    """Decrypt many Vault secrets in one RPC, keyed by vault UUID string."""
+    if not vault_ids:
+        return {}
+    result = client.rpc(
+        "workeros_vault_read_secrets",
+        {"p_ids": [str(vault_id) for vault_id in vault_ids]},
+    ).execute()
+    rows = result.data or []
+    values: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        vault_id = row.get("id")
+        plaintext = row.get("secret")
+        if vault_id and plaintext is not None:
+            values[str(vault_id)] = str(plaintext)
+    return values
+
+
 def vault_delete_secret(client, vault_id: UUID) -> None:
     """Delete a secret from the Vault."""
     try:
