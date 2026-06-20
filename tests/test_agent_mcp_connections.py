@@ -65,6 +65,12 @@ def test_mcp_connection_schema_preserves_legacy_composio_strings():
                     "env": {"GITHUB_TOKEN": "secret:GITHUB_PAT"},
                 }
             },
+            {
+                "browser_session": {
+                    "site": "medium",
+                    "secret": "MEDIUM_STORAGE_STATE_JSON",
+                }
+            },
         ],
     }
 
@@ -80,6 +86,9 @@ def test_mcp_connection_schema_preserves_legacy_composio_strings():
     assert config.connections[3].mcp.label == "filesystem"
     assert config.connections[3].mcp.transport == "stdio"
     assert config.connections[3].mcp.command == "npx"
+    assert config.connections[4].browser_session.site == "medium"
+    assert config.connections[4].browser_session.secret == "MEDIUM_STORAGE_STATE_JSON"
+    assert config.connections[4].browser_session.format == "playwright_storage_state"
     assert declared_composio_connections(config) == {
         "gmail": sorted(read_only_preset_for_app("gmail")),
         "google_search_console": ["GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY"],
@@ -106,6 +115,21 @@ def test_mcp_connection_schema_preserves_legacy_composio_strings():
     driver = AgentDriver()
     assert driver._composio_connection_names(config) == ["gmail", "google_search_console"]
     assert [connection.label for connection in driver._mcp_connections(config)] == ["github", "filesystem"]
+
+
+def test_browser_session_connection_requires_secret_name():
+    raw = {
+        "schema_version": "0.3",
+        "name": "bad-browser-session",
+        "title": "Bad Browser Session",
+        "description": "Invalid browser session declaration.",
+        "version": "0.1.0",
+        "exec": {"entry": "SKILL.md", "runtime": "skill"},
+        "connections": [{"browser_session": {"site": "medium", "secret": "medium-cookie"}}],
+    }
+
+    with pytest.raises(ValueError, match="uppercase env secret name"):
+        parse_worker_manifest(raw)
 
 
 def test_mcp_server_compilation_uses_bearer_secret_and_tool_filter():

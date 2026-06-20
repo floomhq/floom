@@ -668,7 +668,66 @@ curl -X POST http://localhost:8000/workers/<id>/runs \
 
 ---
 
-## 7. Agent-side contract: "write a worker from a prompt"
+## 7. Logged-in browser sessions
+
+Some publishing targets do not expose a usable public API. For those cases, a
+worker can declare a persisted browser session and receive the session material
+through the normal encrypted secrets path.
+
+Store a Playwright `storage_state` JSON blob as a secret:
+
+```bash
+workeros secrets set MEDIUM_STORAGE_STATE_JSON < storage-state.json
+```
+
+Declare both the browser-session connection metadata and the secret in
+`worker.yml`:
+
+```yaml
+connections:
+  - browser_session:
+      site: medium
+      secret: MEDIUM_STORAGE_STATE_JSON
+      format: playwright_storage_state
+
+exec:
+  secrets:
+    - MEDIUM_STORAGE_STATE_JSON
+```
+
+Inside the worker, write the secret to a temp file and pass it to Playwright:
+
+```python
+import os
+import tempfile
+from playwright.sync_api import sync_playwright
+
+
+def run(context):
+    state = context.secrets["MEDIUM_STORAGE_STATE_JSON"]
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        f.write(state)
+        state_path = f.name
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page_context = browser.new_context(storage_state=state_path)
+        page = page_context.new_page()
+        page.goto("https://medium.com/new-story")
+        # Drive the logged-in editor here.
+        browser.close()
+
+    os.unlink(state_path)
+    return {"ok": True}
+```
+
+Keep the storage-state JSON out of Git. It contains bearer-equivalent cookies.
+Rotate the secret when the external site session expires or a teammate should no
+longer be able to run that worker.
+
+---
+
+## 8. Agent-side contract: "write a worker from a prompt"
 
 When an agent (Claude Code / Cursor / a draft-and-create endpoint) writes a worker from a free-text prompt, it must produce:
 

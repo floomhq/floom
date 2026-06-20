@@ -661,6 +661,7 @@ class WorkerMCPConnection(BaseModel):
 class WorkerConnection(BaseModel):
     mcp: Optional[WorkerMCPConnection] = None
     composio: Optional["WorkerComposioConnection"] = None
+    browser_session: Optional["WorkerBrowserSessionConnection"] = None
     # Shorthand for:
     #   connections:
     #     - app: gmail
@@ -673,9 +674,13 @@ class WorkerConnection(BaseModel):
     @model_validator(mode="after")
     def validate_connection_kind(self) -> "WorkerConnection":
         composio_shorthand = self.app is not None
-        kind_count = int(self.mcp is not None) + int(self.composio is not None or composio_shorthand)
+        kind_count = (
+            int(self.mcp is not None)
+            + int(self.composio is not None or composio_shorthand)
+            + int(self.browser_session is not None)
+        )
         if kind_count != 1:
-            raise ValueError("connection entries must declare exactly one of: mcp, composio, or app")
+            raise ValueError("connection entries must declare exactly one of: mcp, composio, app, or browser_session")
         if composio_shorthand:
             self.composio = WorkerComposioConnection(
                 app=self.app or "",
@@ -684,6 +689,30 @@ class WorkerConnection(BaseModel):
                 scopes=self.scopes,
             )
         return self
+
+
+class WorkerBrowserSessionConnection(BaseModel):
+    """Persisted browser-login session material supplied through a named secret."""
+
+    site: str
+    secret: str
+    format: Literal["playwright_storage_state"] = "playwright_storage_state"
+
+    @field_validator("site")
+    @classmethod
+    def validate_site(cls, value: str) -> str:
+        stripped = value.strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", stripped):
+            raise ValueError("browser_session site must be 1-64 lowercase letters, digits, underscores, or hyphens")
+        return stripped
+
+    @field_validator("secret")
+    @classmethod
+    def validate_secret(cls, value: str) -> str:
+        stripped = value.strip()
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", stripped):
+            raise ValueError("browser_session secret must be an uppercase env secret name")
+        return stripped
 
 
 class WorkerComposioConnection(BaseModel):
