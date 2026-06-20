@@ -45,6 +45,61 @@ export function ListEmpty({
   );
 }
 
+const PAGE_X = 28;
+
+/**
+ * Full-page collection skeleton (Federico 2026-06-20): the route-level loading
+ * shell (`loading.tsx` → CollectionRouteLoading) renders BEFORE the real
+ * CollectionView mounts, so there is no real header/search/toolbar behind it.
+ * A bare stack of list bars in that slot reads as "broken" because it does not
+ * represent the page that is loading. This mirrors the real CollectionView
+ * layout — title + counts, then the search-bar + view-toggle + add toolbar,
+ * then the list table — using the SAME `.c-*` classes and the design-system
+ * <Skeleton> (cool palette, subtle shimmer), so the load fades into the real
+ * UI without a layout jump.
+ *
+ * Used ONLY at the route level. Inside CollectionView the real header/search
+ * already render during `config.loading`, so that path keeps using the
+ * list-body-only <ListLoading/> below (no double header).
+ */
+export function CollectionSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
+      aria-busy="true"
+      aria-label="Loading"
+      role="status"
+    >
+      {/* Header: title placeholder + a couple of count chips */}
+      <div style={{ padding: `22px ${PAGE_X}px 0` }}>
+        <div className="c-headrow">
+          <div className="c-headtitle" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <Skeleton className="h-6 w-40 rounded-[var(--radius-button)]" />
+            <Skeleton className="h-3.5 w-64 rounded-[var(--radius-button)]" />
+          </div>
+        </div>
+      </div>
+
+      {/* Toolbar: search-bar-shaped placeholder + view toggle + add button */}
+      <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>
+        <Skeleton
+          className="h-9 w-full rounded-[var(--radius-button)]"
+          style={{ flex: 1, maxWidth: 480 }}
+        />
+        <Skeleton className="h-9 w-16 rounded-[var(--radius-button)]" />
+        <Skeleton className="h-9 w-24 rounded-[var(--radius-button)]" style={{ marginLeft: "auto" }} />
+      </div>
+
+      {/* List: bordered table whose rows match the real `.c-lrow` footprint */}
+      <div className="c-body" style={{ marginTop: 14 }}>
+        <div className="c-listcol" style={{ padding: `0 ${PAGE_X}px 26px` }}>
+          <ListLoading rows={rows} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ListLoading({ rows = 5 }: { rows?: number }) {
   // Restored to the previous good list skeleton (Federico 2026-06-18): a
   // bordered list card with full-width shimmer ROW bars that mirror the real

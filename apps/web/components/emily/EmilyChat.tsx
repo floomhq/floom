@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize, Minimize, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -1091,10 +1091,10 @@ export function EmilyDock({ className }: { className?: string }) {
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={toggleFull}
-              title={isFull ? `Exit full screen` : `Full screen ${assistantName}`}
-              aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
+              title={isFull ? "Exit full screen" : "Full screen"}
+              aria-label={isFull ? "Exit full screen" : "Full screen"}
             >
-              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {isFull ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           ) : (
             <Button
@@ -1102,10 +1102,10 @@ export function EmilyDock({ className }: { className?: string }) {
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={isFull ? collapseHome : maximizeHome}
-              title={isFull ? `Minimize ${assistantName}` : `Full screen ${assistantName}`}
-              aria-label={isFull ? `Minimize ${assistantName}` : `Expand ${assistantName}`}
+              title={isFull ? "Exit full screen" : "Full screen"}
+              aria-label={isFull ? "Exit full screen" : "Full screen"}
             >
-              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {isFull ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           )}
           {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,
