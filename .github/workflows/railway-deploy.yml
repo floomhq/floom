@@ -1,0 +1,88 @@
+name: Deploy backend (Railway)
+
+# Auto-deploys the cloud BACKEND (api/web + worker) to Railway on every push to
+# main. The dashboard + landing (Vercel) are handled separately by
+# vercel-deploy.yml; this retires the manual `railway up` "drill".
+#
+# AUTH: the app env vars live on the Railway services and are NOT needed here.
+# The only thing CI needs is a Railway PROJECT token so it is *allowed* to deploy:
+#   Railway dashboard > project `workeros-cloud-api` > Settings > Tokens >
+#   create a token (production env) > add it as repo secret RAILWAY_TOKEN.
+# The private engine submodule is cloned with the self-hosted runner's own
+# `gh auth token`, matching ci.yml (no stored submodule secret).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  # One backend deploy at a time; never cancel an in-flight prod deploy.
+  group: railway-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy api + worker to Railway
+    # Same self-hosted runner ci.yml uses (org GitHub-hosted minutes are off).
+    runs-on: [self-hosted, linux, x64, workeros-ci]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Initialise engine submodule (runner-local gh auth)
+        # Identical to ci.yml: the private floomhq/workeros submodule is cloned
+        # with the runner user's gh credentials, so `railway up` ships a complete
+        # working tree (engine files present) — no GIT_TOKEN build-arg dance.
+        run: |
+          set -euo pipefail
+          TOKEN="$(gh auth token)"
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::No gh token on the self-hosted runner. Run 'gh auth login' as the runner user with read access to floomhq/workeros."
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${TOKEN}@github.com/".insteadOf \
+            "https://github.com/"
+          git submodule update --init --recursive
+          if [ ! -d engine/apps/api ]; then
+            echo "::error::engine/apps/api missing after submodule init."
+            exit 1
+          fi
+
+      - name: Ensure Railway CLI
+        run: |
+          set -euo pipefail
+          if ! command -v railway >/dev/null 2>&1; then
+            npm i -g @railway/cli
+          fi
+          railway --version
+
+      - name: Check RAILWAY_TOKEN is configured
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "::error::RAILWAY_TOKEN secret is missing. Create a Railway PROJECT token (Railway > project > Settings > Tokens) and add it as the RAILWAY_TOKEN repo secret. App env vars do NOT need to be added — they already live on the Railway services."
+            exit 1
+          fi
+
+      # `railway up` (non-detached) ships the working tree, builds, and waits for
+      # the deployment to succeed — so a failed build fails the job. Worker first,
+      # then web (the executor-split order: worker drains before web flips).
+      - name: Deploy worker
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service workeros-cloud-worker
+
+      - name: Deploy api (web)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service workeros-cloud-api
+
+      # The same hard gate run by hand today. Fails the job (red) if the new
+      # deploy serves a 5xx/508 — surfaced immediately instead of silently shipped.
+      - name: Post-deploy smoke gate
+        run: bash ops/smoke-routes.sh cloud
