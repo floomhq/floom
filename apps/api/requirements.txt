@@ -21,7 +21,7 @@ croniter==6.2.2
 # Ships the IANA tz database with the wheel. Windows has no system zoneinfo db,
 # so ZoneInfo("UTC") (scheduler/cron) raises ZoneInfoNotFoundError without this.
 tzdata==2026.2
-slowapi==0.1.9
+slowapi==0.1.10
 starlette==1.2.1
 pyjwt==2.13.0
 cryptography==48.0.0
