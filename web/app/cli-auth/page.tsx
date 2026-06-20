@@ -9,7 +9,7 @@ export { CliAuthContent } from "@/app/cli-auth/page.engine";
 export default function CloudCliAuthPage() {
   return (
     <CliAuthContent
-      endpointBase="/app/api/cli-auth"
+      endpointBase="/app/api/proxy/auth/cli"
       clientName="workeros-cli"
     />
   );

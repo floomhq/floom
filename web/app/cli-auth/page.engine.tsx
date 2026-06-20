@@ -21,7 +21,11 @@ export type CliAuthContentProps = {
 type AuthState = "idle" | "approving" | "denying" | "approved" | "denied" | "error";
 
 function cliAuthEndpoint(endpointBase: string, action: "approve" | "deny") {
-  return `${endpointBase.replace(/\/$/, "")}/${action}`;
+  const base = endpointBase.replace(/\/$/, "");
+  if (base.endsWith("/auth/cli")) {
+    return `${base}-${action}`;
+  }
+  return `${base}/${action}`;
 }
 
 export default function CliAuthPage() {
@@ -56,9 +60,17 @@ export function CliAuthContent({
         },
         body: JSON.stringify({ user_code: code }),
       });
-      const body = (await response.json().catch(() => ({}))) as { detail?: string };
+      const contentType = response.headers.get("content-type") || "";
+      const body = contentType.includes("application/json")
+        ? ((await response.json().catch(() => ({}))) as { detail?: string; ok?: boolean })
+        : {};
       if (!response.ok) {
         setErrorText(body.detail || "Authorization failed");
+        setState("error");
+        return;
+      }
+      if (body.ok !== true) {
+        setErrorText("Authorization did not complete. Please try again.");
         setState("error");
         return;
       }

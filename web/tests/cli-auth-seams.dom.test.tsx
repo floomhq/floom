@@ -9,7 +9,8 @@ describe("CLI auth seams", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({}),
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ ok: true }),
       })
     );
   });
@@ -34,13 +35,13 @@ describe("CLI auth seams", () => {
   });
 
   it("uses injected cloud endpoint base and CLI client name", async () => {
-    render(<CliAuthContent endpointBase="/app/api/cli-auth/" clientName="workeros-cli" />);
+    render(<CliAuthContent endpointBase="/app/api/proxy/auth/cli/" clientName="workeros-cli" />);
 
     expect(await screen.findByText("workeros-cli")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith("/app/api/cli-auth/approve", {
+      expect(fetch).toHaveBeenCalledWith("/app/api/proxy/auth/cli-approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_code: "ABCD-2345" }),
@@ -82,6 +83,7 @@ describe("CLI auth seams", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: false,
+        headers: new Headers({ "content-type": "application/json" }),
         json: async () => ({ detail: "Code expired" }),
       })
     );
@@ -93,5 +95,23 @@ describe("CLI auth seams", () => {
     // Buttons remain available for retry.
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
+  it("does not treat HTML fallback responses as approval success", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "content-type": "text/html" }),
+        text: async () => "<!doctype html>",
+      })
+    );
+    render(<CliAuthContent endpointBase="/app/api/cli-auth/" clientName="workeros-cli" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByText("Authorization did not complete. Please try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.queryByText("You can return to your terminal.")).toBeNull();
   });
 });
