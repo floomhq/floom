@@ -52,13 +52,10 @@ def test_text_attachment_is_decoded(client):
     assert body[0]["truncated"] is False
 
 
-def test_binary_attachment_returns_metadata_only(client):
+def test_binary_attachment_is_rejected_not_silently_dropped(client):
     resp = client.post(
         "/chat/attachments",
         files=[("files", ("logo.png", b"\x89PNG\r\n\x1a\n\x00\x01", "image/png"))],
     )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body[0]["name"] == "logo.png"
-    assert body[0]["text"] is None
-    assert body[0]["size"] == 10
+    assert resp.status_code == 415
+    assert "text files only" in resp.json()["detail"]

@@ -84,8 +84,13 @@ async def upload_chat_attachments(
     files: List[UploadFile] = File(...),
     auth: AuthContext = Depends(get_auth_context),
 ) -> List[_ChatAttachmentOut]:
-    """#778: accept Emily chat attachments. Text-like files are decoded so their
-    content rides along in the next message; binaries return metadata only."""
+    """#778: accept Emily chat attachments.
+
+    Text-like files are decoded so their content rides along in the next
+    message. Images and arbitrary binaries are rejected until Emily has a real
+    multimodal LLM path; returning metadata-only made uploads look successful
+    while silently dropping the content.
+    """
     max_text = 200_000  # chars of extracted text per file
     out: List[_ChatAttachmentOut] = []
     for f in files:
@@ -95,12 +100,19 @@ async def upload_chat_attachments(
         text: Optional[str] = None
         truncated = False
         is_text = ctype.startswith("text/") or name.lower().endswith(_CHAT_ATTACHMENT_TEXT_EXTS)
-        if is_text:
-            decoded = data.decode("utf-8", errors="replace")
-            if len(decoded) > max_text:
-                decoded = decoded[:max_text]
-                truncated = True
-            text = decoded
+        if not is_text:
+            raise HTTPException(
+                status_code=415,
+                detail=(
+                    "Emily chat attachments currently support text files only; "
+                    "image and binary attachments are not sent to the model yet."
+                ),
+            )
+        decoded = data.decode("utf-8", errors="replace")
+        if len(decoded) > max_text:
+            decoded = decoded[:max_text]
+            truncated = True
+        text = decoded
         out.append(_ChatAttachmentOut(
             name=name, size=len(data),
             type=ctype or "application/octet-stream",
