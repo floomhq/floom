@@ -18,7 +18,11 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
     if (credentials.mode === "cloud") {
       payload.workspace_id = credentials.workspace_id || null;
       payload.workspace_name = credentials.workspace_name || null;
-      payload.refresh_token_masked = maskSecret(credentials.refresh_token || "");
+      if (credentials.api_token) {
+        payload.api_token_masked = maskSecret(credentials.api_token);
+      } else {
+        payload.refresh_token_masked = maskSecret(credentials.refresh_token || "");
+      }
     } else {
       payload.api_secret_masked = maskSecret(credentials.api_secret || "");
     }
@@ -31,7 +35,11 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
       const ws = credentials.workspace_name || credentials.workspace_id;
       log.kv("Workspace", ws ? ws : "(none, run `floom workspace switch <name>`)");
       if (credentials.mode === "cloud") {
-        log.kv("Refresh token", maskSecret(credentials.refresh_token || ""));
+        if (credentials.api_token) {
+          log.kv("API token", maskSecret(credentials.api_token));
+        } else {
+          log.kv("Refresh token", maskSecret(credentials.refresh_token || ""));
+        }
       } else {
         log.kv("API secret", maskSecret(credentials.api_secret || ""));
       }
