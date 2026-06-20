@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { usePathname } from "next/navigation";
 
 import { api, getActiveWorkspaceId } from "@/lib/api";
 import {
@@ -8,6 +9,27 @@ import {
   groupPostHogWorkspace,
   identifyPostHogUser,
 } from "@/lib/posthog";
+
+// Public / unauthenticated routes where /me would 401. Calling api.me() there
+// triggers redirectToLoginOnce (a redundant /login reload), so we skip the
+// identity fetch on these routes entirely.
+const PUBLIC_ROUTE_PREFIXES = [
+  "/login",
+  "/auth",
+  "/cli-auth",
+  "/review",
+  "/s/",
+  "/start",
+  "/privacy",
+  "/terms",
+];
+
+function isPublicRoute(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return PUBLIC_ROUTE_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(prefix)
+  );
+}
 
 // Wires PostHog person identity + the `workspace` group from the authenticated
 // session, and emits `login_completed` once per established session.
@@ -29,6 +51,11 @@ import {
 const LOGIN_FIRED_KEY = "workeros.posthog.loginFired";
 
 export function PostHogIdentity() {
+  const pathname = usePathname();
+  // Fetch /me only until identity is established once, then stop (subsequent
+  // navigations re-run this effect but should not re-hit /me).
+  const identifiedRef = useRef(false);
+
   useEffect(() => {
     let active = true;
 
@@ -39,10 +66,19 @@ export function PostHogIdentity() {
       groupPostHogWorkspace(localWorkspace);
     }
 
+    // On public/auth routes /me would 401 and bounce to /login; skip it. Once
+    // identity is established, skip the redundant per-navigation /me fetch.
+    if (identifiedRef.current || isPublicRoute(pathname)) {
+      return () => {
+        active = false;
+      };
+    }
+
     api
       .me()
       .then((user) => {
         if (!active || !user?.user_id) return;
+        identifiedRef.current = true;
         identifyPostHogUser(user);
         const workspaceId = user.workspace_id || localWorkspace;
         if (workspaceId) {
@@ -68,7 +104,7 @@ export function PostHogIdentity() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [pathname]);
 
   return null;
 }
