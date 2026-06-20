@@ -1449,8 +1449,6 @@ def _warm_pool_sensitive_run_material(
     inputs: Dict[str, Any] | None,
     secrets: Dict[str, str] | None = None,
 ) -> str | None:
-    if secrets:
-        return "secrets"
     if config and getattr(config, "connections", None):
         return "connections"
     return None
@@ -1520,8 +1518,12 @@ def _warm_pool_key(
 
 def _cleanup_run_state(sandbox: Any, workdir: str, *, log_fn: Callable[[str, str], None]) -> bool:
     result = sandbox.commands.run(
-        "find . -mindepth 1 -maxdepth 1 -not -name context -exec rm -rf -- {} + && "
-        "find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +",
+        "rm -rf -- "
+        "inputs inputs.json .env.local secrets.json connections.json result.json "
+        "artifacts artifact outputs output tmp .tmp .workeros_run && "
+        "(find . -type d -name __pycache__ -prune -exec rm -rf -- {} + 2>/dev/null || true) && "
+        "(find . -type f \\( -name '*.pyc' -o -name '*.pyo' \\) -delete 2>/dev/null || true) && "
+        "(find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true)",
         cwd=workdir,
         timeout=30,
         request_timeout=45,
