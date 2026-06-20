@@ -181,6 +181,19 @@ def make_insert_id(*parts: Any) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()  # noqa: S324 - id, not crypto
 
 
+# Prefixed-id tokens whose *tail* is a per-entity random/sequential id and must
+# be stripped before fingerprinting. Without this, the SAME logical crash from
+# two different runs (``run_3f9ac1b2e`` vs ``run_88aa55cc1``) produced DIFFERENT
+# fingerprints, over-splitting one issue into one-per-run (verified in the live
+# ingestion proof). The earlier hex/uuid/number rules do NOT catch these because
+# the tail is short alnum (< 16 chars, mixed-case, glued to a prefix). Covers the
+# WorkerOS id families: run_/ws_/wk_/wkr_/art_/gen_/org_/usr_/conn_/appr_/trig_.
+_PREFIXED_ID_RE = _re.compile(
+    r"\b(?:run|ws|wk|wkr|art|gen|org|usr|user|conn|appr|trig|trace|span|req)_"
+    r"[A-Za-z0-9]{4,}\b"
+)
+
+
 def exception_fingerprint(exc_type: str, message: str) -> str:
     """Stable grouping key for ``$exception`` with volatile bits stripped.
 
@@ -189,7 +202,11 @@ def exception_fingerprint(exc_type: str, message: str) -> str:
     run_id, file path, or numeric value in the text (no cardinality blowup).
     """
     text = f"{exc_type}: {message or ''}"
-    # strip uuids first (before paths/hex/numbers eat their pieces), then
+    # strip prefixed-id tokens (run_…, ws_…, wk_…, art_…, gen_… etc.) FIRST so a
+    # short alnum tail glued to a known id prefix collapses before the generic
+    # hex/number rules (which would only mangle part of it and leave the prefix).
+    text = _PREFIXED_ID_RE.sub("<id>", text)
+    # strip uuids next (before paths/hex/numbers eat their pieces), then
     # absolute/relative paths, hex blobs, then bare numbers.
     text = _re.sub(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", "<uuid>", text)
     text = _re.sub(r"(?:/[\w.\-]+)+/?", "<path>", text)

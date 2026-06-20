@@ -257,6 +257,22 @@ class TestExceptionScrubFingerprint:
     def test_fingerprint_differs_by_type(self):
         assert ai.exception_fingerprint("ValueError", "x") != ai.exception_fingerprint("KeyError", "x")
 
+    def test_fingerprint_stable_across_prefixed_id_tails(self):
+        # Gap 1 (live ingestion proof): the SAME logical crash from two different
+        # runs must group into ONE issue. The only difference is the volatile
+        # run_<alnum> / ws_/wk_/art_/gen_ id tail, which must normalize away.
+        a = ai.exception_fingerprint("RuntimeError", "worker failed in run_3f9ac1b2e otherwise identical")
+        b = ai.exception_fingerprint("RuntimeError", "worker failed in run_88aa55cc1 otherwise identical")
+        assert a == b
+        c = ai.exception_fingerprint("KeyError", "missing ws_aa11bb22 / wk_ccddeeff / art_1234abcd / gen_99xy")
+        d = ai.exception_fingerprint("KeyError", "missing ws_zz99yy88 / wk_gghhiijj / art_zzzz0000 / gen_11ab")
+        assert c == d
+
+    def test_fingerprint_still_differs_for_genuinely_different_crashes(self):
+        # The id-tail stripper must NOT collapse genuinely different errors.
+        assert ai.exception_fingerprint("RuntimeError", "database connection refused in run_aaaa1111") != \
+            ai.exception_fingerprint("RuntimeError", "permission denied on resource in run_bbbb2222")
+
 
 # ---------------------------------------------------------------------------
 # 5. Ingestion canary + delivery telemetry
