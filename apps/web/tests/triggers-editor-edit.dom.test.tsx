@@ -16,6 +16,11 @@ import {
 vi.mock("@/components/CronBuilder", () => ({
   CronBuilder: ({ value }: { value: string }) => <div data-testid="cron-builder">{value}</div>,
 }));
+vi.mock("@/components/TimezoneSelect", () => ({
+  TimezoneSelect: ({ value }: { value: string }) => (
+    <div data-testid="timezone-select">{value}</div>
+  ),
+}));
 vi.mock("@/components/ConnectionEventPicker", () => ({
   ConnectionEventPicker: () => <div data-testid="connection-event-picker" />,
 }));
@@ -38,11 +43,11 @@ describe("W-02 editable triggers", () => {
   it("expands into the full editor (type picker + cron builder) when Edit is clicked", () => {
     render(<Harness initial={[makeTriggerRow({ type: "cron", cron: "0 9 * * MON", timezone: "Europe/Berlin" })]} />);
     fireEvent.click(screen.getByTitle("Edit trigger"));
-    // Expanded editor: the segmented type picker + cron builder + timezone field.
+    // Expanded editor: the segmented type picker + cron builder + timezone select.
     expect(screen.getByText("Manual")).toBeInTheDocument();
     expect(screen.getByText("Webhook")).toBeInTheDocument();
     expect(screen.getByTestId("cron-builder")).toHaveTextContent("0 9 * * MON");
-    expect(screen.getByPlaceholderText("Europe/Berlin")).toBeInTheDocument();
+    expect(screen.getByTestId("timezone-select")).toHaveTextContent("Europe/Berlin");
   });
 
   it("lets the user change the schedule to a webhook trigger", () => {
