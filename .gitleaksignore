@@ -1,1 +1,8 @@
 54d5cd9a06b79f24ae422e86991213306f9d5fc7:apps/api/tests/test_chat_streaming_sanitizer.py:generic-api-key:19
+# Pre-existing benign history findings (verified by code review, not new in this
+# branch): git commit SHAs flagged as generic keys, the published AWS docs
+# example key, and an ephemeral already-public share token in a deploy note.
+bbcd953713171b6842095e39607683f0a1411022:docs/WAVE1_DEPLOY_2026-06-07.md:generic-api-key:29
+a5d8637290c2d2e080850726e0cad08dea9ea3a0:docs/STANDALONE_SHARE_2026-06-05.md:generic-api-key:74
+5ec5740956e56d01ca1ba7b9a354aa720f004fcb:docs/audits/backend-batch-fix-2026-06-04.md:generic-api-key:5
+d078a19cbcb7c22bab7505548391c70b058d841e:apps/api/secret_scan.py:aws-access-token:88
