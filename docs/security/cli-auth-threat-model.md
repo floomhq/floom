@@ -60,7 +60,7 @@ approval is not possible.
 We deliberately do **not** add: a full redesign, PKCE-style binding (the
 single-tenant owner-only model makes it redundant), or per-poll global
 rate-limit tightening (the 256-bit `device_code` already scopes polling). Adding
-those would be over-engineering for a single-tenant OSS install.
+those would be over-engineering for a single-tenant self-hosted install.
 
 ## Disposition
 

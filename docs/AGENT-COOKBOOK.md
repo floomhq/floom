@@ -56,7 +56,7 @@ workeros workspace list
 workeros workspace switch <workspace-name-or-id>
 ```
 
-Workspace switching also works for OSS local workspaces. `workeros mcp list` /
+Workspace switching also works for self-hosted local workspaces. `workeros mcp list` /
 `workeros mcp switch <label>` switch the active MCP server the same way, and
 `workeros mcp test [label]` live-probes a server (defaults to the active one).
 `workspaces` and `use` remain as aliases.

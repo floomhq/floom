@@ -22,3 +22,4 @@ Closes #
 - [ ] No secrets, credentials, or customer data committed (used `example.com` etc.)
 - [ ] Updated docs / `.env.example` if config, routes, or env vars changed
 - [ ] Change is focused; unrelated code not reformatted
+- [ ] Commits are signed off for DCO (`git commit -s`)

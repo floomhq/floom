@@ -7,7 +7,7 @@ staged as a brain pack. Companion references: `docs/slack-events.md`
 (receiver contract), `docs/slack-self-test.md` (live verification checklist),
 `docs/slack-app-manifest.example.yml` (app manifest).
 
-Applies to OSS/self-host (`https://localhost:8000`) and hosted Workeros
+Applies to self-hosted Workeros (`https://localhost:8000`) and hosted Workeros
 (`https://api.workeros.example.com`); substitute your API base below.
 
 ---

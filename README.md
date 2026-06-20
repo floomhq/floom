@@ -103,6 +103,8 @@ runtime contract.
   expectations.
 - [Licensing](docs/LICENSING.md) - what SUL-1.0 allows and what needs a
   commercial agreement.
+- [Third-party licenses](docs/THIRD-PARTY-LICENSES.md) - dependency inventory
+  and SBOM release process.
 
 ## API
 

@@ -20,8 +20,8 @@ The local setup runs the same core pieces used by hosted deployments:
 - Local workspace data, contexts, run logs, approvals, and version history.
 
 Hosted-only concerns such as commercial billing, managed enterprise SSO, and
-SOC 2 evidence collection live outside the OSS runtime. The OSS repo provides
-the core runtime and local/self-hosted path.
+SOC 2 evidence collection live outside the source-available runtime. This repo
+provides the core runtime and local/self-hosted path.
 
 ## 1. Run the app
 

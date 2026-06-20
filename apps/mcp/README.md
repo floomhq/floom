@@ -12,10 +12,10 @@ The CLI targets local, self-hosted, and hosted deployments:
 
 | Mode | API base | Auth | Workspaces |
 |------|----------|------|------------|
-| **OSS/self-hosted** (default) | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
+| **Self-hosted** (default) | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
 | **Hosted** | your hosted API URL | bearer token or hosted login flow, `X-Workeros-Workspace` header | multi-workspace |
 
-## OSS quickstart
+## Self-Hosted Quickstart
 
 ```bash
 npm i -g @floomhq/workeros@latest
@@ -55,7 +55,7 @@ workeros mcp switch <name>          # set the active MCP server by label
 workeros mcp test [name]            # live probe (initialize + tools/list); defaults to the active server
 ```
 
-Switches persist in `~/.config/workeros/credentials.json` and apply to every later CLI invocation. `workspaces`/`use` remain as aliases of `workspace`/`switch`. Workspace switching works in both modes: cloud scopes by membership, OSS scopes local workspaces via the `x-workeros-workspace` header (which the CLI now sends on every request, and `mcp install` bakes into the client config - re-run `mcp install` after switching to repoint installed MCP clients).
+Switches persist in `~/.config/workeros/credentials.json` and apply to every later CLI invocation. `workspaces`/`use` remain as aliases of `workspace`/`switch`. Workspace switching works in both modes: hosted deployments scope by membership, self-hosted deployments scope local workspaces via the `x-workeros-workspace` header (which the CLI now sends on every request, and `mcp install` bakes into the client config - re-run `mcp install` after switching to repoint installed MCP clients).
 
 Re-running the installer updates the existing `workeros` entry instead of duplicating it.
 
@@ -193,7 +193,7 @@ workeros workers info <id>
 | `workers.sample_input` | Get example input values for a worker's fields. |
 | `workers.archive` | Archive a worker (reversible). |
 | `workers.restore` | Restore an archived worker to active status. |
-| `workers.reload` | Reload all workers from disk (OSS self-hosted). |
+| `workers.reload` | Reload all workers from disk on a self-hosted deployment. |
 | `workers.versions` | List saved versions of a worker. |
 | `workers.rollback` | Restore a worker to a previous version. |
 | `workers.alerts.list` | List configured alerts for a worker. |
