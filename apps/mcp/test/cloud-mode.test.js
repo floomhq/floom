@@ -1,6 +1,7 @@
 ﻿import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +43,12 @@ test("cloud login treats cli-exchange 429 without retry metadata as slow_down", 
   const error = new WorkerosApiError("rate limited", 429, {});
 
   assert.equal(cloudRateLimitRetryMs(error, 2), 5_000);
+});
+
+test("cloud login can persist api_token credentials from cli-exchange", () => {
+  const src = readFileSync(new URL("../src/commands/login.ts", import.meta.url), "utf8");
+  assert.match(src, /api_token: exchanged\.api_token/);
+  assert.match(src, /if \(exchanged\.api_token\)/);
 });
 
 async function withTempHome(fn) {
