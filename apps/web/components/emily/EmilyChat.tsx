@@ -979,8 +979,16 @@ export function EmilyDock({ className }: { className?: string }) {
     if (isHomeRoute && (!userCollapsedHome || createMode)) {
       setFullscreen(true);
     }
-    // Leaving home does NOT force-exit fullscreen (the user may have it open
-    // intentionally elsewhere).
+    // Leaving home (home → non-home TRANSITION) docks Emily back to the rail so
+    // the destination page (Workers/Library/Runs/…) is visible. Without this the
+    // home auto-fullscreen latched on across navigation and AppShell hid <main>
+    // on EVERY route → Emily covered the page (P0). This fires only on the
+    // transition (guarded by `wasHome`), never on every render of a non-home
+    // route, so a fullscreen the user MANUALLY opens later on a non-home page
+    // (via the dock toggle) is not clobbered.
+    if (wasHome && !isHomeRoute) {
+      setFullscreen(false);
+    }
   }, [isHomeRoute, setFullscreen, userCollapsedHome, createMode]);
 
   // Collapse the home fullscreen Emily into the right rail (shows the Workers
