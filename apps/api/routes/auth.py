@@ -1027,26 +1027,21 @@ def cli_exchange(payload: CliExchangeRequest):
     consumed = repos.cli_auth.consume(payload.device_code)
     if consumed is None:
         raise HTTPException(status_code=404, detail="Device code not found")
-    refresh_token = str(consumed.get("secret") or "")
-    if not refresh_token:
-        raise HTTPException(status_code=500, detail="Approved device missing refresh token")
+    api_token = str(consumed.get("secret") or "")
+    if not api_token:
+        raise HTTPException(status_code=500, detail="Approved device missing CLI credential")
     try:
         scopes = normalize_cli_scopes(consumed.get("scopes"))
     except UnsupportedCliScope as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    # Include supabase_url + supabase_anon_key + api_base in the response so
-    # the CLI can refresh JWTs without a second round-trip. The anon key is a
-    # public client key (already shipped in the dashboard JS bundle); not
-    # sensitive.
     return {
-        "refresh_token": refresh_token,
+        "api_token": api_token,
         "expires_in_seconds": settings.cli_code_ttl_seconds,
         "user_id": consumed.get("user_id"),
         "client_name": str(consumed.get("client_name") or "workeros-cli"),
-        "credential_type": "supabase_refresh_token",
+        "credential_type": "cloud_api_token",
+        "header": PAT_HEADER,
         "scopes": scopes,
-        "supabase_url": settings.supabase_url,
-        "supabase_anon_key": settings.supabase_anon_key,
         "api_base": settings.api_base,
     }
 
@@ -1144,6 +1139,16 @@ def _device_can_be_claimed(device_user_id: str | None, session_user_id: str) -> 
     return device_user_id == session_user_id
 
 
+def _issue_cli_pat(*, user_id: str, client_name: str) -> str:
+    raw = _generate_raw_token()
+    SupabaseApiTokenRepository().create(
+        user_id=user_id,
+        name=f"CLI device: {(client_name or 'workeros-cli').strip() or 'workeros-cli'}",
+        token_hash=_hash_token(raw),
+    )
+    return raw
+
+
 @router.post("/cli-approve")
 def cli_approve(payload: CliApproveRequest, request: Request):
     """Cloud equivalent of the engine's /cli-auth/approve.
@@ -1151,11 +1156,12 @@ def cli_approve(payload: CliApproveRequest, request: Request):
     The engine endpoint requires FLOOM_SECRET (single-user shared secret)
     and is incompatible with cloud's per-user Supabase auth. This handler
     looks up the pending device by user_code, claims it for the signed-in
-    user, marks it approved, and stores the user's Supabase refresh_token
-    as the device "secret" — that's what the CLI will receive via the
-    /auth/cli-exchange poll.
+    user, marks it approved, and stores a new CLI-specific cloud API token
+    as the device "secret" - that's what the CLI will receive via the
+    /auth/cli-exchange poll. Do not copy the browser refresh token here:
+    Supabase refresh tokens rotate and are shared with the dashboard session.
     """
-    user_id, refresh_token = _session_user(request)
+    user_id, _refresh_token = _session_user(request)
     _enforce_cli_approve_deny_rate_limit(request=request, user_code=payload.user_code)
     repos = get_repositories()
     now_ts = time.time()
@@ -1167,14 +1173,18 @@ def cli_approve(payload: CliApproveRequest, request: Request):
         raise HTTPException(status_code=404, detail="User code not found")
     if str(record.get("status") or "").lower() != "pending":
         raise HTTPException(status_code=409, detail="Device code is no longer pending")
+    api_token = _issue_cli_pat(
+        user_id=user_id,
+        client_name=str(record.get("client_name") or "workeros-cli"),
+    )
     # SECURITY: claim and approve in one conditional repository write. The
     # write is guarded by status='pending' so two browser sessions racing the
-    # same user_code cannot both stamp a refresh_token; the loser gets 409.
+    # same user_code cannot both stamp a CLI token; the loser gets 409.
     try:
         approved = repos.cli_auth.approve_pending(
             device_code=record["device_code"],
             user_id=user_id,
-            secret=refresh_token,
+            secret=api_token,
             approved_at=now_ts,
         )
     except HTTPException:

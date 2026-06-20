@@ -67,7 +67,7 @@ def test_cli_exchange_is_single_use(monkeypatch):
             "user_id": "user-123",
             "user_code": "ABCD-EFGH",
             "status": "approved",
-            "secret": "refresh-123",
+            "secret": "floom_cli_token_123",
             "client_name": "floom-cli",
             "scopes": ["mcp", " API ", "mcp"],
             "expires_at": 9999999999.0,
@@ -80,9 +80,11 @@ def test_cli_exchange_is_single_use(monkeypatch):
 
     assert first.status_code == 200
     payload = first.json()
-    assert payload["refresh_token"] == "refresh-123"
+    assert payload["api_token"] == "floom_cli_token_123"
+    assert "refresh_token" not in payload
     assert payload["client_name"] == "floom-cli"
-    assert payload["credential_type"] == "supabase_refresh_token"
+    assert payload["credential_type"] == "cloud_api_token"
+    assert payload["header"] == "x-floom-token"
     assert payload["scopes"] == ["mcp", "api"]
     assert second.status_code == 404
 
@@ -94,7 +96,7 @@ def test_cli_exchange_defaults_legacy_rows_to_api_scope(monkeypatch):
             "user_id": "user-123",
             "user_code": "ABCD-EFGH",
             "status": "approved",
-            "secret": "refresh-legacy",
+            "secret": "floom_cli_token_legacy",
             "expires_at": 9999999999.0,
         }
     }
@@ -107,6 +109,7 @@ def test_cli_exchange_defaults_legacy_rows_to_api_scope(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["scopes"] == ["api"]
+    assert response.json()["api_token"] == "floom_cli_token_legacy"
 
 
 def test_cli_exchange_rejects_expired_code(monkeypatch):

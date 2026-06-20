@@ -10,6 +10,7 @@ another user from approving a device that already belongs to someone else.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import threading
 from types import SimpleNamespace
@@ -20,6 +21,21 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import apps.api.routes.auth as auth_routes
+
+
+class _FakeApiTokenRepo:
+    created: list[dict[str, str]] = []
+
+    def create(self, *, user_id: str, name: str, token_hash: str, workspace_id: str | None = None):
+        row = {
+            "id": f"tok-{len(self.created) + 1}",
+            "user_id": user_id,
+            "name": name,
+            "token_hash": token_hash,
+            "workspace_id": workspace_id or "ws-test",
+        }
+        self.created.append(row)
+        return row
 
 
 def _make_session_cookie(
@@ -103,6 +119,7 @@ class _FakeCliAuth:
 def _client(rows: dict[str, dict], monkeypatch) -> tuple[TestClient, _FakeCliAuth, MagicMock]:
     if hasattr(auth_routes, "_cli_approve_deny_rate_buckets"):
         auth_routes._cli_approve_deny_rate_buckets.clear()
+    _FakeApiTokenRepo.created = []
     app = FastAPI()
     app.include_router(auth_routes.router)
     fake = _FakeCliAuth(rows)
@@ -141,6 +158,7 @@ def _client(rows: dict[str, dict], monkeypatch) -> tuple[TestClient, _FakeCliAut
         raise HTTPException(status_code=401, detail="unauthorized")
 
     monkeypatch.setattr(provider_module, "_verify_jwt", _fake_verify_jwt)
+    monkeypatch.setattr(auth_routes, "SupabaseApiTokenRepository", _FakeApiTokenRepo)
     return TestClient(app), fake, chain
 
 
@@ -162,10 +180,21 @@ def test_cli_approve_claims_oss_placeholder_device(monkeypatch):
     )
     assert response.status_code == 200, response.text
     assert response.json()["ok"] is True
-    # Status got flipped to approved with the user's refresh_token as secret.
+    # Status got flipped to approved with a fresh CLI PAT, never the browser
+    # session refresh token.
     assert fake.rows["device-1"]["status"] == "approved"
-    assert fake.rows["device-1"]["secret"] == "rt-test"
+    assert str(fake.rows["device-1"]["secret"]).startswith("floom_")
+    assert fake.rows["device-1"]["secret"] != "rt-test"
     assert fake.rows["device-1"]["user_id"] == "supabase-user-uuid"
+    assert _FakeApiTokenRepo.created == [
+        {
+            "id": "tok-1",
+            "user_id": "supabase-user-uuid",
+            "name": "CLI device: workeros-cli",
+            "token_hash": hashlib.sha256(str(fake.rows["device-1"]["secret"]).encode()).hexdigest(),
+            "workspace_id": "ws-test",
+        }
+    ]
     chain.table.assert_not_called()
 
 
@@ -263,6 +292,7 @@ def test_cli_approve_pending_claim_is_atomic_under_race(monkeypatch):
     import apps.api.config as config_module
 
     monkeypatch.setattr(config_module, "new_supabase_service_client", lambda: chain)
+    monkeypatch.setattr(auth_routes, "SupabaseApiTokenRepository", _FakeApiTokenRepo)
     if hasattr(auth_routes, "_cli_approve_deny_rate_buckets"):
         auth_routes._cli_approve_deny_rate_buckets.clear()
     client = TestClient(app)
@@ -291,7 +321,8 @@ def test_cli_approve_pending_claim_is_atomic_under_race(monkeypatch):
 
     assert sorted(statuses) == [200, 409]
     assert fake.rows["device-1"]["status"] == "approved"
-    assert fake.rows["device-1"]["secret"] in {"rt-first", "rt-second"}
+    assert str(fake.rows["device-1"]["secret"]).startswith("floom_")
+    assert fake.rows["device-1"]["secret"] not in {"rt-first", "rt-second"}
     assert len([update for update in fake.updates if update[1].get("status") == "approved"]) == 1
 
 
