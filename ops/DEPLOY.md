@@ -11,6 +11,9 @@ That is the complete command. It handles everything: DB backup, source sync, dep
 
 For unattended deploys, install `ops/autodeploy-api.sh` through
 `workeros-api-autodeploy.service`.
+This OSS repo intentionally documents only the self-hosted Workeros API unit;
+managed cloud API deploy/autodeploy configuration is maintained in the cloud
+deployment repo.
 The autodeploy wrapper is intentionally stricter than this manual command: it
 fetches `origin/main`, refuses dirty or locally-ahead deploy checkouts, resets a
 clean mirror to the remote SHA, and can notify `WORKEROS_AUTODEPLOY_ALERT_WEBHOOK`
