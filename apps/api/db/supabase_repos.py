@@ -143,6 +143,64 @@ from models import (  # noqa: E402
     worker_contract_to_worker_config,
 )
 
+# Failure-taxonomy contract: a FAILED run MUST carry a non-null, structured
+# error_code (and a human error message). The downstream failure taxonomy keys
+# off error_code; a null forces it into best-effort string-matching on the free
+# text. The engine's sqlite repo guarantees this via
+# ``_normalize_failed_error_fields`` (floomhq/workeros
+# ``apps/api/db/sqlite.py``), but the cloud persists runs through the Supabase
+# repo below, which historically only wrote error_code when it was non-None — so
+# every cloud FAILED run landed with error_code=null.
+#
+# KEEP IN SYNC with the engine's ``_normalize_failed_error_fields``. This is a
+# deliberate small mirror rather than an import: the engine helper lives in
+# ``db.sqlite``, whose module import pulls in ``_legacy_sqlite`` (opens a local
+# sqlite connection) — heavy and side-effectful on the cloud, where the local
+# sqlite DB is unused. The function itself is pure, so we mirror it here.
+_UNKNOWN_RUN_ERROR_CODE = "unknown_error"
+_UNKNOWN_RUN_ERROR_MESSAGE = (
+    "Run failed before the engine captured a specific failure reason. "
+    "Check the run logs and retry."
+)
+
+
+def _normalize_failed_error_fields(
+    *,
+    run_id: str,
+    error: str | None,
+    error_code: str | None,
+    existing_error: Any = None,
+    existing_error_code: Any = None,
+) -> tuple[str, str]:
+    """Coerce a FAILED run's (error, error_code) to non-null structured values.
+
+    Mirrors floomhq/workeros ``apps/api/db/sqlite.py::_normalize_failed_error_fields``.
+    Falls back to the value already on the row, then to the ``unknown_error``
+    sentinel — never returns an empty error_code, so the failure taxonomy always
+    has a structured key to match on.
+    """
+    normalized_error = str(error).strip() if error is not None else ""
+    normalized_error_code = str(error_code).strip() if error_code is not None else ""
+    if not normalized_error:
+        normalized_error = str(existing_error or "").strip()
+    if not normalized_error_code:
+        normalized_error_code = str(existing_error_code or "").strip()
+    if not normalized_error:
+        normalized_error = _UNKNOWN_RUN_ERROR_MESSAGE
+        _repo_logger.error(
+            "Run %s reached failed status without an error message in cloud repo "
+            "update; applying fallback",
+            run_id,
+        )
+    if not normalized_error_code:
+        normalized_error_code = _UNKNOWN_RUN_ERROR_CODE
+        _repo_logger.error(
+            "Run %s reached failed status without an error_code in cloud repo "
+            "update; applying fallback",
+            run_id,
+        )
+    return normalized_error, normalized_error_code
+
 
 def _json_dump(value: Any) -> str:
     return json.dumps(value if value is not None else {}, separators=(",", ":"))
@@ -2454,6 +2512,21 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         if payload.get("status") == RunStatus.COMPLETED.value and str(fields.get("error") or "").strip():
             payload["status"] = RunStatus.FAILED.value
             payload["output_json"] = {}
+        # A FAILED transition must carry a non-null structured error_code (mirror
+        # the engine sqlite normalization). Only normalize when THIS update sets
+        # status=failed — a partial update that leaves status untouched is left
+        # alone. Fall back to the values already on the row.
+        if payload.get("status") == RunStatus.FAILED.value:
+            existing = self.get(user_id=user_id, run_id=run_id) or {}
+            normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                run_id=run_id,
+                error=payload.get("error"),
+                error_code=payload.get("error_code"),
+                existing_error=existing.get("error"),
+                existing_error_code=existing.get("error_code"),
+            )
+            payload["error"] = normalized_error
+            payload["error_code"] = normalized_error_code
         if payload:
             builder = self._client.table("runs").update(payload).eq("id", run_id)
             builder = _scope_by_workspace(builder, user_id=user_id)
@@ -2491,6 +2564,19 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         if (error or "").strip() and status == RunStatus.COMPLETED.value:
             status = RunStatus.FAILED.value
             output_json = {}
+        # A FAILED run must persist a non-null, structured error_code (and error
+        # message). Mirror the engine's sqlite normalization so the cloud never
+        # leaves error_code=null (which forces the failure taxonomy into
+        # string-matching). Fall back to whatever the row already holds, else the
+        # unknown_error sentinel.
+        if status == RunStatus.FAILED.value:
+            error, error_code = _normalize_failed_error_fields(
+                run_id=run_id,
+                error=error,
+                error_code=error_code,
+                existing_error=run.get("error"),
+                existing_error_code=run.get("error_code"),
+            )
         updates: dict[str, Any] = {"status": status}
         if output_json is not None:
             updates["output_json"] = output_json
@@ -2579,13 +2665,15 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             user_id = str(row.get("user_id") or "")
             if not run_id or not user_id or run_id in sandbox_started:
                 continue
+            normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                run_id=run_id, error=error, error_code=error_code
+            )
             updates: dict[str, Any] = {
                 "status": RunStatus.FAILED.value,
-                "error": error,
+                "error": normalized_error,
+                "error_code": normalized_error_code,
                 "completed_at": completed_at,
             }
-            if error_code is not None:
-                updates["error_code"] = error_code
             started_at = row.get("started_at") or row.get("created_at")
             if started_at:
                 try:
@@ -2892,10 +2980,13 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             run_id = str(row.get("id") or "")
             if not run_id:
                 continue
+            normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                run_id=run_id, error=error, error_code=error_code
+            )
             updates: dict[str, Any] = {
                 "status": RunStatus.FAILED.value,
-                "error": error,
-                "error_code": error_code,
+                "error": normalized_error,
+                "error_code": normalized_error_code,
                 "completed_at": completed_at_str,
             }
             started_at = row.get("started_at") or row.get("created_at")
@@ -2959,10 +3050,13 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 continue
             if effective_dt >= cutoff_dt:
                 continue
+            normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                run_id=run_id, error=error, error_code=error_code
+            )
             updates: dict[str, Any] = {
                 "status": RunStatus.FAILED.value,
-                "error": error,
-                "error_code": error_code,
+                "error": normalized_error,
+                "error_code": normalized_error_code,
                 "completed_at": completed_at_str,
             }
             started_at = row.get("started_at")
