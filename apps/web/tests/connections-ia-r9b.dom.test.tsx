@@ -4,8 +4,8 @@
 // enough". This reverts the round-09 batch2 IA (Browse=button on /connections,
 // Secrets=sidebar sub-item). Proves:
 //   1. ConnectionsCollection renders the chip nav (4 chips, aria-label
-//      "Integrations sections") and NO standalone "Browse apps" CTA button.
-//   2. The sidebar NavLinks has Integrations as a SINGLE nav row, with NO
+//      "Connections sections") and NO standalone "Browse apps" CTA button.
+//   2. The sidebar NavLinks has Connections as a SINGLE nav row, with NO
 //      Secrets sub-item (Secrets lives in the chip nav, not the sidebar).
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -44,8 +44,9 @@ describe("Connections IA — chip nav, not a tab row or Browse button", () => {
       </TestQueryProvider>,
     );
 
-    // The chip nav (aria-label="Integrations sections") with all 4 surfaces.
-    const chipNav = await screen.findByRole("navigation", { name: /integrations sections/i });
+    // The chip nav (aria-label="Connections sections" — #1707 canonical naming)
+    // with all 4 surfaces.
+    const chipNav = await screen.findByRole("navigation", { name: /connections sections/i });
     const connected = within(chipNav).getByRole("link", { name: /^connected$/i });
     expect(connected).toHaveAttribute("href", "/connections");
     const browse = within(chipNav).getByRole("link", { name: /browse apps/i });
@@ -65,7 +66,7 @@ describe("Connections IA — chip nav, not a tab row or Browse button", () => {
   });
 });
 
-describe("Sidebar IA — Integrations is a single nav row, no Secrets sub-item", () => {
+describe("Sidebar IA — Connections is a single nav row, no Secrets sub-item", () => {
   it("NavLinks has no Secrets sidebar sub-item", async () => {
     vi.doMock("@/lib/useApprovalsSync", () => ({ useApprovalsCount: () => 0 }));
     vi.doMock("@/lib/query/prefetch", () => ({
@@ -79,8 +80,9 @@ describe("Sidebar IA — Integrations is a single nav row, no Secrets sub-item",
       </TestQueryProvider>,
     );
 
-    const integrations = screen.getByRole("link", { name: /integrations/i });
-    expect(integrations).toHaveAttribute("href", "/connections");
+    // #1707: the nav row is now labeled "Connections" (route unchanged).
+    const connections = screen.getByRole("link", { name: /^connections$/i });
+    expect(connections).toHaveAttribute("href", "/connections");
 
     // The option-A Secrets sidebar sub-item is reverted: no Secrets link here.
     expect(screen.queryByRole("link", { name: /^secrets$/i })).toBeNull();

@@ -2061,13 +2061,17 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
   return (
     <form
       onSubmit={handleSubmit}
-      className="mt-4 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
-      style={{ maxWidth: 380 }}
+      className="mt-4 flex w-full items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
+      style={{ maxWidth: 440 }}
     >
       <input
         ref={inputRef}
         type="text"
-        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        // text-ellipsis so a long *placeholder* (or value) degrades to an
+        // ellipsis on a too-narrow input instead of hard-clipping mid-word
+        // ("…want dor"). The wider max-width above lets the intended
+        // placeholder render in full at the normal empty-state width.
+        className="min-w-0 flex-1 truncate bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         placeholder="Describe the job you want done…"
         value={value}
         onChange={(e) => setValue(e.target.value)}

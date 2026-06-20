@@ -19,7 +19,7 @@ import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import type { CurrentUser } from "@/lib/types";
-import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -177,13 +177,14 @@ type NavItem = {
 // Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is gone,
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
-// Integrations. (MCP is a pinned item above the profile footer, see below.)
+// Connections. (MCP is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
-  { href: "/connections", label: "Integrations", icon: Plug },
+  // #1707: canonical "Connections" label (route stays /connections).
+  { href: "/connections", label: "Connections", icon: Plug },
 ];
 
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
@@ -587,7 +588,10 @@ export function UserProfileFooter({
 }: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
-  const [workspaceName, setWorkspaceName] = useState("Floom workspace");
+  // #1709: canonical fallback is "My workspace" (resolveWorkspaceName), NOT the
+  // brand-specific "Floom workspace" — the app is white-labeled and the OSS /me
+  // has no workspace yet on first paint.
+  const [workspaceName, setWorkspaceName] = useState("My workspace");
 
   useEffect(() => {
     let active = true;
@@ -612,16 +616,24 @@ export function UserProfileFooter({
         if (active && current) setWorkspaceName(resolveWorkspaceName(current.name));
       })
       .catch(() => {
-        if (active) setWorkspaceName("Floom workspace");
+        if (active) setWorkspaceName("My workspace");
       });
     return () => {
       active = false;
     };
   }, []);
 
-  // Multi-member: prefer username, then email, then display_name
-  const primary = (user as (typeof user & { username?: string | null }) | null)?.username
-    || user?.email || user?.display_name || "Local user";
+  // Multi-member: prefer username, then email, then display_name. #1728: skip
+  // UUID-shaped candidates so a raw user/owner id never leaks as the identity
+  // line (the OSS /me can return an id-only username).
+  const primary = resolveUserLabel(
+    [
+      (user as (typeof user & { username?: string | null }) | null)?.username,
+      user?.email,
+      user?.display_name,
+    ],
+    "Local user",
+  );
   const secondary = workspaceName;
   // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
   // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this

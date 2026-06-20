@@ -159,10 +159,16 @@ export function PromptInput({
           marketing landing prompt box; compact padding (py-2) keeps it short. */}
       <div
         className={cn(
+          // a11y #1711: the inner <textarea> is outline-none, so the composer
+          // had no visible focus indicator. Move the focus affordance to the
+          // wrapper: a token-based ring (--ring = --accent-line) appears whenever
+          // the composer is focused, satisfying the visible-focus requirement
+          // without changing the resting flat look.
           "flex items-center gap-2 rounded-xl bg-[var(--bg-app)] px-3 py-2",
+          "focus-within:ring-2 focus-within:ring-[var(--ring)] focus-within:ring-offset-0",
           isLanding
             ? "[border:none]"
-            : "[border:var(--bd-div)] focus-within:[border:var(--bd-div)]"
+            : "[border:var(--bd-div)]"
         )}
       >
         {/* Attach button */}
@@ -190,6 +196,9 @@ export function PromptInput({
 
         <textarea
           ref={textareaRef}
+          // a11y #1711: explicit accessible name (the textarea has no visible
+          // <label>; the placeholder is not an accessible name).
+          aria-label="Describe the job for a new worker"
           className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[120px] overflow-auto"
           placeholder={placeholder ?? "Message Emily..."}
           value={value}

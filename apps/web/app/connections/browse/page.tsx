@@ -526,7 +526,7 @@ export default function ConnectionsBrowsePage() {
         });
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Failed to load integrations";
+      const msg = error instanceof Error ? error.message : "Failed to load connections";
       setLoadError(msg);
       toast.error(msg);
     } finally {
@@ -685,7 +685,8 @@ export default function ConnectionsBrowsePage() {
     },
     states: {
       empty: {
-        title: "No integrations found",
+        // #1707: canonical "Connections" wording across the surface.
+        title: "No connections found",
         help: "Clear filters or try a broader search.",
         icon: Search,
         action:

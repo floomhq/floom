@@ -30,6 +30,7 @@ import {
   collectionCounts,
   humaniseAppName,
 } from "@/lib/connections/unify";
+import { resolveUserLabel } from "@/lib/workspace/display-name";
 
 // ---------------------------------------------------------------------------
 // #1233: Resolve owner_id to display name / email.
@@ -42,9 +43,14 @@ function resolveOwner(
 ): string {
   if (!ownerId) return "Not set";
   const member = members.find((m) => m.user_id === ownerId);
-  if (member) return member.display_name || member.email || ownerId;
-  // Fallback: truncate UUID so it's friendlier than the full 36-char string
-  return ownerId.length > 8 ? `${ownerId.slice(0, 8)}...` : ownerId;
+  // #1728: never surface a raw UUID. resolveUserLabel skips UUID-shaped
+  // candidates; when the only candidate IS the owner id (member matched but
+  // has no display_name/email, or no member matched at all) it falls back to
+  // the friendly "Workspace owner" label instead of leaking the UUID.
+  return resolveUserLabel(
+    [member?.display_name, member?.email],
+    "Workspace owner",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -735,9 +741,9 @@ export default function ConnectionsCollection({
   const loading = firstLoadPending && !timedOut;
   const error =
     timedOut && !hasCachedData
-      ? "Could not load integrations. Check your connection and try again."
+      ? "Could not load connections. Check your connection and try again."
       : connectionsQuery.isError && !connectionsQuery.data
-        ? "Could not load integrations. Check your connection and try again."
+        ? "Could not load connections. Check your connection and try again."
         : null;
   // Pinned advanced connection tabs (per-session): the "Advanced ▾" group on the
   // tab row pins/opens secondary tabs (Recent emails, Config). Mirrors the
@@ -811,7 +817,10 @@ export default function ConnectionsCollection({
   };
 
   const config: CollectionConfig<UnifiedConn> = {
-    title: "Integrations",
+    // #1707: canonical label is "Connections" (matches the header counter "N
+    // connections" and the sidebar nav). "Integrations" is dropped from the
+    // user-facing surface; routes are unchanged.
+    title: "Connections",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
     headerSlot: <ConnectionsChips />,
     items,
@@ -1159,7 +1168,7 @@ export default function ConnectionsCollection({
     add: {
       label: "Add",
       panel: {
-        title: "Add an integration",
+        title: "Add a connection",
         render: () => (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 460 }}>
             <p style={pad}>Connect an app, register an MCP server, or store a secret.</p>
@@ -1188,7 +1197,7 @@ export default function ConnectionsCollection({
     },
     states: {
       empty: {
-        title: "No integrations yet",
+        title: "No connections yet",
         help: "Connect an app, add an MCP server, or store a secret your workers can use.",
       },
       errorRetry: () => {
