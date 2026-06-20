@@ -96,11 +96,15 @@ def test_secret_cache_hits_and_invalidates(monkeypatch):
     class Secrets:
         def list_names(self, *, user_id):
             calls["list"] += 1
-            return {"API_KEY"}
+            return {"API_KEY", "UNDECLARED_API_KEY"}
 
         def resolve(self, *, user_id, names):
             calls["resolve"] += 1
-            return {"API_KEY": f"value-{calls['resolve']}"}
+            assert set(names) == {"API_KEY"}
+            return {
+                "API_KEY": f"value-{calls['resolve']}",
+                "UNDECLARED_API_KEY": "must-not-ship",
+            }
 
     repos = types.SimpleNamespace(workers=Workers(), secrets=Secrets())
 
@@ -108,6 +112,7 @@ def test_secret_cache_hits_and_invalidates(monkeypatch):
     second = run_service.get_secrets_for_worker("secret-worker", user_id="owner-1", repos=repos)
 
     assert calls["resolve"] == 1
+    assert calls["list"] == 0
     assert first == {"API_KEY": "value-1"}
     assert second == {"API_KEY": "value-1"}
 
@@ -115,6 +120,7 @@ def test_secret_cache_hits_and_invalidates(monkeypatch):
     third = run_service.get_secrets_for_worker("secret-worker", user_id="owner-1", repos=repos)
 
     assert calls["resolve"] == 2
+    assert calls["list"] == 0
     assert third == {"API_KEY": "value-2"}
 
 
