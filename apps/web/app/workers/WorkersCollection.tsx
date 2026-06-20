@@ -40,10 +40,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { ActionMenu } from "@/components/ui/action-menu";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, Brain, ChevronDown, Lock, MoreHorizontal, Plus } from "lucide-react";
+import { ArrowRight, Brain, ChevronDown, Lock, Plus } from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
@@ -67,7 +68,6 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -1496,10 +1496,9 @@ function WorkerDetailActions({
   return (
     <>
       {(canManage || can("run", w)) && (
-        <button
-          type="button"
-          className="c-addbtn"
-          style={pillBtn}
+        <Button
+          variant="outline"
+          size="sm"
           // R9: kill the jarring popup + hard-nav. The Run button routes to the
           // calm inline /run/{worker} page (schema-driven inputs + live
           // output-first run panel), the same standalone runnable surface — no
@@ -1508,20 +1507,19 @@ function WorkerDetailActions({
           title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
-        </button>
+        </Button>
       )}
       {(canManage || can("edit", w)) && (
-        <DropdownMenu>
-          <DropdownMenuTrigger className="c-vpill" style={pillBtn} aria-label="More worker actions">
-            <MoreHorizontal className="size-3.5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44 p-1">
-            <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
-            {/* Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
-                (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
-                the schedule, which a raw worker.yml `enabled:` PUT does not do. */}
-            <DropdownMenuItem
-              onClick={() => {
+        <ActionMenu
+          label="More worker actions"
+          items={[
+            { label: "Edit", onSelect: () => setEditOpen(true) },
+            // Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
+            // (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
+            // the schedule, which a raw worker.yml `enabled:` PUT does not do.
+            {
+              label: w.enabled === false ? "Resume" : "Pause",
+              onSelect: () => {
                 const pausing = w.enabled !== false;
                 const action = pausing ? api.workers.pause : api.workers.resume;
                 action(w.id)
@@ -1531,15 +1529,14 @@ function WorkerDetailActions({
                     toast.success(pausing ? "Worker paused" : "Worker resumed");
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not update worker"));
-              }}
-            >
-              {w.enabled === false ? "Resume" : "Pause"}
-            </DropdownMenuItem>
-            {/* Share — opens the real Share modal (company access + grants +
-                anonymous public link with revoke), not a bare copy-link. */}
-            <DropdownMenuItem onClick={() => setShareOpen(true)}>Share</DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
+              },
+            },
+            // Share — opens the real Share modal (company access + grants +
+            // anonymous public link with revoke), not a bare copy-link.
+            { label: "Share", onSelect: () => setShareOpen(true) },
+            {
+              label: workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live",
+              onSelect: () => {
                 const next = workerStageKey(w) === "live" ? "draft" : "live";
                 api.workers.setStage(w.id, next)
                   .then((updated) => {
@@ -1547,12 +1544,11 @@ function WorkerDetailActions({
                     onUpdated({ ...w, stage: updated.stage });
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not update stage"));
-              }}
-            >
-              {workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
+              },
+            },
+            {
+              label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+              onSelect: () => {
                 const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
                 const action = isArchived ? api.workers.restore : api.workers.archive;
                 action(w.id)
@@ -1561,26 +1557,29 @@ function WorkerDetailActions({
                     onUpdated({ ...w });
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not update worker"));
-              }}
-            >
-              {(w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => {
-                if (!window.confirm(`Delete "${w.name}"? This cannot be undone.`)) return;
+              },
+            },
+            {
+              label: "Delete",
+              destructive: true,
+              // Replaces window.confirm with the shared ConfirmDialog.
+              confirm: {
+                title: `Delete "${w.name}"?`,
+                body: "This cannot be undone.",
+                confirmLabel: "Delete",
+                destructive: true,
+              },
+              onSelect: () => {
                 api.workers.delete(w.id)
                   .then(() => {
                     toast.success("Worker deleted");
                     onUpdated({ ...w, _deleted: true } as WorkerSummary & { _deleted?: boolean });
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not delete worker"));
-              }}
-            >
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              },
+            },
+          ]}
+        />
       )}
 
       {/* R9: the Run popup is gone — the Run button now routes to the calm
@@ -2016,7 +2015,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "Add", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed
+    add: { label: "New worker", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed. Label matches the sidebar primary CTA (one action, one label).
     states: {
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {
