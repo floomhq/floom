@@ -11,7 +11,7 @@ labels: enhancement
 
 ## Who needs this?
 
-<!-- Local OSS users, self-hosters, worker authors, MCP users, managed deployment users, etc. -->
+<!-- Local users, self-hosters, worker authors, MCP users, managed deployment users, etc. -->
 
 ## Proposed solution
 

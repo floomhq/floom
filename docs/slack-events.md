@@ -2,7 +2,7 @@
 
 Workeros exposes a native Slack Events API receiver at:
 
-- OSS/self-host: `https://localhost:8000/slack/events`
+- Self-hosted: `https://localhost:8000/slack/events`
 - Remote/self-hosted: `https://api.workeros.example.com/slack/events`
 
 ## Required Env

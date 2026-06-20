@@ -135,6 +135,10 @@ If you are not sure where to start:
 - Do not commit secrets, real customer data, or personal information. Use
   `example.com` addresses and synthetic data in tests and fixtures.
 - Run the relevant tests before opening the PR and note what you ran.
+- Sign off each commit with `git commit -s`. Workeros uses Developer
+  Certificate of Origin signoff for external contributions and does not require
+  a separate contributor license agreement unless maintainers say so before a
+  specific contribution is accepted.
 
 ## Reporting bugs and security issues
 
@@ -146,5 +150,14 @@ For common local setup and runtime issues, check
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the
-[Sustainable Use License 1.0](LICENSE) that covers this project.
+By contributing, you certify the Developer Certificate of Origin 1.1 statement
+for your contribution and agree that your contributions will be licensed under
+the [Sustainable Use License 1.0](LICENSE) that covers this project.
+
+Include this trailer on every commit:
+
+```text
+Signed-off-by: Your Name <you@example.com>
+```
+
+The DCO text is available at <https://developercertificate.org/>.

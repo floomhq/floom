@@ -53,9 +53,9 @@ If `WORKEROS_GIT_REMOTE` is set, the engine calls `configure_remote(workspace_di
 
 ## Host hook: workspace_id resolver
 
-In OSS single-tenant mode the git root is a single directory shared by the one user. A downstream multi-tenant host can give each workspace its own isolated git root.
+In self-hosted single-tenant mode the git root is a single directory shared by the one user. A downstream multi-tenant host can give each workspace its own isolated git root.
 
-`set_workspace_id_resolver(fn)` registers a callable that returns the active `workspace_id` for the current request. When set, the host uses the returned value to scope the git root to the right per-workspace directory. In OSS mode this resolver is never registered and all functions receive the workspace dir directly as a parameter.
+`set_workspace_id_resolver(fn)` registers a callable that returns the active `workspace_id` for the current request. When set, the host uses the returned value to scope the git root to the right per-workspace directory. In self-hosted mode this resolver is never registered and all functions receive the workspace dir directly as a parameter.
 
 A downstream host can register this at startup:
 
