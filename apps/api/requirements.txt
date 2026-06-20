@@ -35,4 +35,4 @@ boto3>=1.40,<2
 
 # Optional: Vertex AI / Gemini model provider (resolved by litellm at runtime).
 # Required when GOOGLE_APPLICATION_CREDENTIALS points at Google ADC/WIF config.
-google-auth>=2.49,<3
+google-auth>=2.55.0,<3
