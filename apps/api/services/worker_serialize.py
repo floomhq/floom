@@ -107,6 +107,8 @@ def _should_ignore_worker_file(rel_path: str) -> bool:
             return True
         if part.endswith(".pyc"):
             return True
+        if ".bak" in part:
+            return True
     return False
 
 
