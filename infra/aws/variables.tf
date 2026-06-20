@@ -49,7 +49,7 @@ variable "web_desired_count" {
   default = 1
 }
 variable "worker_desired_count" {
-  description = "Set to 0 until engine #1531 (WORKEROS_ROLE split + worker_main entrypoint) lands; then 1+."
+  description = "1 = run the env-driven worker (WORKEROS_ROLE=worker drain loop; engine + cloud lifespan are role-aware). 0 = disable (e.g. so a test stack does not drain a shared prod queue)."
   type        = number
   default     = 1
 }
