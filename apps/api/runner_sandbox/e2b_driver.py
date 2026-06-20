@@ -437,6 +437,19 @@ def _env_truthy(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_falsey(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in {"0", "false", "no", "off"}
+
+
+def _bundle_baked_enabled() -> bool:
+    return not _env_falsey("WORKEROS_E2B_BUNDLE_BAKED_ENABLED")
+
+
+def _worker_bundle_baked(config: WorkerConfig | None) -> bool:
+    runtime = getattr(config, "runtime", None)
+    return bool(getattr(runtime, "bundle_baked", False)) and _bundle_baked_enabled()
+
+
 _DEFAULT_E2B_PYTHON_BAKED_PACKAGES = {
     "boto3",
     "google-auth",
@@ -603,12 +616,24 @@ def _template_cache_mapping() -> dict[str, str]:
     }
 
 
-def _e2b_template_for_run(worker_dir: Path, config: WorkerConfig | None, *, log_fn: Callable[[str, str], None]) -> str | None:
+def _e2b_template_for_run(
+    worker_dir: Path,
+    config: WorkerConfig | None,
+    *,
+    log_fn: Callable[[str, str], None],
+) -> tuple[str | None, bool]:
     cache_key = _worker_template_cache_key(worker_dir, config)
-    cached_template = _template_cache_mapping().get(cache_key)
-    if cached_template:
-        log_fn(f"[e2b] Using cached worker template for bundle key {cache_key[:12]}", "info")
-        return cached_template
+    bundle_baked = _worker_bundle_baked(config)
+    if bundle_baked:
+        cached_template = _template_cache_mapping().get(cache_key)
+        if cached_template:
+            log_fn(f"[e2b] Using baked worker template for bundle key {cache_key[:12]}", "info")
+            return cached_template, True
+        log_fn(
+            f"[e2b] Worker requests a baked bundle template, but no cache entry exists for {cache_key[:12]}; "
+            "falling back to per-run bundle upload",
+            "warning",
+        )
 
     template = _e2b_template_for_config(config)
     kind = _runtime_kind(config)
@@ -622,7 +647,7 @@ def _e2b_template_for_run(worker_dir: Path, config: WorkerConfig | None, *, log_
             "E2B fixes memory/cpu on the template, not Sandbox.create().",
             "warning",
         )
-    return template
+    return template, False
 
 
 def _sandbox_resource_log_line(config: WorkerConfig | None, sandbox_template: str | None) -> str:
@@ -1739,7 +1764,7 @@ class E2BSandboxDriver(SandboxDriver):
         # still receive only declared user secrets plus callback vars.
         _worker_author_env = _worker_author_platform_env() if worker_id == _WORKER_AUTHOR_ID else {}
         _sandbox_envs.update(_worker_author_env)
-        sandbox_template = _e2b_template_for_run(worker_dir, config, log_fn=log_fn)
+        sandbox_template, bundle_baked_template = _e2b_template_for_run(worker_dir, config, log_fn=log_fn)
         python_template_deps_baked = _env_truthy("WORKEROS_E2B_PYTHON_DEPS_BAKED")
         node_template_deps_baked = _env_truthy("WORKEROS_E2B_NODE_DEPS_BAKED")
         if sandbox_template:
@@ -1798,7 +1823,7 @@ class E2BSandboxDriver(SandboxDriver):
             else:
                 sandbox.files.make_dir(workdir)
 
-            if not sandbox_prepared:
+            if not sandbox_prepared and not bundle_baked_template:
                 # Upload bundle files (read-only worker code; never contains inputs/).
                 made_dirs = {workdir}
                 upload_tree_tarball(
@@ -1814,6 +1839,11 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn=log_fn,
                     label="worker bundle",
                 )
+            if not sandbox_prepared:
+                if bundle_baked_template:
+                    made_dirs = {workdir}
+                    log_fn("[e2b] Skipping worker bundle upload; baked template already contains it", "info")
+
                 # Write workeros.py into the workdir so workers with calls: can do
                 # `from workeros import call_worker`. Only uploaded when the worker
                 # declares calls; keeps the sandbox clean for workers that do not need it.
