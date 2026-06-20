@@ -43,6 +43,43 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function retryAfterSecondsFromBody(body: unknown): number | null {
+  if (!body || typeof body !== "object") return null;
+  const detail = "detail" in body ? (body as { detail?: unknown }).detail : undefined;
+  if (!detail || typeof detail !== "object") return null;
+  const retryAfter = (detail as { retry_after?: unknown }).retry_after;
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
+    return retryAfter;
+  }
+  if (typeof retryAfter === "string") {
+    const parsed = Number(retryAfter);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+function retryAfterSecondsFromHeader(headers: Headers | undefined): number | null {
+  const raw = headers?.get("retry-after");
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) return seconds;
+  const dateMs = Date.parse(raw);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(1, Math.ceil((dateMs - Date.now()) / 1000));
+  }
+  return null;
+}
+
+export function cloudRateLimitRetryMs(
+  error: WorkerosApiError,
+  pollingIntervalSeconds: number,
+): number {
+  const retryAfterSeconds =
+    retryAfterSecondsFromHeader(error.headers) ?? retryAfterSecondsFromBody(error.body);
+  const fallbackSeconds = Math.max(pollingIntervalSeconds, 5);
+  return Math.ceil((retryAfterSeconds ?? fallbackSeconds) * 1000);
+}
+
 export type LoginOptions = {
   cloud?: boolean;
 };
@@ -205,9 +242,10 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
         }
         if (error.status === 429 && isCloud) {
           // Hosted: pending approval polls can collide with the cloud rate
-          // limiter. Treat the rate limit as slow_down instead of failing the
-          // device flow before a human can approve it.
-          await sleep(Math.max(started.polling_interval_seconds * 1000, 5000));
+          // limiter. Treat it as OAuth device-flow slow_down and honor the
+          // server retry window so we do not keep re-tripping the same bucket.
+          const retryMs = cloudRateLimitRetryMs(error, started.polling_interval_seconds);
+          await sleep(Math.min(retryMs, Math.max(0, deadline - Date.now())));
           continue;
         }
       }

@@ -7,6 +7,7 @@ export class WorkerosApiError extends Error {
     message: string,
     readonly status?: number,
     readonly body?: unknown,
+    readonly headers?: Headers,
   ) {
     super(message);
     this.name = "WorkerosApiError";
@@ -238,6 +239,7 @@ export class WorkerosApiClient {
         `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
+        response.headers,
       );
     }
     return parsed;
@@ -263,6 +265,7 @@ export class WorkerosApiClient {
         `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
+        response.headers,
       );
     }
     return new Uint8Array(await response.arrayBuffer());
@@ -290,6 +293,7 @@ export class WorkerosApiClient {
         `Upload for input ${inputName} failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
+        response.headers,
       );
     }
     const uploadId = parsed && typeof parsed === "object" ? (parsed as { id?: unknown }).id : undefined;
