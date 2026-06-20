@@ -33,6 +33,17 @@ function extractItems(decisionInput: Json): unknown[] | null {
   return null;
 }
 
+/**
+ * Whether the decision input carries structured action items (an array of
+ * records / strings). Lets a caller decide whether `<ApprovalActionItems>`
+ * will actually render content BEFORE committing to it — `<ApprovalActionItems>`
+ * itself returns null when there are none, but a JSX element is always truthy,
+ * so callers must NOT branch on the element to detect emptiness.
+ */
+export function hasActionItems(decisionInput: Json): boolean {
+  return extractItems(decisionInput) !== null;
+}
+
 // Derive the action verb (e.g. "post_note", "send_email", "create_file") from
 // the decision input, for the plain-language line and the per-item tag.
 function actionVerb(decisionInput: Json): string | null {

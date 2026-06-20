@@ -4,6 +4,7 @@ import {
   workerStatusPill,
   workerStatusKey,
   workerStageKey,
+  workerStageLabel,
   isRecent,
   workerSmartTags,
   contentTagOptions,
@@ -61,6 +62,15 @@ describe("workerStageKey", () => {
   });
   it("defaults a plain new worker to draft", () => {
     expect(workerStageKey(w({}))).toBe("draft");
+  });
+});
+
+describe("workerStageLabel", () => {
+  it("returns the capitalized stage label matching the per-card badge", () => {
+    expect(workerStageLabel(w({ stage: "draft" }))).toBe("Draft");
+    expect(workerStageLabel(w({ stage: "live" }))).toBe("Live");
+    expect(workerStageLabel(w({ is_example: true }))).toBe("Live");
+    expect(workerStageLabel(w({}))).toBe("Draft");
   });
 });
 
