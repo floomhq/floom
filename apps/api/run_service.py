@@ -1055,7 +1055,11 @@ def update_run_status(
         # the monthly-spend aggregate and approval cost-so-far don't have to
         # re-read transcripts later. Never let cost accounting break a run.
         try:
-            _persist_run_cost(run_id)
+            # Route through the repo so the write lands in whatever backend the
+            # deployment uses (sqlite single-tenant OR cloud Supabase). The old
+            # raw get_db() write went only to local sqlite, leaving cloud runs
+            # with null total_tokens/total_cost_usd.
+            _persist_run_cost(run_id, user_id=owner_id, repos=repos_obj)
         except Exception:
             logger.debug("run cost persistence failed for %s", run_id, exc_info=True)
         _dispatch_terminal_run_alerts(

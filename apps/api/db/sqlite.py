@@ -2357,6 +2357,8 @@ class SqliteRunRepository:
             "bundle_snapshot_path",
             "quality_warning",
             "trigger_ref",
+            "total_tokens",
+            "total_cost_usd",
         }
         updates: list[str] = []
         params: list[Any] = []

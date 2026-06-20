@@ -2722,8 +2722,16 @@ class WorkerStats(BaseModel):
     runs_30d: int = 0
     success_rate_30d: Optional[float] = None
     avg_duration_ms: Optional[float] = None
+    median_duration_ms: Optional[float] = None
     p95_duration_ms: Optional[float] = None
+    # How many orphaned/never-closed runs were excluded from the duration
+    # aggregate (duration > absolute timeout ceiling). Surfaced so the headline
+    # is honest about a stuck-run long tail rather than silently dropping it.
+    duration_outliers_excluded: int = 0
     total_failures: int = 0
+    # Failed runs grouped by failure category (timeout/crash/config/auth/
+    # network/resource/validation/quality/cancelled/unknown). Empty when none.
+    failures_by_category: Dict[str, int] = Field(default_factory=dict)
     last_error: Optional[str] = None
     last_error_at: Optional[str] = None
 
@@ -2736,6 +2744,10 @@ class WorkspaceStats(BaseModel):
     total_runs_7d: int = 0
     success_rate_7d: Optional[float] = None
     avg_duration_ms: Optional[float] = None
+    median_duration_ms: Optional[float] = None
+    p95_duration_ms: Optional[float] = None
+    duration_outliers_excluded: int = 0
+    failures_by_category: Dict[str, int] = Field(default_factory=dict)
     most_active_worker_id: Optional[str] = None
     most_active_worker_name: Optional[str] = None
 
