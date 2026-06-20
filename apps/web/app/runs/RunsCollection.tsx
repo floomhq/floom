@@ -134,6 +134,7 @@ function RunMetricsStrip({ d }: { d: RunDetail }) {
     ["Files", String(d.artifacts?.length ?? 0)],
   ];
   if (tokenCount != null) items.push(["Tokens", tokenCount.toLocaleString()]);
+  items.push(["Cost", d.total_cost_usd != null ? `$${d.total_cost_usd.toFixed(2)}` : "Not reported"]);
   return (
     <div
       style={{
@@ -299,11 +300,15 @@ function LogsTab({ r }: { r: RunSummary }) {
         <span>{formatDuration(d.duration_ms)}</span>
         <span style={kvK}>Tokens</span>
         <span style={{ fontFamily: "var(--font-mono)" }}>
-          {tokenCount != null ? tokenCount.toLocaleString() : "—" /* em-dash-ok: blank-value glyph */}
+          {tokenCount != null ? tokenCount.toLocaleString() : "Not reported"}
+        </span>
+        <span style={kvK}>Cost</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>
+          {d.total_cost_usd != null ? `$${d.total_cost_usd.toFixed(2)}` : "Not reported"}
         </span>
       </div>
       <div>
-        <h4 style={h4}>Steps</h4>
+        <h4 style={h4}>Activity</h4>
         {/* R9: reuse RunDetailSplitPane's real ai-elements (Tool / Task /
             StackTrace) transcript renderer, no hand-rolled steps table. The
             tool-call blocks, step tasks, and failure banners are the same
