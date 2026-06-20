@@ -17,6 +17,7 @@ import type {
   RunSummary,
   TriggerSpec,
   WorkerInput,
+  WorkerAlert,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import {
@@ -43,7 +44,18 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, Brain, ChevronDown, Lock, MoreHorizontal, Plus } from "lucide-react";
+import {
+  ArrowRight,
+  Brain,
+  ChevronDown,
+  Lock,
+  Mail,
+  MoreHorizontal,
+  Plus,
+  Trash2,
+  Webhook,
+  X,
+} from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
@@ -1172,61 +1184,375 @@ function OpsInputsPanel({ w }: { w: WorkerSummary }) {
   );
 }
 
-// Operations > Alerts & webhooks: split EMAIL-ON-EVENT from WEBHOOK-POST, honest
-// about the backend. Per-worker alert rows (email + webhook channels) are wired;
-// the workspace failure-email RECIPIENT is a confirmed silent no-op (no UI field
-// to set failure_email_to) — surfaced as a neutral callout, not implied working.
+// Operations > Alerts & webhooks: CONFIGURABLE per-worker alert rows (#1677).
+// Each row fires on selected run terminal events (failed / completed) and
+// delivers to an email recipient list and/or an outbound webhook URL. Wired to
+// the real CRUD: GET/POST/DELETE /workers/{id}/alerts. Webhook POSTs are signed
+// (X-Workeros-Signature) and SSRF-pinned server-side; email goes via Resend.
+const ALERT_EVENTS = ["failed", "completed"] as const;
+type AlertEvent = (typeof ALERT_EVENTS)[number];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
-  if (d === undefined) return <Loading />;
-  if (d === null) return <DetailError />;
+  const [alerts, setAlerts] = useState<WorkerAlert[] | undefined | null>(undefined);
+
+  const reload = useCallback(async () => {
+    try {
+      setAlerts(await api.workers.alerts.list(w.id));
+    } catch (err) {
+      logError("Could not load alerts.", err);
+      setAlerts(null);
+    }
+  }, [w.id]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h4 style={h4}>Alerts (email on event)</h4>
-        <ConfigInfoGrid
-          rows={[
-            ["Events", "failed, completed"],
-            ["Recipients", "Workspace members (validated at save)"],
-            ["Channel", "Email via Resend"],
-          ]}
-        />
-        <p style={{ ...muted, fontSize: 12.5, marginTop: 8 }}>
-          Email a workspace member when this worker&apos;s run fails or completes.
-        </p>
+        <h4 style={h4}>Configured alerts</h4>
+        {alerts === undefined ? (
+          <Loading />
+        ) : alerts === null ? (
+          <DetailError />
+        ) : alerts.length === 0 ? (
+          <div
+            className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
+            style={{ ...muted, fontSize: 12.5 }}
+          >
+            No alerts yet. Add one below to be notified when this worker&apos;s runs
+            fail or complete.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {alerts.map((a) => (
+              <AlertRow
+                key={a.id}
+                alert={a}
+                onDeleted={() => void reload()}
+                workerId={w.id}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
-      <section>
-        <h4 style={h4}>Webhooks (POST on event)</h4>
-        <ConfigInfoGrid
-          rows={[
-            ["Events", "failed, completed"],
-            ["Signing", "X-Workeros-Signature (HMAC)"],
-            ["Egress", "Internal/metadata targets blocked (SSRF-pinned)"],
-            ["Current", d.webhook_url ? <span key="u" className="font-mono text-xs">{d.webhook_url}</span> : "Not set"],
-          ]}
-        />
-        <p style={{ ...muted, fontSize: 12.5, marginTop: 8 }}>
-          POST the run outcome to an external URL on the same events, signed and
-          redirect-blocked.
-        </p>
-      </section>
+      <AddAlertForm workerId={w.id} onCreated={() => void reload()} />
 
-      {/* Honest callout for the confirmed workspace failure-email no-op (N3). */}
-      <div
-        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
-        style={{ fontSize: 12.5, color: "var(--ink-soft)" }}
+      <p style={{ ...muted, fontSize: 12.5 }}>
+        Webhook POSTs are signed with an <code>X-Workeros-Signature</code> HMAC header
+        and blocked from internal / metadata targets. Email delivery goes to workspace
+        members via Resend.
+      </p>
+    </div>
+  );
+}
+
+// One configured alert: its channels + events, with a delete control.
+function AlertRow({
+  alert,
+  workerId,
+  onDeleted,
+}: {
+  alert: WorkerAlert;
+  workerId: string;
+  onDeleted: () => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await api.workers.alerts.remove(workerId, alert.id);
+      toast.success("Alert removed.");
+      onDeleted();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove alert");
+      setDeleting(false);
+    }
+  };
+  return (
+    <div
+      className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
+      style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {alert.on.map((ev) => (
+            <span key={ev} className="c-vpill" style={{ padding: "3px 8px", fontSize: 11.5 }}>
+              on {ev}
+            </span>
+          ))}
+        </div>
+        {alert.email_to && alert.email_to.length > 0 && (
+          <div className="flex items-center gap-2" style={{ fontSize: 12.5 }}>
+            <Mail className="size-3.5 shrink-0" style={{ color: "var(--muted-foreground)" }} aria-hidden="true" />
+            <span className="min-w-0 break-words">{alert.email_to.join(", ")}</span>
+          </div>
+        )}
+        {alert.url && (
+          <div className="flex items-center gap-2" style={{ fontSize: 12.5 }}>
+            <Webhook className="size-3.5 shrink-0" style={{ color: "var(--muted-foreground)" }} aria-hidden="true" />
+            <span className="min-w-0 break-words font-mono text-xs">{alert.url}</span>
+          </div>
+        )}
+        {alert.description && (
+          <span style={{ ...muted, fontSize: 12 }}>{alert.description}</span>
+        )}
+      </div>
+      <button
+        type="button"
+        aria-label="Remove alert"
+        className="c-vpill shrink-0"
+        style={{ padding: "5px 8px", cursor: "pointer" }}
+        onClick={() => void remove()}
+        disabled={deleting}
+        title="Remove alert"
       >
-        <strong style={{ color: "var(--ink)" }}>Heads up:</strong> the workspace-level
-        &quot;email me on run failures&quot; toggle sends to nobody unless a recipient is
-        configured server-side (no UI field exists for it yet). Per-worker alert and
-        webhook channels above are wired and do deliver.
-        <div style={{ marginTop: 6, color: "var(--muted-foreground)" }}>
-          One alert row carries one event set plus an email and/or a webhook channel; the
-          two channels are split here for clarity.
+        <Trash2 className="size-3.5" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+// The add-alert form: event toggles + recipient email(s) + webhook URL. At least
+// one channel (email or URL) and one event are required. Validates email + URL
+// format client-side; the backend re-validates (membership, SSRF) on save.
+function AddAlertForm({
+  workerId,
+  onCreated,
+}: {
+  workerId: string;
+  onCreated: () => void;
+}) {
+  const [events, setEvents] = useState<Set<AlertEvent>>(new Set(["failed"]));
+  const [emails, setEmails] = useState<string[]>([]);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [url, setUrl] = useState("");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setEvents(new Set(["failed"]));
+    setEmails([]);
+    setEmailDraft("");
+    setUrl("");
+    setDescription("");
+  };
+
+  const toggleEvent = (ev: AlertEvent) => {
+    setEvents((prev) => {
+      const next = new Set(prev);
+      if (next.has(ev)) next.delete(ev);
+      else next.add(ev);
+      return next;
+    });
+  };
+
+  const addEmail = () => {
+    const value = emailDraft.trim();
+    if (!value) return;
+    if (!EMAIL_RE.test(value)) {
+      toast.error(`Not a valid email address: ${value}`);
+      return;
+    }
+    if (emails.includes(value)) {
+      setEmailDraft("");
+      return;
+    }
+    setEmails((prev) => [...prev, value]);
+    setEmailDraft("");
+  };
+
+  const removeEmail = (addr: string) => setEmails((prev) => prev.filter((e) => e !== addr));
+
+  const trimmedUrl = url.trim();
+  const urlValid = (() => {
+    if (!trimmedUrl) return true; // optional
+    try {
+      const u = new URL(trimmedUrl);
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  })();
+
+  const hasChannel = emails.length > 0 || trimmedUrl.length > 0;
+  const canSave = hasChannel && events.size > 0 && urlValid && !saving;
+
+  const save = async () => {
+    if (events.size === 0) {
+      toast.error("Select at least one event.");
+      return;
+    }
+    if (!hasChannel) {
+      toast.error("Add a recipient email or a webhook URL.");
+      return;
+    }
+    if (!urlValid) {
+      toast.error("Webhook URL must be a valid http(s) URL.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.workers.alerts.create(workerId, {
+        on: ALERT_EVENTS.filter((e) => events.has(e)),
+        ...(emails.length > 0 ? { email_to: emails } : {}),
+        ...(trimmedUrl ? { url: trimmedUrl } : {}),
+        ...(description.trim() ? { description: description.trim() } : {}),
+      });
+      toast.success("Alert saved.");
+      reset();
+      onCreated();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save alert");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section>
+      <h4 style={h4}>Add alert</h4>
+      <div
+        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-4"
+        style={{ display: "flex", flexDirection: "column", gap: 16 }}
+      >
+        {/* Events */}
+        <div className="flex flex-col gap-2">
+          <Label style={{ fontSize: 12.5 }}>Fire on</Label>
+          <div className="flex flex-wrap gap-2">
+            {ALERT_EVENTS.map((ev) => {
+              const on = events.has(ev);
+              return (
+                <button
+                  key={ev}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={on}
+                  className="c-vpill"
+                  style={{
+                    padding: "5px 11px",
+                    cursor: "pointer",
+                    ...(on
+                      ? { background: "var(--bg-3)", color: "var(--ink)", fontWeight: 500 }
+                      : {}),
+                  }}
+                  onClick={() => toggleEvent(ev)}
+                >
+                  Run {ev}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Recipient emails (multi) */}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`alert-email-${workerId}`} style={{ fontSize: 12.5 }}>
+            Recipient email(s)
+          </Label>
+          {emails.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {emails.map((addr) => (
+                <span
+                  key={addr}
+                  className="c-vpill"
+                  style={{ padding: "3px 6px 3px 9px", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
+                >
+                  {addr}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${addr}`}
+                    onClick={() => removeEmail(addr)}
+                    style={{ display: "inline-flex", cursor: "pointer", color: "var(--muted-foreground)" }}
+                  >
+                    <X className="size-3" aria-hidden="true" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Input
+              id={`alert-email-${workerId}`}
+              type="email"
+              placeholder="you@example.com"
+              value={emailDraft}
+              onChange={(e) => setEmailDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === ",") {
+                  e.preventDefault();
+                  addEmail();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="c-vpill shrink-0"
+              style={{ ...pillBtn, cursor: "pointer" }}
+              onClick={addEmail}
+            >
+              <Plus className="size-3.5" aria-hidden="true" /> Add
+            </button>
+          </div>
+          <span style={{ ...muted, fontSize: 11.5 }}>
+            Must be a workspace member. Press Enter to add each address.
+          </span>
+        </div>
+
+        {/* Webhook URL */}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`alert-url-${workerId}`} style={{ fontSize: 12.5 }}>
+            Webhook URL
+          </Label>
+          <Input
+            id={`alert-url-${workerId}`}
+            type="url"
+            placeholder="https://hooks.example.com/workeros"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            aria-invalid={!urlValid}
+          />
+          {!urlValid && (
+            <span style={{ fontSize: 11.5, color: "#C98A1A" }}>
+              Enter a valid http(s) URL.
+            </span>
+          )}
+        </div>
+
+        {/* Description (optional) */}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`alert-desc-${workerId}`} style={{ fontSize: 12.5 }}>
+            Description <span style={muted}>(optional)</span>
+          </Label>
+          <Input
+            id={`alert-desc-${workerId}`}
+            placeholder="e.g. Page on-call on failure"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className="c-addbtn"
+            style={{ ...pillBtn, cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.55 }}
+            onClick={() => void save()}
+            disabled={!canSave}
+          >
+            {saving ? "Saving…" : "Save alert"}
+          </button>
+          {!hasChannel && (
+            <span style={{ ...muted, fontSize: 11.5 }}>
+              Add a recipient email or a webhook URL.
+            </span>
+          )}
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
