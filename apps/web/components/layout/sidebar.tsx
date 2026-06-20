@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Grid2x2 } from "lucide-react";
+import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -173,7 +173,7 @@ type NavItem = {
   badge?: boolean;
 };
 
-// Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is GONE,
+// Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is gone,
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
 // Integrations. (MCP is a pinned item above the profile footer, see below.)
@@ -251,7 +251,7 @@ function SidebarMcpItem({ onNavigate }: { onNavigate?: () => void }) {
         title="Add Floom to your AI client"
         className="flex h-9 w-full items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
       >
-        <Grid2x2 className="w-4 h-4" />
+        <Terminal className="w-4 h-4" />
         MCP
       </button>
     </div>
@@ -497,7 +497,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
               aria-label="MCP, add Floom to your AI client"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 hover:bg-[var(--active-nav-bg)] hover:text-ink"
             >
-              <Grid2x2 className="w-4 h-4" />
+              <Terminal className="w-4 h-4" />
             </button>
             <Link
               href="/settings"
