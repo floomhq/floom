@@ -152,11 +152,17 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   const isOpen = selected != null;
 
   // ---- detail (split right pane) ----
-  const detail = isOpen ? config.detail(selected!) : null;
+  // First pass resolves the tab set so we can derive the active tab key, then we
+  // rebuild the detail passing that key — this lets a detail config (e.g. the
+  // worker "Advanced ▾" group) mark exactly the active view, not a parallel
+  // pinned set. config.detail is pure, so the double call is side-effect-free and
+  // the tab set does not depend on the active key.
+  const baseDetail = isOpen ? config.detail(selected!) : null;
   const activeTabKey =
-    detail && state.tab && detail.tabs.some((t) => t.key === state.tab)
+    baseDetail && state.tab && baseDetail.tabs.some((t) => t.key === state.tab)
       ? state.tab!
-      : detail?.tabs[0]?.key ?? "";
+      : baseDetail?.tabs[0]?.key ?? "";
+  const detail = isOpen ? config.detail(selected!, activeTabKey) : null;
 
   // ---- keyboard nav (SPEC §8c) ----
   const onKeyDown = (e: React.KeyboardEvent) => {
