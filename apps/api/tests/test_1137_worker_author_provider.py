@@ -121,6 +121,16 @@ def test_worker_author_routes_gemini_through_litellm(monkeypatch):
     assert captured["messages"][0]["content"] == "S"
 
 
+def test_worker_author_parses_first_json_object_with_trailing_text():
+    worker_author = _load_worker_author_module()
+    raw = '{"worker_yml": "id: w\\n", "run_code": "print(1)"}\n\nHere is why this works.'
+
+    parsed = worker_author._extract_json_object(raw)
+
+    assert parsed["worker_yml"] == "id: w\n"
+    assert parsed["run_code"] == "print(1)"
+
+
 def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypatch):
     from runner_sandbox.e2b_driver import _worker_author_platform_env
 
