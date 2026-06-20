@@ -554,6 +554,24 @@ def _context_upload_limit_bytes() -> int:
     return configured if configured > 0 else DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES
 
 
+def _context_total_limit_bytes() -> int:
+    try:
+        configured = int(os.environ.get("WORKEROS_CONTEXT_MAX_BYTES", ""))
+    except ValueError:
+        configured = 0
+    if configured > 0:
+        return configured
+    from contexts import MAX_CONTEXT_BYTES
+
+    return MAX_CONTEXT_BYTES
+
+
+def _format_bytes(value: int) -> str:
+    if value % (1024 * 1024) == 0:
+        return f"{value // (1024 * 1024)} MiB"
+    return f"{value} bytes"
+
+
 def _contexts_git_prefix() -> str:
     """Relative path of the contexts dir within the workspace git root.
 
@@ -722,13 +740,14 @@ def _context_detail(
 
 
 def _raise_context_quota_if_needed(name: str) -> None:
-    from contexts import context_dir, context_total_size, MAX_CONTEXT_BYTES
+    from contexts import context_dir, context_total_size
 
     total = context_total_size(context_dir(name))
-    if total > MAX_CONTEXT_BYTES:
+    limit = _context_total_limit_bytes()
+    if total > limit:
         raise HTTPException(
             status_code=400,
-            detail=f"Context exceeds 50MB total size limit ({total} bytes)",
+            detail=f"Context exceeds {_format_bytes(limit)} total size limit ({total} bytes)",
         )
 
 

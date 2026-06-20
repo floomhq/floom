@@ -108,6 +108,29 @@ def _upload(client: TestClient, content: bytes) -> str:
     return resp.json()["sha256"]
 
 
+def test_upload_accepts_mp4_and_mov_media_by_default():
+    client = _client()
+    for filename, media_type in [
+        ("clip.mp4", "video/mp4"),
+        ("iphone.mov", "video/quicktime"),
+    ]:
+        resp = client.post(
+            "/uploads",
+            files={"file": (filename, io.BytesIO(b"video-bytes"), media_type)},
+            headers=_AUTH,
+        )
+        assert resp.status_code in (200, 201), resp.text
+        body = resp.json()
+        assert body["sha256"]
+        assert body["media_type"] == media_type
+
+
+def test_upload_default_limit_supports_large_media():
+    from services.uploads import _upload_max_bytes
+
+    assert _upload_max_bytes() == 500 * 1024 * 1024
+
+
 def _blob_exists(sha: str) -> bool:
     # Resolve `files` at call time like the upload pipeline does — main's
     # module-level blob_path binding can be stale after sibling reloads.

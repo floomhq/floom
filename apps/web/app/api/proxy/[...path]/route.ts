@@ -108,6 +108,7 @@ async function handler(
   const isUpload =
     upstreamPath === "/uploads" ||
     (/^\/approvals\/(public\/)?[^/]+\/uploads$/.test(upstreamPath.split("?")[0])) ||
+    (/^\/drop\/public\/[^/]+\/uploads$/.test(upstreamPath.split("?")[0])) ||
     (upstreamPath.startsWith("/contexts/") && upstreamPath.endsWith("/upload"));
   let body: BodyInit | null | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {

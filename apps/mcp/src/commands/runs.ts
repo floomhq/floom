@@ -242,3 +242,90 @@ export async function runsDownloadCommand(runId: string): Promise<number> {
     throw error;
   }
 }
+
+export async function runsApproveCommand(runId: string, options: { comment?: string; edit?: string; json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    let editedOutput: unknown | undefined;
+    if (options.edit) {
+      try {
+        editedOutput = JSON.parse(options.edit);
+      } catch {
+        log.err("--edit must be valid JSON");
+        return 1;
+      }
+    }
+    const body: Record<string, unknown> = {};
+    if (options.comment) body.comment = options.comment;
+    if (editedOutput !== undefined) body.edited_output = editedOutput;
+    const result = await client.requestJson("POST", `/runs/${encodeURIComponent(runId)}/approve`, { body });
+    if (options.json) {
+      printJson(result);
+      return 0;
+    }
+    const out = result as { run_id?: string; status?: string };
+    log.ok(`Approved ${runId}`);
+    if (out.run_id && out.run_id !== runId) log.info(`Follow-up run: ${out.run_id}`);
+    return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    if (error instanceof WorkerosApiError && error.status === 404) {
+      log.err(`Run '${runId}' not found.`);
+      return 1;
+    }
+    if (error instanceof WorkerosApiError && error.status === 409) {
+      log.err(error.message);
+      return 1;
+    }
+    throw error;
+  }
+}
+
+export async function runsRejectCommand(runId: string, options: { reason?: string; json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const body: Record<string, unknown> = {};
+    if (options.reason) body.reason = options.reason;
+    const result = await client.requestJson("POST", `/runs/${encodeURIComponent(runId)}/reject`, { body });
+    if (options.json) {
+      printJson(result);
+      return 0;
+    }
+    log.ok(`Rejected ${runId}`);
+    return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    if (error instanceof WorkerosApiError && error.status === 404) {
+      log.err(`Run '${runId}' not found.`);
+      return 1;
+    }
+    if (error instanceof WorkerosApiError && error.status === 409) {
+      log.err(error.message);
+      return 1;
+    }
+    throw error;
+  }
+}
+
+export async function runsCancelCommand(runId: string, options: { json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const result = await client.requestJson("POST", `/runs/${encodeURIComponent(runId)}/cancel`);
+    if (options.json) {
+      printJson(result);
+      return 0;
+    }
+    log.ok(`Cancelled ${runId}`);
+    return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    if (error instanceof WorkerosApiError && error.status === 404) {
+      log.err(`Run '${runId}' not found.`);
+      return 1;
+    }
+    throw error;
+  }
+}
