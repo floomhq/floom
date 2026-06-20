@@ -100,15 +100,24 @@ def test_upload_tree_tarball_uses_single_archive_write(tmp_path):
     (root / "__pycache__" / "ignored.pyc").write_bytes(b"cache")
 
     sandbox = _CaptureSandbox()
+    logs: list[tuple[str, str]] = []
     files, dirs = upload_tree_tarball(
         sandbox,
         root,
         "/remote",
         skip=lambda _path, rel: "__pycache__" in rel.parts,
+        log_fn=lambda msg, level: logs.append((msg, level)),
         label="test tree",
     )
 
     assert (files, dirs) == (1, 1)
+    assert logs
+    assert logs[-1][1] == "debug"
+    assert "Uploaded test tree archive" in logs[-1][0]
+    assert "bytes;" in logs[-1][0]
+    assert "tar=" in logs[-1][0]
+    assert "write=" in logs[-1][0]
+    assert "extract=" in logs[-1][0]
     assert list(sandbox.files.written) == ["/remote/.workeros-upload.tar.gz"]
     command, kwargs = sandbox.commands.runs[0]
     assert command.startswith("tar -xzf .workeros-upload.tar.gz")
