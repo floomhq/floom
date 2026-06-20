@@ -12,7 +12,9 @@ import hashlib
 import hmac
 import json
 import os
+import threading
 import time
+import collections
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
@@ -21,6 +23,9 @@ from pydantic import BaseModel
 from services.uploads import _store_uploaded_blob
 
 drop_router = APIRouter()
+_DROP_RATE_WINDOW_SECONDS = 3600.0
+_drop_rate_lock = threading.Lock()
+_drop_rate_store: Dict[str, collections.deque[float]] = {}
 
 
 class DropUploadResponse(BaseModel):
@@ -39,6 +44,48 @@ def _drop_signing_key() -> bytes:
             detail="Drop links require WORKEROS_DROP_LINK_SECRET or FLOOM_SECRET to be configured",
         )
     return key.encode("utf-8")
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _drop_default_max_size_mb() -> float:
+    return _positive_float_env("WORKEROS_DROP_DEFAULT_MAX_SIZE_MB", 50.0)
+
+
+def _drop_uploads_per_token_hour() -> int:
+    return _positive_int_env("WORKEROS_DROP_UPLOADS_PER_TOKEN_HOUR", 25)
+
+
+def _claim_drop_rate_limit(token: str, owner_id: str) -> None:
+    limit = _drop_uploads_per_token_hour()
+    now = time.monotonic()
+    cutoff = now - _DROP_RATE_WINDOW_SECONDS
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()[:24]
+    key = f"{owner_id}:{token_hash}"
+    with _drop_rate_lock:
+        dq = _drop_rate_store.setdefault(key, collections.deque())
+        while dq and dq[0] <= cutoff:
+            dq.popleft()
+        if len(dq) >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Drop link upload limit exceeded ({limit} per hour)",
+            )
+        dq.append(now)
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -111,11 +158,15 @@ async def public_drop_upload(
     input_name = str(claims["input_name"])
     accepts = claims.get("accepts")
     max_size_mb = claims.get("max_size_mb")
+    effective_max_size_mb = (
+        float(max_size_mb) if max_size_mb is not None else _drop_default_max_size_mb()
+    )
+    _claim_drop_rate_limit(token, owner_id)
     stored = await _store_uploaded_blob(
         request,
         file,
         owner_id,
-        max_size_mb=float(max_size_mb) if max_size_mb is not None else None,
+        max_size_mb=effective_max_size_mb,
         accepts=str(accepts) if accepts else None,
     )
     from run_service import create_run
