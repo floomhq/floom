@@ -1505,6 +1505,13 @@ def _warm_pool_sensitive_run_material(
     return None
 
 
+def _bundle_fingerprint_for_warm_key(worker_dir: Path, config: WorkerConfig | None) -> str:
+    trusted = getattr(getattr(config, "runtime", None), "bundle_sha256", None)
+    if isinstance(trusted, str) and trusted.strip():
+        return f"sha256:{trusted.strip()}"
+    return f"tree:{_hash_tree(worker_dir)}"
+
+
 def _warm_pool_context_key_entries(
     selected_contexts: list[dict[str, Any]],
     *,
@@ -1560,7 +1567,7 @@ def _warm_pool_key(
         "template": sandbox_template or "",
         "runtime": _runtime_kind(config),
         "command": command,
-        "bundle": _hash_tree(worker_dir),
+        "bundle": _bundle_fingerprint_for_warm_key(worker_dir, config),
         "contexts": _warm_pool_context_key_entries(selected_contexts, user_id=user_id),
     }
     raw = json.dumps(key_payload, sort_keys=True, separators=(",", ":"))

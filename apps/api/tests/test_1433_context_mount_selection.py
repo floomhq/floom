@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -549,6 +550,119 @@ def test_warm_pool_key_changes_when_bundle_content_changes_same_size(monkeypatch
         user_id="u",
         worker_dir=worker_dir,
         config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+
+    assert first_err is None
+    assert second_err is None
+    assert first_key
+    assert second_key
+    assert first_key != second_key
+
+
+def test_warm_pool_key_changes_when_large_bundle_file_middle_changes_with_preserved_mtime(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    big_file = worker_dir / "run.py"
+    original = "a" * 4096 + "print('first')\n" + "z" * 4096
+    changed = "a" * 4096 + "print('second')\n" + "z" * 4095
+    assert len(original) == len(changed)
+    big_file.write_text(original, encoding="utf-8")
+    fixed_ns = 1_700_000_000_000_000_000
+    os.utime(big_file, ns=(fixed_ns, fixed_ns))
+    cfg = SimpleNamespace(runtime=SimpleNamespace(command="python run.py", type="python"), contexts=[])
+
+    first_key, first_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+    big_file.write_text(changed, encoding="utf-8")
+    os.utime(big_file, ns=(fixed_ns, fixed_ns))
+    second_key, second_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+
+    assert first_err is None
+    assert second_err is None
+    assert first_key
+    assert second_key
+    assert first_key != second_key
+
+
+def test_warm_pool_key_uses_trusted_bundle_sha_without_hashing_disk(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    monkeypatch.setattr(
+        e2b_driver_mod,
+        "_hash_tree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("_hash_tree should not run")),
+    )
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    cfg = SimpleNamespace(
+        runtime=SimpleNamespace(
+            command="python run.py",
+            type="python",
+            bundle_sha256="a" * 64,
+        ),
+        contexts=[],
+    )
+
+    warm_key, warm_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+
+    assert warm_err is None
+    assert warm_key
+
+
+def test_warm_pool_key_changes_when_trusted_bundle_sha_changes(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    cfg_a = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python", bundle_sha256="a" * 64),
+        contexts=[],
+    )
+    cfg_b = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python", bundle_sha256="b" * 64),
+        contexts=[],
+    )
+
+    first_key, first_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg_a,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+    second_key, second_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg_b,
         inputs={},
         sandbox_template="tmpl",
     )

@@ -451,6 +451,53 @@ def _skill_version_id(worker_id: str, manifest: dict[str, Any]) -> str:
     return f"sv_{worker_id}_{version}"
 
 
+def _bundle_sha256_from_manifest_files(manifest: dict[str, Any]) -> str | None:
+    files = manifest.get("_files")
+    if not isinstance(files, dict) or not files:
+        return None
+    digest = hashlib.sha256()
+    included = 0
+    for rel_path, content in sorted(files.items()):
+        if not isinstance(rel_path, str) or not isinstance(content, str):
+            continue
+        path = Path(rel_path)
+        if (
+            not rel_path
+            or path.is_absolute()
+            or ".." in path.parts
+            or (path.parts and path.parts[0] == "inputs")
+            or "__pycache__" in path.parts
+            or path.suffix == ".pyc"
+            or (path.parts and path.parts[0] in {".pytest_cache", ".ruff_cache"})
+        ):
+            continue
+        path_bytes = path.as_posix().encode("utf-8")
+        content_bytes = content.encode("utf-8")
+        digest.update(len(path_bytes).to_bytes(8, "big"))
+        digest.update(path_bytes)
+        digest.update(len(content_bytes).to_bytes(8, "big"))
+        digest.update(content_bytes)
+        included += 1
+    if included == 0:
+        return None
+    return digest.hexdigest()
+
+
+def _attach_bundle_sha256(manifest: dict[str, Any]) -> dict[str, Any]:
+    bundle_sha256 = _bundle_sha256_from_manifest_files(manifest)
+    if not bundle_sha256:
+        return manifest
+    out = dict(manifest)
+    runtime = out.get("runtime")
+    if isinstance(runtime, dict):
+        runtime = dict(runtime)
+    else:
+        runtime = {}
+    runtime["bundle_sha256"] = bundle_sha256
+    out["runtime"] = runtime
+    return out
+
+
 def _backfill_legacy_manifest(
     manifest_raw: dict[str, Any],
     *,
@@ -518,6 +565,7 @@ def _config_from_manifest(
         cron_expr=cron_expr,
         cron_timezone=cron_timezone,
     )
+    manifest_raw = _attach_bundle_sha256(manifest_raw)
     parsed = parse_worker_manifest(manifest_raw)
     if isinstance(parsed, WorkerContract):
         config = worker_contract_to_worker_config(parsed, worker_id)

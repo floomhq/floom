@@ -1165,6 +1165,9 @@ class WorkerRuntime(BaseModel):
     runner: str = "e2b"
     command: Optional[str] = None
     bundle_path: Optional[str] = None
+    # Trusted content fingerprint for DB-backed/materialized bundles. The runner
+    # may use this instead of hashing the on-disk tree on every execution.
+    bundle_sha256: Optional[str] = None
     bundle_baked: bool = False
     mode: Literal["agent", "pure-script"] = "pure-script"
     model: Optional[str] = None
