@@ -190,6 +190,46 @@ exec:
     assert worker_author._validate_generated_bundle(parsed, "make topic bullets") is None
 
 
+def test_worker_author_repairs_exec_inputs_outputs_mapping_shape():
+    worker_author = _load_worker_author_module()
+    worker_yml = """
+schema_version: "0.3"
+name: "topic-summary"
+title: "Topic Summary"
+description: "Create a concise markdown summary for a topic."
+version: "0.1.0"
+trigger:
+  type: manual
+exec:
+  entry: "run.py"
+  runner: e2b
+  inputs:
+    topic:
+      type: string
+      required: true
+  outputs:
+    summary:
+      type: markdown
+      required: true
+"""
+    parsed = {
+        "worker_yml": worker_yml,
+        "run_code": "outputs = {'summary': '# Summary\\n\\nA concise summary.'}\n",
+    }
+
+    assert worker_author._validate_generated_bundle(parsed, "summarize a topic") is None
+    manifest = worker_author._repair_generated_worker_manifest(
+        worker_author._load_manifest(worker_yml),
+        prompt="summarize a topic",
+    )
+    assert manifest["exec"]["inputs"] == [
+        {"name": "topic", "type": "string", "required": True}
+    ]
+    assert manifest["exec"]["outputs"] == [
+        {"name": "summary", "type": "markdown", "required": True}
+    ]
+
+
 def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypatch):
     from runner_sandbox.e2b_driver import _worker_author_platform_env
 
