@@ -1,7 +1,6 @@
 ﻿import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,14 +13,35 @@ import {
 } from "../dist/lib/credentials.js";
 import {
   WorkerosApiClient,
+  WorkerosApiError,
   createAuthenticatedClient,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
+import { cloudRateLimitRetryMs } from "../dist/commands/login.js";
 
-test("cloud login treats cli-exchange 429 as slow_down instead of fatal", () => {
-  const src = readFileSync(new URL("../src/commands/login.ts", import.meta.url), "utf8");
-  assert.match(src, /error\.status === 429 && isCloud/);
-  assert.match(src, /Math\.max\(started\.polling_interval_seconds \* 1000, 5000\)/);
+test("cloud login honors Retry-After headers on cli-exchange 429", () => {
+  const error = new WorkerosApiError(
+    "rate limited",
+    429,
+    { detail: { retry_after: 60 } },
+    new Headers({ "Retry-After": "17" }),
+  );
+
+  assert.equal(cloudRateLimitRetryMs(error, 2), 17_000);
+});
+
+test("cloud login falls back to structured retry_after body on cli-exchange 429", () => {
+  const error = new WorkerosApiError("rate limited", 429, {
+    detail: { retry_after: 42 },
+  });
+
+  assert.equal(cloudRateLimitRetryMs(error, 2), 42_000);
+});
+
+test("cloud login treats cli-exchange 429 without retry metadata as slow_down", () => {
+  const error = new WorkerosApiError("rate limited", 429, {});
+
+  assert.equal(cloudRateLimitRetryMs(error, 2), 5_000);
 });
 
 async function withTempHome(fn) {
