@@ -107,6 +107,7 @@ from apps.api.routes.workspace_agent import router as workspace_agent_router
 from apps.api.routes.workspaces import router as workspaces_router
 
 engine_main = import_engine_module("main")
+engine_worker_serialize = import_engine_module("services.worker_serialize")
 
 # The engine's main.py auto-loads /root/.config/workeros/api.env via load_dotenv()
 # on import. That file is the OSS single-tenant local-mode prod env and contains
@@ -678,7 +679,7 @@ app.include_router(slack_events_router, prefix="/api")
 app.include_router(slack_oauth_router)
 
 
-def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any) -> None:
+def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any, *, merge_existing: bool = False) -> None:
     """Save worker file contents to Supabase manifest_json._files.
 
     Called after any worker creation or file update so Supabase is always
@@ -696,8 +697,13 @@ def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any) -> None
     sv_rows = sv_resp.data or []
     raw_mj = sv_rows[0].get("manifest_json") if sv_rows else {}
     manifest_json = raw_mj if isinstance(raw_mj, dict) else (_json.loads(raw_mj) if isinstance(raw_mj, str) else {})
+    incoming_files = _sanitize_cloud_worker_files(files)
+    if merge_existing:
+        existing_raw = manifest_json.get("_files") or {}
+        existing_files = _sanitize_cloud_worker_files(existing_raw) if isinstance(existing_raw, dict) else {}
+        incoming_files = {**existing_files, **incoming_files}
     manifest_json.pop("_files", None)
-    manifest_json["_files"] = _sanitize_cloud_worker_files(files)
+    manifest_json["_files"] = incoming_files
     svc.table("skill_versions").update({"manifest_json": manifest_json}).eq("id", sv_id).execute()
 
 
@@ -726,6 +732,8 @@ def _sanitize_cloud_worker_files(files: dict) -> dict[str, str]:
     sanitized: dict[str, str] = {}
     for raw_path, raw_content in files.items():
         safe_path = _validate_cloud_worker_file_path(str(raw_path))
+        if engine_worker_serialize._should_ignore_worker_file(safe_path):
+            continue
         if safe_path in sanitized:
             raise HTTPException(status_code=400, detail=f"duplicate file path: {safe_path!r}")
         if not isinstance(raw_content, str):
@@ -744,9 +752,10 @@ def _read_worker_files_from_disk(worker_id: str) -> dict:
         return {}
     files = {}
     for fpath in sorted(worker_dir.iterdir()):
-        if fpath.is_file() and not fpath.name.startswith(".") and not fpath.name.endswith(".bak"):
+        rel = fpath.name
+        if fpath.is_file() and not engine_worker_serialize._should_ignore_worker_file(rel):
             try:
-                files[fpath.name] = fpath.read_text(encoding="utf-8")
+                files[rel] = fpath.read_text(encoding="utf-8")
             except Exception:
                 pass
     return files
@@ -907,6 +916,8 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
     files = _sanitize_cloud_worker_files(
         {f["path"]: f["content"] for f in files_list if isinstance(f, dict) and "path" in f and "content" in f}
     )
+    if not files:
+        raise HTTPException(status_code=400, detail="files list did not contain any persistable worker files")
 
     # #272: only validate worker.yml when this edit actually includes it.
     # A partial edit (e.g. only run.py) must NOT be rejected for a "missing"
@@ -956,7 +967,7 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
     # subset and drop the rest.
     from apps.api.db.supabase_repos import _read_worker_files_from_disk
     full_files = _read_worker_files_from_disk(worker_id) or files
-    _cloud_persist_worker_files(worker_id, full_files, repos)
+    _cloud_persist_worker_files(worker_id, full_files, repos, merge_existing=True)
     return result
 
 

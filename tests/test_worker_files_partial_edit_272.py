@@ -61,8 +61,11 @@ def _setup(monkeypatch, main, *, disk_files):
     monkeypatch.setattr(main.engine_main, "update_worker_files", lambda *a, **k: {"ok": True})
     monkeypatch.setattr(repos_mod, "_read_worker_files_from_disk", lambda wid: dict(disk_files))
     captured: dict = {}
-    monkeypatch.setattr(main, "_cloud_persist_worker_files",
-                        lambda wid, files, repos: captured.update({"files": files}))
+    monkeypatch.setattr(
+        main,
+        "_cloud_persist_worker_files",
+        lambda wid, files, repos, **kwargs: captured.update({"files": files, "kwargs": kwargs}),
+    )
     return captured
 
 
@@ -74,6 +77,84 @@ def test_partial_edit_without_worker_yml_succeeds_and_persists_full_set(monkeypa
     assert result == {"ok": True}  # no 400 on the partial edit
     # persisted the FULL on-disk set, not just the submitted run.py
     assert captured["files"] == {"run.py": "new", "worker.yml": "name: w"}
+
+
+def test_cloud_sanitizer_drops_engine_backup_files(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+
+    assert main._sanitize_cloud_worker_files(
+        {
+            "worker.yml": "name: w",
+            "run.py.bak1": "old run",
+            "lib/search.py.bak123": "old lib",
+            "lib/__pycache__/search.cpython-312.pyc": "binary-ish",
+        }
+    ) == {"worker.yml": "name: w"}
+
+
+class _SkillVersionTable:
+    def __init__(self, manifest_json):
+        self.manifest_json = manifest_json
+        self.updated_payload = None
+        self._mode = "select"
+
+    def select(self, *_args, **_kwargs):
+        self._mode = "select"
+        return self
+
+    def update(self, payload):
+        self._mode = "update"
+        self.updated_payload = payload
+        return self
+
+    def eq(self, *_args, **_kwargs):
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def execute(self):
+        if self._mode == "select":
+            return SimpleNamespace(data=[{"manifest_json": self.manifest_json}])
+        return SimpleNamespace(data=[self.updated_payload])
+
+
+def test_cloud_persist_merges_partial_update_and_drops_backups(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    table = _SkillVersionTable(
+        {
+            "name": "w",
+            "_files": {
+                "worker.yml": "name: old\n",
+                "run.py": "print('canonical')\n",
+                "lib/search.py": "def search(): pass\n",
+            },
+        }
+    )
+
+    import apps.api.config as config
+
+    monkeypatch.setattr(config, "get_supabase_service_client", lambda: SimpleNamespace(table=lambda _name: table))
+    repos = SimpleNamespace(workers=SimpleNamespace(get_any=lambda *, worker_id: {"skill_version_id": "sv1"}))
+
+    main._cloud_persist_worker_files(
+        "w1",
+        {
+            "worker.yml": "name: new\n",
+            "run.py.bak1": "print('backup')\n",
+            "lib/search.py.bak1": "backup lib\n",
+        },
+        repos,
+        merge_existing=True,
+    )
+
+    files = table.updated_payload["manifest_json"]["_files"]
+    assert files == {
+        "worker.yml": "name: new\n",
+        "run.py": "print('canonical')\n",
+        "lib/search.py": "def search(): pass\n",
+    }
+    assert not any(".bak" in path for path in files)
 
 
 def test_invalid_worker_yml_when_submitted_still_400(monkeypatch, tmp_path):

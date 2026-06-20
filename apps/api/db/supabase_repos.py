@@ -36,11 +36,20 @@ _recipe_cache: contextvars.ContextVar[dict[str, tuple[dict, dict | None]] | None
 # re-materializes on demand from Supabase, so statelessness is preserved.
 _materialized_versions: set[str] = set()
 
+from apps.api._engine import import_engine_module
 from apps.api.obs import log_failure
 
 _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 
 _SYSTEM_RUN_WORKER_IDS = frozenset({"worker-author"})
+_ENGINE_WORKER_SERIALIZE: Any | None = None
+
+
+def _should_ignore_worker_file(rel_path: str) -> bool:
+    global _ENGINE_WORKER_SERIALIZE
+    if _ENGINE_WORKER_SERIALIZE is None:
+        _ENGINE_WORKER_SERIALIZE = import_engine_module("services.worker_serialize")
+    return bool(_ENGINE_WORKER_SERIALIZE._should_ignore_worker_file(rel_path))
 
 # Curated catalog of ship-with-product stock/example workers that EVERY tenant
 # may run. On cloud these rows are seeded under DIFFERENT demo users in DIFFERENT
@@ -199,6 +208,8 @@ def _read_worker_files_from_disk(worker_id: str) -> dict[str, str]:
             try:
                 rel = _validate_worker_file_path(p.relative_to(worker_dir).as_posix())
             except Exception:
+                continue
+            if _should_ignore_worker_file(rel):
                 continue
             try:
                 if p.stat().st_size > MAX_FILE:

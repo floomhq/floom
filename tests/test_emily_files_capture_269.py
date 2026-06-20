@@ -46,6 +46,18 @@ def test_read_skips_binary_and_missing_dir(monkeypatch, tmp_path):
     assert files == {"run.py": "x = 1"}  # binary skipped
 
 
+def test_read_files_from_disk_skips_engine_backup_files(monkeypatch, tmp_path):
+    workers = tmp_path / "workers"
+    w = workers / "w-bak"
+    (w / "lib").mkdir(parents=True)
+    (w / "worker.yml").write_text("name: w\n", encoding="utf-8")
+    (w / "run.py.bak1").write_text("old run\n", encoding="utf-8")
+    (w / "lib" / "search.py.bak1").write_text("old lib\n", encoding="utf-8")
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers))
+
+    assert _read_worker_files_from_disk("w-bak") == {"worker.yml": "name: w\n"}
+
+
 # ---- _sync_disk_files_to_manifest ----
 
 class _Chain:
