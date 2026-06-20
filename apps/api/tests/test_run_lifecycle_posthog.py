@@ -43,8 +43,8 @@ class _Recorder:
 def emit(monkeypatch):
     """Patch analytics to enabled + a recorder, and stub cost lookups."""
     rec = _Recorder()
-    monkeypatch.setattr(analytics_posthog, "is_enabled", lambda: True)
-    monkeypatch.setattr(analytics_posthog, "capture_event", rec)
+    monkeypatch.setattr("services.analytics_posthog.is_enabled", lambda: True)
+    monkeypatch.setattr("services.analytics_posthog.capture_event", rec)
     # Deterministic token/cost so terminal events don't hit the transcript store.
     import cost as cost_mod
 
@@ -119,8 +119,8 @@ class TestRunLifecycleEmit:
 
     def test_disabled_emits_nothing(self, monkeypatch):
         rec = _Recorder()
-        monkeypatch.setattr(analytics_posthog, "is_enabled", lambda: False)
-        monkeypatch.setattr(analytics_posthog, "capture_event", rec)
+        monkeypatch.setattr("services.analytics_posthog.is_enabled", lambda: False)
+        monkeypatch.setattr("services.analytics_posthog.capture_event", rec)
         run_service._emit_run_lifecycle_event(
             run_id="r", status="completed", worker_id="w", owner_id="o",
             error=None, error_code=None, run_row={}, repos=None,
@@ -136,3 +136,35 @@ class TestRunLifecycleEmit:
         _emit("running")
         _emit("completed")
         assert [c["event"] for c in emit.calls] == ["run_started", "run_completed"]
+
+
+class TestApprovalRequestedEmit:
+    def test_approval_requested_single_event(self, monkeypatch):
+        rec = _Recorder()
+        monkeypatch.setattr("services.analytics_posthog.is_enabled", lambda: True)
+        monkeypatch.setattr("services.analytics_posthog.capture_event", rec)
+        run_service._emit_approval_requested(
+            approval_id="apr_1",
+            run_id="run-1",
+            worker_id="wkr-1",
+            owner_id="owner-1",
+            tool_name="send_email",
+            risk_level="high",
+        )
+        assert len(rec.calls) == 1
+        call = rec.calls[0]
+        assert call["event"] == "approval_requested"
+        assert call["distinct_id"] == "owner-1"
+        assert call["groups"] == {"workspace": "local-default"}
+        assert call["properties"]["approval_id"] == "apr_1"
+        assert call["properties"]["tool_name"] == "send_email"
+        assert call["properties"]["risk_level"] == "high"
+
+    def test_disabled_emits_nothing(self, monkeypatch):
+        rec = _Recorder()
+        monkeypatch.setattr("services.analytics_posthog.is_enabled", lambda: False)
+        monkeypatch.setattr("services.analytics_posthog.capture_event", rec)
+        run_service._emit_approval_requested(
+            approval_id="a", run_id="r", worker_id="w", owner_id="o",
+        )
+        assert rec.calls == []

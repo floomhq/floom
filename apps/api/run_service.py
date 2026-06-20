@@ -1148,6 +1148,41 @@ def _emit_run_lifecycle_event(
         logger.debug("PostHog run-lifecycle emit failed for %s", run_id, exc_info=True)
 
 
+def _emit_approval_requested(
+    *,
+    approval_id: str,
+    run_id: str,
+    worker_id: str,
+    owner_id: Optional[str],
+    tool_name: Optional[str] = None,
+    risk_level: Optional[str] = None,
+) -> None:
+    """Emit the approval_requested PostHog event when a run parks awaiting
+    approval. Single point (the pending_approval set). Swallows all errors."""
+    try:
+        from services import analytics_posthog
+        from db import derive_workspace_id
+    except Exception:  # pragma: no cover
+        return
+    if not analytics_posthog.is_enabled():
+        return
+    try:
+        analytics_posthog.capture_event(
+            distinct_id=owner_id or "",
+            event="approval_requested",
+            properties={
+                "approval_id": approval_id,
+                "run_id": run_id,
+                "worker_id": worker_id or None,
+                "tool_name": tool_name or None,
+                "risk_level": risk_level or None,
+            },
+            groups={"workspace": derive_workspace_id(owner_id)},
+        )
+    except Exception:  # pragma: no cover
+        logger.debug("PostHog approval_requested emit failed for %s", run_id, exc_info=True)
+
+
 def update_run_status(
     run_id: str,
     status: str,
@@ -2728,6 +2763,16 @@ def execute_run(
                 "label": label,
             })
             publish_run_part(run_id, {"type": "finish", "status": "pending_approval"})
+            # PostHog: run paused awaiting approval (single emit point). No-op
+            # when analytics is disabled; never raises.
+            _emit_approval_requested(
+                approval_id=approval_id,
+                run_id=run_id,
+                worker_id=worker_id,
+                owner_id=owner_id,
+                tool_name=decision_required.get("tool_name") or decision_required.get("tool"),
+                risk_level=decision_required.get("risk_level") or decision_required.get("risk"),
+            )
             log_fn(f"Run awaiting approval: {label}")
             # Fan-out: notify the run owner over WhatsApp if they have an active binding.
             try:
