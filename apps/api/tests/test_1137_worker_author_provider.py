@@ -15,6 +15,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 _BEDROCK = "bedrock/us.anthropic.claude-sonnet-4-6"
+_GEMINI = "gemini/gemini-3.5-flash"
 
 
 def _load_worker_author_module():
@@ -61,6 +62,15 @@ def test_worker_author_reports_missing_bedrock_credentials(monkeypatch):
     assert "AWS credentials" in worker_author._provider_credentials_error(_BEDROCK)
 
 
+def test_worker_author_reports_missing_gemini_credentials(monkeypatch):
+    worker_author = _load_worker_author_module()
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _GEMINI)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    assert "GEMINI_API_KEY" in worker_author._provider_credentials_error(_GEMINI)
+
+
 def test_worker_author_routes_bedrock_through_litellm(monkeypatch):
     worker_author = _load_worker_author_module()
     monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _BEDROCK)
@@ -87,6 +97,30 @@ def test_worker_author_routes_bedrock_through_litellm(monkeypatch):
     assert captured["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 
+def test_worker_author_routes_gemini_through_litellm(monkeypatch):
+    worker_author = _load_worker_author_module()
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _GEMINI)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return "OK"
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        out = worker_author._codegen_chat(
+            messages=[{"role": "system", "content": "S"}, {"role": "user", "content": "u"}],
+            max_output_tokens=12,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+
+    assert out == "OK"
+    assert captured["model"] == _GEMINI
+    assert captured["max_tokens"] == 12
+    assert captured["messages"][0]["content"] == "S"
+
+
 def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypatch):
     from runner_sandbox.e2b_driver import _worker_author_platform_env
 
@@ -102,6 +136,19 @@ def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypat
     assert env["AWS_ACCESS_KEY_ID"] == "AKIAEXAMPLE"
     assert env["AWS_SECRET_ACCESS_KEY"] == "secret"
     assert env["AWS_REGION_NAME"] == "us-west-2"
+
+
+def test_worker_author_env_bridge_forwards_gemini_key(monkeypatch):
+    from runner_sandbox.e2b_driver import _worker_author_platform_env
+
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _GEMINI)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    env = _worker_author_platform_env()
+
+    assert env["WORKEROS_CODEGEN_MODEL"] == _GEMINI
+    assert env["GEMINI_API_KEY"] == "test-gemini-key"
 
 
 def test_worker_author_manifest_does_not_require_byo_ai_key():
