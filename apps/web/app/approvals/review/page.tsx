@@ -835,7 +835,7 @@ function ReviewContent() {
   }, [annotationsPayload, chatComment, approval, isDestructiveDelete, isAgentTool, isSignedLink, load, removeCurrent, token]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--bg)]">
+    <div className="flex h-screen flex-col bg-[var(--bg)]">
       {/* Topbar: brand + who-asked + shared-link marker (consistent header) */}
       <div className="flex items-center justify-between [border-bottom:var(--bd-div)] px-6 py-3.5">
         <div className="flex items-center gap-2.5">
@@ -857,7 +857,7 @@ function ReviewContent() {
         )}
       </div>
 
-      <div className="flex-1 px-6 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-8">
         {loading ? (
           <div className="mx-auto max-w-[820px] space-y-3">
             <div className="h-5 w-1/2 animate-pulse rounded bg-[var(--bg-2)]" />
