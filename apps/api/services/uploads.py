@@ -35,7 +35,7 @@ from core.utils import _positive_int_env
 
 logger = logging.getLogger("floom.api")
 
-_DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+_DEFAULT_UPLOAD_MAX_BYTES = 500 * 1024 * 1024
 _DEFAULT_UPLOAD_HOURLY_CAP_BYTES = 1024 * 1024 * 1024
 _UPLOAD_HOURLY_WINDOW_SECONDS = 3600.0
 _UPLOAD_ALLOWED_MEDIA_TYPES = frozenset({
@@ -56,6 +56,10 @@ _UPLOAD_ALLOWED_MEDIA_TYPES = frozenset({
     "image/jpeg",
     "image/png",
     "image/webp",
+    "video/mp4",
+    "video/quicktime",
+    "video/webm",
+    "video/x-m4v",
     "text/css",
     "text/csv",
     "text/html",
@@ -75,6 +79,7 @@ _UPLOAD_ALLOWED_EXTENSIONS = frozenset({
     ".css", ".scss",
     ".docx", ".pptx", ".xlsx", ".rtf", ".odt",
     ".gif", ".jpeg", ".jpg", ".png", ".webp",
+    ".m4v", ".mov", ".mp4", ".webm",
     ".go", ".rs", ".rb", ".java", ".kt", ".swift",
     ".htm", ".html", ".xml",
     ".ini", ".toml", ".env", ".conf", ".cfg",

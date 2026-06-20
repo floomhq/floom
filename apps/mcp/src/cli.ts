@@ -21,9 +21,12 @@ import {
   workspacesSwitchCommand,
 } from "./commands/workspaces.js";
 import {
+  runsApproveCommand,
+  runsCancelCommand,
   runsDownloadCommand,
   runsListCommand,
   runsLogsCommand,
+  runsRejectCommand,
   runsShowCommand,
 } from "./commands/runs.js";
 import {
@@ -182,6 +185,27 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .description("Download run bundle archive")
     .argument("<id>", "Run id")
     .action(async (id: string) => runAction(runsDownloadCommand(id)));
+  runs.command("approve")
+    .description("Approve a pending approval run")
+    .argument("<id>", "Run id")
+    .option("--comment <text>", "Optional approval comment")
+    .option("--edit <json>", "Edited output JSON to approve with")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { comment?: string; edit?: string; json?: boolean }) =>
+      runAction(runsApproveCommand(id, options)));
+  runs.command("reject")
+    .description("Reject a pending approval run")
+    .argument("<id>", "Run id")
+    .option("--reason <text>", "Rejection reason")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { reason?: string; json?: boolean }) =>
+      runAction(runsRejectCommand(id, options)));
+  runs.command("cancel")
+    .description("Cancel a queued or running run")
+    .argument("<id>", "Run id")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { json?: boolean }) =>
+      runAction(runsCancelCommand(id, options)));
 
   const secrets = program.command("secrets").description("Manage secrets");
   secrets.command("list")
