@@ -434,6 +434,74 @@ with open("result.json", "w", encoding="utf-8") as handle:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
 
 
+def test_e2b_bundle_baked_template_skips_cold_bundle_upload(tmp_path, monkeypatch):
+    import json
+
+    _install_fake_e2b(monkeypatch, tmp_path)
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "requirements.txt").write_text("", encoding="utf-8")
+    (worker_dir / "run.py").write_text("print('template copy placeholder')\n", encoding="utf-8")
+
+    config = WorkerConfig(
+        id="baked-worker",
+        name="Baked Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+            bundle_baked=True,
+        ),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    cache_key = e2b_driver._worker_template_cache_key(worker_dir, config)
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_CACHE_JSON", json.dumps({cache_key: "tpl-baked-worker"}))
+    upload_calls: list[object] = []
+    monkeypatch.setattr(e2b_driver, "upload_tree_tarball", lambda *args, **kwargs: upload_calls.append((args, kwargs)))
+    original_run = _Commands.run
+
+    def run_with_baked_bundle(self, command: str, **kwargs):
+        if command.endswith("python3 run.py'") or command == "python3 run.py":
+            self.run_calls.append((command, kwargs))
+            cwd = self.files._host_path(kwargs.get("cwd") or "/home/user/worker")
+            cwd.mkdir(parents=True, exist_ok=True)
+            (cwd / "result.json").write_text(
+                json.dumps({"status": "success", "outputs": {"ok": True}, "artifacts": []}),
+                encoding="utf-8",
+            )
+            self.files.write("/home/user/worker/result.json", (cwd / "result.json").read_bytes())
+            return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
+        return original_run(self, command, **kwargs)
+
+    monkeypatch.setattr(_Commands, "run", run_with_baked_bundle)
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="baked-worker",
+        run_id="run-baked-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-baked-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert result.outputs == {"ok": True}
+    assert upload_calls == []
+    assert _Sandbox.last_create_kwargs["template"] == "tpl-baked-worker"
+    assert any("Skipping worker bundle upload" in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
 def test_e2b_python_template_installs_requirements_not_in_baked_template(tmp_path, monkeypatch):
     _install_fake_e2b(monkeypatch, tmp_path)
     monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")

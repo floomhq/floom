@@ -12,14 +12,14 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 
-def _config(runtime_type: str, *, resources=None):
+def _config(runtime_type: str, *, resources=None, bundle_baked: bool = False):
     from models import WorkerConfig, WorkerRuntime, WorkerTrigger
 
     return WorkerConfig(
         id=f"{runtime_type}-worker",
         name=f"{runtime_type} Worker",
         trigger=WorkerTrigger(type="manual"),
-        runtime=WorkerRuntime(type=runtime_type, command="python run.py"),
+        runtime=WorkerRuntime(type=runtime_type, command="python run.py", bundle_baked=bundle_baked),
         memory=False,
         resources=resources or {},
         outputs=[],
@@ -86,7 +86,7 @@ def test_cpu_memory_specific_template_alias_is_supported(monkeypatch):
     )
 
 
-def test_worker_template_cache_key_can_select_cached_template(monkeypatch, tmp_path):
+def test_worker_template_cache_is_ignored_by_default(monkeypatch, tmp_path):
     import json
 
     from runner_sandbox.e2b_driver import _e2b_template_for_run, _worker_template_cache_key
@@ -97,10 +97,84 @@ def test_worker_template_cache_key_can_select_cached_template(monkeypatch, tmp_p
     config = _config("python311", resources={"memory_mb": 2048})
     cache_key = _worker_template_cache_key(worker_dir, config)
     monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_CACHE_JSON", json.dumps({cache_key: "tpl-worker-cached"}))
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_2048", "tpl-python-2gb")
     logs: list[tuple[str, str]] = []
 
-    assert _e2b_template_for_run(worker_dir, config, log_fn=lambda msg, level="info": logs.append((level, msg))) == "tpl-worker-cached"
-    assert any("cached worker template" in msg for _level, msg in logs)
+    assert _e2b_template_for_run(worker_dir, config, log_fn=lambda msg, level="info": logs.append((level, msg))) == ("tpl-python-2gb", False)
+    assert not any("baked worker template" in msg for _level, msg in logs)
+
+
+def test_bundle_baked_worker_template_cache_can_select_baked_template(monkeypatch, tmp_path):
+    import json
+
+    from runner_sandbox.e2b_driver import _e2b_template_for_run, _worker_template_cache_key
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    config = _config("python311", resources={"memory_mb": 2048}, bundle_baked=True)
+    cache_key = _worker_template_cache_key(worker_dir, config)
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_CACHE_JSON", json.dumps({cache_key: "tpl-worker-cached"}))
+    logs: list[tuple[str, str]] = []
+
+    assert _e2b_template_for_run(worker_dir, config, log_fn=lambda msg, level="info": logs.append((level, msg))) == ("tpl-worker-cached", True)
+    assert any("baked worker template" in msg for _level, msg in logs)
+
+
+def test_bundle_baked_global_kill_switch_falls_back_to_runtime_template(monkeypatch, tmp_path):
+    import json
+
+    from runner_sandbox.e2b_driver import _e2b_template_for_run, _worker_template_cache_key
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    config = _config("python311", resources={"memory_mb": 2048}, bundle_baked=True)
+    cache_key = _worker_template_cache_key(worker_dir, config)
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_CACHE_JSON", json.dumps({cache_key: "tpl-worker-cached"}))
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_2048", "tpl-python-2gb")
+    monkeypatch.setenv("WORKEROS_E2B_BUNDLE_BAKED_ENABLED", "0")
+
+    assert _e2b_template_for_run(worker_dir, config, log_fn=lambda *_args, **_kwargs: None) == ("tpl-python-2gb", False)
+
+
+def test_bundle_template_staging_excludes_run_scoped_and_cache_files(tmp_path):
+    from runner_sandbox.e2b_bundle_template import stage_worker_bundle
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    (worker_dir / "lib").mkdir()
+    (worker_dir / "lib" / "engine.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (worker_dir / "inputs").mkdir()
+    (worker_dir / "inputs" / "secret.csv").write_text("x\n", encoding="utf-8")
+    (worker_dir / "__pycache__").mkdir()
+    (worker_dir / "__pycache__" / "run.pyc").write_bytes(b"pyc")
+    (worker_dir / ".ruff_cache").mkdir()
+    (worker_dir / ".ruff_cache" / "CACHEDIR.TAG").write_text("", encoding="utf-8")
+
+    staged = stage_worker_bundle(worker_dir, parent_dir=tmp_path / "stage")
+
+    assert (staged / "run.py").is_file()
+    assert (staged / "lib" / "engine.py").is_file()
+    assert not (staged / "inputs").exists()
+    assert not (staged / "__pycache__").exists()
+    assert not (staged / ".ruff_cache").exists()
+
+
+def test_bundle_template_cache_file_updates_existing_mapping(tmp_path):
+    import json
+
+    from runner_sandbox.e2b_bundle_template import update_template_cache_file
+
+    cache_file = tmp_path / "cache" / "templates.json"
+    cache_file.parent.mkdir()
+    cache_file.write_text(json.dumps({"old": "tpl-old"}), encoding="utf-8")
+
+    updated = update_template_cache_file(cache_file, "new", "tpl-new")
+
+    assert updated == {"old": "tpl-old", "new": "tpl-new"}
+    assert json.loads(cache_file.read_text(encoding="utf-8")) == updated
 
 
 def test_worker_resources_are_clamped_by_operator_policy(monkeypatch):
@@ -141,6 +215,33 @@ def test_schema_03_accepts_exec_resources_alias():
 
     assert config.resources.memory_mb == 2048
     assert config.resources.cpu_count == 2
+
+
+def test_schema_03_accepts_exec_bundle_baked_flag():
+    from models import parse_worker_manifest, worker_contract_to_worker_config
+
+    contract = parse_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "baked-worker",
+            "title": "Baked Worker",
+            "description": "Stable production worker.",
+            "version": "0.1.0",
+            "entrypoint": "run.py",
+            "exec": {
+                "runtime": "python311",
+                "runner": "e2b",
+                "entry": "run.py",
+                "command": "python run.py",
+                "bundle_baked": True,
+            },
+            "trigger": {"type": "manual"},
+        }
+    )
+
+    config = worker_contract_to_worker_config(contract, "baked-worker")
+
+    assert config.runtime.bundle_baked is True
 
 
 def test_node_template_builder_defaults_to_2gb(monkeypatch):

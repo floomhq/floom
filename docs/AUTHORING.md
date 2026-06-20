@@ -430,7 +430,14 @@ WORKEROS_E2B_NODE_TEMPLATE_MEMORY_2048=tpl-node-2gb
 accepted for manifests that keep runtime-related fields together; the parser
 lifts it to the same worker resource configuration.
 
-E2B memory/CPU is a template-build property, so an unconfigured resource request logs a warning and falls back to the normal runtime template. Operators can also register content-addressed worker templates with:
+E2B memory/CPU is a template-build property, so an unconfigured resource request logs a warning and falls back to the normal runtime template. Stable production workers can opt in to bundle-baked templates:
+
+```yaml
+exec:
+  bundle_baked: true
+```
+
+Operators register content-addressed worker templates with:
 
 ```bash
 WORKEROS_E2B_TEMPLATE_CACHE_JSON='{"<bundle-cache-key>":"tpl-worker-specific"}'
@@ -438,7 +445,7 @@ WORKEROS_E2B_TEMPLATE_CACHE_JSON='{"<bundle-cache-key>":"tpl-worker-specific"}'
 WORKEROS_E2B_TEMPLATE_CACHE_FILE=/path/to/e2b-template-cache.json
 ```
 
-When the current worker bundle/runtime/resources hash matches that map, the runner uses the worker-specific template; otherwise it falls back to the configured shared template and normal tarball upload.
+When `exec.bundle_baked: true` and the current worker bundle/runtime/resources hash matches that map, the runner uses the worker-specific template and skips cold-run bundle upload. Otherwise it falls back to the configured shared template and normal tarball upload. Use `python ops/e2b/build-worker-bundle-template.py --worker-dir workers/<id> --cache-file /path/to/e2b-template-cache.json` to build and record the mapping.
 
 Working example:
 

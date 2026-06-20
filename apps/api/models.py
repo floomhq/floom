@@ -1136,6 +1136,7 @@ class WorkerRuntime(BaseModel):
     runner: str = "e2b"
     command: Optional[str] = None
     bundle_path: Optional[str] = None
+    bundle_baked: bool = False
     mode: Literal["agent", "pure-script"] = "pure-script"
     model: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -1401,6 +1402,7 @@ class WorkerContractExec(BaseModel):
     # backward-compatibility with old worker.yml files (in-process executor
     # was removed in PR #28).
     runner: str = "e2b"
+    bundle_baked: bool = False
     # PR S11: `entry` is the canonical mode signal. `.md` -> agent, `.py/.sh/.js` -> script.
     # `mode` is a deprecated alias retained for back-compat; if both are absent we infer
     # from `command` / `runtime` (legacy path).
@@ -1852,6 +1854,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         entrypoint=entrypoint,
         runner=runner,
         command=contract.exec.command,
+        bundle_baked=bool(contract.exec.bundle_baked),
         mode=contract.exec.mode or "agent",
         model=contract.model or default_worker_agent_model(),
         system_prompt=contract.system_prompt,
@@ -2012,6 +2015,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             command=f"python {config.runtime.entrypoint or 'run.py'}",
             runtime="python311",
             runner=config.runtime.runner,
+            bundle_baked=bool(config.runtime.bundle_baked),
             mode=config.runtime.mode,
             entry=config.runtime.entrypoint or "run.py",
             inputs=[_legacy_input_to_contract_field(field) for field in config.inputs],

@@ -37,6 +37,38 @@ Templates in this directory:
 
 - `python-base`: shared Python 3.11 image with common WorkerOS dependencies.
 - `node-base`: shared Node LTS image with common helper packages.
+- `build-worker-bundle-template.py`: opt-in per-worker bundle baking for stable
+  production workers.
 
 Builds require an E2B account and `E2B_API_KEY`; the returned template id/alias is
 account-scoped.
+
+## Worker Bundle Templates
+
+Stable workers can opt in to baking their read-only bundle into a dedicated E2B
+template:
+
+```yaml
+exec:
+  bundle_baked: true
+```
+
+Build the bundle template and update a cache file:
+
+```bash
+E2B_API_KEY=e2b_... python ops/e2b/build-worker-bundle-template.py \
+  --worker-dir workers/research-assistant \
+  --cache-file data/e2b-template-cache.json
+```
+
+Run the API with:
+
+```bash
+WORKEROS_E2B_TEMPLATE_CACHE_FILE=data/e2b-template-cache.json
+```
+
+When the current bundle/runtime/resource hash matches the cache entry, cold E2B
+runs use the baked template and skip the per-run worker bundle upload. If the
+entry is missing or stale, the run logs a warning and falls back to the normal
+upload path. Set `WORKEROS_E2B_BUNDLE_BAKED_ENABLED=0` to disable the feature
+globally.
