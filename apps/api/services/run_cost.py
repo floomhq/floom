@@ -33,10 +33,13 @@ def _persist_run_cost(
     whichever backend the deployment uses. Falls back to the direct sqlite write
     only when called without a repo (single-tenant / legacy callers / tests).
     """
-    from cost import estimate_cost_usd, total_tokens_from_transcript
+    from cost import resolved_cost_usd_from_transcript, total_tokens_from_transcript
 
     tokens = total_tokens_from_transcript(run_id)
-    cost = estimate_cost_usd(tokens)
+    # Prefer the trace-derived (model-aware, summed-per-generation) cost from
+    # Track A; fall back to the blended estimate when the run wasn't
+    # AI-instrumented (pure-script, or analytics disabled at run time).
+    cost = resolved_cost_usd_from_transcript(run_id)
 
     if repos is not None and user_id is not None:
         repos.runs.update(

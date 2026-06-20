@@ -2616,6 +2616,11 @@ class WorkerResult(BaseModel):
     # S47 HITL: present when a worker requests human approval before executing.
     # Contains {label: str, preview: str} as emitted by the worker in result.json.
     decision_required: Optional[Dict[str, Any]] = None
+    # Track A LLM-obs: trace-derived run rollup (generation_count, span_count,
+    # total_tokens, total_cost_usd, p95_step_latency_ms, ai_trace_id). Present
+    # only for agent-mode runs; the runner uses it to persist real cost/tokens
+    # summed from per-generation captures instead of a flat blended estimate.
+    ai_summary: Optional[Dict[str, Any]] = None
 
 
 class StructuredLog(BaseModel):

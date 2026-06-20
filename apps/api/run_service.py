@@ -1110,10 +1110,16 @@ def _emit_run_lifecycle_event(
             total_tokens: Optional[int] = None
             total_cost_usd: Optional[float] = None
             try:
-                from cost import estimate_cost_usd, total_tokens_from_transcript
+                from cost import (
+                    resolved_cost_usd_from_transcript,
+                    total_tokens_from_transcript,
+                )
 
                 total_tokens = total_tokens_from_transcript(run_id)
-                total_cost_usd = estimate_cost_usd(total_tokens)
+                # Trace-derived cost (Track A §A2) when available, else blended
+                # estimate — the SAME source the persisted run row uses, so the
+                # PostHog event and the runs API never disagree on cost.
+                total_cost_usd = resolved_cost_usd_from_transcript(run_id)
             except Exception:
                 total_tokens = None
                 total_cost_usd = None
@@ -1146,6 +1152,44 @@ def _emit_run_lifecycle_event(
         )
     except Exception:  # pragma: no cover - belt-and-suspenders
         logger.debug("PostHog run-lifecycle emit failed for %s", run_id, exc_info=True)
+
+
+def _emit_run_exception(
+    *,
+    exc: BaseException,
+    run_id: str,
+    worker_id: str,
+    owner_id: Optional[str],
+    trace_id: Optional[str] = None,
+    error_code: Optional[str] = None,
+) -> None:
+    """Capture a PostHog ``$exception`` for a crashed run (Track A §A4).
+
+    Groups crashes into issues with type + stack trace, attaching the run /
+    worker / workspace / trace id + the run_metrics error_category. Pure side
+    effect; swallows everything so it can never break a run."""
+    try:
+        from services import ai_observability as ai_obs
+        from services import run_metrics
+        from db import derive_workspace_id
+    except Exception:  # pragma: no cover
+        return
+    if not ai_obs.is_enabled():
+        return
+    try:
+        category = run_metrics.classify_failure(error_code=error_code, error=str(exc))
+        ai_obs.capture_exception(
+            owner_id=owner_id or "",
+            exc=exc,
+            run_id=run_id,
+            worker_id=worker_id or "",
+            workspace_id=derive_workspace_id(owner_id),
+            trace_id=trace_id,
+            error_code=error_code,
+            error_category=category,
+        )
+    except Exception:  # pragma: no cover - belt-and-suspenders
+        logger.debug("PostHog $exception emit failed for %s", run_id, exc_info=True)
 
 
 def _emit_approval_requested(
@@ -2974,6 +3018,18 @@ def execute_run(
     except Exception as exc:
         logger.exception("Run %s crashed for worker %s", run_id, worker_id)
         error_message = str(exc) or exc.__class__.__name__
+        # PostHog Error Tracking (Track A §A4): capture the real exception with
+        # type + stack trace so crashes group into debuggable issues, beyond the
+        # flat run_failed.error_category label. No-op + never raises when
+        # analytics is disabled. Stack text carries no prompt/completion bodies.
+        _emit_run_exception(
+            exc=exc,
+            run_id=run_id,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            trace_id=trace_id,
+            error_code="run_execution_exception",
+        )
         try:
             update_run_status(
                 run_id,
