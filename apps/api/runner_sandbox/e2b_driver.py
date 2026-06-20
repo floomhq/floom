@@ -31,9 +31,9 @@ import contexts as _contexts_module
 from contexts import (
     CONTEXTS_DIR,
     context_mount_matches_inputs,
-    context_total_size,
-    context_updated_at,
+    context_tree_summary,
     context_scope_for_user,
+    load_context_metadata,
     normalize_context_mount,
     use_context_scope,
 )
@@ -1521,6 +1521,7 @@ def _warm_pool_context_key_entries(
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     with use_context_scope(context_scope_for_user(user_id)):
+        metadata = load_context_metadata()
         for context in selected_contexts:
             source = context.get("source", "local")
             entry: dict[str, Any] = {
@@ -1529,8 +1530,22 @@ def _warm_pool_context_key_entries(
             }
             if source == "local":
                 local_dir = _contexts_module.context_dir(context["name"])
-                entry["size"] = context_total_size(local_dir) if local_dir.exists() else 0
-                entry["updated_at"] = context_updated_at(local_dir)
+                pack_meta = metadata.get(str(context["name"])) if isinstance(metadata, dict) else None
+                summary = pack_meta.get("summary") if isinstance(pack_meta, dict) else None
+                sha256 = summary.get("sha256") if isinstance(summary, dict) else None
+                if isinstance(sha256, str) and sha256.strip():
+                    entry["fingerprint"] = f"sha256:{sha256.strip()}"
+                    entry["size"] = int(summary.get("total_size_bytes") or 0)
+                    entry["updated_at"] = summary.get("updated_at")
+                else:
+                    summary = context_tree_summary(local_dir) if local_dir.exists() else {
+                        "sha256": hashlib.sha256().hexdigest(),
+                        "total_size_bytes": 0,
+                        "updated_at": None,
+                    }
+                    entry["fingerprint"] = f"tree:{summary['sha256']}"
+                    entry["size"] = int(summary.get("total_size_bytes") or 0)
+                    entry["updated_at"] = summary.get("updated_at")
             entries.append(entry)
     return entries
 
