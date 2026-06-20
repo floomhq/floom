@@ -165,11 +165,17 @@ def get_secrets_for_worker(
                 return dict(cached[1])
     _load_runtime_env_files()
     config = _get_worker_config_for_run(worker_id, repos_obj)
+    # Only declared worker secrets are injected into the sandbox. Resolving every
+    # DB secret in the workspace is slower for secret-heavy tenants and weakens
+    # the least-privilege contract documented above.
     names = set(config.secrets if config else [])
-    names.update(_secret_names_from_db(owner_id, repos_obj))
-    # DO NOT union env-file keys here. They include platform infra secrets.
     allowed_names = [name for name in names if name not in _PLATFORM_SECRET_NAMES]
-    resolved = repos_obj.secrets.resolve(user_id=owner_id, names=allowed_names)
+    allowed_name_set = set(allowed_names)
+    resolved = {
+        name: value
+        for name, value in repos_obj.secrets.resolve(user_id=owner_id, names=allowed_names).items()
+        if name in allowed_name_set
+    }
     if ttl > 0:
         with _secret_cache_lock:
             _secret_cache_by_key[cache_key] = (time.monotonic() + ttl, dict(resolved))
