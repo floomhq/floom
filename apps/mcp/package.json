@@ -1,6 +1,6 @@
 {
   "name": "@floomhq/workeros",
-  "version": "4.2.4",
+  "version": "4.2.5",
   "description": "CLI + MCP server for self-hosted and hosted Workeros instances.",
   "type": "module",
   "bin": {

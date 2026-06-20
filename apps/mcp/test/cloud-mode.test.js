@@ -16,6 +16,7 @@ import {
   WorkerosApiClient,
   WorkerosApiError,
   createAuthenticatedClient,
+  resolveLoginApiBase,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
 import { cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
@@ -43,6 +44,27 @@ test("cloud login treats cli-exchange 429 without retry metadata as slow_down", 
   const error = new WorkerosApiError("rate limited", 429, {});
 
   assert.equal(cloudRateLimitRetryMs(error, 2), 5_000);
+});
+
+test("cloud login defaults to hosted Workeros API", () => {
+  const originalBase = process.env.WORKEROS_API_BASE;
+  const originalFloomBase = process.env.FLOOM_API_BASE;
+  const originalCloud = process.env.WORKEROS_CLOUD;
+  try {
+    delete process.env.WORKEROS_API_BASE;
+    delete process.env.FLOOM_API_BASE;
+    delete process.env.WORKEROS_CLOUD;
+    assert.equal(resolveLoginApiBase({ cloud: true }), "https://workeros-api.floom.dev");
+    process.env.WORKEROS_CLOUD = "1";
+    assert.equal(resolveLoginApiBase(), "https://workeros-api.floom.dev");
+  } finally {
+    if (originalBase === undefined) delete process.env.WORKEROS_API_BASE;
+    else process.env.WORKEROS_API_BASE = originalBase;
+    if (originalFloomBase === undefined) delete process.env.FLOOM_API_BASE;
+    else process.env.FLOOM_API_BASE = originalFloomBase;
+    if (originalCloud === undefined) delete process.env.WORKEROS_CLOUD;
+    else process.env.WORKEROS_CLOUD = originalCloud;
+  }
 });
 
 test("cloud login can persist api_token credentials from cli-exchange", () => {
@@ -94,7 +116,7 @@ test("readCredentials back-compat treats legacy schema as OSS mode", async () =>
 test("readCredentials rejects cloud creds missing refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://api.workeros.example.com",
+      api_base: "https://workeros-api.floom.dev",
       mode: "cloud",
       // refresh_token + supabase_url intentionally omitted
       authed_at: new Date().toISOString(),
@@ -107,7 +129,7 @@ test("readCredentials rejects cloud creds missing refresh_token", async () => {
 test("updateCredentials persists workspace_id without dropping refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://api.workeros.example.com",
+      api_base: "https://workeros-api.floom.dev",
       mode: "cloud",
       refresh_token: "rt-1",
       supabase_url: "https://abc.supabase.co",
@@ -125,13 +147,13 @@ test("updateCredentials persists workspace_id without dropping refresh_token", a
 
 test("readCredentials accepts cloud PAT from environment", async () => {
   await withTempHome(async () => {
-    process.env.WORKEROS_API_BASE = "https://api.workeros.example.com";
+    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     process.env.WORKEROS_API_TOKEN = "floom_pat_123";
     process.env.WORKEROS_WORKSPACE_ID = "ws_env";
     const creds = await readCredentials();
     assert.ok(creds);
     assert.equal(creds.mode, "cloud");
-    assert.equal(creds.api_base, "https://api.workeros.example.com");
+    assert.equal(creds.api_base, "https://workeros-api.floom.dev");
     assert.equal(creds.api_token, "floom_pat_123");
     assert.equal(creds.workspace_id, "ws_env");
   });

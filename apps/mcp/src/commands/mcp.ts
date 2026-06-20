@@ -8,7 +8,7 @@ import { log, printJson, renderTable } from "../lib/output.js";
 
 type JsonObject = Record<string, unknown>;
 
-const DEFAULT_CLOUD_API_BASE = "https://api.workeros.example.com";
+const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
 
 // Targets that write a file (kind = "object" or "array" for config shape).
