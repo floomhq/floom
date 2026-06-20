@@ -1283,7 +1283,7 @@ _WORKER_SOURCE_PATH_RE = re.compile(r"^/workers/[^/]+$")
 def _normalized_request_path(request: Request) -> str:
     """Return the route-local path, stripping any ASGI mount prefix.
 
-    B10: the downstream host mounts this engine sub-app under ``/api``
+    B10: a downstream host may mount this engine sub-app under ``/api``
     (``parent.mount("/api", engine.app)``). When mounted, Starlette keeps the
     full prefixed path in ``scope["path"]`` (and ``request.url.path``) while
     recording the mount prefix in ``scope["root_path"]``. The body-size /
@@ -1571,7 +1571,7 @@ async def auth_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
 
-    # B10: the downstream host mounts this engine sub-app under ``/api``. The
+    # B10: a downstream host may mount this engine sub-app under ``/api``. The
     # run-token proxy matchers (_RE_RUN_LLM_PROXY, _RE_RUN_COMPOSIO_PROXY, ...)
     # and the run_id extraction below all match route-local paths
     # (``/runs/{id}/llm``), so a sandbox using WORKEROS_API_URL=.../api would

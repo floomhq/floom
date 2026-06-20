@@ -1703,11 +1703,10 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
 
 
 /**
- * A host-injected top-level view (#1006). managed-deployment passes its
- * cross-tenant "workspace-admin" view here so it can compose the engine
- * `WorkersCollection` instead of forking the whole 869-line component. The
- * host decides visibility (e.g. only pass it when `api.me().is_admin`); the
- * engine stays generic and renders the switcher only when views are supplied.
+ * A downstream host can inject a top-level view (#1006) and compose
+ * `WorkersCollection` without forking the full component. The host decides
+ * visibility; the engine stays generic and renders the switcher only when
+ * views are supplied.
  */
 export type WorkersExtraView = {
   /** Stable key, also the active-view id. */

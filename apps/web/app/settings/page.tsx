@@ -2482,19 +2482,17 @@ function VersionList({ title, versions }: { title: string; versions: VersionSumm
 // To regenerate: python3 -c "import qrcode; ..." (see git history for script).
 //
 // #1385: WA_BOT_NUMBER is read from NEXT_PUBLIC_WA_BOT_NUMBER env at build time.
-// Cloud sets it via Railway env. Self-hosters set their own number. When unset,
+// Deployments set it via env. When unset,
 // the WhatsApp card renders a "not configured" state instead of QR/number.
-// The pre-computed QR SVG below encodes the cloud number; it is only rendered
-// when the env number matches (i.e. the cloud deployment). Self-hosters with a
-// custom number get the wa.me link only (they can regenerate the QR if needed).
+// The pre-computed QR SVG below encodes one default number; it is only rendered
+// when the env number matches. Custom numbers get the wa.me link only.
 // ---------------------------------------------------------------------------
 
-// The cloud number the pre-computed QR encodes. Do not change without
+// The default number the pre-computed QR encodes. Do not change without
 // regenerating WA_QR_PATH.
-const WA_QR_CLOUD_NUMBER = "16503999709";
+const WA_QR_DEFAULT_NUMBER = "16503999709";
 
-// Read from env — set NEXT_PUBLIC_WA_BOT_NUMBER in Railway (cloud) or .env
-// (self-host). When absent the WhatsApp channel card renders unconfigured.
+// Read from env; when absent the WhatsApp channel card renders unconfigured.
 const WA_BOT_NUMBER = (process.env.NEXT_PUBLIC_WA_BOT_NUMBER || "").trim() || null;
 const WA_LINK = WA_BOT_NUMBER ? `https://wa.me/${WA_BOT_NUMBER}` : null;
 
@@ -2519,8 +2517,8 @@ function WhatsAppQR() {
       ? `+1 ${digitsOnly.slice(1, 4)}-${digitsOnly.slice(4, 7)}-${digitsOnly.slice(7)}`
       : `+${digitsOnly}`;
 
-  // The pre-computed QR SVG only matches the cloud number.
-  const showQR = digitsOnly === WA_QR_CLOUD_NUMBER;
+  // The pre-computed QR SVG only matches the default number.
+  const showQR = digitsOnly === WA_QR_DEFAULT_NUMBER;
 
   return (
     <div className="flex flex-col items-center gap-2">

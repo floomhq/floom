@@ -2,12 +2,11 @@ import { Radar } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * EmilyAvatar — the Floom Emily identity mark.
+ * EmilyAvatar — the Emily assistant identity mark.
  *
- * Floom-blue accent circle with a Lucide Radar icon (white stroke).
- * Radar evokes active scanning/discovery — fitting for Emily as the Search Assistant
- * recruiting agent. The blue (#3E6FE0 light / #5B8DEF dark) is the Floom
- * accent, tokenized via --emily-mark.
+ * Accent circle with a Lucide Radar icon (white stroke).
+ * Radar evokes active scanning and discovery, fitting for an assistant that
+ * helps inspect workers, runs, and workspace state.
  *
  * No letter monogram, no sparkle.
  */

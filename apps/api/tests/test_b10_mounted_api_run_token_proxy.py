@@ -1,5 +1,5 @@
 """B10 / round-09 re-derive gate: run-token proxy + body-size middleware must
-resolve when the engine app is mounted under ``/api`` (the downstream host's
+resolve when the engine app is mounted under ``/api`` (a downstream host's
 ``parent.mount("/api", engine.app)`` topology).
 
 Codex flagged that R9's ``_normalized_request_path()`` was applied ONLY to the
@@ -8,7 +8,7 @@ body-size helpers, while the auth middleware's run-token match and
 ``/api`` a sandbox using ``WORKEROS_API_URL=.../api`` would present
 ``/api/runs/{id}/llm`` and be rejected (403) before reaching the managed proxy.
 
-These tests mount the app under ``/api`` exactly like the downstream host and
+These tests mount the app under ``/api`` like a downstream host and
 assert the run-token LLM proxy still resolves (200), proving the normalization
 was extended to the auth-middleware run-token matchers.
 """

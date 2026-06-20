@@ -33,7 +33,7 @@ MAX_CONTEXT_BYTES = 50 * 1024 * 1024
 # same FS root is shared across workspaces; without scoping every authed
 # user sees every other tenant's contexts (P0 cross-tenant leak).
 #
-# The downstream host registers a resolver callable via
+# A downstream multi-tenant host registers a resolver callable via
 # ``set_context_scope_resolver()`` that returns the active workspace_id for
 # the current request. When set + returning a non-empty safe string, every
 # context path becomes ``CONTEXTS_DIR/<workspace_id>/<name>/...`` and the
@@ -53,7 +53,7 @@ _scope_override: ContextVar[object | str | None] = ContextVar(
 )
 _CONTEXT_METADATA_SAVE_LOCK = threading.Lock()
 
-# --- Context hydration hook (cloud Storage lazy-fetch) ----------------------
+# --- Context hydration hook (remote storage lazy-fetch) --------------------
 #
 # In OSS single-tenant mode this hook is never set and context_dir() behaves
 # exactly as before — a pure filesystem path resolver with no side effects.

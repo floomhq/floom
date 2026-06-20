@@ -53,7 +53,7 @@ def _git_workspace() -> Path:
     """Return the git workspace root for the current request.
 
     OSS (single-tenant): WORKEROS_WORKSPACE_DIR env var, or WORKERS_DIR.parent.
-    Cloud (multi-tenant): a host-registered resolver (#1001) returns the real
+    Managed multi-tenant host: a registered resolver (#1001) returns the real
     materialized per-workspace git root; else WORKERS_DIR / {workspace_id}.
 
     git_ops and worker_registry are resolved lazily: the test suite pops and
