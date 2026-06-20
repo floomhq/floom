@@ -31,7 +31,7 @@ pytest-xdist==3.8.0
 # Optional: AWS Bedrock / Claude model provider (resolved by litellm at runtime).
 # Not needed for the default OpenAI path and not installed by the test suite, so
 # left as a bounded range rather than a hard pin.
-boto3>=1.40,<2
+boto3>=1.43.34,<2
 
 # Optional: Vertex AI / Gemini model provider (resolved by litellm at runtime).
 # Required when GOOGLE_APPLICATION_CREDENTIALS points at Google ADC/WIF config.
