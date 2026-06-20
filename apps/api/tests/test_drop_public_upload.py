@@ -121,3 +121,56 @@ def test_public_drop_upload_rejects_bad_token(client_and_main):
     )
 
     assert response.status_code == 404
+
+
+def test_public_drop_upload_uses_drop_default_size_when_token_omits_cap(
+    client_and_main, monkeypatch
+):
+    client, _main = client_and_main
+    from routers.drop import make_drop_upload_token
+
+    monkeypatch.setenv("WORKEROS_DROP_DEFAULT_MAX_SIZE_MB", "0.000001")
+    token = make_drop_upload_token(
+        drop_id="drop_small",
+        owner_id=OWNER,
+        worker_id="drop-worker",
+        input_name="source_file",
+        expires_at=int(time.time()) + 300,
+        accepts="text/plain",
+    )
+
+    response = client.post(
+        f"/drop/public/drop_small/uploads?token={token}",
+        files={"file": ("lead.txt", io.BytesIO(b"too-large-for-one-byte"), "text/plain")},
+    )
+
+    assert response.status_code == 400
+    assert "Uploaded file exceeds" in response.text
+
+
+def test_public_drop_upload_rate_limits_reusable_link(client_and_main, monkeypatch):
+    client, _main = client_and_main
+    from routers.drop import make_drop_upload_token
+
+    monkeypatch.setenv("WORKEROS_DROP_UPLOADS_PER_TOKEN_HOUR", "1")
+    token = make_drop_upload_token(
+        drop_id="drop_rate",
+        owner_id=OWNER,
+        worker_id="drop-worker",
+        input_name="source_file",
+        expires_at=int(time.time()) + 300,
+        accepts="text/plain",
+        max_size_mb=1,
+    )
+    first = client.post(
+        f"/drop/public/drop_rate/uploads?token={token}",
+        files={"file": ("one.txt", io.BytesIO(b"one"), "text/plain")},
+    )
+    second = client.post(
+        f"/drop/public/drop_rate/uploads?token={token}",
+        files={"file": ("two.txt", io.BytesIO(b"two"), "text/plain")},
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 429
+    assert "Drop link upload limit exceeded" in second.text
