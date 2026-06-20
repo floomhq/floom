@@ -257,6 +257,8 @@ _WORKER_AUTHOR_PROVIDER_ENV_VARS = (
     "AWS_DEFAULT_REGION",
     "AWS_BEARER_TOKEN_BEDROCK",
     "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
     "PLATFORM_OPENAI_API_KEY",
     "OPENAI_API_KEY",
     # worker-author smoke-tests the worker it generates in a NESTED E2B sandbox,
