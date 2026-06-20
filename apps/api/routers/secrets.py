@@ -221,6 +221,9 @@ def list_secrets(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[SecretItem]:
+    if getattr(auth, "role", None) and not auth.is_admin:
+        raise HTTPException(status_code=403, detail="admin role required")
+    logger.info("Secret metadata listed by user=%s role=%s", auth.user_id, auth.role)
     db_secrets = {
         row["name"]: row_to_dict(row)
         for row in repos.secrets.list(user_id=auth.user_id)

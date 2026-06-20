@@ -85,3 +85,40 @@ def test_main_share_token_signers_raise_503_without_secret(monkeypatch, tmp_path
     with pytest.raises(HTTPException) as e3:
         main._approval_public_token({"id": "a1", "run_id": "r1", "owner_id": "o1"})
     assert e3.value.status_code == 503
+
+
+def _load_main_for_startup_guard(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
+    (tmp_path / "workers").mkdir(exist_ok=True)
+    for name in list(sys.modules):
+        if name in ("main", "models", "worker_registry", "run_service", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
+            sys.modules.pop(name, None)
+    import types as _types
+
+    sys.modules["scheduler"] = _types.SimpleNamespace(start_scheduler=lambda: None, stop_scheduler=lambda: None)
+    return importlib.import_module("main")
+
+
+def test_startup_guard_requires_floom_secret_for_local_non_dev(monkeypatch, tmp_path):
+    main = _load_main_for_startup_guard(monkeypatch, tmp_path)
+    monkeypatch.delenv("WORKEROS_DEV", raising=False)
+    monkeypatch.setenv("FLOOM_SECRET", "")
+
+    with pytest.raises(RuntimeError, match="FLOOM_SECRET is required"):
+        main._validate_startup_configuration()
+
+
+def test_startup_guard_allows_explicit_dev_and_cloud_exemption(monkeypatch, tmp_path):
+    main = _load_main_for_startup_guard(monkeypatch, tmp_path)
+    monkeypatch.setenv("FLOOM_SECRET", "")
+    monkeypatch.setenv("WORKEROS_DEV", "1")
+    main._validate_startup_configuration()
+
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.delenv("WORKEROS_DEV", raising=False)
+    monkeypatch.setattr(main, "get_auth_provider", lambda: object())
+    main._validate_startup_configuration()

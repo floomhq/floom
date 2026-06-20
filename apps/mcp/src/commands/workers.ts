@@ -132,6 +132,39 @@ function validateTimezones(manifest: Record<string, unknown>): string[] {
   return errors;
 }
 
+function validateWorkerContractShape(manifest: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  if (Array.isArray(manifest.use_cases)) {
+    if (manifest.use_cases.length < 3 || manifest.use_cases.length > 5) {
+      errors.push("use_cases must contain 3 to 5 items");
+    }
+    manifest.use_cases.forEach((item, index) => {
+      if (typeof item !== "string" || !item.trim()) {
+        errors.push(`use_cases.${index} must be a non-empty string`);
+      }
+    });
+  }
+
+  const validateFields = (value: unknown, path: string) => {
+    if (!Array.isArray(value)) return;
+    value.forEach((field, index) => {
+      if (!isRecord(field)) return;
+      if ("placeholder" in field && field.placeholder !== undefined && field.placeholder !== null && typeof field.placeholder !== "string") {
+        errors.push(`${path}.${index}.placeholder must be a string`);
+      }
+    });
+  };
+
+  validateFields(manifest.inputs, "inputs");
+  validateFields(manifest.outputs, "outputs");
+  const exec = readNestedRecord(manifest, "exec");
+  if (exec) {
+    validateFields(exec.inputs, "exec.inputs");
+    validateFields(exec.outputs, "exec.outputs");
+  }
+  return errors;
+}
+
 function declaredComposioConnections(manifest: Record<string, unknown>): Map<string, Set<string> | null> {
   const result = new Map<string, Set<string> | null>();
   const raw = manifest.connections;
@@ -397,6 +430,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
     errors.push("worker.yml must include a runtime field (runtime, runtime.type, exec.runtime, or exec.runtime.type)");
   }
   errors.push(...validateTimezones(manifest));
+  errors.push(...validateWorkerContractShape(manifest));
 
   const entrypoint = readEntrypoint(manifest);
   if (entrypoint === "run.py" && !hasRunPy) {
@@ -604,7 +638,17 @@ export async function workersPushCommand(dir: string): Promise<number> {
     }
 
     if (!exists) {
-      await client.requestJson("POST", "/workers", { body: payload });
+      try {
+        await client.requestJson("POST", "/workers", { body: payload });
+      } catch (error) {
+        if (error instanceof WorkerosApiError && error.status === 409 && /already exists/i.test(apiErrorDetail(error))) {
+          return emitError(
+            `Worker id '${source.workerId}' already exists outside the active workspace.`,
+            "Choose a unique worker id in worker.yml, then run: floom workers validate <dir> && floom workers push <dir>",
+          );
+        }
+        throw error;
+      }
       if (hasNonLegacyBundleFiles(source)) {
         try {
           await client.requestJson("PUT", `/workers/${encodeURIComponent(source.workerId)}/files`, { body: filesPayload(source) });

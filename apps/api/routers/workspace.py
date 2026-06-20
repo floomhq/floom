@@ -1342,6 +1342,7 @@ _WORKSPACE_SETTING_ALLOWED_KEYS = _WORKSPACE_SETTING_BOOL_KEYS | {
     "failure_email_to",
     "monthly_spend_cap_usd",
     "default_model",
+    "fallback_model",
     "default_timeout_seconds",
     "max_output_tokens",
     "region",
@@ -1427,11 +1428,11 @@ def _validate_workspace_setting(key: str, value: str) -> str:
             )
         return str(parsed)
 
-    if key == "default_model":
+    if key in {"default_model", "fallback_model"}:
         if not raw:
             return raw
         if not _MODEL_ID_RE.fullmatch(raw) or "://" in raw or ".." in raw:
-            _setting_error("default_model must be a safe model id")
+            _setting_error(f"{key} must be a safe model id")
         return raw
 
     if key == "region":

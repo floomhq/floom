@@ -1175,6 +1175,16 @@ set_context_scope_resolver(_active_context_scope)
 
 def _validate_startup_configuration() -> None:
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local" and os.environ.get("WORKEROS_DEV") != "1":
+        if not (os.environ.get("FLOOM_SECRET") or "").strip():
+            logger.error(
+                "FLOOM_SECRET is required for OSS single-tenant startup. "
+                "Set FLOOM_SECRET, or set WORKEROS_DEV=1 for explicit local development."
+            )
+            raise RuntimeError(
+                "FLOOM_SECRET is required for OSS single-tenant startup; "
+                "set WORKEROS_DEV=1 only for local development"
+            )
     if deploy != "local":
         get_auth_provider()
 
@@ -1515,7 +1525,13 @@ async def rate_limit_middleware(request: Request, call_next):
             if len(bucket) >= limit:
                 return JSONResponse(
                     status_code=429,
-                    content={"detail": "Rate limit exceeded"},
+                    content={
+                        "detail": {
+                            "error_code": "rate_limit_exceeded",
+                            "message": "Rate limit exceeded",
+                            "retry_after": int(window),
+                        }
+                    },
                     headers={"Retry-After": str(int(window))},
                 )
         for key in keys:
