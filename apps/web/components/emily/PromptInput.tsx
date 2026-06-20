@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Paperclip, SendHorizonal } from "lucide-react";
+import { ArrowUp, Paperclip, SendHorizonal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PromptChips } from "@/components/PromptChips";
 import { FileChip } from "./FileChip";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import type { AttachedFile } from "@/lib/emily-chat-types";
 
 const ACCEPTED_TYPES = [
@@ -29,6 +30,7 @@ export function PromptInput({
   placeholder,
   disabled,
   sendDisabled,
+  variant = "default",
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -44,7 +46,20 @@ export function PromptInput({
    * next message, and disable ONLY the send action until the stream completes.
    */
   sendDisabled?: boolean;
+  /**
+   * #1557 + P1-10 (Federico 2026-06-19): "landing" matches the marketing landing
+   * prompt box — a FLAT, borderless composer with a labeled "Hire ↑" send
+   * affordance instead of a bare arrow icon, and no "Will use / Uses" chip row.
+   * Used by Emily's HOME/CREATE empty state so the in-app first prompt reads the
+   * same as the landing's. The "default" variant (the bottom-anchored
+   * conversation composer) keeps its existing flat-but-outlined box + icon send.
+   * NOTE: rendering the detected tools as rich INLINE chips inside the editable
+   * textarea (as the landing does within static prompt text) is a follow-up; the
+   * landing variant simply drops the separate Uses-row to stay clean.
+   */
+  variant?: "default" | "landing";
 }) {
+  const isLanding = variant === "landing";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -114,14 +129,24 @@ export function PromptInput({
 
       {/* Detected tools + capabilities in the message text (read-only here —
           the assistant decides what to wire). Same shared detector as
-          /workers/new (lib/prompt-detect). */}
-      <PromptChips prompt={value} className="px-1" />
+          /workers/new (lib/prompt-detect). #1557/P1-10: the landing variant keeps
+          the composer clean (no separate Uses-row); inline tool chips are a
+          follow-up. */}
+      {!isLanding && <PromptChips prompt={value} className="px-1" />}
 
       {/* E10 (Federico 2026-06-17): flat #FBFBFC composer (bg-app), NOT the grey
           --bg-2 panel that read as an unwanted "white box" appearing on type/focus.
-          A single subtle divider outline keeps it discoverable; more compact
-          padding (py-2) makes the box shorter. */}
-      <div className="flex items-center gap-2 rounded-xl [border:var(--bd-div)] bg-[var(--bg-app)] px-3 py-2 focus-within:[border:var(--bd-div)]">
+          default: a single subtle divider outline keeps it discoverable.
+          landing (#1557/P1-10): fully FLAT, no box border at all, to match the
+          marketing landing prompt box; compact padding (py-2) keeps it short. */}
+      <div
+        className={cn(
+          "flex items-center gap-2 rounded-xl bg-[var(--bg-app)] px-3 py-2",
+          isLanding
+            ? "[border:none]"
+            : "[border:var(--bd-div)] focus-within:[border:var(--bd-div)]"
+        )}
+      >
         {/* Attach button */}
         <button
           type="button"
@@ -156,17 +181,35 @@ export function PromptInput({
           disabled={disabled}
         />
 
-        <Button
-          size="sm"
-          className="h-7 w-7 p-0 shrink-0"
-          onClick={onSubmit}
-          disabled={!canSend}
-          style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
-          type="button"
-          aria-label="Send message"
-        >
-          <SendHorizonal className="size-3.5" />
-        </Button>
+        {isLanding ? (
+          // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
+          // landing's prompt CTA, not a bare arrow. Keeps the accessible name
+          // "Send message" so the send action stays discoverable to AT + tests.
+          <Button
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 px-3 text-xs font-medium"
+            onClick={onSubmit}
+            disabled={!canSend}
+            style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
+            type="button"
+            aria-label="Send message"
+          >
+            Hire
+            <ArrowUp className="size-3.5" />
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            className="h-7 w-7 p-0 shrink-0"
+            onClick={onSubmit}
+            disabled={!canSend}
+            style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
+            type="button"
+            aria-label="Send message"
+          >
+            <SendHorizonal className="size-3.5" />
+          </Button>
+        )}
       </div>
     </div>
   );

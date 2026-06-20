@@ -57,7 +57,7 @@ function CollectionInner<T>({ config }: { config: CollectionConfig<T> }) {
 
   const onInvalidSel = useCallback(
     (id: string) => {
-      toast.error("Item not found; it may have been deleted or the link uses an old ID format.");
+      toast.error("Couldn't open that item; it may have been deleted.");
       const next = { ...stateRef.current, sel: null, tab: null };
       setState(next);
       const qs = serializeCollectionState(next, defaultView).toString();
