@@ -626,50 +626,6 @@ def _maybe_send_welcome_email(user: Any) -> None:
     )
 
 
-def _store_cli_exchange(
-    *,
-    request: Request,
-    user_id: str,
-    device_code: str,
-    user_code: str,
-    refresh_token: str,
-) -> None:
-    repos = get_repositories()
-    normalized_user_code = user_code.strip().upper()
-    now_ts = time.time()
-    expires_at = now_ts + get_cloud_settings().cli_code_ttl_seconds
-    existing = repos.cli_auth.get_by_device_code(device_code)
-    if existing is not None:
-        if str(existing.get("user_code", "")).strip().upper() != normalized_user_code:
-            raise HTTPException(status_code=409, detail="CLI auth device code mismatch")
-        repos.cli_auth.delete(device_code=device_code)
-        client_name = str(existing.get("client_name") or "workeros-cli")
-        try:
-            scopes = normalize_cli_scopes(existing.get("scopes"))
-        except UnsupportedCliScope as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        created_ip = existing.get("created_ip") or (request.client.host if request.client else None)
-        created_at = float(existing.get("created_at", now_ts) or now_ts)
-    else:
-        client_name = "workeros-cli"
-        scopes = normalize_cli_scopes(None)
-        created_ip = request.client.host if request.client else None
-        created_at = now_ts
-    repos.cli_auth.create_device(
-        user_id=user_id,
-        device_code=device_code,
-        user_code=normalized_user_code,
-        status="approved",
-        secret=refresh_token,
-        client_name=client_name,
-        scopes=scopes,
-        created_ip=created_ip,
-        created_at=created_at,
-        expires_at=expires_at,
-        approved_at=now_ts,
-    )
-
-
 @router.get("/login")
 def login(
     provider: str,
@@ -683,8 +639,6 @@ def login(
     next_path = _safe_next(next)
     callback_url = _callback_url(
         next_path=next_path,
-        device_code=device_code,
-        user_code=user_code,
         request=request,
     )
 
@@ -865,14 +819,6 @@ def fragment_session(payload: FragmentSessionRequest, request: Request):
         expires_in=payload.expires_in,
         user=user,
     )
-    if payload.device_code and payload.user_code:
-        _store_cli_exchange(
-            request=request,
-            user_id=str(user.id),
-            device_code=payload.device_code,
-            user_code=payload.user_code,
-            refresh_token=payload.refresh_token,
-        )
     response = JSONResponse({"ok": True, "next": next_path, "redirect_to": _frontend_redirect(next_path)})
     _set_cookie(
         response,
@@ -993,8 +939,6 @@ def callback(
     next_path = _safe_next(next)
     callback_url = _callback_url(
         next_path=next_path,
-        device_code=device_code,
-        user_code=user_code,
     )
     client = new_supabase_anon_client()
     if confirmation_url and not code and not token_hash:
@@ -1037,8 +981,6 @@ def callback(
             return HTMLResponse(
                 _auth_fragment_bridge_html(
                     next_path=next_path,
-                    device_code=device_code,
-                    user_code=user_code,
                 )
             )
     except HTTPException:
@@ -1054,15 +996,6 @@ def callback(
 
     _upsert_user_row(user)
     _maybe_send_welcome_email(user)
-    if device_code and user_code:
-        _store_cli_exchange(
-            request=request,
-            user_id=str(user.id),
-            device_code=device_code,
-            user_code=user_code,
-            refresh_token=session.refresh_token,
-        )
-
     response = RedirectResponse(_frontend_redirect(next_path), status_code=303)
     _set_cookie(
         response,

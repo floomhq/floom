@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 from cryptography.fernet import Fernet
@@ -9,6 +10,9 @@ from fastapi.testclient import TestClient
 
 import apps.api.routes.auth as auth_routes
 from apps.api.db.supabase_repos import SupabaseCliAuthRepository
+
+
+AUTH_ROUTE_SRC = Path(__file__).resolve().parents[1] / "apps" / "api" / "routes" / "auth.py"
 
 
 class _FakeCliAuth:
@@ -125,6 +129,13 @@ def test_cli_exchange_rejects_expired_code(monkeypatch):
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Device code expired"
+
+
+def test_login_callback_does_not_auto_approve_cli_devices():
+    text = AUTH_ROUTE_SRC.read_text(encoding="utf-8")
+    assert "_store_cli_exchange" not in text
+    assert "device_code=device_code" not in text
+    assert "user_code=user_code" not in text
 
 
 class _RaceResponse:

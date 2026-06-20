@@ -82,3 +82,40 @@ def test_workspace_transfer_consistency_migration_reassigns_late_tables():
     assert "update public.asset_versions" in text
     assert "set user_id = p_new_owner" in text
     assert "update public.mcp_tools" in text
+
+
+def test_p0_security_lockdown_migration_locks_vault_rpc_execution():
+    text = _migration("0047_p0_security_lockdown.sql")
+    for signature in [
+        "public.workeros_vault_create_secret(text, text, text)",
+        "public.workeros_vault_update_secret(uuid, text, text)",
+        "public.workeros_vault_delete_secret(uuid)",
+        "public.workeros_vault_read_secret(uuid)",
+        "public.workeros_vault_read_secrets(uuid[])",
+    ]:
+        assert f"revoke all on function {signature} from public" in text
+        assert f"revoke all on function {signature} from anon" in text
+        assert f"revoke all on function {signature} from authenticated" in text
+        assert f"grant execute on function {signature} to service_role" in text
+
+
+def test_p0_security_lockdown_migration_fixes_whatsapp_sender_policy():
+    text = _migration("0047_p0_security_lockdown.sql")
+    assert 'drop policy if exists "service role full access to whatsapp sender bindings"' in text
+    policy = text.split('create policy "service role full access to whatsapp sender bindings"', 1)[1]
+    assert "to service_role" in policy
+    assert "auth.role() = 'service_role'" in policy
+    assert "using (true)" not in policy
+    assert "force row level security" in text
+
+
+def test_p0_security_lockdown_migration_binds_workspace_transfer_caller():
+    text = _migration("0047_p0_security_lockdown.sql")
+    assert "create or replace function public.transfer_workspace_ownership" in text
+    assert "auth.uid() is distinct from p_actor_user_id" in text
+    assert "auth.role() is distinct from 'service_role'" in text
+    signature = "public.transfer_workspace_ownership(text, uuid, uuid, uuid, text, text[])"
+    assert f"revoke all on function {signature} from public" in text
+    assert f"revoke all on function {signature} from anon" in text
+    assert f"revoke all on function {signature} from authenticated" in text
+    assert f"grant execute on function {signature} to service_role" in text

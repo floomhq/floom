@@ -56,6 +56,12 @@ def test_chat_rule_present_and_scoped(monkeypatch, tmp_path):
     assert main._cloud_rate_limit_for_request(_fake("POST", "/api/novasearch/match")) == (30, 60.0)
 
 
+def test_cli_exchange_polling_uses_dedicated_loose_rate_bucket(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    assert main._cloud_rate_limit_for_request(_fake("POST", "/auth/cli-exchange")) == (120, 60.0)
+    assert main._cloud_rate_limit_for_request(_fake("POST", "/auth/cli-approve")) == (5, 60.0)
+
+
 def test_list_endpoint_scraping_rules_are_exact_roots(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
     assert main._cloud_rate_limit_for_request(_fake("GET", "/api/workers")) == (240, 60.0)
@@ -119,3 +125,26 @@ def test_chat_limit_is_per_identity(monkeypatch, tmp_path):
     blocked_a, fresh_b = asyncio.run(run())
     assert blocked_a.status_code == 429
     assert fresh_b.status_code == 200
+
+
+def test_cli_exchange_throttles_only_after_loose_poll_budget(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    main._cloud_rate_buckets.clear()
+
+    async def call_next(_req):
+        return Response("ok", status_code=200)
+
+    async def run():
+        out = []
+        for _ in range(121):
+            res = await main.cloud_rate_limit_middleware(
+                _request("POST", "/auth/cli-exchange", token=b"poller-a"),
+                call_next,
+            )
+            out.append(res)
+        return out
+
+    responses = asyncio.run(run())
+    assert [r.status_code for r in responses[:120]] == [200] * 120
+    assert responses[120].status_code == 429
+    assert responses[120].headers.get("Retry-After")

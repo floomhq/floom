@@ -213,7 +213,11 @@ _RE_WORKER_PATH = _re.compile(r"^(?:/api/v1|/v1|/api)?/workers/([^/]+)(/.*)?$")
 _CLOUD_CLONE_TOKEN_RE = _re.compile(r"^wct_[A-Za-z0-9_-]{32,}$")
 
 _CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], int, float]] = [
-    (None, _re.compile(r"^/auth/(?:password-login|password-signup|login|fragment-session|cli-exchange|cli-approve|cli-deny)$"), 5, 60.0),
+    # /auth/cli-exchange is intentionally not in this bucket. It is a
+    # high-entropy, single-use device-code poll endpoint; charging every
+    # pending poll against the auth bucket can permanently 429 cloud login.
+    (("POST",), _re.compile(r"^/auth/cli-exchange$"), 120, 60.0),
+    (None, _re.compile(r"^/auth/(?:password-login|password-signup|login|fragment-session|cli-approve|cli-deny)$"), 5, 60.0),
     (("POST",), _re.compile(r"^/api/cli-auth/devices$"), 5, 60.0),
     (("POST", "DELETE"), _re.compile(r"^/auth/tokens(?:/.*)?$"), 20, 60.0),
     (("POST", "PATCH", "DELETE"), _re.compile(r"^/api/workspaces(?:/.*)?$"), 60, 60.0),
