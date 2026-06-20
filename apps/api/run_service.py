@@ -2681,12 +2681,6 @@ def execute_run(
                     # already-terminal SSE event does not carry custom fields).
                     outputs = dict(outputs or {})
                     outputs["created_worker_id"] = created_worker_id
-                else:
-                    # Registration failed (see run logs for gate that fired).
-                    # Store flag so the create-flow frontend can show an error
-                    # instead of the misleading "Worker drafted" fallback.
-                    outputs = dict(outputs or {})
-                    outputs["worker_creation_failed"] = True
 
                     # Wedge safety net: prove the generated SCRIPT-mode worker
                     # actually RUNS (and bounded-repair it if not) before telling
@@ -2710,6 +2704,12 @@ def execute_run(
                             f"Could not smoke-test the generated worker: {smoke_exc}",
                             level="warning",
                         )
+                else:
+                    # Registration failed (see run logs for gate that fired).
+                    # Store flag so the create-flow frontend can show an error
+                    # instead of the misleading "Worker drafted" fallback.
+                    outputs = dict(outputs or {})
+                    outputs["worker_creation_failed"] = True
             except Exception as exc:
                 # Never fail the run on registration trouble — the bundle is
                 # still viewable. Log so the operator/engineer can see why.

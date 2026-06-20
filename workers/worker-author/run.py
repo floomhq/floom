@@ -120,6 +120,31 @@ def _with_prompt_cache(messages: list, model: str) -> list:
     return out
 
 
+def _extract_json_object(raw: str) -> Dict[str, Any]:
+    """Parse the first JSON object from an LLM response.
+
+    Some providers honor ``response_format={"type": "json_object"}`` loosely and
+    still append commentary after the object. ``json.loads`` then fails with
+    ``Extra data`` even though the leading object is usable.
+    """
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+        text = text.strip()
+        if text.lower().startswith("json"):
+            text = text[4:].lstrip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        if start != -1:
+            text = text[start:]
+    parsed, _end = json.JSONDecoder().raw_decode(text)
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("top-level JSON value is not an object", text, 0)
+    return parsed
+
+
 def _provider_credentials_error(model: str) -> Optional[str]:
     if _is_litellm_model(model):
         if "gemini" in model.lower() and not (
@@ -671,24 +696,8 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
             f"{time.perf_counter() - attempt_started_at:.2f}s"
         )
         raw = (resp.choices[0].message.content or "").strip()
-        # Bedrock/Anthropic Claude (and some other providers) wrap JSON in a
-        # ```json ... ``` markdown fence or add a short preamble, so a bare
-        # json.loads fails at char 0 ("Expecting value: line 1 column 1"). Strip a
-        # fence if present, else fall back to the outermost {...} object.
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1] if "\n" in raw else raw[3:]
-            if raw.rstrip().endswith("```"):
-                raw = raw.rstrip()[:-3]
-            raw = raw.strip()
-            if raw.lower().startswith("json"):
-                raw = raw[4:].lstrip()
-        if not raw.startswith("{"):
-            _start, _end = raw.find("{"), raw.rfind("}")
-            if _start != -1 and _end > _start:
-                raw = raw[_start : _end + 1]
-
         try:
-            parsed = json.loads(raw)
+            parsed = _extract_json_object(raw)
         except json.JSONDecodeError as exc:
             last_error = f"LLM returned non-JSON: {exc}"
             log(f"worker-author: attempt {attempt} JSON parse error: {exc}", level="warning")
