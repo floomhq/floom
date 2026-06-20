@@ -77,7 +77,7 @@ export function CliAuthContent({
     // /login: no sidebar chrome, the page IS the single authorize action.
     <div className="grid min-h-screen w-full place-items-center bg-[var(--bg-app)] px-6 py-10 text-[var(--ink)]">
       <div className="w-full max-w-md">
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] px-8 py-9 shadow-[var(--hairline)]">
+        <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] px-8 py-9">
           {/* Brand mark — same play-arrow squircle as /login, never a text circle. */}
           <div className="mb-7 flex items-center gap-2.5">
             <FloomMark size={22} />
