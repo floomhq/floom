@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { MoreHorizontal } from "lucide-react";
 import type { ListColumns, ListRowSpec, RowMenuItem } from "@/lib/collection/types";
+import { ActionMenu } from "@/components/ui/action-menu";
 import { StatusPill } from "./StatusPill";
 
 interface CollectionListProps<T> {
@@ -19,63 +18,22 @@ interface CollectionListProps<T> {
 }
 
 function RowMenu({ items }: { items: RowMenuItem[] }) {
-  const [open, setOpen] = useState(false);
+  // Global ⋯ menu (one ActionMenu everywhere) — replaces the hand-rolled
+  // open/close state + absolute c-menu div. stopPropagation keeps the row's
+  // onClick from firing when the menu trigger is used.
   return (
-    <div className="c-menu" style={{ position: "relative" }}>
-      <button
-        type="button"
-        aria-label="Row actions"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-      >
-        <MoreHorizontal size={18} />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          onMouseLeave={() => setOpen(false)}
-          style={{
-            position: "absolute",
-            top: "100%",
-            right: 0,
-            zIndex: 30,
-            minWidth: 168,
-            background: "var(--bg-card)",
-            border: "var(--bd-card)",
-            borderRadius: "var(--radius-card)",
-            boxShadow: "var(--shadow-pop)",
-            padding: 5,
-          }}
-        >
-          {items.map((it) => (
-            <button
-              key={it.label}
-              type="button"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-                it.onSelect();
-              }}
-              style={{
-                display: "block",
-                width: "100%",
-                textAlign: "left",
-                padding: "8px 10px",
-                borderRadius: "var(--radius-button)",
-                fontSize: 13,
-                color: it.danger ? "var(--warning)" : "var(--ink-soft)",
-              }}
-            >
-              {it.label}
-            </button>
-          ))}
-        </div>
-      )}
+    <div
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <ActionMenu
+        label="Row actions"
+        items={items.map((it) => ({
+          label: it.label,
+          destructive: it.danger,
+          onSelect: it.onSelect,
+        }))}
+      />
     </div>
   );
 }

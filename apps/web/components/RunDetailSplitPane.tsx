@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Copy, Check, Download, FileText, Pencil, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RunStatusBadge, RunStatusGlyph } from "@/components/RunStatus";
 import { Tool } from "@/components/ai-elements/tool";
@@ -56,6 +57,7 @@ export function RunDetailSplitPane({
   onReplay,
   onCancel,
 }: Props) {
+  const [replayConfirmOpen, setReplayConfirmOpen] = useState(false);
   const transcriptParts = parts.length > 0 ? parts : partsFromRun(run);
   const timeline = buildTimeline(run, transcriptParts);
   const isActive = run.status === "running" || run.status === "queued";
@@ -142,14 +144,12 @@ export function RunDetailSplitPane({
             </Button>
           </Link>
           {run.can_replay !== false && (
-            /* #1274: confirm before replaying to prevent accidental duplicate runs. */
+            /* #1274: confirm before replaying to prevent accidental duplicate runs.
+               Uses the shared ConfirmDialog (not native window.confirm). */
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                if (!window.confirm("Re-run this worker with the same inputs?")) return;
-                onReplay?.();
-              }}
+              onClick={() => setReplayConfirmOpen(true)}
             >
               <RotateCcw className="size-3.5 mr-1.5" />
               Re-run
@@ -169,6 +169,18 @@ export function RunDetailSplitPane({
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={replayConfirmOpen}
+        onOpenChange={setReplayConfirmOpen}
+        title="Re-run this worker?"
+        body="It will run again with the same inputs."
+        confirmLabel="Re-run"
+        onConfirm={() => {
+          setReplayConfirmOpen(false);
+          onReplay?.();
+        }}
+      />
 
       {streamUnavailable && isActive && (
         <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3">
