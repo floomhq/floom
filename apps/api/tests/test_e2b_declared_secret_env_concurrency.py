@@ -614,3 +614,115 @@ def test_e2b_resource_request_selects_matching_template_and_logs_fixed_limit(tmp
 
     if _Sandbox.host_root:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_warm_pool_key_allows_declared_secrets(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+
+    config = WorkerConfig(
+        id="secret-worker",
+        name="Secret Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=["OPENAI_API_KEY"],
+        memory=False,
+        outputs=[],
+    )
+
+    warm_key, error = e2b_driver._warm_pool_key(
+        worker_id="secret-worker",
+        user_id="user-owner",
+        worker_dir=worker_dir,
+        config=config,
+        inputs={},
+        secrets={"OPENAI_API_KEY": "sk-test"},
+        sandbox_template="tpl-python-fast",
+    )
+
+    assert error is None
+    assert warm_key
+
+
+def test_e2b_warm_pool_key_still_rejects_connection_workers(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+
+    config = WorkerConfig(
+        id="connection-worker",
+        name="Connection Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        connections=["gmail"],
+        secrets=["OPENAI_API_KEY"],
+        memory=False,
+        outputs=[],
+    )
+
+    warm_key, error = e2b_driver._warm_pool_key(
+        worker_id="connection-worker",
+        user_id="user-owner",
+        worker_dir=worker_dir,
+        config=config,
+        inputs={},
+        secrets={"OPENAI_API_KEY": "sk-test"},
+        sandbox_template="tpl-python-fast",
+    )
+
+    assert error is None
+    assert warm_key is None
+
+
+def test_e2b_warm_pool_cleanup_scrubs_run_state_and_preserves_bundle(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    sandbox = _Sandbox()
+    workdir = "/home/user/worker"
+    sandbox.files.make_dir(workdir)
+    sandbox.files.write(f"{workdir}/run.py", "print('ok')\n")
+    sandbox.files.write(f"{workdir}/lib/engine.py", "VALUE = 1\n")
+    sandbox.files.write(f"{workdir}/data/static.json", "{}\n")
+    sandbox.files.write(f"{workdir}/context/memory.json", "{}\n")
+    sandbox.files.write(f"{workdir}/inputs/file.txt", "uploaded\n")
+    sandbox.files.write(f"{workdir}/inputs.json", "{}\n")
+    sandbox.files.write(f"{workdir}/.env.local", "OPENAI_API_KEY=sk-test\n")
+    sandbox.files.write(f"{workdir}/secrets.json", '{"OPENAI_API_KEY":"sk-test"}\n')
+    sandbox.files.write(f"{workdir}/connections.json", "{}\n")
+    sandbox.files.write(f"{workdir}/result.json", "{}\n")
+    sandbox.files.write(f"{workdir}/__pycache__/run.cpython-311.pyc", b"pyc")
+
+    logs: list[tuple[str, str]] = []
+
+    assert e2b_driver._cleanup_run_state(
+        sandbox,
+        workdir,
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+    )
+
+    root = _Sandbox.host_root / "home/user/worker"
+    assert (root / "run.py").is_file()
+    assert (root / "lib/engine.py").is_file()
+    assert (root / "data/static.json").is_file()
+    assert (root / "context/memory.json").is_file()
+    assert not (root / "inputs").exists()
+    assert not (root / "inputs.json").exists()
+    assert not (root / ".env.local").exists()
+    assert not (root / "secrets.json").exists()
+    assert not (root / "connections.json").exists()
+    assert not (root / "result.json").exists()
+    assert not (root / "__pycache__").exists()
