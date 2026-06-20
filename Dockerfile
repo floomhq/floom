@@ -23,7 +23,7 @@ COPY engine/apps/api/requirements.txt ./engine/apps/api/requirements.txt
 # change (e.g. an engine bump), wheels are reused from cache instead of being
 # re-downloaded from PyPI — the bulk of the old ~3min build. (Was --no-cache,
 # which actively defeated this.)
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
 # --- App code ------------------------------------------------------------------
@@ -38,7 +38,7 @@ COPY . .
 # dependency layer above; on `railway up` every dep is already satisfied so it is
 # a fast no-op.
 ARG GIT_TOKEN
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     TOKEN="$(printf '%s' "$GIT_TOKEN")"; \
     if [ -n "$TOKEN" ]; then \
       git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/" && \
