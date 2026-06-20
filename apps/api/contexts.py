@@ -717,18 +717,27 @@ def context_file_metadata(root: Path, path: Path, pack_metadata: dict[str, Any] 
     return result
 
 
-def context_tree_summary(root: Path) -> dict[str, Any]:
+def context_tree_summary(root: Path, *, include_sha256: bool = True) -> dict[str, Any]:
     file_count = 0
     total_size = 0
     latest = None
-    for path in iter_context_files(root):
+    digest = hashlib.sha256() if include_sha256 else None
+    for path in sorted(iter_context_files(root), key=lambda candidate: _relative_posix_path(candidate, root)):
         stat = path.stat()
         file_count += 1
         total_size += stat.st_size
         latest = stat.st_mtime if latest is None else max(latest, stat.st_mtime)
+        if digest is not None:
+            rel = _relative_posix_path(path, root)
+            rel_bytes = rel.encode("utf-8")
+            content = path.read_bytes()
+            digest.update(len(rel_bytes).to_bytes(4, "big"))
+            digest.update(rel_bytes)
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
     if latest is None and root.exists():
         latest = root.stat().st_mtime
-    return {
+    summary = {
         "file_count": file_count,
         "total_size_bytes": total_size,
         "updated_at": (
@@ -737,6 +746,9 @@ def context_tree_summary(root: Path) -> dict[str, Any]:
             else None
         ),
     }
+    if digest is not None:
+        summary["sha256"] = digest.hexdigest()
+    return summary
 
 
 def refresh_context_summary_metadata(name: str) -> dict[str, Any]:
@@ -753,11 +765,11 @@ def refresh_context_summary_metadata(name: str) -> dict[str, Any]:
 
 
 def context_total_size(root: Path) -> int:
-    return int(context_tree_summary(root)["total_size_bytes"])
+    return int(context_tree_summary(root, include_sha256=False)["total_size_bytes"])
 
 
 def context_updated_at(root: Path) -> str | None:
-    return context_tree_summary(root)["updated_at"]
+    return context_tree_summary(root, include_sha256=False)["updated_at"]
 
 
 def normalize_context_mount(raw: Any) -> dict[str, Any]:
