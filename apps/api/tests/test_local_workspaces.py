@@ -222,7 +222,7 @@ def test_secret_auth_sees_legacy_private_workers(client_and_db):
     assert body["permissions"]["is_owner"] is True
 
 
-def test_local-user_login_maps_to_legacy_worker_owner(client_and_db):
+def test_local_user_login_maps_to_legacy_worker_owner(client_and_db):
     client, db = client_and_db
     _seed_legacy_worker(db, "legacy-session-worker")
 

@@ -50,6 +50,7 @@ from services.auth_ops import (
     _default_token_expiry,
     _enforce_token_ttl_cap,
     _issue_magic_link,
+    _FAILED_LOGIN_WINDOW_SECONDS,
     _login_locked_out,
     _magic_link_secret,
     _prune_expired_sessions,
@@ -148,7 +149,12 @@ def auth_login(
     if _login_locked_out(username):
         raise HTTPException(
             status_code=429,
-            detail="too many failed login attempts; try again later",
+            detail={
+                "error_code": "rate_limit_exceeded",
+                "message": "too many failed login attempts; try again later",
+                "retry_after": _FAILED_LOGIN_WINDOW_SECONDS,
+            },
+            headers={"Retry-After": str(_FAILED_LOGIN_WINDOW_SECONDS)},
         )
     user = user_repo.get_by_username(username=username)
     if user is None or not _bcrypt_verify(payload.password, user.get("password_hash") or ""):
@@ -445,6 +451,13 @@ def create_token(
             ) from _pat_exc
         raise
     pat = _PATOut(**{k: row[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")})
+    logger.info(
+        "personal access token created user=%s role=%s token_name=%s expires_at=%s",
+        auth.user_id,
+        auth.role,
+        name,
+        expires_at,
+    )
     return _PATCreateResponse(token=raw, pat=pat)
 
 

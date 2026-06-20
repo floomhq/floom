@@ -6,6 +6,8 @@ import json
 import os
 import sys
 import tempfile
+import importlib.util
+from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -15,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "apps", "api"))
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ.setdefault("FLOOM_DB", _tmp_db.name)
-os.environ.pop("FLOOM_SECRET", None)
+os.environ.setdefault("FLOOM_SECRET", "test-secret-pr-186")
 if not os.environ.get("OPENAI_API_KEY", "").strip():
     os.environ["OPENAI_API_KEY"] = "sk-test-fake-key"
 
@@ -69,8 +71,14 @@ def _mock_openai_response(content: str):
 
 @pytest.fixture()
 def client_with_tmp_workers(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret-pr-186")
     import worker_registry
     monkeypatch.setattr(worker_registry, "WORKERS_DIR", tmp_path)
+    try:
+        from auth.factory import get_auth_provider
+        get_auth_provider.cache_clear()
+    except Exception:
+        pass
     secret = os.environ.get("FLOOM_SECRET", "")
     from fastapi.testclient import TestClient
     from main import app
@@ -120,3 +128,23 @@ def test_duplicate_generated_id_gets_distinct_suffix(mock_codegen, client_with_t
     import yaml as pyyaml
     raw2 = pyyaml.safe_load((workers_dir / id2 / "worker.yml").read_text())
     assert raw2.get("name") == id2, "worker.yml name must be rewritten to the deduped id"
+
+
+def test_worker_author_derives_distinct_suggested_ids_for_representative_prompts():
+    run_py = Path(__file__).resolve().parents[1] / "workers" / "worker-author" / "run.py"
+    spec = importlib.util.spec_from_file_location("worker_author_run", run_py)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    prompts = [
+        "follow up with applicants",
+        "chase overdue invoices",
+        "summarise Granola meetings into HubSpot",
+        "daily summary of my GitHub PRs",
+        "reverse a string",
+    ]
+    suggested_ids = [module._suggested_id_from_prompt(prompt) for prompt in prompts]
+
+    assert len(set(suggested_ids)) == len(prompts)
+    assert all(3 <= len(item) <= 64 for item in suggested_ids)
