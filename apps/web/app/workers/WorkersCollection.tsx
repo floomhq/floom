@@ -118,7 +118,8 @@ function workerCardMeta(w: WorkerSummary): string | null {
   if (s.last_run_at) parts.push(rel(s.last_run_at));
   if (typeof s.runs_7d === "number" && s.runs_7d > 0) parts.push(`${s.runs_7d} run${s.runs_7d === 1 ? "" : "s"}`);
   if (typeof s.success_rate_7d === "number" && s.runs_7d > 0) {
-    parts.push(`${Math.round(s.success_rate_7d * 100)}%`);
+    // P2-2 (#1565): label the success rate so a bare "29%" isn't alarming/ambiguous.
+    parts.push(`${Math.round(s.success_rate_7d * 100)}% success`);
   }
   return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -1869,7 +1870,13 @@ export default function WorkersCollection({
     },
     counts: [
       { value: visible.length, label: "workers" },
-      { value: visible.filter((w) => w.status === "healthy" || w.status === "ready").length, label: "active" },
+      // P2-1 (#1565): the header count must agree with the per-card stage badge.
+      // The badge is the *stage* axis (Draft vs Live), but this count used the
+      // *health* axis (status healthy/ready) — so "5 active" could sit next to a
+      // grid where every card shows "Draft". Count live (non-draft) workers on the
+      // same axis as the badge so they reconcile: the "live" number equals the
+      // number of cards WITHOUT a Draft badge.
+      { value: visible.filter((w) => workerStageKey(w) === "live").length, label: "live" },
       {
         value: visible.filter((w) => w.status === "needs_attention" || w.status === "missing_secret").length,
         label: "needs attention",
