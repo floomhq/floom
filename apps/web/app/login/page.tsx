@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FloomMark } from "@/components/layout/sidebar";
 import { sanitizeRedirect } from "@/lib/redirects";
+import { capturePostHogEvent } from "@/lib/posthog";
 
 type LoginMode = "loading" | "setup" | "username" | "secret";
 
@@ -85,7 +86,12 @@ function LoginContent() {
         const res = await fetch("/api/auth/setup", { cache: "no-store" });
         if (res.ok) {
           const data = (await res.json()) as { required?: boolean };
-          setMode(data.required ? "setup" : "username");
+          const nextMode = data.required ? "setup" : "username";
+          setMode(nextMode);
+          // INTENT: the first-admin signup form is being shown.
+          if (nextMode === "setup") {
+            capturePostHogEvent("signup_started", { method: "password" });
+          }
           return;
         }
       } catch {
@@ -103,6 +109,8 @@ function LoginContent() {
 
     try {
       if (effectiveMode === "setup") {
+        // INTENT: signup form submitted (before the server confirms).
+        capturePostHogEvent("signup_submitted", { method: "password" });
         const res = await fetch("/api/auth/setup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

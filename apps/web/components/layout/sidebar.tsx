@@ -17,6 +17,7 @@ import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
+import { capturePostHogEvent, resetPostHogUser } from "@/lib/posthog";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import {
@@ -630,6 +631,10 @@ export function UserProfileFooter({
     ?? null;
 
   async function logout() {
+    // INTENT: emit logout, then reset the PostHog person so post-logout
+    // anonymous events are not attributed to the prior user.
+    capturePostHogEvent("logout");
+    resetPostHogUser();
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } catch {
