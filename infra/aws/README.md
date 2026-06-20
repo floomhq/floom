@@ -11,10 +11,11 @@ cheaper) and open egress, so they can reach **E2B, Gemini AI Studio, Supabase, a
 Bedrock** (all external HTTPS). Bedrock LLM calls can target `us-east-1` (125 models)
 regardless of compute region.
 
-## NOT ready to apply yet — prerequisites
-1. **Engine #1531** (the `WORKEROS_ROLE` web/worker split + worker entrypoint) must be
-   merged + in the image, or the `worker` service crash-loops. **Until then set
-   `worker_desired_count = 0`** (the example tfvars does). Web works as-is.
+## Before you apply — prerequisites
+1. **`WORKEROS_ROLE` split is env-driven** — already in the engine (web = HTTP only,
+   worker = scheduler + drain; no separate entrypoint) AND the cloud `lifespan` is
+   role-aware (`apps/api/main.py`). `worker_desired_count = 1` runs the worker; set `0`
+   to disable it (e.g. so a test stack doesn't drain a shared prod Supabase run queue).
 2. **Image in ECR** — `terraform apply` creates the ECR repo; the image must be built
    from the cloud repo's Dockerfile and pushed (see below).
 3. **Secrets populated** — copy `terraform.tfvars.example` → `secrets.auto.tfvars` and

@@ -4,9 +4,10 @@
 region    = "eu-central-1"   # == your Supabase region
 image_tag = "latest"
 
-# Until engine #1531 (WORKEROS_ROLE split + worker entrypoint) is merged, keep the
-# worker at 0 so it doesn't crash-loop. Web runs as role=all-compatible.
-worker_desired_count = 0
+# WORKEROS_ROLE split is env-driven (engine + cloud lifespan are role-aware).
+# 1 = run the worker (WORKEROS_ROLE=worker drain loop); 0 = disable (e.g. so a test
+# stack doesn't drain a shared prod Supabase run queue).
+worker_desired_count = 1
 
 # Optional: HTTPS on the ALB for workeros-api.floom.dev (create an ACM cert first).
 # acm_certificate_arn = "arn:aws:acm:eu-central-1:ACCOUNT:certificate/..."
