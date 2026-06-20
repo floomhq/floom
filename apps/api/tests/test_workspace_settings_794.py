@@ -82,6 +82,7 @@ def test_admin_round_trip(app_main, client):
         ("failure_email_to", "ops@example.com,alerts@example.com"),
         ("monthly_spend_cap_usd", "25.50"),
         ("default_model", "anthropic.claude-3-5-sonnet"),
+        ("fallback_model", "gpt-5.1-mini"),
         ("default_timeout_seconds", "300"),
         ("max_output_tokens", "8192"),
         ("region", "us-west-2"),
@@ -110,10 +111,11 @@ def test_current_month_spend_setting_is_read_only(app_main, client):
     assert "read-only" in resp.json()["detail"]
 
 
+@pytest.mark.parametrize("key", ["default_model", "fallback_model"])
 @pytest.mark.parametrize("value", ["../etc/passwd", "file:///tmp/model", "openai/gpt-4"])
-def test_default_model_rejects_path_or_scheme_values(app_main, client, value):
+def test_model_settings_reject_path_or_scheme_values(app_main, client, key, value):
     _as_role(app_main, user_id="alice", role="admin")
-    resp = client.put("/workspace/settings/default_model", json={"value": value})
+    resp = client.put(f"/workspace/settings/{key}", json={"value": value})
     assert resp.status_code == 422
     assert "safe model id" in resp.json()["detail"]
 

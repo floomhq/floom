@@ -67,6 +67,11 @@ def _ws_default_model() -> "Optional[str]":
     return v or None
 
 
+def _ws_fallback_model() -> "Optional[str]":
+    v = (_ws_setting("fallback_model") or "").strip()
+    return v or None
+
+
 def _ws_default_int(key: str) -> "Optional[int]":
     raw = (_ws_setting(key) or "").strip()
     if not raw:
@@ -116,6 +121,13 @@ def _agent_effective_max_tokens(model: str, requested: int) -> Optional[int]:
     if "bedrock" in str(model or "").lower():
         return min(requested, _BEDROCK_MAX_OUTPUT_CAP)
     return requested if requested <= _OPENAI_MAX_OUTPUT_CAP else None
+
+
+def _resolve_max_output_tokens(limits: "Any") -> int:
+    per_worker = int(getattr(limits, "max_output_tokens", 1_000_000) or 1_000_000)
+    if per_worker != 1_000_000:
+        return per_worker
+    return _ws_default_int("max_output_tokens") or per_worker
 
 
 
@@ -443,7 +455,7 @@ class AgentDriver(SandboxDriver):
         _effective_max_tokens = (
             _agent_effective_max_tokens(
                 default_worker_agent_model(),
-                int(limits.max_output_tokens),
+                _resolve_max_output_tokens(limits),
             )
         )
         model_settings = ModelSettings(
@@ -491,12 +503,17 @@ class AgentDriver(SandboxDriver):
                     )
 
                 force_finish = corrective_retry_used
-                _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or default_worker_agent_model())
+                _agent_model = _llm.agent_model(
+                    config.runtime.model
+                    or _ws_default_model()
+                    or _ws_fallback_model()
+                    or default_worker_agent_model()
+                )
                 # Clamp output tokens to the provider's hard limit (caps above):
                 # Bedrock -> 64k, OpenAI -> forward only when <=16k else None.
                 _agent_max_tokens = _agent_effective_max_tokens(
                     _agent_model,
-                    int(limits.max_output_tokens),
+                    _resolve_max_output_tokens(limits),
                 )
                 agent = Agent(
                     name=worker_id,

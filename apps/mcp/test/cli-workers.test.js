@@ -105,7 +105,7 @@ function json(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-async function startMockApi({ existing = false, putStatus = 200, putDetail = "Unsupported" } = {}) {
+async function startMockApi({ existing = false, postStatus = 200, postDetail = "Unsupported", putStatus = 200, putDetail = "Unsupported" } = {}) {
   const seen = [];
   const bodies = [];
   const server = createServer(async (request, response) => {
@@ -141,6 +141,10 @@ async function startMockApi({ existing = false, putStatus = 200, putDetail = "Un
     if (request.method === "POST" && url.pathname === "/workers") {
       const body = await readBody(request);
       bodies.push(body);
+      if (postStatus !== 200) {
+        json(response, postStatus, { detail: postDetail });
+        return;
+      }
       json(response, 200, { id: "cli-test-worker", name: "CLI Test Worker" });
       return;
     }
@@ -280,6 +284,40 @@ test("workers validate accepts GSC proxy worker with long app prefix", async () 
   assert.match(result.stdout, /Validated cli-test-worker/);
 });
 
+test("workers validate rejects use_cases outside server contract range", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: `${scriptWorkerYml}use_cases:\n  - One\n  - Two\n`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /use_cases must contain 3 to 5 items/);
+});
+
+test("workers validate rejects YAML-typed non-string placeholders", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: `schema_version: "0.3"
+name: cli-test-worker
+title: CLI Test Worker
+description: Worker used by CLI push tests.
+entrypoint: run.py
+exec:
+  runtime: python311
+  command: python run.py
+  entry: run.py
+  inputs:
+    - name: start_at
+      kind: scalar
+      type: string
+      placeholder: 12345
+`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /exec\.inputs\.0\.placeholder must be a string/);
+});
+
 test("workers push accepts cross-app Composio tool in explicit allowlist", async (t) => {
   const mock = await startMockApi({ existing: false });
   t.after(() => mock.server.close());
@@ -317,6 +355,27 @@ test("workers push creates a new worker with POST /workers", async (t) => {
   assert.match(mock.bodies[0].worker_yml, /name: cli-test-worker/);
   assert.match(mock.bodies[0].run_py, /def run/);
   assert.equal(mock.bodies[0].skill_md, undefined);
+});
+
+test("workers push explains hidden cross-workspace id conflicts", async (t) => {
+  const mock = await startMockApi({
+    existing: false,
+    postStatus: 409,
+    postDetail: "Worker 'cli-test-worker' already exists",
+  });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+  const dir = await makeWorkerDir();
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /already exists outside the active workspace/);
+  assert.match(result.stdout, /Choose a unique worker id/);
+  assert.deepEqual(mock.seen, [
+    "GET /workers/cli-test-worker",
+    "POST /workers",
+  ]);
 });
 
 test("workers push uploads full bundle after creating a worker with extra files", async (t) => {

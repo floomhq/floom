@@ -45,6 +45,24 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_CODEGEN_MODEL = "gpt-5.1"
+_SUGGESTED_ID_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "for",
+    "from",
+    "into",
+    "latest",
+    "me",
+    "my",
+    "of",
+    "on",
+    "the",
+    "to",
+    "with",
+}
 
 
 def _codegen_model() -> str:
@@ -64,6 +82,20 @@ def _is_litellm_model(model: str) -> bool:
 def _is_anthropic_model(model: str) -> bool:
     m = model.lower()
     return "anthropic" in m or "claude" in m
+
+
+def _suggested_id_from_prompt(prompt: str) -> str:
+    words = [
+        word
+        for word in re.findall(r"[a-z0-9]+", (prompt or "").lower())
+        if word not in _SUGGESTED_ID_STOPWORDS
+    ]
+    selected = words[:4] or ["worker"]
+    slug = "-".join(selected)[:64].strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
+    if len(slug) < 3:
+        slug = f"{slug}-worker".strip("-")
+    return slug or "worker"
 
 
 def _with_prompt_cache(messages: list, model: str) -> list:
@@ -687,7 +719,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
         "skill_md": parsed.get("skill_md"),
         "run_code": parsed.get("run_code"),
         "requirements_txt": parsed.get("requirements_txt"),
-        "suggested_id": parsed.get("suggested_id") or "my-worker",
+        "suggested_id": parsed.get("suggested_id") or _suggested_id_from_prompt(prompt),
         "sample_input_json": parsed.get("sample_input_json") or "{}",
         "created_worker_id": None,
     }

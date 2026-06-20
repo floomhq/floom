@@ -108,7 +108,24 @@ class TestDefaultModel:
         # The global default is resolved lazily (default_worker_agent_model()) so
         # cloud dotenv config that arrives after import is honored (Bedrock, not
         # the frozen OpenAI fallback).
-        assert "config.runtime.model or _ws_default_model() or default_worker_agent_model()" in src
+        assert "or _ws_default_model()" in src
+        assert "or _ws_fallback_model()" in src
+        assert "or default_worker_agent_model()" in src
+
+    def test_fallback_model_resolves_after_workspace_default(self):
+        import runner_sandbox.agent_driver as ad
+
+        ad._ws_setting = lambda key: "gpt-5.1-mini" if key == "fallback_model" else None
+        assert ad._ws_default_model() is None
+        assert ad._ws_fallback_model() == "gpt-5.1-mini"
+
+    def test_workspace_max_output_tokens_used_when_worker_default(self):
+        import runner_sandbox.agent_driver as ad
+        import types
+
+        ad._ws_setting = lambda key: "8192" if key == "max_output_tokens" else None
+        assert ad._resolve_max_output_tokens(types.SimpleNamespace(max_output_tokens=1_000_000)) == 8192
+        assert ad._resolve_max_output_tokens(types.SimpleNamespace(max_output_tokens=4096)) == 4096
 
 
 class TestTimeoutCeiling:

@@ -91,9 +91,14 @@ def _claim_run_create_quota_slot(key: str, *, limit: int, window: float, cost: i
 
 
 def _raise_run_create_quota(limit: int, window: float, retry_after: int) -> None:
+    message = f"Run creation rate limit exceeded: {limit}/{int(window)}s"
     raise HTTPException(
         status_code=429,
-        detail=f"Run creation rate limit exceeded: {limit}/{int(window)}s",
+        detail={
+            "error_code": "rate_limit_exceeded",
+            "message": message,
+            "retry_after": retry_after,
+        },
         headers={"Retry-After": str(retry_after)},
     )
 
@@ -194,9 +199,14 @@ def _chat_cost_units(message: str = "", *, model: str | None = None) -> int:
 
 def _raise_chat_quota(limit: int, window: float, retry_after: int, *, cost_based: bool = False) -> None:
     kind = "cost quota" if cost_based else "rate limit"
+    message = f"Chat {kind} exceeded: {limit}/{int(window)}s"
     raise HTTPException(
         status_code=429,
-        detail=f"Chat {kind} exceeded: {limit}/{int(window)}s",
+        detail={
+            "error_code": "rate_limit_exceeded",
+            "message": message,
+            "retry_after": retry_after,
+        },
         headers={"Retry-After": str(retry_after)},
     )
 

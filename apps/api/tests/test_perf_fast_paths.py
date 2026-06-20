@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
+
+import pytest
 
 
 def test_cloud_runs_omitted_limit_uses_safe_default(monkeypatch):
@@ -270,6 +273,56 @@ def test_list_secrets_uses_listed_worker_configs_for_used_by(monkeypatch):
 
     assert by_name["API_KEY"].used_by == ["Worker A", "Worker B"]
     assert by_name["OTHER_KEY"].used_by == ["Worker A"]
+
+
+def test_list_secrets_rejects_non_admin_roles():
+    from fastapi import HTTPException
+    from routers import secrets
+
+    auth = SimpleNamespace(user_id="member-a", is_admin=False, role="member")
+    with pytest.raises(HTTPException) as exc:
+        secrets.list_secrets(auth=auth, repos=SimpleNamespace())
+
+    assert exc.value.status_code == 403
+
+
+def test_list_secrets_allows_workspace_owner(monkeypatch):
+    import sys
+    from auth.context import AuthContext
+    from routers import secrets
+
+    class SecretsRepo:
+        def list(self, *, user_id):
+            assert user_id == "owner-a"
+            return []
+
+    monkeypatch.setitem(sys.modules, "run_service", SimpleNamespace())
+    monkeypatch.setattr(secrets, "_list_visible_workers", lambda **_kwargs: [])
+    monkeypatch.setattr(secrets, "_available_secret_names_for_user", lambda *_args, **_kwargs: set())
+
+    auth = AuthContext(user_id="owner-a", role="owner", auth_method="session")
+
+    assert auth.is_admin is True
+    assert secrets.list_secrets(auth=auth, repos=SimpleNamespace(secrets=SecretsRepo())) == []
+
+
+def test_list_secrets_audit_logs_metadata_read(monkeypatch, caplog):
+    import sys
+    from routers import secrets
+
+    class SecretsRepo:
+        def list(self, *, user_id):
+            return []
+
+    monkeypatch.setitem(sys.modules, "run_service", SimpleNamespace())
+    monkeypatch.setattr(secrets, "_list_visible_workers", lambda **_kwargs: [])
+    monkeypatch.setattr(secrets, "_available_secret_names_for_user", lambda *_args, **_kwargs: set())
+
+    auth = SimpleNamespace(user_id="admin-a", is_admin=True, role="admin")
+    with caplog.at_level(logging.INFO, logger="floom.api"):
+        assert secrets.list_secrets(auth=auth, repos=SimpleNamespace(secrets=SecretsRepo())) == []
+
+    assert any("Secret metadata listed by user=admin-a role=admin" in r.getMessage() for r in caplog.records)
 
 
 def test_list_approvals_caps_and_batches_artifacts(monkeypatch):
