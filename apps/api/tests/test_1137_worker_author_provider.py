@@ -131,6 +131,65 @@ def test_worker_author_parses_first_json_object_with_trailing_text():
     assert parsed["run_code"] == "print(1)"
 
 
+def test_worker_author_repairs_missing_manifest_name_from_suggested_id():
+    worker_author = _load_worker_author_module()
+    worker_yml = """
+schema_version: "0.3"
+title: "Topic Bullets"
+description: "Create three bullets for a topic."
+version: "0.1.0"
+trigger:
+  type: manual
+exec:
+  entry: "run.py"
+  runner: e2b
+  inputs:
+    - name: topic
+      type: string
+      required: true
+  outputs:
+    - name: bullets
+      type: markdown
+      required: true
+"""
+    parsed = {
+        "worker_yml": worker_yml,
+        "suggested_id": "topic-bullets",
+        "run_code": "outputs = {'bullets': '- one\\n- two\\n- three'}\n",
+    }
+
+    assert worker_author._validate_generated_bundle(parsed, "make topic bullets") is None
+
+
+def test_worker_author_repairs_missing_manifest_title_from_name():
+    worker_author = _load_worker_author_module()
+    worker_yml = """
+schema_version: "0.3"
+name: "topic-bullets"
+description: "Create three bullets for a topic."
+version: "0.1.0"
+trigger:
+  type: manual
+exec:
+  entry: "run.py"
+  runner: e2b
+  inputs:
+    - name: topic
+      type: string
+      required: true
+  outputs:
+    - name: bullets
+      type: markdown
+      required: true
+"""
+    parsed = {
+        "worker_yml": worker_yml,
+        "run_code": "outputs = {'bullets': '- one\\n- two\\n- three'}\n",
+    }
+
+    assert worker_author._validate_generated_bundle(parsed, "make topic bullets") is None
+
+
 def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypatch):
     from runner_sandbox.e2b_driver import _worker_author_platform_env
 
