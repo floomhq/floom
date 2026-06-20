@@ -29,9 +29,11 @@ def _reset(monkeypatch):
     monkeypatch.delenv("POSTHOG_AI_SAMPLE_RATE", raising=False)
     analytics_posthog._reset_for_tests()
     ai._reset_delivery_counters_for_tests()
+    ai._reset_alias_cache_for_tests()
     yield
     analytics_posthog._reset_for_tests()
     ai._reset_delivery_counters_for_tests()
+    ai._reset_alias_cache_for_tests()
 
 
 class _StubClient:
@@ -222,6 +224,47 @@ class TestCostProvenance:
         assert cost > 0 and source == ai.COST_SOURCE_LITELLM and priced is True
         cost2, source2, priced2 = ai.generation_cost_detail("nope-xyz", 10, 10)
         assert cost2 is None and source2 == ai.COST_SOURCE_UNKNOWN and priced2 is False
+
+    # --- Gap 2: model-id pricing normalization (verified cost gap) ---------
+    def test_latest_alias_normalizes_to_real_cost(self):
+        # A `-latest` alias litellm cannot price directly must normalize to the
+        # current dated id and resolve a REAL cost (no false cost_is_partial).
+        for alias in ("claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest"):
+            cost, source, priced = ai.generation_cost_detail(alias, 1000, 500)
+            assert priced is True, alias
+            assert source == ai.COST_SOURCE_LITELLM, alias
+            assert cost and cost > 0, alias
+
+    def test_prod_bedrock_profile_echo_normalizes(self):
+        # The production worker model is bedrock/us.anthropic.claude-sonnet-4-6.
+        # Even if Bedrock echoes the inference-profile `…-v1:0` id (which litellm
+        # does NOT price), cost must still resolve via normalization.
+        cost, source, priced = ai.generation_cost_detail(
+            "bedrock/us.anthropic.claude-sonnet-4-6-v1:0", 1000, 500
+        )
+        assert priced is True and source == ai.COST_SOURCE_LITELLM and cost > 0
+
+    def test_unknown_model_still_partial_after_normalization(self):
+        # A genuinely unknown model (no priced alias target) must STILL be unknown
+        # -> cost None -> cost_is_partial at the trace level. Normalization only
+        # ever improves coverage; it never invents a price.
+        cost, source, priced = ai.generation_cost_detail("gemini/gemini-1.5-pro", 1000, 500)
+        assert cost is None and source == ai.COST_SOURCE_UNKNOWN and priced is False
+        cost2, _s, priced2 = ai.generation_cost_detail("brand-new-model-unmapped", 10, 10)
+        assert cost2 is None and priced2 is False
+
+    def test_alias_map_targets_are_priced(self):
+        # Self-verify contract: every alias the module actually uses points at a
+        # target the installed litellm prices (stale targets are dropped).
+        verified = ai._verified_model_alias_map()
+        assert verified, "expected at least the claude -latest aliases to verify"
+        for alias, target in verified.items():
+            assert ai._litellm_prices(target), f"{alias} -> {target} not priced"
+
+    def test_normalize_model_id_passthrough(self):
+        # Non-alias ids pass through unchanged.
+        assert ai.normalize_model_id("gpt-4o") == "gpt-4o"
+        assert ai.normalize_model_id("") == ""
 
 
 # ---------------------------------------------------------------------------

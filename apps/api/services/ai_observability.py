@@ -249,6 +249,86 @@ def normalize_capture_mode(mode: Optional[str]) -> str:
 # Cost (§A2) — per-generation, from input/output tokens via litellm pricing.
 # ---------------------------------------------------------------------------
 
+# Model-id alias normalization for cost lookup (verified gap from the live proof).
+#
+# ``litellm.cost_per_token`` prices DATED/pinned ids but returns None for moving
+# ``-latest`` aliases (it can't know which dated price a "latest" alias points
+# at). Real runs that report a ``-latest`` model id therefore silently flagged
+# ``cost_is_partial`` even though the underlying model IS priced. This map points
+# each known alias at the current dated id litellm prices, so real runs get real
+# costs; genuinely-unknown models still fall through to None -> cost_is_partial.
+#
+# REVIEW ON MODEL CHANGE: every value here is a DATED id whose price litellm
+# tracks. When Anthropic/Google ship a new dated snapshot and repoint a
+# ``-latest`` alias, update the target id below (and re-run the self-verify which
+# drops any entry the installed litellm no longer prices — see
+# ``_verified_model_alias_map``). The production worker model is currently
+# ``bedrock/us.anthropic.claude-sonnet-4-6`` (WORKEROS_WORKER_AGENT_MODEL); its
+# bare/inference-profile echoes are normalized here too so the prod model always
+# resolves a real cost even when Bedrock echoes a ``…-v1:0`` profile id.
+_MODEL_ALIAS_MAP: Dict[str, str] = {
+    # Anthropic moving aliases -> current dated/priced ids.
+    "claude-3-7-sonnet-latest": "claude-3-7-sonnet-20250219",
+    "anthropic/claude-3-7-sonnet-latest": "claude-3-7-sonnet-20250219",
+    "claude-3-5-sonnet-latest": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "anthropic/claude-3-5-sonnet-latest": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+    # Production Bedrock worker model: normalize the inference-profile / region
+    # echoes (which litellm does NOT price) back to the priced canonical id.
+    "bedrock/us.anthropic.claude-sonnet-4-6-v1:0": "bedrock/us.anthropic.claude-sonnet-4-6",
+    "us.anthropic.claude-sonnet-4-6-v1:0": "us.anthropic.claude-sonnet-4-6",
+}
+
+
+def _litellm_prices(model: str) -> bool:
+    """True iff the installed litellm returns a real per-token price for ``model``."""
+    if not model:
+        return False
+    try:
+        import litellm
+
+        prompt_cost, completion_cost = litellm.cost_per_token(
+            model=model, prompt_tokens=1, completion_tokens=1
+        )
+        return (float(prompt_cost) + float(completion_cost)) > 0
+    except Exception:
+        return False
+
+
+def _verified_model_alias_map() -> Dict[str, str]:
+    """The alias map, filtered to entries whose TARGET the installed litellm
+    actually prices. A stale target (litellm dropped/renamed the dated id) is
+    dropped rather than silently mapping to an unpriced id — so the map can only
+    ever improve cost coverage, never regress a model to ``unknown`` wrongly."""
+    global _VERIFIED_ALIAS_CACHE
+    if _VERIFIED_ALIAS_CACHE is not None:
+        return _VERIFIED_ALIAS_CACHE
+    verified = {
+        alias: target
+        for alias, target in _MODEL_ALIAS_MAP.items()
+        if _litellm_prices(target)
+    }
+    _VERIFIED_ALIAS_CACHE = verified
+    return verified
+
+
+_VERIFIED_ALIAS_CACHE: "Optional[Dict[str, str]]" = None
+
+
+def _reset_alias_cache_for_tests() -> None:
+    global _VERIFIED_ALIAS_CACHE
+    _VERIFIED_ALIAS_CACHE = None
+
+
+def normalize_model_id(model: str) -> str:
+    """Map a moving/profile alias to the dated id litellm prices, else return
+    ``model`` unchanged. Only rewrites when the target is actually priced by the
+    installed litellm (self-verifying), so an unknown model stays unknown and a
+    priced model is never repointed to a hole."""
+    if not model:
+        return model
+    return _verified_model_alias_map().get(model.strip(), model)
+
+
 def generation_cost_detail(
     model: str,
     input_tokens: int,
@@ -272,8 +352,13 @@ def generation_cost_detail(
     try:
         import litellm
 
+        # Normalize moving/profile aliases (`-latest`, Bedrock `…-v1:0`) to the
+        # dated id litellm prices, so a real run reports a real cost instead of
+        # silently flagging cost_is_partial. Self-verifying: an unknown model is
+        # left as-is and still falls through to unknown below.
+        priced_model = normalize_model_id(model)
         prompt_cost, completion_cost = litellm.cost_per_token(
-            model=model,
+            model=priced_model,
             prompt_tokens=max(0, int(input_tokens or 0)),
             completion_tokens=max(0, int(output_tokens or 0)),
         )
