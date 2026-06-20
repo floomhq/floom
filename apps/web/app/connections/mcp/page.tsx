@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
+import { IntegrationsShell } from "@/components/connections/IntegrationsShell";
 import { ListLoading, ListEmpty, ListError } from "@/components/collection/CollectionStates";
 import { api } from "@/lib/api";
 import type { ConnectionItem, SecretItem } from "@/lib/types";
@@ -500,17 +500,10 @@ export default function McpConnectionsPage() {
     MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command;
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">MCP</h1>
-        <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-          Use Floom as an MCP server in your AI client, or register MCP servers
-          your workers can call.
-        </p>
-      </header>
-
-      <ConnectionsChips />
-
+    <IntegrationsShell
+      title="MCP"
+      subtitle="Use Floom as an MCP server in your AI client, or register MCP servers your workers can call."
+    >
       {/* ============================================================= */}
       {/* Concept A — Use Floom Workers IN your AI client (secondary)   */}
       {/* ============================================================= */}
@@ -954,7 +947,7 @@ export default function McpConnectionsPage() {
         stored here. Prefer the terminal? Run{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono">{IMPORT_CONFIG_COMMAND}</code>.
       </p>
-    </div>
+    </IntegrationsShell>
   );
 }
 
