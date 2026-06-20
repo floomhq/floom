@@ -20,14 +20,14 @@ const TERMINAL_RUN_STATUSES = new Set([
 
 type JsonObject = Record<string, unknown>;
 
-class WorkerosApiError extends Error {
+class FloomApiError extends Error {
   constructor(
     message: string,
     readonly status?: number,
     readonly body?: unknown,
   ) {
     super(message);
-    this.name = "WorkerosApiError";
+    this.name = "FloomApiError";
   }
 }
 
@@ -53,7 +53,7 @@ function resolvePath(path: string): string {
 }
 
 // #1455: the workspace id resolved once at startup from readCredentials() (env
-// OR ~/.config/workeros/credentials.json). authHeader() is synchronous and runs
+// OR ~/.config/floom/credentials.json). authHeader() is synchronous and runs
 // per-request, so we cache it here instead of reading the creds file each call.
 let resolvedWorkspaceId: string | undefined;
 
@@ -126,8 +126,8 @@ export function redactSecrets(value: unknown): unknown {
 
 function errorResult(error: unknown): CallToolResult {
   const message = redactSecretText(error instanceof Error ? error.message : String(error));
-  const status = error instanceof WorkerosApiError ? error.status : undefined;
-  const body = error instanceof WorkerosApiError ? redactSecrets(error.body) : undefined;
+  const status = error instanceof FloomApiError ? error.status : undefined;
+  const body = error instanceof FloomApiError ? redactSecrets(error.body) : undefined;
   const structuredContent: JsonObject = { error: message };
   if (status !== undefined) {
     structuredContent.status = status;
@@ -217,8 +217,8 @@ async function request(
       typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
         ? renderErrorDetail((safeParsed as { detail: unknown }).detail)
         : JSON.stringify(safeParsed);
-    throw new WorkerosApiError(
-      `Workeros API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
+    throw new FloomApiError(
+      `Floom API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
       response.status,
       parsed,
     );
@@ -249,8 +249,8 @@ async function requestBytes(
       typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
         ? renderErrorDetail((safeParsed as { detail: unknown }).detail)
         : JSON.stringify(safeParsed);
-    throw new WorkerosApiError(
-      `Workeros API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
+    throw new FloomApiError(
+      `Floom API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
       response.status,
       parsed,
     );
@@ -263,7 +263,7 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
   const files = Array.isArray(detail.files) ? detail.files as JsonObject[] : [];
   const file = files.find((item) => item.path === path);
   if (!file) {
-    throw new WorkerosApiError(`Context file ${name}/${path} was not found`, 404);
+    throw new FloomApiError(`Context file ${name}/${path} was not found`, 404);
   }
   const downloadPath = `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
   if (file.is_binary) {
@@ -287,8 +287,8 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
   });
   if (!response.ok) {
     const parsed = await parseResponse(response);
-    throw new WorkerosApiError(
-      `Workeros API GET ${downloadPath} failed with HTTP ${response.status}: ${JSON.stringify(redactSecrets(parsed))}`,
+    throw new FloomApiError(
+      `Floom API GET ${downloadPath} failed with HTTP ${response.status}: ${JSON.stringify(redactSecrets(parsed))}`,
       response.status,
       parsed,
     );
@@ -375,14 +375,14 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
         typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
           ? redactSecretText(String((safeParsed as { detail: unknown }).detail))
           : JSON.stringify(safeParsed);
-      throw new WorkerosApiError(
-        `Workeros API GET /runs/${runId}/events failed with HTTP ${response.status}: ${detail}`,
+      throw new FloomApiError(
+        `Floom API GET /runs/${runId}/events failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
       );
     }
     if (!response.body) {
-      throw new WorkerosApiError("Workeros run events response did not include a body", response.status);
+      throw new FloomApiError("Floom run events response did not include a body", response.status);
     }
 
     const reader = response.body.getReader();
@@ -420,7 +420,7 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new WorkerosApiError(`Timed out watching run ${runId} after ${timeoutMs}ms`);
+      throw new FloomApiError(`Timed out watching run ${runId} after ${timeoutMs}ms`);
     }
     throw error;
   } finally {
@@ -553,11 +553,11 @@ function autoFillCapabilities(workerYml: string, runPy: string): string {
 }
 
 const workerIdSchema = z.object({
-  id: z.string().min(1).describe("Workeros worker id."),
+  id: z.string().min(1).describe("Floom worker id."),
 });
 
 const runIdSchema = z.object({
-  id: z.string().min(1).describe("Workeros run id."),
+  id: z.string().min(1).describe("Floom run id."),
 });
 
 async function consumeChatStream(
@@ -595,14 +595,14 @@ async function consumeChatStream(
         typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
           ? redactSecretText(String((safeParsed as { detail: unknown }).detail))
           : JSON.stringify(safeParsed);
-      throw new WorkerosApiError(
+      throw new FloomApiError(
         `POST /chat failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
       );
     }
     if (!response.body) {
-      throw new WorkerosApiError("POST /chat response has no body");
+      throw new FloomApiError("POST /chat response has no body");
     }
 
     const reader = response.body.getReader();
@@ -644,7 +644,7 @@ async function consumeChatStream(
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new WorkerosApiError(`workspace.chat timed out after ${timeoutMs}ms`);
+      throw new FloomApiError(`workspace.chat timed out after ${timeoutMs}ms`);
     }
     throw error;
   } finally {
@@ -669,7 +669,7 @@ function buildChatResult(
 
 export function createServer(): McpServer {
   const server = new McpServer({
-    name: "workeros-mcp",
+    name: "floom-mcp",
     version: "0.1.0",
   });
 
@@ -682,7 +682,7 @@ export function createServer(): McpServer {
     "workers.list",
     {
       title: "List Workers",
-      description: "List Workeros workers.",
+      description: "List Floom workers.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -693,7 +693,7 @@ export function createServer(): McpServer {
     "workers.get",
     {
       title: "Get Worker",
-      description: "Get a Workeros worker by id.",
+      description: "Get a Floom worker by id.",
       inputSchema: workerIdSchema.shape,
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -705,7 +705,7 @@ export function createServer(): McpServer {
     {
       title: "Create Worker",
       description:
-        "Create a Workeros worker from WorkerContract YAML. " +
+        "Create a Floom worker from WorkerContract YAML. " +
         "The YAML must include schema_version, name, title, description, version, exec, and trigger. " +
         "For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md (the agent system prompt) and a minimal run_py stub.",
       inputSchema: {
@@ -734,7 +734,7 @@ export function createServer(): McpServer {
       title: "Update Worker",
       description: "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.",
       inputSchema: {
-        id: z.string().min(1).describe("Workeros worker id."),
+        id: z.string().min(1).describe("Floom worker id."),
         trigger_type: z.string().optional().describe("Trigger type, for example manual, cron, or webhook."),
         cron_expr: z.string().optional().describe("Cron expression for cron workers."),
         cron_timezone: z.string().optional().describe("IANA timezone for cron workers."),
@@ -754,7 +754,7 @@ export function createServer(): McpServer {
     "workers.delete",
     {
       title: "Delete Worker",
-      description: "Delete a Workeros worker.",
+      description: "Delete a Floom worker.",
       inputSchema: workerIdSchema.shape,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
@@ -766,9 +766,9 @@ export function createServer(): McpServer {
     "workers.run",
     {
       title: "Run Worker",
-      description: "Start a manual Workeros worker run.",
+      description: "Start a manual Floom worker run.",
       inputSchema: {
-        id: z.string().min(1).describe("Workeros worker id."),
+        id: z.string().min(1).describe("Floom worker id."),
         inputs: z.record(z.string(), z.unknown()).default({}).describe("Input values for this run."),
         trigger_source: z.string().default("manual").describe("Run trigger source."),
       },
@@ -787,7 +787,7 @@ export function createServer(): McpServer {
     "runs.list",
     {
       title: "List Runs",
-      description: "List Workeros runs, optionally filtered by worker id.",
+      description: "List Floom runs, optionally filtered by worker id.",
       inputSchema: {
         worker_id: z.string().optional().describe("Optional worker id filter."),
         status: z.string().optional().describe("Optional run status filter."),
@@ -804,7 +804,7 @@ export function createServer(): McpServer {
     "runs.get",
     {
       title: "Get Run",
-      description: "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.",
+      description: "Get a Floom run by id, including logs, outputs, artifacts, and approval status.",
       inputSchema: runIdSchema.shape,
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -815,9 +815,9 @@ export function createServer(): McpServer {
     "runs.watch",
     {
       title: "Watch Run",
-      description: "Read server-sent events for a Workeros run until a terminal status is reached.",
+      description: "Read server-sent events for a Floom run until a terminal status is reached.",
       inputSchema: {
-        id: z.string().min(1).describe("Workeros run id."),
+        id: z.string().min(1).describe("Floom run id."),
         timeout_ms: z.number().int().min(1000).max(600000).default(120000).describe("Maximum watch duration in milliseconds."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
@@ -907,7 +907,7 @@ export function createServer(): McpServer {
     "contexts.list",
     {
       title: "List Contexts",
-      description: "List Workeros context folders.",
+      description: "List Floom context folders.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -1000,7 +1000,7 @@ export function createServer(): McpServer {
     {
       title: "Chat with Workspace Agent",
       description:
-        "Send a message to the Workeros workspace agent and receive a streamed reply. " +
+        "Send a message to the Floom workspace agent and receive a streamed reply. " +
         "The agent can list workers, inspect runs, create workers, manage secrets, and more. " +
         "Supply conversation_id to continue an existing conversation (enables anaphor resolution).",
       inputSchema: {
@@ -1581,7 +1581,7 @@ export function createServer(): McpServer {
     "integrations.catalog",
     {
       title: "List Integrations Catalog",
-      description: "Browse available integrations (apps, triggers, actions) supported by Workeros.",
+      description: "Browse available integrations (apps, triggers, actions) supported by Floom.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -1740,7 +1740,7 @@ const executedPath = process.argv[1] ? resolve(process.argv[1]) : "";
 if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`workeros-mcp failed: ${message}`);
+    console.error(`floom-mcp failed: ${message}`);
     process.exit(1);
   });
 }

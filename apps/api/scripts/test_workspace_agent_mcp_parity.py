@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live MCP parity checks for Workeros Remote MCP.
+"""Live MCP parity checks for Floom Remote MCP.
 
 Defaults to production. Override with:
   MCP_BASE_URL=http://127.0.0.1:8011/api/mcp
@@ -75,7 +75,7 @@ def assert_discovery() -> None:
     assert payload["transport"] == "streamable-http", payload
     missing = EXPECTED_TOOLS - set(payload["tools"])
     assert not missing, f"discovery missing tools {sorted(missing)}: {payload}"
-    print(f"PASS discovery: {payload['endpoint']} exposes {len(payload['tools'])} Workeros tools")
+    print(f"PASS discovery: {payload['endpoint']} exposes {len(payload['tools'])} Floom tools")
 
 
 def assert_initialize() -> None:
@@ -96,7 +96,7 @@ def assert_tools_list() -> None:
     schema = tool.get("inputSchema", {})
     assert schema.get("required") == ["message"], schema
     assert "conversation_id" in schema.get("properties", {}), schema
-    print("PASS tools/list: remote Workeros control-plane tools returned")
+    print("PASS tools/list: remote Floom control-plane tools returned")
 
 
 def assert_direct_read_tool() -> None:
@@ -135,13 +135,13 @@ def assert_tool_call() -> None:
 
 
 def main() -> int:
-    print(f"Testing Workeros MCP endpoint: {BASE_URL}")
+    print(f"Testing Floom MCP endpoint: {BASE_URL}")
     assert_discovery()
     assert_initialize()
     assert_tools_list()
     assert_direct_read_tool()
     assert_tool_call()
-    print("PASS all Workeros MCP parity checks")
+    print("PASS all Floom MCP parity checks")
     return 0
 
 

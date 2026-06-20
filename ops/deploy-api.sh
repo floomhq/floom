@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ops/deploy-api.sh — idempotent backend deploy for workeros-api
+# ops/deploy-api.sh — idempotent backend deploy for floom-api
 #
 # Usage:
 #   ./ops/deploy-api.sh              # deploy origin/main
@@ -14,7 +14,7 @@
 #   5. Sync source files from origin/main (no git reset --hard)
 #   6. Clean .rej/.bak patch cruft under apps/
 #   7. Install deployed apps/api/requirements.txt into the actual service venv
-#   8. systemctl restart workeros-api
+#   8. systemctl restart floom-api
 #   9. Poll /health until ok (hard gate, exit 1 on timeout)
 #  10. Assert key endpoints return expected HTTP codes
 #  11. Verify schema drift (calls ops/verify-schema.py)
@@ -26,7 +26,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Config (all overridable via env)
 # ---------------------------------------------------------------------------
-WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/workeros}"
+WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/floom}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 BACKUP_ROOT="${WORKEROS_BACKUP_ROOT:-/root/backups}"
 SERVICE_VENV="${WORKEROS_API_VENV:-$WORKEROS_ROOT/apps/api/venv}"
@@ -37,7 +37,7 @@ HEALTH_POLL_INTERVAL=2          # seconds between health polls
 HEALTH_TIMEOUT=90               # seconds before giving up
 DRAIN_WAIT=80                   # seconds to wait for active runs to finish
 DRAIN_POLL=5                    # seconds between drain checks
-SERVICE_NAME="workeros-api"
+SERVICE_NAME="floom-api"
 DRY_RUN=0
 SKIP_DRAIN=0
 
@@ -87,7 +87,7 @@ RESOLVED_DB="$(resolve_db_path "$DB_PATH")"
 # ---------------------------------------------------------------------------
 # Step 0: Pre-flight
 # ---------------------------------------------------------------------------
-log "=== Workeros backend deploy ==="
+log "=== Floom backend deploy ==="
 [[ $DRY_RUN -eq 1 ]] && log "*** DRY-RUN MODE: no system changes will be made ***"
 
 if [[ $EUID -ne 0 ]]; then
@@ -102,7 +102,7 @@ done
 
 # Verify this is the right repo
 cd "$WORKEROS_ROOT"
-git remote get-url origin | grep -q "workeros" || fail "Not in the workeros git repo"
+git remote get-url origin | grep -q "floom" || fail "Not in the floom git repo"
 
 # ---------------------------------------------------------------------------
 # Step 1: Backup DB
@@ -288,7 +288,7 @@ check_endpoint() {
 
 # Read FLOOM_SECRET from the env file (it's not in our environment)
 FLOOM_SECRET=""
-ENV_FILE="/etc/workeros/api.env"
+ENV_FILE="/etc/floom/api.env"
 if [[ -f "$ENV_FILE" ]]; then
   FLOOM_SECRET="$(grep '^FLOOM_SECRET=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)"
 fi

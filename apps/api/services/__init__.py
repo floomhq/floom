@@ -1,4 +1,4 @@
-"""Domain service helpers for the WorkerOS API.
+"""Domain service helpers for the Floom API.
 
 Modules here hold business-logic helpers that are shared across multiple route
 groups (e.g. git workspace resolution, worker access control, context access).

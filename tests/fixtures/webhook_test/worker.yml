@@ -5,7 +5,7 @@ description: Triggered by incoming HTTP webhooks. Echoes the payload back.
 long_description: |
   A simple webhook echo worker for checking inbound HTTP triggering and payload serialization. It is intended for development tests before a real webhook-driven automation is connected.
 use_cases:
-- Confirm Workeros receives POST webhook payloads.
+- Confirm Floom receives POST webhook payloads.
 - Inspect exactly what the worker receives after request parsing.
 - Test downstream run logs and JSON output artifacts.
 example_input: {}

@@ -1,4 +1,4 @@
-// Tiny Node worker — proves Workeros installs package.json deps + runs node22.
+// Tiny Node worker — proves Floom installs package.json deps + runs node22.
 // No secrets, no external API calls, no network state.
 
 import fs from "node:fs/promises";

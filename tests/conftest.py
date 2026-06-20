@@ -1,8 +1,8 @@
-"""Root pytest config for the WorkerOS backend test suite.
+"""Root pytest config for the Floom backend test suite.
 
 Hermetic isolation guard. The API modules (`main`, `run_service`,
 `composio_client`) call `python-dotenv` `load_dotenv()` at import time, which
-loads `apps/api/.env` AND the operator's `/etc/workeros/api.env`.
+loads `apps/api/.env` AND the operator's `/etc/floom/api.env`.
 The latter holds the PRODUCTION `FLOOM_SECRET` and a `FLOOM_DB` that points at
 the live prod database (`../../data/floom.db`, ~605 runs). Without this guard:
 
@@ -71,7 +71,7 @@ os.environ.setdefault("WORKEROS_DEPLOY", "local")
 #     threshold and still exercise production behavior.
 os.environ.setdefault("WORKEROS_MIN_FREE_DISK_BYTES", "0")
 
-# 3) Ensure the prod FLOOM_SECRET from /etc/workeros/api.env can never
+# 3) Ensure the prod FLOOM_SECRET from /etc/floom/api.env can never
 #    be injected. Presence of this key (even empty) blocks load_dotenv's
 #    override=False from setting the real prod value. Empty => local dev mode.
 #    Tests that exercise auth set their own FLOOM_SECRET explicitly in setUp.
@@ -79,7 +79,7 @@ os.environ.setdefault("FLOOM_SECRET", "")
 
 # 4) Neuter dotenv so file-based secrets can NEVER leak into the test process.
 #    main / run_service / composio_client call load_dotenv() at import time,
-#    loading apps/api/.env AND /etc/workeros/api.env (which holds the
+#    loading apps/api/.env AND /etc/floom/api.env (which holds the
 #    prod FLOOM_SECRET + prod FLOOM_DB). The setdefault guard above is defeated
 #    the moment a test does `os.environ.pop("FLOOM_SECRET"); import main` — the
 #    pop removes the guard and load_dotenv(override=False) then injects the real

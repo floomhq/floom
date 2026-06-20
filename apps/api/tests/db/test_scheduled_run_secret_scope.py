@@ -267,7 +267,7 @@ def test_shared_worker_run_scopes_secrets_to_owner_not_runner(repo_bundle, run_s
 def test_secret_store_path_is_db_anchored_not_source_relative(monkeypatch, tmp_path):
     """The N4-1 root cause: the secret-value store must be anchored to the DB
     directory, NOT to the source tree. A source-relative path diverges across
-    deploy directories (/opt/workeros vs /opt/workeros-live) while the DB
+    deploy directories (/opt/floom vs /opt/floom-live) while the DB
     (absolute) is shared, orphaning secret values.
 
     With no explicit WORKEROS_API_ENV_FILE, the store must co-locate with the

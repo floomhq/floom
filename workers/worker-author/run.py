@@ -1,4 +1,4 @@
-"""Worker Author — generates Workeros worker bundles from natural-language prompts.
+"""Worker Author — generates Floom worker bundles from natural-language prompts.
 
 This worker runs in an E2B sandbox as a pure-script worker. The E2B driver
 executes ``python run.py`` and reads back ``result.json`` (schema
@@ -433,7 +433,7 @@ def _validate_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Optional[
 # Prompt assembly
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT_HEADER = """You are the Worker Author — a meta-worker that generates Workeros worker bundles from natural-language descriptions.
+SYSTEM_PROMPT_HEADER = """You are the Worker Author — a meta-worker that generates Floom worker bundles from natural-language descriptions.
 
 Output ONLY a JSON object (no markdown, no code fences) with this exact shape:
 {
@@ -561,7 +561,7 @@ def _build_messages(
 
     system_content = "\n".join(system_parts)
 
-    user_parts = [f"Design a Workeros worker for this task:\n\n{prompt}"]
+    user_parts = [f"Design a Floom worker for this task:\n\n{prompt}"]
     if mode == "create":
         user_parts.append("\nMode: create. Include the full bundle so it can be registered immediately.")
     else:

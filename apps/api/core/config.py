@@ -1,4 +1,4 @@
-﻿"""Static configuration constants for the WorkerOS API.
+"""Static configuration constants for the Floom API.
 
 These values were previously defined inline in ``main.py``. They are pure data
 (no application state, no FastAPI objects) and are consumed across many request
@@ -130,7 +130,7 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "node-smoke-test",
         "outbound-approval-demo",
         "research_brief",
-        # engine/system workers that power Workeros itself (not tenant content)
+        # engine/system workers that power Floom itself (not tenant content)
         "slack-listener",
         "whatsapp-listener",
         "worker-author",
@@ -191,7 +191,7 @@ _INTERNAL_WORKER_ID_PREFIXES = (
 # System knowledge packs (contexts)
 # ---------------------------------------------------------------------------
 
-# Engine/system knowledge packs that power Workeros itself (e.g. the
+# Engine/system knowledge packs that power Floom itself (e.g. the
 # worker-generation style guide). They are internal config, not operator
 # content, so they are hidden from the /contexts operator view — the contexts
 # equivalent of system_worker:true. A pack can also opt in via metadata

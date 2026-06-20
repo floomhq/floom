@@ -1,9 +1,10 @@
 {
-  "name": "@floomhq/workeros",
+  "name": "@floomhq/floom",
   "version": "4.2.0",
-  "description": "CLI + MCP server for self-hosted and hosted Workeros instances.",
+  "description": "CLI + MCP server for self-hosted and hosted Floom instances.",
   "type": "module",
   "bin": {
+    "floom-mcp": "./bin/floom-mcp",
     "workeros-mcp": "./bin/workeros-mcp",
     "workeros": "./dist/cli.js",
     "floom": "./dist/cli.js"

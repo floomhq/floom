@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def _configured_root() -> Path:
-    return Path(os.environ.get("WORKEROS_ROOT", "/opt/workeros")).resolve()
+    return Path(os.environ.get("WORKEROS_ROOT", "/opt/floom")).resolve()
 
 
 def _configured_db(root: Path) -> Path:

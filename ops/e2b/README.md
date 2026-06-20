@@ -1,6 +1,6 @@
 # E2B Runtime Templates
 
-WorkerOS can create sandboxes from configured E2B templates:
+Floom can create sandboxes from configured E2B templates:
 
 ```bash
 WORKEROS_E2B_PYTHON_TEMPLATE_ID=workeros-python-base
@@ -35,7 +35,7 @@ and falls back to `WORKEROS_E2B_{PYTHON,NODE}_TEMPLATE_ID` or
 
 Templates in this directory:
 
-- `python-base`: shared Python 3.11 image with common WorkerOS dependencies.
+- `python-base`: shared Python 3.11 image with common Floom dependencies.
 - `node-base`: shared Node LTS image with common helper packages.
 - `build-worker-bundle-template.py`: opt-in per-worker bundle baking for stable
   production workers.

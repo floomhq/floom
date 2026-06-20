@@ -1,11 +1,11 @@
 display_information:
-  name: Workeros
-  description: Slack-native AI workforce for Workeros workers, approvals, and workspace agent chat.
+  name: Floom
+  description: Slack-native AI workforce for Floom workers, approvals, and workspace agent chat.
   background_color: "#111827"
 
 features:
   bot_user:
-    display_name: Workeros
+    display_name: Floom
     always_online: true
   app_home:
     home_tab_enabled: false
@@ -21,7 +21,7 @@ features:
   slash_commands:
     - command: /floom
       url: https://localhost:8000/slack/events
-      description: Ask the Workeros workspace agent or manage pending approvals.
+      description: Ask the Floom workspace agent or manage pending approvals.
       usage_hint: "approvals | <request>"
       should_escape: false
 

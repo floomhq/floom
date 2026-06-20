@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import importlib
@@ -108,14 +108,14 @@ def test_e2b_network_policy_and_sandbox_create_kwargs(monkeypatch):
         ),
     )
     monkeypatch.delenv("WORKEROS_E2B_RESTRICT_EGRESS", raising=False)
-    policy = e2b_driver._e2b_network_policy(config, api_url="https://workeros-api.example.test")
+    policy = e2b_driver._e2b_network_policy(config, api_url="https://floom-api.example.test")
     assert policy["allow_public_traffic"] is True
     assert "allow_out" not in policy
     assert "169.254.0.0/16" in policy["deny_out"]
 
     monkeypatch.setenv("WORKEROS_E2B_RESTRICT_EGRESS", "1")
-    strict_policy = e2b_driver._e2b_network_policy(config, api_url="https://workeros-api.example.test")
-    assert "workeros-api.example.test" in strict_policy["allow_out"]
+    strict_policy = e2b_driver._e2b_network_policy(config, api_url="https://floom-api.example.test")
+    assert "floom-api.example.test" in strict_policy["allow_out"]
     assert "api.partner.test" in strict_policy["allow_out"]
     assert "0.0.0.0/0" in strict_policy["deny_out"]
 
@@ -131,7 +131,7 @@ def test_e2b_network_policy_and_sandbox_create_kwargs(monkeypatch):
         FakeSandbox,
         api_keys=["key"],
         timeout=180,
-        envs={"WORKEROS_API_URL": "https://workeros-api.example.test"},
+        envs={"WORKEROS_API_URL": "https://floom-api.example.test"},
         network=policy,
         log_fn=lambda *_: None,
     )

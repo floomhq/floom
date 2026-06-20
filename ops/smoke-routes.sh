@@ -1,12 +1,12 @@
-﻿#!/usr/bin/env bash
-# Pre/post-deploy live-route smoke gate for a self-hosted Workeros install.
+#!/usr/bin/env bash
+# Pre/post-deploy live-route smoke gate for a self-hosted Floom install.
 #
 # Usage:
 #   bash ops/smoke-routes.sh
 #
 # Override hosts when needed:
-#   WORKEROS_SMOKE_WEB_BASE=https://workeros.example.com \
-#   WORKEROS_SMOKE_API_BASE=https://api.workeros.example.com \
+#   WORKEROS_SMOKE_WEB_BASE=https://floom.example.com \
+#   WORKEROS_SMOKE_API_BASE=https://api.floom.example.com \
 #   bash ops/smoke-routes.sh
 
 set -uo pipefail

@@ -9,7 +9,7 @@ global* ``httpx.AsyncClient`` (``OpenAIProvider.shared_http_client()``). An
 ``httpx.AsyncClient`` binds its connection pool to the event loop that first
 performs I/O on it.
 
-Workeros runs each agent worker in its OWN fresh event loop (see
+Floom runs each agent worker in its OWN fresh event loop (see
 ``AgentDriver._run_coro_sync`` -> ``asyncio.run`` in a thread). The chat path
 runs on the persistent uvicorn loop. All of them share the single global httpx
 client. When one run's loop closes (or when a run on loop A reuses a client

@@ -1,4 +1,4 @@
-﻿"""Context (knowledge-pack) access-control and serialization helpers.
+"""Context (knowledge-pack) access-control and serialization helpers.
 
 Extracted from main.py as a cohesive cluster (AST-verified closed). These helpers
 resolve which contexts a request may see, validate context file paths, and build
@@ -64,7 +64,7 @@ def _scan_context_write(file_path: str, data: bytes) -> List[SecretWarning]:
             detail=(
                 f"This file appears to contain a live credential "
                 f"({first.pattern}: {first.masked}). Store secrets in "
-                f"Settings → Secrets, not in a Brain pack."
+                f"Settings ? Secrets, not in a Brain pack."
             ),
         )
     return warnings
@@ -615,7 +615,7 @@ def _git_commit_context(
     rel_path: Optional[str] = None,
     *,
     message: str,
-    author_name: str = "WorkerOS",
+    author_name: str = "Floom",
     author_email: str = "workeros@local",
 ) -> None:
     import git_ops as _git_ops

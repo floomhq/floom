@@ -694,18 +694,18 @@ test("install subcommand patches agent config idempotently", async () => {
     const env = { HOME: home, WORKEROS_API_SECRET: "test-secret" };
     const first = await runCli(["install"], env);
     assert.equal(first.code, 0);
-    assert.match(first.stdout, /Installed Workeros MCP config for Claude Code/);
+    assert.match(first.stdout, /Installed Floom MCP config for Claude Code/);
     assert.doesNotMatch(first.stdout, /test-secret/);
 
     const second = await runCli(["install"], env);
     assert.equal(second.code, 0);
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(config.mcpServers.workeros.url, "https://localhost:8000/mcp-tools/serve");
-    assert.equal(config.mcpServers.workeros.headers["x-floom-secret"], "test-secret");
-    assert.equal(config.mcpServers.workeros.command, undefined);
-    assert.equal(config.mcpServers.workeros.args, undefined);
-    assert.deepEqual(Object.keys(config.mcpServers).sort(), ["existing", "workeros"]);
+    assert.equal(config.mcpServers.floom.url, "https://localhost:8000/mcp-tools/serve");
+    assert.equal(config.mcpServers.floom.headers["x-floom-secret"], "test-secret");
+    assert.equal(config.mcpServers.floom.command, undefined);
+    assert.equal(config.mcpServers.floom.args, undefined);
+    assert.deepEqual(Object.keys(config.mcpServers).sort(), ["existing", "floom"]);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
@@ -725,14 +725,14 @@ test("mcp add patches agent config", async () => {
     });
 
     assert.equal(result.code, 0);
-    assert.match(result.stdout, /Installed Workeros MCP config for Cursor/);
+    assert.match(result.stdout, /Installed Floom MCP config for Cursor/);
     assert.doesNotMatch(result.stdout, /test-secret/);
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(config.mcpServers.workeros.url, "https://localhost:8000/mcp-tools/serve");
-    assert.equal(config.mcpServers.workeros.headers["x-floom-secret"], "test-secret");
-    assert.equal(config.mcpServers.workeros.command, undefined);
-    assert.equal(config.mcpServers.workeros.args, undefined);
+    assert.equal(config.mcpServers.floom.url, "https://localhost:8000/mcp-tools/serve");
+    assert.equal(config.mcpServers.floom.headers["x-floom-secret"], "test-secret");
+    assert.equal(config.mcpServers.floom.command, undefined);
+    assert.equal(config.mcpServers.floom.args, undefined);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

@@ -695,7 +695,7 @@ def download_run_bundle(
         archive.writestr(
             "README.txt",
             "This archive omits run inputs, logs, and internal transcripts. "
-            "Use the Workeros UI for redacted run history.\n",
+            "Use the Floom UI for redacted run history.\n",
         )
 
         primary_output = _extract_primary_output_file(output_payload)

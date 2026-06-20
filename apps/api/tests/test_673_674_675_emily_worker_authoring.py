@@ -87,7 +87,7 @@ trigger:
 # ---------------------------------------------------------------------------
 
 def test_673_invalid_trigger_type_cron_rejected():
-    """'cron' is not a valid WorkerOS trigger type — must be rejected."""
+    """'cron' is not a valid Floom trigger type — must be rejected."""
     result = _call_create(_minimal_yaml(trigger_type="cron"))
     assert result.get("ok") is False, (
         "#673: trigger.type='cron' must be rejected. "
@@ -100,7 +100,7 @@ def test_673_invalid_trigger_type_incoming_email_rejected():
     """'incoming_email' is not a valid trigger type."""
     result = _call_create(_minimal_yaml(trigger_type="incoming_email"))
     assert result.get("ok") is False, (
-        "#673: trigger.type='incoming_email' must be rejected — it does not exist in WorkerOS."
+        "#673: trigger.type='incoming_email' must be rejected — it does not exist in Floom."
     )
     assert "incoming_email" in result.get("error", "") or "trigger" in result.get("error", "").lower()
 

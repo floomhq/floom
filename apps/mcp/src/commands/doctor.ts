@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { WorkerosApiClient, WorkerosApiError } from "../lib/api.js";
+import { FloomApiClient, FloomApiError } from "../lib/api.js";
 import { readCredentials } from "../lib/credentials.js";
 import { log, printJson } from "../lib/output.js";
 
@@ -35,7 +35,7 @@ async function checkApiReachable(apiBase: string): Promise<Check> {
       const version = typeof body.version === "string" ? body.version : "ok";
       return pass("api_url", `${apiBase} — ${version}`);
     }
-    return fail("api_url", `HTTP ${response.status}`, "Check API status: https://github.com/floomhq/workeros/issues");
+    return fail("api_url", `HTTP ${response.status}`, "Check API status: https://github.com/floomhq/floom/issues");
   } catch (error) {
     if ((error as Error).name === "AbortError") {
       return fail("api_url", `Timeout reaching ${apiBase}`, "Check your network or API status");
@@ -44,15 +44,15 @@ async function checkApiReachable(apiBase: string): Promise<Check> {
   }
 }
 
-async function checkAuth(client: WorkerosApiClient): Promise<Check> {
+async function checkAuth(client: FloomApiClient): Promise<Check> {
   try {
     await client.requestJson("GET", "/system/info");
     return pass("auth", "Token valid");
   } catch (error) {
-    if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+    if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
       return fail("auth", "Token rejected by API", "Re-run: floom login");
     }
-    if (error instanceof WorkerosApiError && error.status) {
+    if (error instanceof FloomApiError && error.status) {
       return fail("auth", `HTTP ${error.status}`, "Re-run: floom login");
     }
     return fail("auth", "Could not reach API to validate token", "Re-run: floom login");
@@ -84,7 +84,7 @@ function checkMcpInstall(): Check {
       const raw = readFileSync(candidate.path, "utf8");
       const config = JSON.parse(raw) as Record<string, unknown>;
       const servers = config.mcpServers as Record<string, unknown> | undefined;
-      if (servers && "workeros" in servers) {
+      if (servers && ("floom" in servers || "workeros" in servers)) {
         found.push(candidate.label);
       }
     } catch {
@@ -98,16 +98,16 @@ function checkMcpInstall(): Check {
   return warn("mcp_install", "Not found in any editor config", "Install: floom mcp install");
 }
 
-async function checkRecentRuns(client: WorkerosApiClient): Promise<Check> {
+async function checkRecentRuns(client: FloomApiClient): Promise<Check> {
   try {
     await client.requestJson("GET", "/runs", { query: { limit: 1 } });
     return pass("recent_runs", "API + auth + DB reachable");
   } catch (error) {
-    if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+    if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
       return fail("recent_runs", "Auth rejected", "Re-run: floom login");
     }
-    if (error instanceof WorkerosApiError && error.status) {
-      return fail("recent_runs", `HTTP ${error.status}`, "Check API status: https://github.com/floomhq/workeros/issues");
+    if (error instanceof FloomApiError && error.status) {
+      return fail("recent_runs", `HTTP ${error.status}`, "Check API status: https://github.com/floomhq/floom/issues");
     }
     return fail("recent_runs", "Could not reach /runs endpoint", "Check your network connection");
   }
@@ -116,7 +116,7 @@ async function checkRecentRuns(client: WorkerosApiClient): Promise<Check> {
 export async function doctorCommand(options: { json?: boolean } = {}): Promise<number> {
   const credentials = await readCredentials();
   const apiBase = credentials?.api_base || process.env.WORKEROS_API_BASE || API_DEFAULT;
-  const client = credentials ? new WorkerosApiClient(apiBase, credentials) : null;
+  const client = credentials ? new FloomApiClient(apiBase, credentials) : null;
 
   const checks: Check[] = [];
 

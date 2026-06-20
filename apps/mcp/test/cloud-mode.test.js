@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp } from "node:fs/promises";
@@ -12,15 +12,15 @@ import {
   writeCredentials,
 } from "../dist/lib/credentials.js";
 import {
-  WorkerosApiClient,
-  WorkerosApiError,
+  FloomApiClient,
+  FloomApiError,
   createAuthenticatedClient,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
 import { cloudRateLimitRetryMs } from "../dist/commands/login.js";
 
 test("cloud login honors Retry-After headers on cli-exchange 429", () => {
-  const error = new WorkerosApiError(
+  const error = new FloomApiError(
     "rate limited",
     429,
     { detail: { retry_after: 60 } },
@@ -31,7 +31,7 @@ test("cloud login honors Retry-After headers on cli-exchange 429", () => {
 });
 
 test("cloud login falls back to structured retry_after body on cli-exchange 429", () => {
-  const error = new WorkerosApiError("rate limited", 429, {
+  const error = new FloomApiError("rate limited", 429, {
     detail: { retry_after: 42 },
   });
 
@@ -39,7 +39,7 @@ test("cloud login falls back to structured retry_after body on cli-exchange 429"
 });
 
 test("cloud login treats cli-exchange 429 without retry metadata as slow_down", () => {
-  const error = new WorkerosApiError("rate limited", 429, {});
+  const error = new FloomApiError("rate limited", 429, {});
 
   assert.equal(cloudRateLimitRetryMs(error, 2), 5_000);
 });
@@ -87,7 +87,7 @@ test("readCredentials back-compat treats legacy schema as OSS mode", async () =>
 test("readCredentials rejects cloud creds missing refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://api.workeros.example.com",
+      api_base: "https://api.floom.example.com",
       mode: "cloud",
       // refresh_token + supabase_url intentionally omitted
       authed_at: new Date().toISOString(),
@@ -100,7 +100,7 @@ test("readCredentials rejects cloud creds missing refresh_token", async () => {
 test("updateCredentials persists workspace_id without dropping refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://api.workeros.example.com",
+      api_base: "https://api.floom.example.com",
       mode: "cloud",
       refresh_token: "rt-1",
       supabase_url: "https://abc.supabase.co",
@@ -118,13 +118,13 @@ test("updateCredentials persists workspace_id without dropping refresh_token", a
 
 test("readCredentials accepts cloud PAT from environment", async () => {
   await withTempHome(async () => {
-    process.env.WORKEROS_API_BASE = "https://api.workeros.example.com";
+    process.env.WORKEROS_API_BASE = "https://api.floom.example.com";
     process.env.WORKEROS_API_TOKEN = "floom_pat_123";
     process.env.WORKEROS_WORKSPACE_ID = "ws_env";
     const creds = await readCredentials();
     assert.ok(creds);
     assert.equal(creds.mode, "cloud");
-    assert.equal(creds.api_base, "https://api.workeros.example.com");
+    assert.equal(creds.api_base, "https://api.floom.example.com");
     assert.equal(creds.api_token, "floom_pat_123");
     assert.equal(creds.workspace_id, "ws_env");
   });
@@ -212,7 +212,7 @@ async function startMockDoctorApi() {
   return { server, port: server.address().port, seen };
 }
 
-test("cloud client sends JWT + X-Workeros-Workspace and rewrites /workers to /api/workers", async () => {
+test("cloud client sends JWT + legacy x-workeros-workspace and rewrites /workers to /api/workers", async () => {
   await withTempHome(async () => {
     const supa = await startMockSupabase();
     const api = await startMockApi();
@@ -252,7 +252,7 @@ test("cloud client sends JWT + X-Workeros-Workspace and rewrites /workers to /ap
   });
 });
 
-test("cloud client sends PAT + X-Workeros-Workspace and rewrites /workers to /api/workers", async () => {
+test("cloud client sends PAT + legacy x-workeros-workspace and rewrites /workers to /api/workers", async () => {
   await withTempHome(async () => {
     const api = await startMockApi();
     try {
@@ -345,11 +345,11 @@ test("oss client sends x-floom-secret and does NOT rewrite paths", async () => {
   });
 });
 
-test("WorkerosApiClient.authHeaders is callable from outside (used by SSE follow)", async () => {
+test("FloomApiClient.authHeaders is callable from outside (used by SSE follow)", async () => {
   await withTempHome(async () => {
     const supa = await startMockSupabase();
     try {
-      const client = new WorkerosApiClient(`http://127.0.0.1:9999`, {
+      const client = new FloomApiClient(`http://127.0.0.1:9999`, {
         api_base: `http://127.0.0.1:9999`,
         mode: "cloud",
         refresh_token: "rt-1",

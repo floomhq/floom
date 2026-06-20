@@ -1201,7 +1201,7 @@ function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
         <ConfigInfoGrid
           rows={[
             ["Events", "failed, completed"],
-            ["Signing", "X-Workeros-Signature (HMAC)"],
+            ["Signing", "X-Floom-Signature (HMAC)"],
             ["Egress", "Internal/metadata targets blocked (SSRF-pinned)"],
             ["Current", d.webhook_url ? <span key="u" className="font-mono text-xs">{d.webhook_url}</span> : "Not set"],
           ]}

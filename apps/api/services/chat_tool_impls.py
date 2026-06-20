@@ -1,4 +1,4 @@
-﻿"""Workspace-agent tool implementations: workers, runs, secrets, connections,
+"""Workspace-agent tool implementations: workers, runs, secrets, connections,
 MCP-tools, and contexts.
 
 Extracted verbatim from chat_service.py: the agent action handlers behind the
@@ -146,7 +146,7 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
                     f"Invalid trigger.type '{trigger_type}'. "
                     f"Valid values: {sorted(_VALID_TRIGGER_TYPES)}. "
                     "For a scheduled worker use type: 'schedule' with cron: '*/10 * * * *'. "
-                    "Never use 'cron' or 'incoming_email' — they do not exist in WorkerOS."
+                    "Never use 'cron' or 'incoming_email' — they do not exist in Floom."
                 ),
             }
     exec_block = manifest.get("exec") or {}

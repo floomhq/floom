@@ -1,4 +1,4 @@
-﻿"""Workspace operations: instructions/base-persona git commits, membership,
+"""Workspace operations: instructions/base-persona git commits, membership,
 and the workspace-template export (zip build, share token, payload).
 
 The active-workspace resolver, member projection + owner-membership guard, the
@@ -131,7 +131,7 @@ def _ensure_owner_membership(
 def _git_commit_workspace_md(
     *,
     message: str,
-    author_name: str = "WorkerOS",
+    author_name: str = "Floom",
     author_email: str = "workeros@local",
 ) -> None:
     import git_ops as _git_ops
@@ -154,7 +154,7 @@ def _git_commit_workspace_md(
 def _git_commit_workspace_base_md(
     *,
     message: str,
-    author_name: str = "WorkerOS",
+    author_name: str = "Floom",
     author_email: str = "workeros@local",
 ) -> None:
     import git_ops as _git_ops

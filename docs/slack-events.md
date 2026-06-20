@@ -1,22 +1,22 @@
-﻿# Slack Events Verification
+# Slack Events Verification
 
-Workeros exposes a native Slack Events API receiver at:
+Floom exposes a native Slack Events API receiver at:
 
 - Self-hosted: `https://localhost:8000/slack/events`
-- Remote/self-hosted: `https://api.workeros.example.com/slack/events`
+- Remote/self-hosted: `https://api.floom.example.com/slack/events`
 
 ## Required Env
 
 - `SLACK_SIGNING_SECRET`: Slack app signing secret used for `X-Slack-Signature`.
 - `SLACK_BOT_TOKEN`: bot token with `chat:write` plus the event scopes used by the Slack app.
 - `SLACK_ALLOWED_TEAM_IDS`: optional comma-separated allowlist of Slack team ids.
-- `SLACK_WORKEROS_USER_ID`: optional Workeros user/workspace owner id; defaults to the single-user bootstrap id.
+- `SLACK_WORKEROS_USER_ID`: optional Floom user/workspace owner id; defaults to the single-user bootstrap id.
 - `SLACK_EVENTS_ENABLED`: optional feature flag; set to `0` to disable the route.
 
 ## Slack App Setup
 
 1. In Slack app Event Subscriptions, set Request URL to the matching `/slack/events` URL.
-2. Slack sends a `url_verification` payload. Workeros returns the raw `challenge` only after validating Slack HMAC.
+2. Slack sends a `url_verification` payload. Floom returns the raw `challenge` only after validating Slack HMAC.
 3. Subscribe to `app_mention` bot events.
 4. Install or reinstall the app into the workspace after scopes/events change.
 

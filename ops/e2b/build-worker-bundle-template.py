@@ -1,4 +1,4 @@
-"""Build an E2B template containing one WorkerOS worker bundle.
+"""Build an E2B template containing one Floom worker bundle.
 
 Example:
     python ops/e2b/build-worker-bundle-template.py \

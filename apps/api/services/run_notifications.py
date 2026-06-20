@@ -231,10 +231,10 @@ def _run_email_html(
     error: str | None,
 ) -> str:
     """Branded run-notification email. Branding is env-configurable for self-hosters:
-    WORKEROS_BRAND_NAME (default "WorkerOS"), WORKERS_FRONTEND_URL (header/footer link),
+    WORKEROS_BRAND_NAME (default "Floom"), WORKERS_FRONTEND_URL (header/footer link),
     WORKEROS_EMAIL_LOGO_URL (optional absolute https logo; falls back to the brand name
     as text), and WORKEROS_SUPPORT_EMAIL (optional footer contact)."""
-    brand = (os.environ.get("WORKEROS_BRAND_NAME") or "WorkerOS").strip() or "WorkerOS"
+    brand = (os.environ.get("WORKEROS_BRAND_NAME") or "Floom").strip() or "Floom"
     frontend_url = (os.environ.get("WORKERS_FRONTEND_URL") or "http://localhost:3000").rstrip("/")
     # Gmail requires an absolute https <img> src in email (data URIs are stripped),
     # so the logo must be a public URL; when unset we render the brand name as text.
@@ -308,7 +308,7 @@ def _send_email_notification(
     from_addr = os.environ.get("NOTIFY_FROM_EMAIL", "notifications@example.com").strip()
     # The user-facing brand is "Floom". Force the From display name to "Floom"
     # regardless of how NOTIFY_FROM_EMAIL is configured (it must never read
-    # "Workeros" to recipients). Preserve the address, override the name.
+    # "Floom" to recipients). Preserve the address, override the name.
     _email_only = from_addr.split("<")[-1].strip(" <>") if "<" in from_addr else from_addr
     if _email_only:
         from_addr = f"Floom <{_email_only}>"
@@ -412,10 +412,10 @@ def _fire_alert_webhooks(
                 logger.warning("Skipping unsafe alert webhook URL for run %s: %s", run_id, exc)
         if url and url_safe:
             secret = row.get("secret")
-            headers = {"Content-Type": "application/json", "X-Workeros-Run-Id": run_id}
+            headers = {"Content-Type": "application/json", "X-Floom-Run-Id": run_id}
             if secret:
                 sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()  # type: ignore[attr-defined]
-                headers["X-Workeros-Signature"] = f"sha256={sig}"
+                headers["X-Floom-Signature"] = f"sha256={sig}"
             try:
                 req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
                 # Bounded timeout — a hostile/slow endpoint must not hang the

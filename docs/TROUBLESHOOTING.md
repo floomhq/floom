@@ -87,7 +87,7 @@ FLOOM_CONTEXTS_DIR=~/.workeros/contexts
 ```
 
 The engine refuses to commit worker/context history into its own source repo.
-That guard prevents accidental commits to the Workeros checkout.
+That guard prevents accidental commits to the Floom checkout.
 
 ### Encrypted secrets cannot be read after moving machines
 

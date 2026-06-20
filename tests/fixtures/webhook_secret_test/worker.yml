@@ -3,7 +3,7 @@ name: webhook-secret-test
 title: Webhook Secret Test Worker
 description: Tests webhook HMAC signature verification.
 long_description: |
-  Exercises the signed webhook path with HMAC verification enabled. Use it to confirm external systems can call Workeros webhooks without exposing unauthenticated write access.
+  Exercises the signed webhook path with HMAC verification enabled. Use it to confirm external systems can call Floom webhooks without exposing unauthenticated write access.
 use_cases:
 - Verify webhook signature validation before connecting a real integration.
 - Test rejected and accepted webhook payload handling.

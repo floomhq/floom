@@ -1,4 +1,4 @@
-﻿import { createAuthenticatedClient, WorkerosApiError, type WorkerosApiClient } from "../lib/api.js";
+import { createAuthenticatedClient, FloomApiError, type FloomApiClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
 import { updateCredentials, type StoredCredentials } from "../lib/credentials.js";
 import { log, printJson, renderTable } from "../lib/output.js";
@@ -17,13 +17,13 @@ type WorkspaceListResponse = {
 
 // OSS serves GET /workspaces; in hosted mode the client rewrites the path to
 // /api/workspaces. Both return { workspaces, active_id }.
-async function fetchWorkspaces(client: WorkerosApiClient): Promise<WorkspaceListResponse> {
+async function fetchWorkspaces(client: FloomApiClient): Promise<WorkspaceListResponse> {
   try {
     return (await client.requestJson("GET", "/workspaces")) as WorkspaceListResponse;
   } catch (error) {
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       throw new Error(
-        "This Workeros server does not support workspaces. Update the server to a version with local workspaces.",
+        "This Floom server does not support workspaces. Update the server to a version with local workspaces.",
       );
     }
     throw error;
@@ -154,7 +154,7 @@ export async function workspacesSwitchCommand(target: string): Promise<number> {
       try {
         await client.requestJson("POST", `/workspaces/${match.id}/select`);
       } catch (error) {
-        if (error instanceof WorkerosApiError && error.status === 404) {
+        if (error instanceof FloomApiError && error.status === 404) {
           log.err(`Workspace ${match.id} was not accepted by the server.`);
           process.stderr.write("Re-run `floom workspaces list` and try again.\n");
           return 1;

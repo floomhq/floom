@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ops/verify-schema.py — schema drift detector for workeros.
+ops/verify-schema.py — schema drift detector for Floom.
 
 Compares every expected table defined in apps/api/db/_legacy_sqlite.py
 against the live SQLite database. Fails with a non-zero exit code and a
@@ -9,7 +9,7 @@ clear diff if any expected table is missing.
 Usage:
     python3 ops/verify-schema.py [db_path]
 
-    db_path defaults to /opt/workeros/data/floom.db (or $FLOOM_DB).
+    db_path defaults to /opt/floom/data/floom.db (or $FLOOM_DB).
 
 Exit codes:
     0  All expected tables present.
@@ -116,9 +116,9 @@ def main() -> int:
     else:
         db_path = os.environ.get("FLOOM_DB") or os.environ.get("WORKEROS_DB")
         if not db_path:
-            # Try the standard relative path from /opt/workeros/apps/api working dir
+            # Try the standard relative path from /opt/floom/apps/api working dir
             candidates = [
-                "/opt/workeros/data/floom.db",
+                "/opt/floom/data/floom.db",
                 Path(__file__).parent.parent / "data" / "floom.db",
             ]
             for c in candidates:

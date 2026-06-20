@@ -509,7 +509,7 @@ test("workers push reports unreachable API separately from expired auth", async 
   const result = await runCli(["workers", "push", dir], { HOME: home });
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /Workeros API is unreachable/);
+  assert.match(result.stderr, /Floom API is unreachable/);
   assert.match(result.stdout, /WORKEROS_API_BASE\/FLOOM_API_BASE/);
   assert.doesNotMatch(result.stderr, /session expired/i);
 });

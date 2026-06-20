@@ -1089,9 +1089,9 @@ function SystemInfoRow({
   );
 }
 
-const CLI_INSTALL_SNIPPET = `npm i -g @floomhq/workeros
-workeros login
-workeros run <worker>`;
+const CLI_INSTALL_SNIPPET = `npm i -g @floomhq/floom
+floom login
+floom run <worker>`;
 
 // API base comes from the same env seam lib/api uses (NEXT_PUBLIC_API_PROXY_BASE
 // → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
@@ -1248,7 +1248,7 @@ function ConnectSection() {
           </button>
           .{" "}
           <a
-            href="https://github.com/floomhq/workeros#api"
+            href="https://github.com/floomhq/floom#api"
             target="_blank"
             rel="noopener noreferrer"
             className="text-primary hover:underline"

@@ -19,13 +19,13 @@ the contexts root and the keys of the contexts metadata file.
 
 Usage:
     # Read-only report (default) — counts orphans, prints the live/orphan split.
-    python scripts/gc_orphan_asset_versions.py --db /opt/workeros/data/floom.db \
-        --contexts-dir /opt/workeros/contexts
+    python scripts/gc_orphan_asset_versions.py --db /opt/floom/data/floom.db \
+        --contexts-dir /opt/floom/contexts
 
     # Destructive reclaim — DELETE orphans in batches, then VACUUM.
     # Run ONLY during a deploy window (API stopped) to avoid lock contention.
-    python scripts/gc_orphan_asset_versions.py --db /opt/workeros/data/floom.db \
-        --contexts-dir /opt/workeros/contexts --apply
+    python scripts/gc_orphan_asset_versions.py --db /opt/floom/data/floom.db \
+        --contexts-dir /opt/floom/contexts --apply
 
 Idempotent: a second run finds zero orphans. Always take a verified gzip backup
 BEFORE running with --apply.

@@ -1,10 +1,10 @@
-# Workeros Architecture
+# Floom Architecture
 
 **For auditors, operators, and contributors: read this before testing or filing security findings.**
 
 ## Runtime Topology
 
-Workeros is a self-hosted app with three main pieces:
+Floom is a self-hosted app with three main pieces:
 
 | Component | Default local location | Responsibility |
 |---|---|---|
@@ -41,7 +41,7 @@ For pure-script workers, this means attacks like:
 - Worker mutates env vars seen by subsequent workers.
 - Worker writes to API service files.
 
-These do not apply to the pure-script Workeros path. Pure-script workers do not
+These do not apply to the pure-script Floom path. Pure-script workers do not
 share a Python interpreter with the API. If a security audit produces these
 findings for a `.py`/`.sh`/`.js` worker, the audit was run against the wrong
 execution path.

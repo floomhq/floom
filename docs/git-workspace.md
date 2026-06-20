@@ -66,6 +66,6 @@ git_ops.set_workspace_id_resolver(get_active_workspace_id)
 
 ## Initialisation
 
-`ensure_repo(workspace_dir)` initialises the git repo if one does not exist. Creates the default `.gitignore`, sets `user.email = workeros@local`, `user.name = WorkerOS`, and makes an initial commit of any pre-existing files. Returns `True` if it initialised, `False` if already a repo.
+`ensure_repo(workspace_dir)` initialises the git repo if one does not exist. Creates the default `.gitignore`, sets `user.email = workeros@local`, `user.name = Floom`, and makes an initial commit of any pre-existing files. Returns `True` if it initialised, `False` if already a repo.
 
 Call `ensure_repo` once at startup before any `commit_paths` call. The API server does this in its startup sequence.

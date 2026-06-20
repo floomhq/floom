@@ -1,4 +1,4 @@
-"""Pydantic models for Workeros request, response, and domain types."""
+"""Pydantic models for Floom request, response, and domain types."""
 
 import ipaddress
 import os
@@ -1636,7 +1636,7 @@ class WorkerContract(BaseModel):
     @classmethod
     def fill_missing_description(cls, value: Any) -> Any:
         if isinstance(value, dict) and not str(value.get("description") or "").strip():
-            fallback = str(value.get("title") or value.get("name") or "Workeros worker").strip()
+            fallback = str(value.get("title") or value.get("name") or "Floom worker").strip()
             value = {**value, "description": fallback[:500]}
         if isinstance(value, dict) and "resources" not in value:
             exec_block = value.get("exec")
@@ -2034,7 +2034,7 @@ def _legacy_output_to_contract_field(field: WorkerOutput) -> WorkerContractField
 
 
 def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0") -> WorkerContract:
-    """Convert a legacy Workeros worker.yml config into WorkerContract shape."""
+    """Convert a legacy Floom worker.yml config into WorkerContract shape."""
     return WorkerContract(
         schema_version="0.3",
         name=_slug_from_worker_id(config.id),
@@ -2171,7 +2171,7 @@ class Artifact(BaseModel):
     name: str
     type: Optional[str] = None
     # PATH-1 (2026-05-29): `path` must NOT expose the absolute host path
-    # (/opt/workeros/data/artifacts/...). It now carries the path RELATIVE to
+    # (/opt/floom/data/artifacts/...). It now carries the path RELATIVE to
     # the artifacts root (e.g. "run_x/out/sorted.csv"); the download endpoint
     # resolves the real on-disk path server-side from the artifact id.
     path: str
@@ -2660,7 +2660,7 @@ class NotifyConfig(BaseModel):
     email_to: Optional[List[str]] = None
     # Events to fire on: "failed", "completed", or both
     on: List[str] = Field(default_factory=lambda: ["failed"])
-    # Optional HMAC secret for webhook — sent as X-Workeros-Signature header
+    # Optional HMAC secret for webhook — sent as X-Floom-Signature header
     secret: Optional[str] = None
     # Optional custom email subject (supports {worker_name} and {status} placeholders)
     email_subject: Optional[str] = None

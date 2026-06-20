@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+// Explicit Floom stdio MCP binary. The legacy workeros-mcp wrapper remains for
+// older configs and npm installs.
+import { main } from "../dist/server.js";
+main().catch((/** @type {unknown} */ error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`floom-mcp failed: ${message}`);
+  process.exit(1);
+});

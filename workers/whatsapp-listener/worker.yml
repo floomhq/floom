@@ -4,7 +4,7 @@ name: "whatsapp-listener"
 title: "WhatsApp Listener (workspace agent)"
 description: "Polls for incoming WhatsApp messages via Composio, forwards them to the workspace agent via /chat, and sends the reply back."
 long_description: |
-  Cron-driven v0 adapter that connects WhatsApp to the Workeros workspace agent.
+  Cron-driven v0 adapter that connects WhatsApp to the Floom workspace agent.
 
   When triggered, it:
   1. Lists recent incoming WhatsApp messages via the Composio WHATSAPP integration.

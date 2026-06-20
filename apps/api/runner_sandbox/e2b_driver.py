@@ -1,4 +1,4 @@
-﻿"""E2B cloud sandbox driver for Workeros - uses e2b SDK 2.x.
+"""E2B cloud sandbox driver for Floom - uses e2b SDK 2.x.
 
 Worker protocol: run.py in an E2B worker reads inputs from inputs.json and
 MUST write result.json with:

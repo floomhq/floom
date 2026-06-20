@@ -10,7 +10,7 @@ _Last updated: 2026-06-19._
 
 - **Security** - P0/P1 issues verified patched; no live secrets and no current
   infrastructure details in git history, so history is safe to publish as-is.
-- **Hygiene** - Workeros Source Available License, README badge, CONTRIBUTING, CODE_OF_CONDUCT,
+- **Hygiene** - Floom Source Available License, README badge, CONTRIBUTING, CODE_OF_CONDUCT,
   SECURITY, issue/PR templates, clean repo root, and package metadata.
 - **Dependency review** - Dependabot plus third-party license/SBOM policy are
   documented for release review.
@@ -33,7 +33,7 @@ _Last updated: 2026-06-19._
    opens release PRs; merging a release PR tags and publishes the GitHub
    release.
 5. **Docker image and compose** - add Dockerfiles for `apps/api` and `apps/web`,
-   `docker-compose.yml`, and publish `ghcr.io/floomhq/workeros:<version>`.
+   `docker-compose.yml`, and publish `ghcr.io/floomhq/floom:<version>`.
 6. **README screenshots or demo GIF** - useful for public launch because this is
    a visual product.
 7. **Frontend onboarding** - document `FLOOM_API_BASE` and `FLOOM_API_SECRET`;
@@ -46,5 +46,5 @@ _Last updated: 2026-06-19._
 - Expand the ruff ruleset by clearing the F401/F841 backlog file by file.
 - Decompose `main.py`; remove `db/_legacy_sqlite.py`.
 - Add coverage measurement for pytest and vitest.
-- Publish the MCP npm package (`@floomhq/workeros`) on release.
+- Publish the MCP npm package (`@floomhq/floom`) on release.
 - Fold `pytest.ini` and `ruff.toml` into a single `pyproject.toml`.

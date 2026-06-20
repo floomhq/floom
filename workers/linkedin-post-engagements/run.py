@@ -1,10 +1,10 @@
 """LinkedIn post engagements worker.
 
-Port of ~/.agents/skills/linkedin-post-engagements/scripts/sync.py for Workeros.
+Port of ~/.agents/skills/linkedin-post-engagements/scripts/sync.py for Floom.
 Differences from the Mac skill:
-- APIFY_API_KEY read from env (declared as Workeros secret), not hardcoded.
+- APIFY_API_KEY read from env (declared as Floom secret), not hardcoded.
 - profile_url + posts_limit + recent_only_days come from `inputs`.
-- Output written to out/engagements.json + out/summary.md as Workeros artifacts
+- Output written to out/engagements.json + out/summary.md as Floom artifacts
   (the sandbox is ephemeral; cross-run merging is the user's local skill on Mac).
 """
 

@@ -1,7 +1,7 @@
-# WorkerOS Python E2B Base Template
+# Floom Python E2B Base Template
 
 This builds the shared Python base template used to avoid per-run installation of
-common WorkerOS dependencies.
+common Floom dependencies.
 
 Build:
 

@@ -1,4 +1,4 @@
-# Contributing to Workeros
+# Contributing to Floom
 
 Thanks for your interest in contributing. This guide covers local setup, how the
 repo is organized, and what we look for in a pull request.
@@ -135,7 +135,7 @@ If you are not sure where to start:
 - Do not commit secrets, real customer data, or personal information. Use
   `example.com` addresses and synthetic data in tests and fixtures.
 - Run the relevant tests before opening the PR and note what you ran.
-- Sign off each commit with `git commit -s`. Workeros uses Developer
+- Sign off each commit with `git commit -s`. Floom uses Developer
   Certificate of Origin signoff for external contributions and does not require
   a separate contributor license agreement unless maintainers say so before a
   specific contribution is accepted.

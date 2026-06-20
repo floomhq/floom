@@ -42,7 +42,7 @@ function buildMcpSnippet(target: McpTarget): string {
   const note = target === "codex"
     ? "\n# Codex uses a manual MCP config paste today; the command prints the server snippet."
     : "";
-  return `npm i -g @floomhq/workeros\nworkeros mcp install --target ${cliTarget}${note}`;
+  return `npm i -g @floomhq/floom\nfloom mcp install --target ${cliTarget}${note}`;
 }
 
 // The OSS MCP server is HTTP transport: clients connect to /mcp-tools/serve and
@@ -52,28 +52,28 @@ function buildMcpSnippet(target: McpTarget): string {
 
 // CLI subcommands surfaced for the CLI tab (mirror of apps/mcp/src/cli.ts). The
 // curated MCP-tool catalog (McpToolCatalog) covers the MCP/agent surface; this
-// is the human-facing `workeros <cmd>` list.
+// is the human-facing `floom <cmd>` list.
 const CLI_COMMANDS: { name: string; description: string }[] = [
-  { name: "workeros login", description: "Authenticate via browser device authorization." },
-  { name: "workeros logout", description: "Remove saved CLI credentials." },
-  { name: "workeros whoami", description: "Show the current auth identity." },
-  { name: "workeros workers list", description: "List workers." },
-  { name: "workeros workers show <id>", description: "Show one worker's config and metadata." },
-  { name: "workeros workers info <id>", description: "Pretty single-worker summary (trigger, connections, last run)." },
-  { name: "workeros workers push <dir>", description: "Create or update a worker from a local directory." },
-  { name: "workeros workers validate <dir>", description: "Validate a local worker directory." },
-  { name: "workeros run <id>", description: "Start and monitor a worker run." },
-  { name: "workeros runs list", description: "List runs, filterable by worker or status." },
-  { name: "workeros runs show <id>", description: "Show run details." },
-  { name: "workeros runs logs <id>", description: "Show or follow run logs." },
-  { name: "workeros runs download <id>", description: "Download a run's bundle archive." },
-  { name: "workeros secrets list", description: "List secret names." },
-  { name: "workeros secrets set <key>", description: "Set a secret value." },
-  { name: "workeros secrets delete <key>", description: "Delete a secret." },
-  { name: "workeros connections list", description: "List saved app and MCP connections." },
-  { name: "workeros connections import-mcp-config <path>", description: "Import MCP servers from a client config JSON." },
-  { name: "workeros mcp install --target <client>", description: "Install the Floom MCP server into a client config (claude, cursor, vscode, windsurf, generic)." },
-  { name: "workeros doctor", description: "Check CLI setup: API, auth, MCP, runs endpoint." },
+  { name: "floom login", description: "Authenticate via browser device authorization." },
+  { name: "floom logout", description: "Remove saved CLI credentials." },
+  { name: "floom whoami", description: "Show the current auth identity." },
+  { name: "floom workers list", description: "List workers." },
+  { name: "floom workers show <id>", description: "Show one worker's config and metadata." },
+  { name: "floom workers info <id>", description: "Pretty single-worker summary (trigger, connections, last run)." },
+  { name: "floom workers push <dir>", description: "Create or update a worker from a local directory." },
+  { name: "floom workers validate <dir>", description: "Validate a local worker directory." },
+  { name: "floom run <id>", description: "Start and monitor a worker run." },
+  { name: "floom runs list", description: "List runs, filterable by worker or status." },
+  { name: "floom runs show <id>", description: "Show run details." },
+  { name: "floom runs logs <id>", description: "Show or follow run logs." },
+  { name: "floom runs download <id>", description: "Download a run's bundle archive." },
+  { name: "floom secrets list", description: "List secret names." },
+  { name: "floom secrets set <key>", description: "Set a secret value." },
+  { name: "floom secrets delete <key>", description: "Delete a secret." },
+  { name: "floom connections list", description: "List saved app and MCP connections." },
+  { name: "floom connections import-mcp-config <path>", description: "Import MCP servers from a client config JSON." },
+  { name: "floom mcp install --target <client>", description: "Install the Floom MCP server into a client config (claude, cursor, vscode, windsurf, generic)." },
+  { name: "floom doctor", description: "Check CLI setup: API, auth, MCP, runs endpoint." },
 ];
 
 // Representative API endpoints for the API tab. All take the x-floom-secret
@@ -199,15 +199,15 @@ export function CliCommandPanel() {
   // (what the box renders — masked unless revealed) and a `copy` variant
   // (always the real token, since the user clicked Copy deliberately).
   const snippets = useMemo(() => {
-    // P2-10 (audit 2026-05-29): the npm package @floomhq/workeros installs a
-    // binary named `workeros` (see apps/mcp/package.json `bin`), NOT `floom`.
-    // CLI auth: `workeros login` is the interactive browser device flow (no
+    // P2-10 (audit 2026-05-29): the npm package @floomhq/floom installs the
+    // `floom` CLI. The legacy `workeros` alias remains for older installs.
+    // CLI auth: `floom login` is the interactive browser device flow (no
     // token needed). To use THIS already-generated token non-interactively,
     // set WORKEROS_API_SECRET (see apps/mcp/src/lib/credentials.ts) and verify.
     const cli = (secret: string) =>
-      `npm i -g @floomhq/workeros\nWORKEROS_API_SECRET=${secret} workeros whoami`;
+      `npm i -g @floomhq/floom\nWORKEROS_API_SECRET=${secret} floom whoami`;
     // MCP: ready-to-paste mcpServers JSON with the token embedded. The
-    // `workeros mcp install` command would write the same thing after login.
+    // `floom mcp install` command would write the same thing after login.
     const mcp = (secret: string) => buildMcpJson(secret, activeWorkspace);
     const api = (secret: string) =>
       `curl -sS ${API_BASE}/workers?shape=list \\\n  -H "x-floom-secret: ${secret}"` +
@@ -339,7 +339,7 @@ export function CliCommandPanel() {
           {/* CLI surface */}
           <TabsContent value="cli" className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Install the <code className="font-mono">workeros</code> CLI and run any command below.
+              Install the <code className="font-mono">floom</code> CLI and run any command below.
               The snippet uses your token; full command reference follows.
             </p>
             <SnippetBox

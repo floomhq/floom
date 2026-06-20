@@ -1,4 +1,4 @@
-"""Multi-member auth provider for OSS WorkerOS (WORKEROS_DEPLOY=local).
+"""Multi-member auth provider for OSS Floom (WORKEROS_DEPLOY=local).
 
 Auth priority (first match wins):
   1. Bearer <token>   — personal access token (PAT) in Authorization header

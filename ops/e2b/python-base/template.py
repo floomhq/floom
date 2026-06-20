@@ -1,4 +1,4 @@
-"""Build the shared WorkerOS Python E2B base template.
+"""Build the shared Floom Python E2B base template.
 
 Usage:
     python ops/e2b/python-base/template.py

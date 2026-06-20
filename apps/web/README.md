@@ -1,6 +1,6 @@
-# Workeros Web App
+# Floom Web App
 
-This is the Next.js frontend for Workeros. It talks to the FastAPI backend in
+This is the Next.js frontend for Floom. It talks to the FastAPI backend in
 `apps/api` and provides the UI for workers, runs, approvals, connections,
 contexts, and settings.
 
@@ -52,4 +52,4 @@ npm run build:web
 
 Build the app with `npm run build` and deploy the generated Next.js application
 with any hosting provider that supports Next.js. Set `FLOOM_API_BASE` and
-`NEXT_PUBLIC_API_BASE` to the URL of your Workeros API.
+`NEXT_PUBLIC_API_BASE` to the URL of your Floom API.

@@ -1,6 +1,6 @@
-﻿import { writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
-import { createAuthenticatedClient, WorkerosApiError } from "../lib/api.js";
+import { createAuthenticatedClient, FloomApiError } from "../lib/api.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
 type RunSummary = {
@@ -38,14 +38,14 @@ function handleAuthError(error: unknown): number | null {
     process.stderr.write("Run: floom login\n");
     return 1;
   }
-  if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+  if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
     log.err("Your session expired.");
     process.stderr.write("Re-run: floom login\n");
     return 1;
   }
-  if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
+  if (error instanceof FloomApiError && error.status && error.status >= 500) {
     log.err(`API error: ${message}`);
-    process.stderr.write("Check API status, then retry. Report: https://github.com/floomhq/workeros/issues\n");
+    process.stderr.write("Check API status, then retry. Report: https://github.com/floomhq/floom/issues\n");
     return 1;
   }
   return null;
@@ -132,7 +132,7 @@ export async function runsShowCommand(runId: string, options: { json?: boolean }
     }
     return 0;
   } catch (error) {
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Run '${runId}' not found.`);
       log.info("List recent runs: floom runs list");
       return 1;
@@ -229,7 +229,7 @@ export async function runsDownloadCommand(runId: string): Promise<number> {
       log.ok(`Saved ${outputPath}`);
       return 0;
     } catch (error) {
-      if (error instanceof WorkerosApiError && error.status === 404) {
+      if (error instanceof FloomApiError && error.status === 404) {
         log.warn("Run download is not yet available for this run.");
         log.info("View run details: floom runs show " + runId);
         return 0;
@@ -270,11 +270,11 @@ export async function runsApproveCommand(runId: string, options: { comment?: str
   } catch (error) {
     const handled = handleAuthError(error);
     if (handled !== null) return handled;
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Run '${runId}' not found.`);
       return 1;
     }
-    if (error instanceof WorkerosApiError && error.status === 409) {
+    if (error instanceof FloomApiError && error.status === 409) {
       log.err(error.message);
       return 1;
     }
@@ -297,11 +297,11 @@ export async function runsRejectCommand(runId: string, options: { reason?: strin
   } catch (error) {
     const handled = handleAuthError(error);
     if (handled !== null) return handled;
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Run '${runId}' not found.`);
       return 1;
     }
-    if (error instanceof WorkerosApiError && error.status === 409) {
+    if (error instanceof FloomApiError && error.status === 409) {
       log.err(error.message);
       return 1;
     }
@@ -322,7 +322,7 @@ export async function runsCancelCommand(runId: string, options: { json?: boolean
   } catch (error) {
     const handled = handleAuthError(error);
     if (handled !== null) return handled;
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Run '${runId}' not found.`);
       return 1;
     }

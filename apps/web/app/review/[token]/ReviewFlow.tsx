@@ -81,7 +81,7 @@ export function ReviewFlow({ token }: { token: string }) {
   const [gateError, setGateError] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState(false);
 
-  // Force the Workeros dark theme for this standalone client surface. The app
+  // Force the Floom dark theme for this standalone client surface. The app
   // defaults to the light ("day") theme; the review pack is always presented in
   // the matte dark palette to match the design reference.
   useEffect(() => {

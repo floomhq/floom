@@ -8,11 +8,11 @@ name: node-smoke-test
 title: Node Smoke Test
 description: Tiny Node worker that installs one npm dep (nanoid) and writes a result.json. Proves the Node runtime + npm install pipeline.
 long_description: |
-  Use this to confirm Workeros's E2B `node22` runtime is alive and that
+  Use this to confirm Floom's E2B `node22` runtime is alive and that
   `package.json` deps get installed via `npm install` before `node run.js`
   fires. No secrets, no network state, deterministic output.
 use_cases:
-- Smoke-test the Node runtime + npm install path on Workeros.
+- Smoke-test the Node runtime + npm install path on Floom.
 - Verify after backend changes that pure-script Node workers still work.
 - Run as a quick sanity check that the E2B sandbox is reachable and healthy.
 folder: Operations

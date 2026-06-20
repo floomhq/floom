@@ -4,7 +4,7 @@ name: "slack-listener"
 title: "Slack Listener (@floom mentions)"
 description: "Polls for @floom mentions in a configured Slack channel, forwards each message to the workspace agent via /chat, and posts the reply in thread."
 long_description: |
-  Cron-driven v0 adapter that connects Slack to the Workeros workspace agent.
+  Cron-driven v0 adapter that connects Slack to the Floom workspace agent.
 
   When triggered, it:
   1. Fetches recent @floom mentions from the configured Slack channel.

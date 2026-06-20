@@ -1,4 +1,4 @@
-﻿"""Tests for PR B: connections backend, scopes, account_label, test endpoint, daily sweep.
+"""Tests for PR B: connections backend, scopes, account_label, test endpoint, daily sweep.
 
 Run from repo root:
     cd apps/api && python3 -m pytest ../../tests/test_connections_backend.py -x -q

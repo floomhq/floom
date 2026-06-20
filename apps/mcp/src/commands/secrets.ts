@@ -1,4 +1,4 @@
-import { createAuthenticatedClient, WorkerosApiError } from "../lib/api.js";
+import { createAuthenticatedClient, FloomApiError } from "../lib/api.js";
 import { promptHidden, promptYesNo } from "../lib/prompt.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
@@ -13,14 +13,14 @@ function handleAuthError(error: unknown): number | null {
     process.stderr.write("Run: floom login\n");
     return 1;
   }
-  if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+  if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
     log.err("Your session expired.");
     process.stderr.write("Re-run: floom login\n");
     return 1;
   }
-  if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
+  if (error instanceof FloomApiError && error.status && error.status >= 500) {
     log.err(`API error: ${message}`);
-    process.stderr.write("Check API status, then retry. Report: https://github.com/floomhq/workeros/issues\n");
+    process.stderr.write("Check API status, then retry. Report: https://github.com/floomhq/floom/issues\n");
     return 1;
   }
   return null;
@@ -87,7 +87,7 @@ export async function secretsDeleteCommand(key: string, options: { yes?: boolean
     log.ok(`Deleted ${key}`);
     return 0;
   } catch (error) {
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Secret '${key}' not found.`);
       log.info("List available secrets: floom secrets list");
       return 1;

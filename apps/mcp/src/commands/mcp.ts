@@ -1,15 +1,17 @@
-﻿import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { createAuthenticatedClient, WorkerosApiClient } from "../lib/api.js";
+import { createAuthenticatedClient, FloomApiClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
 import { readCredentials, updateCredentials } from "../lib/credentials.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
 type JsonObject = Record<string, unknown>;
 
-const DEFAULT_CLOUD_API_BASE = "https://api.workeros.example.com";
+const DEFAULT_CLOUD_API_BASE = "https://api.floom.example.com";
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
+const MCP_SERVER_NAME = "floom";
+const LEGACY_MCP_SERVER_NAME = "workeros";
 
 // Targets that write a file (kind = "object" or "array" for config shape).
 const FILE_CLIENTS = [
@@ -52,7 +54,8 @@ function patchObjectConfig(config: JsonObject, mcpUrl: string, headers: Record<s
     typeof next.mcpServers === "object" && next.mcpServers && !Array.isArray(next.mcpServers)
       ? { ...(next.mcpServers as JsonObject) }
       : {};
-  mcpServers.workeros = serverConfig(mcpUrl, headers);
+  delete mcpServers[LEGACY_MCP_SERVER_NAME];
+  mcpServers[MCP_SERVER_NAME] = serverConfig(mcpUrl, headers);
   next.mcpServers = mcpServers;
   return next;
 }
@@ -61,11 +64,13 @@ function patchContinueConfig(config: JsonObject, mcpUrl: string, headers: Record
   const next = { ...config };
   const servers = Array.isArray(next.mcpServers) ? [...next.mcpServers] : [];
   const entry = {
-    name: "workeros",
+    name: MCP_SERVER_NAME,
     ...serverConfig(mcpUrl, headers),
   };
   const existing = servers.findIndex((server) => (
-    typeof server === "object" && server !== null && (server as JsonObject).name === "workeros"
+    typeof server === "object" &&
+    server !== null &&
+    [MCP_SERVER_NAME, LEGACY_MCP_SERVER_NAME].includes(String((server as JsonObject).name))
   ));
   if (existing === -1) {
     servers.push(entry);
@@ -80,7 +85,8 @@ function removeObjectConfig(config: JsonObject): JsonObject {
   const next = { ...config };
   if (typeof next.mcpServers === "object" && next.mcpServers && !Array.isArray(next.mcpServers)) {
     const mcpServers = { ...(next.mcpServers as JsonObject) };
-    delete mcpServers.workeros;
+    delete mcpServers[MCP_SERVER_NAME];
+    delete mcpServers[LEGACY_MCP_SERVER_NAME];
     next.mcpServers = mcpServers;
   }
   return next;
@@ -90,7 +96,9 @@ function removeContinueConfig(config: JsonObject): JsonObject {
   const next = { ...config };
   const servers = Array.isArray(next.mcpServers) ? [...next.mcpServers] : [];
   next.mcpServers = servers.filter((server) => (
-    !(typeof server === "object" && server !== null && (server as JsonObject).name === "workeros")
+    !(typeof server === "object" &&
+      server !== null &&
+      [MCP_SERVER_NAME, LEGACY_MCP_SERVER_NAME].includes(String((server as JsonObject).name)))
   ));
   return next;
 }
@@ -98,7 +106,7 @@ function removeContinueConfig(config: JsonObject): JsonObject {
 function genericSnippet(mcpUrl: string, headers: Record<string, string>): string {
   return JSON.stringify({
     mcpServers: {
-      workeros: serverConfig(mcpUrl, headers),
+      [MCP_SERVER_NAME]: serverConfig(mcpUrl, headers),
     },
   }, null, 2);
 }
@@ -165,7 +173,7 @@ async function resolveMcpConfig(
   // Resolve the workspace_id: stored in credentials, set via env var, or fetched from API.
   let workspaceId = credentials.workspace_id || process.env.WORKEROS_WORKSPACE_ID?.trim();
   if (!workspaceId) {
-    const client = new WorkerosApiClient(apiBase, credentials);
+    const client = new FloomApiClient(apiBase, credentials);
     try {
       const workspaces = await client.requestJson("GET", "/api/workspaces") as Array<{ id: string; name?: string }>;
       if (!Array.isArray(workspaces) || workspaces.length === 0) {
@@ -238,7 +246,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
       : patchObjectConfig(config, mcpUrl, headers);
     await writeJson(configPath, patched);
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
-    log.ok(`Installed Workeros MCP config for ${client.name}`);
+    log.ok(`Installed Floom MCP config for ${client.name}`);
     log.kv("Config path", displayPath);
     log.kv("MCP URL", mcpUrl);
     return 0;
@@ -256,7 +264,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
       : patchObjectConfig(config, mcpUrl, headers);
     await writeJson(configPath, patched);
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
-    log.ok(`Installed Workeros MCP config for ${client.name} (auto-detected)`);
+    log.ok(`Installed Floom MCP config for ${client.name} (auto-detected)`);
     log.kv("Config path", displayPath);
     log.kv("MCP URL", mcpUrl);
     return 0;
@@ -288,12 +296,12 @@ export async function mcpUninstallCommand(options: { target?: ClientTarget }): P
     const patched = client.kind === "array" ? removeContinueConfig(config) : removeObjectConfig(config);
     await writeJson(configPath, patched);
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
-    log.ok(`Removed Workeros MCP config from ${client.name}`);
+    log.ok(`Removed Floom MCP config from ${client.name}`);
     log.kv("Config path", displayPath);
     return 0;
   }
 
-  log.warn("No Workeros MCP config entries were found.");
+  log.warn("No Floom MCP config entries were found.");
   log.info("Install first: floom mcp install");
   return 0;
 }
@@ -312,7 +320,7 @@ function mcpRowLabel(row: McpConnectionRow): string {
   return String(row.mcp_label || row.display_name || row.app_name || "");
 }
 
-async function fetchMcpConnections(client: WorkerosApiClient): Promise<McpConnectionRow[]> {
+async function fetchMcpConnections(client: FloomApiClient): Promise<McpConnectionRow[]> {
   const rows = (await client.requestJson("GET", "/connections")) as McpConnectionRow[];
   return (Array.isArray(rows) ? rows : []).filter((row) => (row.kind || "composio") === "mcp");
 }

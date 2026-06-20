@@ -106,7 +106,7 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
     assert "OPENAI_API_KEY" in body["system_prompt"]
     assert "E2B_API_KEY" in body["system_prompt"]
     assert "## Worker authoring rules" not in body["system_prompt"]
-    assert "## Workeros worker.yml format" not in body["system_prompt"]
+    assert "## Floom worker.yml format" not in body["system_prompt"]
     assert body["settings"] == {
         "brain_read": True,
         "brain_write": False,
@@ -181,7 +181,7 @@ def test_endpoint_updates_capability_settings_and_gates_tools(client_and_main):
 
 def test_base_persona_and_workspace_instructions_are_separate_editable_layers(client_and_main):
     client, _main = client_and_main
-    base = "# Emily\n\nYou are Emily, the custom Workeros operator.\n"
+    base = "# Emily\n\nYou are Emily, the custom Floom operator.\n"
     custom = "# Workspace custom instructions\n\nPrefer verified workspace facts.\n"
 
     default_base = client.get("/workspace/base")
@@ -205,11 +205,11 @@ def test_base_persona_and_workspace_instructions_are_separate_editable_layers(cl
 
     body = client.get("/system/workspace-agent").json()
     prompt = body["system_prompt"]
-    assert "You are Emily, the custom Workeros operator." in prompt
+    assert "You are Emily, the custom Floom operator." in prompt
     assert "personal Chief-of-Staff" not in prompt
     assert "Prefer verified workspace facts." in prompt
     assert "You manage the workspace." in prompt
-    assert prompt.index("custom Workeros operator") < prompt.index("Prefer verified workspace facts.")
+    assert prompt.index("custom Floom operator") < prompt.index("Prefer verified workspace facts.")
     assert prompt.index("Prefer verified workspace facts.") < prompt.index("You manage the workspace.")
     assert "## Worker authoring rules" not in prompt
 
@@ -309,7 +309,7 @@ def test_worker_authoring_rules_are_gated_by_message_intent(client_and_main):
 
     sample_skill = (
         "# Workspace Agent\n\n"
-        "## Workeros worker.yml format\n"
+        "## Floom worker.yml format\n"
         "YAML authoring rules here.\n\n"
         "## Workspace-management tools\n"
         "Tool list here.\n"
@@ -322,9 +322,9 @@ def test_worker_authoring_rules_are_gated_by_message_intent(client_and_main):
         sample_skill,
         include_authoring_rules=True,
     )
-    assert "## Workeros worker.yml format" not in casual_skill
+    assert "## Floom worker.yml format" not in casual_skill
     assert "## Workspace-management tools" in casual_skill
-    assert "## Workeros worker.yml format" in authoring_skill
+    assert "## Floom worker.yml format" in authoring_skill
 
 
 def test_emily_persona_investigation_mode_blocks_partial_status_dumps():

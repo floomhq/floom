@@ -1,7 +1,7 @@
 import { basename, resolve as resolvePath, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { createAuthenticatedClient, WorkerosApiError } from "../lib/api.js";
+import { createAuthenticatedClient, FloomApiError } from "../lib/api.js";
 import { log, printJson } from "../lib/output.js";
 
 type ParsedInputs = {
@@ -117,19 +117,19 @@ export async function runWorkerCommand(
       { body: { inputs: resolvedInputs, trigger_source: "manual" } },
     )) as { run_id?: string; status?: string };
   } catch (error) {
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Worker '${workerId}' not found.`);
       log.info("List available workers: floom workers list");
       return 1;
     }
-    if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+    if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
       log.err("Your session expired.");
       log.info("Re-run: floom login");
       return 1;
     }
-    if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
+    if (error instanceof FloomApiError && error.status && error.status >= 500) {
       log.err(`API error starting run.`);
-      log.info("Check API status, then retry. Report: https://github.com/floomhq/workeros/issues");
+      log.info("Check API status, then retry. Report: https://github.com/floomhq/floom/issues");
       return 1;
     }
     throw error;

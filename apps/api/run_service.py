@@ -435,7 +435,7 @@ def _schedule_retry_for_failed_run(
     return True
 
 
-API_ENV_PATH = Path("/etc/workeros/api.env")
+API_ENV_PATH = Path("/etc/floom/api.env")
 
 
 # --- authored-worker registration + smoke/gate (services/run_authoring.py) ---

@@ -3,7 +3,7 @@ system_worker: true
 is_example: false
 name: "workspace-agent"
 title: "Workspace Agent"
-description: "Interactive ops assistant for your Workeros workspace. Chat with it to manage workers, runs, secrets, and connections."
+description: "Interactive ops assistant for your Floom workspace. Chat with it to manage workers, runs, secrets, and connections."
 long_description: |
   The workspace agent is your AI ops teammate. Ask it to list workers, inspect
   failed runs, create new workers, trigger existing ones, manage secrets, or

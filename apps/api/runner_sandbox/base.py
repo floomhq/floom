@@ -1,4 +1,4 @@
-"""Abstract sandbox driver interface for Workeros."""
+"""Abstract sandbox driver interface for Floom."""
 
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional
