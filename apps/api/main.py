@@ -1653,6 +1653,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/api/workspace-agent/mcp"
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
+            or path.startswith("/drop/public/")
             or path.startswith("/review/public/")
             or path.startswith("/workers/public/")
             or path.startswith("/runs/public/")  # #765: token-gated read-only run view
@@ -5021,6 +5022,9 @@ app.include_router(cli_auth_router)
 
 from routers.chat import chat_router
 app.include_router(chat_router)
+
+from routers.drop import drop_router
+app.include_router(drop_router)
 
 from routers.workspaces import (
     workspaces_router,

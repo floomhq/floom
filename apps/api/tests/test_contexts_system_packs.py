@@ -213,6 +213,24 @@ def test_context_upload_default_limit_is_fifty_mb(client_and_main):
     assert main._context_upload_body_limit_bytes() == (51 * 1024 * 1024)
 
 
+def test_context_total_size_limit_can_be_raised_for_media(client_and_main, monkeypatch):
+    client, _main = client_and_main
+    monkeypatch.setenv("WORKEROS_CONTEXT_MAX_BYTES", str(3 * 1024 * 1024))
+    first = b"a" * (2 * 1024 * 1024)
+    second = b"b" * (512 * 1024)
+
+    response = client.post(
+        "/contexts/media-pack/upload",
+        files=[
+            ("files", ("first.bin", first, "application/octet-stream")),
+            ("files", ("second.bin", second, "application/octet-stream")),
+        ],
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["files"]) == 2
+
+
 def test_context_file_metadata_tags_roundtrip(client_and_main):
     client, _main = client_and_main
     assert client.post("/contexts/my-company").status_code == 200
