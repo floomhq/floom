@@ -70,27 +70,62 @@ export function approvalActionLine(label: string | undefined, decisionInput: Jso
 }
 
 function ItemRow({ item, verb }: { item: unknown; verb: string | null }) {
-  // Object item -> a small key/value record card.
+  // Object item -> a scannable record card: headline + score, a subtitle from
+  // short fields, a long-text body (reason/why/…), and clickable URL fields.
+  // Stays generic — any worker's items render this way, no use-case chrome.
   if (isObject(item)) {
-    const entries = Object.entries(item).filter(([, v]) => !isObject(v) && !Array.isArray(v));
-    const titleKey = ["name", "title", "company", "record", "target", "to", "subject", "id"].find((k) => k in item);
-    const title = titleKey ? asString((item as Json)[titleKey]) : asString(Object.values(item)[0]);
-    const rest = entries.filter(([k]) => k !== titleKey);
+    const scalars = Object.entries(item).filter(
+      ([, v]) => !isObject(v) && !Array.isArray(v) && v != null && asString(v).trim() !== "",
+    );
+    const titleKey = ["name", "title", "company", "record", "target", "to", "subject", "id"].find(
+      (k) => k in item && asString((item as Json)[k]).trim(),
+    );
+    const title = titleKey ? asString((item as Json)[titleKey]) : asString(scalars[0]?.[1] ?? "Item");
+    const scoreKey = ["score", "rating", "match", "fit"].find(
+      (k) => k in item && asString((item as Json)[k]).trim(),
+    );
+    const score = scoreKey ? asString((item as Json)[scoreKey]) : null;
+    const bodyKey = ["reason", "why", "description", "summary", "body", "note", "rationale"].find(
+      (k) => k in item && asString((item as Json)[k]).trim(),
+    );
+    const body = bodyKey ? asString((item as Json)[bodyKey]) : null;
+    const isUrl = (v: unknown): v is string => typeof v === "string" && /^https?:\/\//i.test(v.trim());
+    const links = scalars.filter(([k, v]) => isUrl(v) && k !== titleKey);
+    const subtitle = scalars.filter(
+      ([k, v]) => k !== titleKey && k !== scoreKey && k !== bodyKey && !isUrl(v),
+    );
     return (
-      <div className="overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)]">
-        <div className="flex items-center gap-2 [border-bottom:var(--bd-div)] px-3 py-2">
-          <span className="flex-1 truncate text-[13px] font-medium">{title || "Item"}</span>
-          {verb && <span className="font-mono text-[11px] text-[var(--ink-soft)]">{verb}</span>}
+      <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3.5 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <span className="min-w-0 flex-1 text-[14px] font-medium text-[var(--ink)]">{title || "Item"}</span>
+          {score != null ? (
+            <span className="shrink-0 rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-[12px] font-medium text-[var(--ink)]">
+              {score}
+            </span>
+          ) : verb ? (
+            <span className="shrink-0 font-mono text-[11px] text-[var(--ink-soft)]">{verb}</span>
+          ) : null}
         </div>
-        {rest.length > 0 && (
-          <dl className="[&>*+*]:[border-top:var(--bd-div)]">
-            {rest.map(([k, v]) => (
-              <div key={k} className="grid grid-cols-[120px_1fr] gap-3 px-3 py-1.5 text-xs">
-                <dt className="truncate text-[var(--ink-soft)]">{k.replace(/[_-]+/g, " ")}</dt>
-                <dd className="min-w-0 break-words">{asString(v)}</dd>
-              </div>
+        {subtitle.length > 0 && (
+          <p className="mt-1 text-[12.5px] text-[var(--ink-soft)]">
+            {subtitle.map(([, v]) => asString(v)).join(" · ")}
+          </p>
+        )}
+        {body && <p className="mt-2 text-[13px] leading-relaxed text-[var(--ink)]">{body}</p>}
+        {links.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
+            {links.map(([k, v]) => (
+              <a
+                key={k}
+                href={v as string}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[12.5px] font-medium text-[var(--accent)] hover:underline"
+              >
+                {k.replace(/[_-]+/g, " ").replace(/\burl\b/i, "").trim() || "Link"} →
+              </a>
             ))}
-          </dl>
+          </div>
         )}
       </div>
     );
