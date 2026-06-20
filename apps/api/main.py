@@ -120,15 +120,30 @@ if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
+    import logging as _logging
+    _cloud = (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud"
+    # WORKEROS_ROLE splits a multi-replica cloud deploy: web = HTTP only (no
+    # scheduler/drain/recovery), worker = run the scheduler + drain loop. Unset
+    # ("all") keeps the single-replica monolith behavior (Railway today).
+    _role = (os.environ.get("WORKEROS_ROLE") or os.environ.get("WORKEROS_PROCESS_ROLE") or "all").strip().lower()
+    _run_workers = _cloud and _role in ("all", "worker")
+    if _run_workers:
         db_host = (os.environ.get("WORKEROS_CLOUD_DB_HOST") or "").strip()
         if not db_host:
             raise RuntimeError(
                 "WORKEROS_CLOUD_DB_HOST is required in cloud mode so the "
                 "scheduler can acquire its distributed advisory lock."
             )
+        # The scheduler is a singleton guarded by a Postgres advisory lock. If
+        # another process/env already holds it (rolling deploy overlap, or a
+        # second deploy target against the same DB), SKIP the scheduler here
+        # rather than crash — the drain loop still runs and executes queued runs.
+        # (This also fixes the Railway rolling-deploy advisory-lock deadlock.)
         if not start_cloud_scheduler():
-            raise RuntimeError("Cloud scheduler advisory lock is already held.")
+            _logging.getLogger("workeros.cloud").warning(
+                "Cloud scheduler advisory lock already held elsewhere; "
+                "skipping scheduler in this process (drain loop still runs)."
+            )
         # Start the run drain loop — picks up queued runs and dispatches them
         # to E2B. The engine only starts this in local mode; cloud must do it
         # explicitly here.
@@ -136,15 +151,18 @@ async def lifespan(_app: FastAPI):
         engine_run_service.re_enqueue_queued_runs_on_startup()
         recovered = cloud_startup.recover_cloud_runs_on_startup()
         if recovered:
-            import logging as _logging
             _logging.getLogger("workeros.cloud").info(
                 "Cloud startup recovery marked %d interrupted run(s) as failed.",
                 recovered,
             )
+    elif _cloud:
+        _logging.getLogger("workeros.cloud").info(
+            "WORKEROS_ROLE=%s: scheduler/drain/recovery disabled in this process (HTTP only).", _role
+        )
     try:
         yield
     finally:
-        if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
+        if _run_workers:
             engine_run_service.stop_drain_loop(timeout=5.0)
             stop_cloud_scheduler()
 

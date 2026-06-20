@@ -66,9 +66,9 @@ variable "web_command" {
 }
 
 variable "worker_command" {
-  description = "Worker container CMD. Depends on engine #1531 (the headless worker entrypoint). Adjust to match whatever #1531 ships."
+  description = "Worker container CMD. Engine split is ENV-DRIVEN (WORKEROS_ROLE), no separate entrypoint -> use the image default CMD (uvicorn) with WORKEROS_ROLE=worker."
   type        = list(string)
-  default     = ["python", "-m", "apps.api.worker_main"]
+  default     = []
 }
 
 variable "container_env" {
