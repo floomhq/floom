@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Activity,
@@ -27,6 +27,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { api } from "@/lib/api";
+import { rankWorkersForCommandPalette } from "@/lib/command-palette";
 import { useWorkers } from "@/lib/query/hooks";
 import type { WorkerSummary } from "@/lib/types";
 
@@ -34,7 +35,7 @@ const NAV = [
   { href: "/overview", label: "Overview", icon: Activity, keywords: "home dashboard" },
   { href: "/workers", label: "Workers", icon: Box, keywords: "list jobs" },
   { href: "/runs", label: "Runs", icon: Clock, keywords: "history executions" },
-  { href: "/library", label: "Library", icon: Brain, keywords: "context folders files knowledge resources brain" },
+  { href: "/library", label: "Brain", icon: Brain, keywords: "library context folders files knowledge resources" },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, keywords: "review pending actions" },
   { href: "/connections/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
   { href: "/connections", label: "Integrations", icon: Plug, keywords: "connections oauth" },
@@ -49,12 +50,17 @@ export function openCommandPalette() {
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   // Source workers from the shared cache (TanStack Query) instead of an
   // independent fetch — so the palette has the worker list instantly and a slow
   // or failed backend call never leaves it empty (which made search return
   // "No results" even for an exact worker name).
   const workersQuery = useWorkers();
-  const workers: WorkerSummary[] = workersQuery.data ?? [];
+  const workers: WorkerSummary[] = useMemo(() => workersQuery.data ?? [], [workersQuery.data]);
+  const visibleWorkers = useMemo(
+    () => rankWorkersForCommandPalette(workers, query),
+    [workers, query],
+  );
   const router = useRouter();
 
   useEffect(() => {
@@ -95,7 +101,12 @@ export function CommandPalette() {
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Search or run a command…" autoFocus />
+      <CommandInput
+        placeholder="Search or run a command..."
+        autoFocus
+        value={query}
+        onValueChange={setQuery}
+      />
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
 
@@ -112,11 +123,11 @@ export function CommandPalette() {
           ))}
         </CommandGroup>
 
-        {workers.length > 0 && (
+        {visibleWorkers.length > 0 && (
           <>
             <CommandSeparator />
             <CommandGroup heading="Workers">
-              {workers.slice(0, 12).map((worker) => (
+              {visibleWorkers.map((worker) => (
                 <CommandItem
                   key={worker.id}
                   value={`worker ${worker.name} ${worker.id} ${worker.description ?? ""}`}

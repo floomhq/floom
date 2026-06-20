@@ -101,12 +101,37 @@ describe("Emily chat tool cards", () => {
     expect(getToolCardTitle("approvals.list pending", "running")).toBe("Checking approvals");
     expect(getToolCardTitle("runs.list", "running")).toBe("Reviewing runs");
     expect(getToolCardTitle("runs.list", "completed")).toBe("Reviewed runs");
+    expect(getToolCardTitle("workers__create_from_prompt", "running")).toBe("Creating worker");
+    expect(getToolCardTitle("cancel_run POST", "running")).toBe("Cancelling run");
   });
 
   it("humanizes unknown tools without leaking raw dotted names", () => {
     expect(getToolCardTitle("vendor__fetch_report", "running")).toBe("Fetching report");
     expect(getToolCardTitle("vendor__fetch_report", "completed")).toBe("Fetched report");
     expect(getToolCardTitle("vendor.unknown_slug", "running")).toBe("Unknown slug");
+  });
+
+  it("replaces raw progress labels with operator-facing tool labels", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_cancel",
+      toolName: "cancel_run POST",
+      args: {},
+    };
+    const progress: ChatSSEEvent = {
+      type: "tool-progress",
+      callId: "call_cancel",
+      card_id: "call_cancel",
+      status: "running",
+      label: "cancel_run POST",
+    };
+
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), progress, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+
+    expect(card?.kind).toBe("generic");
+    if (card?.kind !== "generic") throw new Error("expected generic card");
+    expect(card.title).toBe("Cancelling run");
   });
 
   it("surfaces SSE error events as assistant text", () => {
@@ -191,6 +216,43 @@ describe("Emily chat tool cards", () => {
     expect(card.workerName).toBe("research_brief");
     expect(card.streams?.parts).toBe("/runs/run_123/stream");
     expect(card.toolName).toBe("workers.run");
+  });
+
+  it("materializes create-from-prompt results into a progress run card", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_create_prompt",
+      toolName: "workers__create_from_prompt",
+      args: { prompt: "Email me a daily summary" },
+      args_preview: { prompt: "Email me a daily summary" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_create_prompt",
+      toolName: "workers__create_from_prompt",
+      isError: false,
+      result: {
+        ok: true,
+        run_id: "run_author_123",
+        worker_id: "worker-author",
+        status: "running",
+        message: "Worker-author run 'run_author_123' started.",
+      },
+    };
+
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+
+    expect(card?.kind).toBe("run");
+    if (card?.kind !== "run") throw new Error("expected run card");
+    expect(card.runId).toBe("run_author_123");
+    expect(card.workerName).toBe("Creating worker");
+    expect(card.actions?.[0]).toEqual({
+      id: "open_run",
+      label: "View progress",
+      method: "GET",
+      href: "/runs?sel=run_author_123&tab=Logs",
+    });
   });
 
   it("marks completed runs.get cards for automatic navigation to run details", () => {

@@ -116,6 +116,7 @@ function toRunCard(row: ConversationToolCardRow): RunCard | null {
   const persistedKind = (row.card as { kind?: unknown } | null)?.kind;
   const isRun =
     persistedKind === "run" ||
+    normalized === "workers.create_from_prompt" ||
     normalized === "workers.run" ||
     normalized === "runs.get";
   if (!isRun) return null;
@@ -130,7 +131,8 @@ function toRunCard(row: ConversationToolCardRow): RunCard | null {
   const workerId =
     optionalString(row.worker_id) ?? optionalString(nestedRun?.worker_id);
   const workerName =
-    optionalString(nestedRun?.worker_name) ?? workerId ?? "Worker run";
+    optionalString(nestedRun?.worker_name) ??
+    (normalized === "workers.create_from_prompt" ? "Creating worker" : workerId ?? "Worker run");
   const callId = row.callId || row.id;
   return {
     kind: "run",
@@ -147,6 +149,15 @@ function toRunCard(row: ConversationToolCardRow): RunCard | null {
     actions:
       row.actions && row.actions.length
         ? (row.actions as RunCard["actions"])
+        : normalized === "workers.create_from_prompt"
+          ? [
+              {
+                id: "open_run",
+                label: "View progress",
+                method: "GET",
+                href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
+              },
+            ]
         : [
             {
               id: "open_run",
