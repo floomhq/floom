@@ -3,7 +3,8 @@
 [![CI](https://github.com/floomhq/workeros/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/workeros/actions/workflows/ci.yml)
 [![License: SUL-1.0](https://img.shields.io/badge/License-SUL--1.0-blue.svg)](LICENSE)
 
-The source-available, self-hosted runtime for AI workers. Sandboxed by default.
+Workeros is a source-available AI runtime for creating, running, and supervising
+background AI workers. Sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
 
