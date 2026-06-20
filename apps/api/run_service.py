@@ -240,7 +240,27 @@ _log_flush_stop = threading.Event()
 
 def _async_log_flush_enabled() -> bool:
     raw = (os.environ.get("WORKEROS_ASYNC_LOG_FLUSH") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    deploy = (
+        os.environ.get("WORKEROS_DEPLOY")
+        or os.environ.get("WORKEROS_DEPLOYMENT")
+        or os.environ.get("WORKEROS_ENV")
+        or ""
+    ).strip().lower()
+    if deploy in {"prod", "production", "cloud", "hosted"}:
+        return True
+    # Managed hosts should not block worker startup on cross-region log writes.
+    return any(
+        os.environ.get(name)
+        for name in (
+            "RAILWAY_ENVIRONMENT",
+            "RAILWAY_PROJECT_ID",
+            "FLY_APP_NAME",
+            "K_SERVICE",
+            "RENDER_SERVICE_ID",
+        )
+    )
 
 
 def _log_flush_batch_size() -> int:
@@ -722,6 +742,35 @@ def _snapshot_worker_bundle(run_id: str, worker_id: str, config: Optional[Worker
     except Exception as exc:
         logger.warning("Run %s bundle snapshot failed for worker %s: %s", run_id, worker_id, exc)
         return None
+
+
+def _snapshot_worker_bundle_background(
+    run_id: str,
+    worker_id: str,
+    config: Optional[WorkerConfig],
+    *,
+    owner_id: str | None,
+) -> None:
+    if not owner_id:
+        return
+
+    def _run() -> None:
+        bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
+        try:
+            _repos(None).runs.set_bundle_snapshot_path(
+                user_id=owner_id,
+                run_id=run_id,
+                bundle_snapshot_path=bundle_snapshot_path,
+            )
+        except Exception as exc:
+            logger.warning("Run %s bundle snapshot persist failed: %s", run_id, exc)
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"workeros-bundle-snapshot-{run_id}",
+    ).start()
+
 
 # --- run cost accounting + spend caps (services/run_cost.py) ---
 # Extracted for module size; re-imported for backward compatibility.
@@ -1635,12 +1684,12 @@ def _drain_one_batch() -> None:
 
             # Slot acquired — dispatch the run in a thread.
             try:
-                repos_obj.runs.add_log(
-                    user_id=user_id,
-                    run_id=run_id,
+                add_log(
+                    run_id,
+                    "Queue drain claimed run; dispatching executor thread.",
                     level="info",
-                    message="Queue drain claimed run; dispatching executor thread.",
-                    timestamp=_now_iso(),
+                    user_id=user_id,
+                    repos=repos_obj,
                     trace_id=None,
                 )
                 dispatch_perf.mark("claim_log")
@@ -1667,13 +1716,13 @@ def _drain_one_batch() -> None:
                 raise
             try:
                 dispatch_perf.log(
-                    lambda msg, level: repos_obj.runs.add_log(
-                        user_id=user_id,
-                        run_id=run_id,
+                    lambda msg, level: add_log(
+                        run_id,
+                        msg,
                         level=level,
-                        message=msg,
-                        timestamp=_now_iso(),
                         trace_id=None,
+                        user_id=user_id,
+                        repos=repos_obj,
                     ),
                     "queue.dispatch",
                 )
@@ -2275,15 +2324,8 @@ def execute_run(
             logger.warning("Worker re-materialization failed for %s: %s", worker_id, _rmat_exc)
             perf.mark("rematerialize_error")
 
-        bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
-        perf.mark("bundle_snapshot")
-        if owner_id:
-            repos_obj.runs.set_bundle_snapshot_path(
-                user_id=owner_id,
-                run_id=run_id,
-                bundle_snapshot_path=bundle_snapshot_path,
-            )
-            perf.mark("bundle_snapshot_persist")
+        _snapshot_worker_bundle_background(run_id, worker_id, config, owner_id=owner_id)
+        perf.mark("bundle_snapshot_dispatch")
 
         # Dispatch to the appropriate sandbox driver based on worker config.
         # #603: default to "e2b" — "local" (in-process) runner was removed in
