@@ -24,7 +24,7 @@ tzdata==2026.2
 slowapi==0.1.10
 starlette==1.2.1
 pyjwt==2.13.0
-cryptography==48.0.0
+cryptography==49.0.0
 lxml==6.1.1
 pytest-xdist==3.8.0
 
