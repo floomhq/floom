@@ -2534,7 +2534,7 @@ export function ShareControl({
 // Folder (pack) version history + rollback. Per-file history already exists on
 // the FilePane; this surfaces the orphaned WHOLE-FOLDER history/rollback
 // (client methods shipped, zero call sites). Reuses the same VersionHistoryMenu
-// primitive as per-file history so the two read as a pair (Maintainer flag: file
+// primitive as per-file history so the two read as a pair (Federico flag: file
 // history NEXT TO folder history). Disabled while Sensitive (no git history).
 // ===========================================================================
 

@@ -1,9 +1,24 @@
 import type { ComponentType, ReactNode } from "react";
-import { Inbox } from "lucide-react";
+import { Inbox, AlertTriangle } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/** Empty / loading / error share one slot (SPEC §7). */
+/**
+ * The ONE shared loading / empty / error treatment for every list and
+ * collection surface in the app (SPEC §7). Three distinct states share one
+ * slot so a failed fetch can NEVER be mistaken for a slow one or an empty one:
+ *
+ *   <ListLoading/> — skeleton rows (we are still fetching)
+ *   <ListEmpty/>   — the fetch succeeded and there is genuinely nothing
+ *   <ListError/>   — the fetch FAILED (explicit message + retry), never a
+ *                    perpetual skeleton and never an empty card
+ *
+ * Bespoke surfaces (e.g. /connections/mcp, /connections/secrets) must use
+ * these instead of rolling their own skeleton/empty so the register is one
+ * system. `EmptyState`/`LoadingState`/`ErrorState` remain as aliases for the
+ * `Collection`-driven surfaces that already import them.
+ */
 
-export function EmptyState({
+export function ListEmpty({
   title,
   help,
   action,
@@ -30,8 +45,13 @@ export function EmptyState({
   );
 }
 
-export function LoadingState({ rows = 5 }: { rows?: number }) {
-  // Skeleton mirrors the list layout (SPEC §4 — no partial flashes).
+export function ListLoading({ rows = 5 }: { rows?: number }) {
+  // Restored to the previous good list skeleton (Federico 2026-06-18): a
+  // bordered list card with full-width shimmer ROW bars that mirror the real
+  // list rows, using the design-system <Skeleton> (skeleton-shimmer) — the
+  // source of truth — NOT the cramped avatar + two short bars that read as
+  // broken on a wide list. Rows are full-bleed `.c-lrow`-height bars so the
+  // skeleton occupies the same footprint the loaded list will (no layout jump).
   return (
     <div className="c-ltable" aria-busy="true" aria-label="Loading">
       {Array.from({ length: rows }).map((_, i) => (
@@ -40,38 +60,22 @@ export function LoadingState({ rows = 5 }: { rows?: number }) {
           className="c-lrow"
           style={{ gridTemplateColumns: "1fr", pointerEvents: "none" }}
         >
-          <div className="c-lprimary">
-            <span className="c-av animate-pulse" style={{ background: "var(--bg-3)" }} />
-            <div className="c-lp-tx" style={{ flex: 1 }}>
-              <div
-                className="animate-pulse"
-                style={{ height: 12, width: "40%", background: "var(--bg-3)", borderRadius: "var(--radius-button)" }}
-              />
-              <div
-                className="animate-pulse"
-                style={{
-                  height: 10,
-                  width: "60%",
-                  background: "var(--bg-3)",
-                  borderRadius: "var(--radius-button)",
-                  marginTop: 6,
-                }}
-              />
-            </div>
-          </div>
+          <Skeleton className="h-4 w-full rounded-[var(--radius-button)]" />
         </div>
       ))}
     </div>
   );
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ListError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="c-statebox" role="alert">
-      <span className="g">
-        <Inbox size={24} />
+      {/* AlertTriangle (not the empty-state Inbox) so an ERROR never reads as
+          "nothing here" — the failure is visually distinct from empty. */}
+      <span className="g" style={{ color: "var(--negative, var(--destructive))" }}>
+        <AlertTriangle size={24} />
       </span>
-      <h3>Something went wrong</h3>
+      <h3>Couldn&apos;t load</h3>
       <p style={{ margin: 0, maxWidth: 360 }}>{message}</p>
       {onRetry && (
         <button type="button" className="c-addbtn" onClick={onRetry}>
@@ -81,3 +85,8 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
     </div>
   );
 }
+
+// Back-compat aliases — the `Collection`-driven surfaces import these names.
+export const EmptyState = ListEmpty;
+export const LoadingState = ListLoading;
+export const ErrorState = ListError;

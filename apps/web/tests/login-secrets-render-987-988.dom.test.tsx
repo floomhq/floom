@@ -11,9 +11,10 @@ import type { ReactNode } from "react";
 // The live audit's blank pages were a broken DEPLOYMENT (body_len=0 hydration
 // failure), not a source bug — these guard against a real source regression.
 
-const { authSetupRequired, authStatus, secretsList } = vi.hoisted(() => ({
+const { authSetupRequired, authStatus, me, secretsList } = vi.hoisted(() => ({
   authSetupRequired: vi.fn(),
   authStatus: vi.fn(),
+  me: vi.fn(),
   secretsList: vi.fn(),
 }));
 
@@ -26,6 +27,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api", () => ({
   api: {
     auth: { setupRequired: authSetupRequired, status: authStatus },
+    me,
     secrets: { list: secretsList },
     workers: { list: vi.fn().mockResolvedValue([]) },
   },
@@ -37,6 +39,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   authSetupRequired.mockResolvedValue({ required: false });
   authStatus.mockResolvedValue({ mode: "username" });
+  me.mockResolvedValue({ role: "owner", scopes: ["*"], user_id: "u_1" });
   secretsList.mockResolvedValue([]);
 });
 

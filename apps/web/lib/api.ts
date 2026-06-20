@@ -86,7 +86,7 @@ async function fetchApi(path: string, input: RequestInfo | URL, init?: RequestIn
 
 function isSignedApprovalProxyPath(path: string): boolean {
   // Public, token-gated surfaces: a 401/403 here means "wrong token/password",
-  // NOT "your session expired". Never bounce an anonymous reviewer to /login —
+  // NOT "your session expired". Never bounce an anonymous reviewer to /login;
   // the page renders its own inline error instead.
   return path.startsWith("/approvals/public/") || path.startsWith("/review/public/");
 }
@@ -638,10 +638,9 @@ export const api = {
       return res.json() as Promise<import("./types").ApprovalUploadResponse>;
     },
   },
-  // ReviewPack Review Pack (demo-client pilot) — public, no Workeros login. The
+  // ReviewPack Review Pack (demo-client pilot) - public, no Workeros login. The
   // token in the path is the share secret; the pack password gates the body.
-  // A 401/403 surfaces as an inline "wrong password" in the UI (the proxy path
-  // is allow-listed in isSignedApprovalProxyPath, so it never redirects to /login).
+  // A 401/403 surfaces as an inline "wrong password" in the UI.
   review: {
     publicGet: (token: string, password?: string, reviewerToken?: string) => {
       const headers = new Headers();

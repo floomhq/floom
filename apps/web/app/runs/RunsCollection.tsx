@@ -650,7 +650,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         ),
         // R9: header matches the WORKER detail treatment exactly — a status
         // c-pill plus a quiet description line, NOT a verbose
-        // "trigger · duration · started" string above the tabs (Maintainer:
+        // "trigger · duration · started" string above the tabs (Federico:
         // "too much info above the tabs, inconsistent"). Duration / started /
         // tokens now live as a quiet metrics strip INSIDE the Output body
         // (output-first), not in the header.

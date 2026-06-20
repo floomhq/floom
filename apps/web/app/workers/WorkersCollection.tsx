@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -344,7 +344,7 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {/* #1290: "Latest output" removed — its purpose was unclear to operators
-          (Maintainer: "why is latest output shown?") and it only showed run status +
+          (Federico: "why is latest output shown?") and it only showed run status +
           ID with no actual output text. The History tab shows the run list. */}
       <div>
         <h4 style={h4}>WHAT IT DOES</h4>
@@ -759,7 +759,7 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [busy, setBusy] = useState(false);
   // B4: the Add-tool combobox is sourced from the workspace's connected apps
-  // (Maintainer: "we already have the list of connections") plus the integrations
+  // (Federico: "we already have the list of connections") plus the integrations
   // catalog, so the user picks from a searchable list instead of free-typing a
   // slug. Per-app allowlist tools come from the catalog, cached per app.
   const [availableApps, setAvailableApps] = useState<ToolAppOption[]>([]);
@@ -1702,7 +1702,7 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
 
 
 /**
- * A host-injected top-level view (#1006). a downstream host passes its
+ * A host-injected top-level view (#1006). workeros-cloud passes its
  * cross-tenant "workspace-admin" view here so it can compose the engine
  * `WorkersCollection` instead of forking the whole 869-line component. The
  * host decides visibility (e.g. only pass it when `api.me().is_admin`); the
@@ -2032,7 +2032,7 @@ export default function WorkersCollection({
         })(),
         // R9 FIX 1: the advanced group is a clearly-visible affordance ON the
         // primary tab row (right-aligned), not a header-overflow "Customize"
-        // pill — Maintainer couldn't find the advanced tabs at all.
+        // pill — Federico couldn't find the advanced tabs at all.
         tabsTrailing: (
           <CustomizeTabsMenu
             workerId={w.id}
@@ -2044,7 +2044,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
+    add: { label: "Add", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed
     states: {
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {
@@ -2052,7 +2052,7 @@ export default function WorkersCollection({
         help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
         action: (
           <WorkersEmptyPrompt
-            onSubmit={(prompt) => router.push(`/chat?mode=create&q=${encodeURIComponent(prompt)}`)}
+            onSubmit={(prompt) => router.push(`/?create=1&prime=${encodeURIComponent(prompt)}`)}
           />
         ),
       },

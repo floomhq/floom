@@ -131,7 +131,7 @@ export function getConnectionAccountLabel(conn: ConnectionRecord) {
   // account_label (which may have been redacted server-side). Fall through to
   // legacy fields for backward compat.
   // N10 fix: fall back to connection ID suffix when all human-readable labels
-  // are absent or identical (e.g. two Gmail accounts both showing "local-user").
+  // are absent or identical (e.g. two Gmail accounts both showing "federico").
   // Appending the suffix ensures the cards are visually distinct.
   const label =
     conn.display_name ||

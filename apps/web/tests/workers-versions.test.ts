@@ -14,7 +14,7 @@ function v(partial: Partial<VersionSummary>): VersionSummary {
     id: "abc1234",
     sha: "abc1234",
     message: "feat: thing",
-    author: "maintainer",
+    author: "Vivek",
     timestamp: "2026-06-10T11:00:00Z",
     asset_type: "worker",
     asset_id: "w1",
@@ -40,7 +40,7 @@ describe("formatVersionRow", () => {
   it("builds `sha · author · age` meta", () => {
     const r = formatVersionRow(v({}), NOW);
     expect(r.message).toBe("feat: thing");
-    expect(r.meta).toBe("abc1234 · maintainer · 1h");
+    expect(r.meta).toBe("abc1234 · Vivek · 1h");
   });
   it("truncates sha to 7 chars and falls back to id", () => {
     const r = formatVersionRow(v({ sha: "abcdef1234567", id: "abcdef1" }), NOW);

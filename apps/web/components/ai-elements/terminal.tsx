@@ -1,6 +1,6 @@
-﻿"use client";
+"use client";
 
-// Inspired by AI Elements. MIT License.
+// Inspired by Vercel AI Elements. MIT License.
 
 import { TerminalSquare } from "lucide-react";
 import { cn } from "@/lib/utils";

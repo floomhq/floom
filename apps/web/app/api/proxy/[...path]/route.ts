@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
 // PR S19 (I-1, I-6): draft-and-create makes up to 3 OpenAI calls with

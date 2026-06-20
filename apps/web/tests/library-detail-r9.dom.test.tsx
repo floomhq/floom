@@ -83,7 +83,7 @@ describe("Library item detail — header affordances (r9)", () => {
 describe("(C) ShareControl menu — Copy AND Revoke (#766)", () => {
   it("opens a menu with Create link, Revoke, and the honest copy text", async () => {
     const user = userEvent.setup();
-    const onShare = vi.fn(async () => "https://localhost:3000/s/fls_x");
+    const onShare = vi.fn(async () => "https://workers.floom.dev/s/fls_x");
     const onRevoke = vi.fn(async () => true);
     render(<ShareControl noun="folder" onShare={onShare} onRevoke={onRevoke} />);
     await user.click(screen.getByRole("button", { name: /share this folder/i }));
