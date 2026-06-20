@@ -762,6 +762,10 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
                   variant={createMode ? "landing" : "default"}
+                  // #1698: "New worker" / ?create=1 must give visible feedback
+                  // from ANY route. Focus the composer when entering create mode
+                  // so the click lands a caret here instead of a dead no-op.
+                  autoFocus={createMode}
                 />
               </div>
             </div>
@@ -851,6 +855,7 @@ const DOCK_WIDTH: Record<DockMode, string> = {
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
+  const router = useRouter();
   const [mode, setMode] = useState<DockMode>("rail");
   // True fullscreen lives in shared context (AppShell hides the page pane and
   // this dock flex-grows to fill the main area — the left sidebar stays put).
@@ -932,19 +937,29 @@ export function EmilyDock({ className }: { className?: string }) {
   // then cleared — re-renders must not keep re-seeding it.
   const [primeText, setPrimeText] = useState<string | undefined>(undefined);
   useEffect(() => {
-    if (createParam && isHomeRoute) {
-      setCreateLatched(true);
-      if (primeParam) setPrimeText(primeParam);
-      // Drop the params from the URL so create-prime is deep-linkable but not
-      // sticky across refresh/back (history.replace, no Next reload).
-      if (typeof window !== "undefined") {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("create");
-        url.searchParams.delete("prime");
-        window.history.replaceState(window.history.state, "", url.pathname + url.search);
-      }
+    if (!createParam) return;
+    // #1698: the create deep-link (`?create=1`) must open the create flow
+    // CONSISTENTLY regardless of the route it lands on. On a NON-home route it
+    // would otherwise just sit in the URL doing nothing (a broken first action),
+    // while the page's Collection keeps owning the surface. Forward it to the
+    // home create surface so create always opens the same way — and the param
+    // never lingers on a Collection route to be mistaken for view state.
+    if (!isHomeRoute) {
+      const prime = primeParam ? `&prime=${encodeURIComponent(primeParam)}` : "";
+      router.replace(`/?create=1${prime}`);
+      return;
     }
-  }, [createParam, isHomeRoute, primeParam]);
+    setCreateLatched(true);
+    if (primeParam) setPrimeText(primeParam);
+    // Drop the params from the URL so create-prime is deep-linkable but not
+    // sticky across refresh/back (history.replace, no Next reload).
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("create");
+      url.searchParams.delete("prime");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    }
+  }, [createParam, isHomeRoute, primeParam, router]);
   // Reset the create latch when the user navigates away from the home route so
   // the next visit shows the home greeting (not a stale create hero).
   useEffect(() => {

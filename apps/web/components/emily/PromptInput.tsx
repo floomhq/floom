@@ -31,6 +31,7 @@ export function PromptInput({
   disabled,
   sendDisabled,
   variant = "default",
+  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -58,6 +59,13 @@ export function PromptInput({
    * landing variant simply drops the separate Uses-row to stay clean.
    */
   variant?: "default" | "landing";
+  /**
+   * #1698: when the composer is the PRIMARY first action (the home/create
+   * empty state reached via "New worker" / `?create=1`), focus it on mount so
+   * clicking "New worker" gives immediate, visible feedback (a caret lands in
+   * the composer) from ANY route — never a dead click with no change.
+   */
+  autoFocus?: boolean;
 }) {
   const isLanding = variant === "landing";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -81,6 +89,16 @@ export function PromptInput({
       textareaRef.current?.focus();
     }
   }, [disabled]);
+
+  // #1698: focus on mount when this composer is the primary first action
+  // (home/create empty state via "New worker" / `?create=1`). Gives the click
+  // immediate, visible feedback (caret lands here) regardless of the route the
+  // user came from. Guarded by `disabled` so it never steals focus mid-stream.
+  useEffect(() => {
+    if (autoFocus && !disabled) {
+      textareaRef.current?.focus();
+    }
+  }, [autoFocus, disabled]);
 
   useEffect(() => {
     if (textareaRef.current) {
