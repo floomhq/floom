@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { QueryClientContext } from "@tanstack/react-query";
 
 import { useEmilyFullscreen } from "./emily-fullscreen";
 import { EmilyAvatar } from "./EmilyAvatar";
@@ -457,6 +458,11 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     loadConversation,
   } = useChatStream({ ephemeral: createMode });
   const router = useRouter();
+  // Read the query client via context (NOT useQueryClient) so it is `undefined`
+  // when no QueryClientProvider is mounted — the targeted list refresh below is
+  // then a no-op. In the app Emily is always under QueryProvider, so this is the
+  // live path; the optionality only matters for isolated component tests.
+  const queryClient = useContext(QueryClientContext);
   const [input, setInput] = useState(primeInput ?? "");
   // Seed the composer when primeInput ARRIVES after mount. The full-page chat
   // passes primeInput at mount (handled by useState above), but the dock core is
@@ -529,9 +535,17 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     }
   }, [messages, scrollToBottom]);
 
-  // Refresh the workers page whenever Emily completes a create/update/delete
-  // so the user sees the new worker immediately without a manual refresh.
+  // #1559: keep the workers/runs/overview lists in sync whenever Emily completes
+  // a create/update/delete — WITHOUT the reload flicker the old per-card
+  // `router.refresh()` caused. `router.refresh()` re-fetches the WHOLE RSC tree,
+  // and firing it once per completed mutation card re-rendered the entire app on
+  // every card = visible flicker. Instead we (a) only TARGET the affected
+  // react-query lists (workers + overview + runs), and (b) debounce to ONE
+  // invalidation that runs after streaming ENDS — not per card. The lists are
+  // react-query backed (lib/query/hooks), so invalidating their keys revalidates
+  // just those queries in place; nothing else re-renders.
   const seenCardIds = useRef(new Set<string>());
+  const pendingListRefreshRef = useRef(false);
   useEffect(() => {
     for (const msg of messages) {
       if (msg.role !== "assistant" || !msg.parts) continue;
@@ -547,11 +561,29 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
           (card.status === "completed" || card.status === "failed")
         ) {
           seenCardIds.current.add(cardId);
-          router.refresh();
+          // Mark a refresh as pending; the flush effect below runs it ONCE after
+          // the stream settles, so a multi-mutation reply triggers a single
+          // targeted revalidation instead of one full reload per card.
+          pendingListRefreshRef.current = true;
         }
       }
     }
-  }, [messages, router]);
+  }, [messages]);
+
+  // Flush the pending list refresh ONCE streaming has finished. Targeted
+  // invalidation only — workers list, system overview, and runs (the three
+  // surfaces a create/update/delete can change). No full RSC refresh, no flicker.
+  // Query keys mirror lib/query/hooks `qk` (workers/overview/runs); using the
+  // key roots here revalidates every matching list variant in place. If there is
+  // no query client (no provider), this is a no-op.
+  useEffect(() => {
+    if (isStreaming || !pendingListRefreshRef.current) return;
+    pendingListRefreshRef.current = false;
+    if (!queryClient) return;
+    queryClient.invalidateQueries({ queryKey: ["workers"] });
+    queryClient.invalidateQueries({ queryKey: ["system", "overview"] });
+    queryClient.invalidateQueries({ queryKey: ["runs"] });
+  }, [isStreaming, queryClient]);
 
   useEffect(() => {
     if (!runDetailsNavReadyRef.current || isHydrating) return;
@@ -718,6 +750,10 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 onPickMcp={() => mcpModal.open()}
               />
               <div className="mt-6 w-full max-w-2xl px-6">
+                {/* #1557/P1-10: HOME/CREATE empty state uses the LANDING-style
+                    composer (flat, borderless, labeled "Hire" send, no
+                    Uses-row) so the in-app first prompt matches the marketing
+                    landing prompt box. */}
                 <PromptInput
                   value={input}
                   onChange={setInput}
@@ -726,6 +762,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   attachedFiles={attachedFiles}
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
+                  variant="landing"
                 />
               </div>
             </div>
@@ -942,8 +979,16 @@ export function EmilyDock({ className }: { className?: string }) {
     if (isHomeRoute && (!userCollapsedHome || createMode)) {
       setFullscreen(true);
     }
-    // Leaving home does NOT force-exit fullscreen (the user may have it open
-    // intentionally elsewhere).
+    // Leaving home (home → non-home TRANSITION) docks Emily back to the rail so
+    // the destination page (Workers/Library/Runs/…) is visible. Without this the
+    // home auto-fullscreen latched on across navigation and AppShell hid <main>
+    // on EVERY route → Emily covered the page (P0). This fires only on the
+    // transition (guarded by `wasHome`), never on every render of a non-home
+    // route, so a fullscreen the user MANUALLY opens later on a non-home page
+    // (via the dock toggle) is not clobbered.
+    if (wasHome && !isHomeRoute) {
+      setFullscreen(false);
+    }
   }, [isHomeRoute, setFullscreen, userCollapsedHome, createMode]);
 
   // Collapse the home fullscreen Emily into the right rail (shows the Workers
@@ -1180,24 +1225,25 @@ export function EmilyMobileSheet() {
   const assistantName = useAssistantName();
   const pathname = usePathname();
   const isHomeRoute = pathname === "/" || pathname === "/overview";
-  // HOME (Federico 2026-06-19): on mobile the home is the SAME real Emily — the
-  // bottom sheet opens by default on the home route so the home greeting + pulse
-  // + pills render in Emily's empty state (homeMode), seeding Emily's composer.
-  // Off the home route it stays a tap-to-open FAB as before.
+  // MOBILE Emily (Federico 2026-06-19): on mobile the page pane shows the
+  // Workers list (the home pane) and Emily lives behind a clearly-labeled
+  // floating "Ask <assistant>" FAB. We do NOT auto-open the sheet — an aggressive
+  // auto-open hid the FAB and left no reliable affordance to reach Emily (#1544).
+  // The user taps the FAB to open the SAME real Emily, sized for the sheet; on
+  // the home route it opens in homeMode (greeting + pulse + pills + composer).
+  // Closing returns to the Workers list behind it.
   const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (isHomeRoute) setOpen(true);
-  }, [isHomeRoute]);
   return (
     <>
       {!open && (
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label={`Open ${assistantName}`}
-          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-background shadow-lg [border:var(--bd-card)]"
+          aria-label={`Ask ${assistantName}`}
+          className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-[var(--radius-pill)] bg-background py-2.5 pl-3 pr-4 shadow-lg [border:var(--bd-card)]"
         >
-          <EmilyAvatar size="sm" />
+          <MessageCircle className="size-5 text-[var(--text-primary)]" />
+          <span className="text-sm font-semibold leading-none text-[var(--text-primary)]">Ask {assistantName}</span>
         </button>
       )}
       {open && (

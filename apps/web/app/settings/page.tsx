@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { api, API_BASE } from "@/lib/api";
@@ -2195,8 +2195,17 @@ function memberInitial(m: WorkspaceMember, currentUser?: CurrentUser | null, isM
   return base.slice(0, 2).toUpperCase();
 }
 
+// P0-2 fetch race: a remount of this panel (e.g. switching settings tabs away
+// and back) must show the members list immediately, and a fetch that resolves
+// after the panel unmounts must never strand the skeleton. A module-level cache
+// (keyed by a single workspace-scoped slot) is written on every successful load
+// — even after unmount — and seeds the initial state synchronously on remount.
+const membersCache = { current: undefined as WorkspaceMembersResponse | undefined };
+
 function MembersSettingsPanel() {
-  const [data, setData] = useState<WorkspaceMembersResponse | null>(null);
+  const [data, setData] = useState<WorkspaceMembersResponse | null>(
+    () => membersCache.current ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
@@ -2209,19 +2218,31 @@ function MembersSettingsPanel() {
     | null
   >(null);
 
+  // `aliveRef` gates only the React state writes (avoid setState-after-unmount);
+  // the cache write below is intentionally NOT gated so a late/cancelled fetch
+  // still populates the cache for the next mount.
+  const aliveRef = useRef(true);
+
   const load = useCallback(async () => {
     try {
       const res = await api.members.list();
+      membersCache.current = res;
+      if (!aliveRef.current) return;
       setData(res);
       setError(null);
     } catch (err) {
+      if (!aliveRef.current) return;
       setError((err as Error).message || "Failed to load members");
     }
   }, []);
 
   useEffect(() => {
+    aliveRef.current = true;
     void load();
-    api.me().then(setCurrentUser).catch(() => setCurrentUser(null));
+    api.me().then((u) => { if (aliveRef.current) setCurrentUser(u); }).catch(() => { if (aliveRef.current) setCurrentUser(null); });
+    return () => {
+      aliveRef.current = false;
+    };
   }, [load]);
 
   const myRole = data?.my_role ?? null;
