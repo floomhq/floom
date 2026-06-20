@@ -988,6 +988,166 @@ def add_log(
     })
 
 
+# ---------------------------------------------------------------------------
+# PostHog product-analytics emission (server is the source of truth for run
+# OUTCOMES). All four run-lifecycle events emit from the single terminal point
+# (update_run_status) so there is exactly one event per state transition and the
+# failure category is computed from the SAME classify_failure() the runs API
+# uses. Fail-soft + no-op when POSTHOG_API_KEY is unset; never blocks/raises.
+# ---------------------------------------------------------------------------
+
+# status value -> PostHog event name. running/completed/failed/cancelled only;
+# pending_approval is emitted separately as approval_requested at its set point.
+_RUN_STATUS_EVENT = {
+    RunStatus.RUNNING.value: "run_started",
+    RunStatus.COMPLETED.value: "run_completed",
+    RunStatus.FAILED.value: "run_failed",
+    RunStatus.CANCELLED.value: "run_cancelled",
+}
+
+
+def _json_byte_len(value: Any) -> Optional[int]:
+    """UTF-8 byte length of a JSON-serializable value (dict OR pre-serialized
+    str). Returns None when absent; never raises."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            return len(value)
+        if isinstance(value, str):
+            return len(value.encode("utf-8"))
+        return len(json.dumps(value, default=str).encode("utf-8"))
+    except Exception:
+        return None
+
+
+def _run_duration_ms(run_row: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Best-effort run duration in ms: prefer the persisted duration_ms; else
+    compute started_at -> now. Returns None when no start time is known."""
+    if not run_row:
+        return None
+    persisted = run_row.get("duration_ms")
+    if persisted is not None:
+        try:
+            return int(persisted)
+        except (TypeError, ValueError):
+            pass
+    started_raw = run_row.get("started_at")
+    if not started_raw:
+        return None
+    try:
+        started = datetime.fromisoformat(str(started_raw).replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - started
+        return max(0, int(delta.total_seconds() * 1000))
+    except Exception:
+        return None
+
+
+def _emit_run_lifecycle_event(
+    *,
+    run_id: str,
+    status: str,
+    worker_id: str,
+    owner_id: Optional[str],
+    error: Optional[str],
+    error_code: Optional[str],
+    run_row: Optional[Dict[str, Any]],
+    repos: Repositories,
+) -> None:
+    """Emit the run_started/completed/failed/cancelled PostHog event for a
+    terminal (or running) transition. Pure side effect; swallows all errors so
+    analytics can never break a run."""
+    try:
+        from services import analytics_posthog
+        from services import run_metrics
+    except Exception:  # pragma: no cover - analytics module import guard
+        return
+    if not analytics_posthog.is_enabled():
+        return
+
+    event = _RUN_STATUS_EVENT.get(status)
+    if event is None:
+        return
+
+    try:
+        # workspace group: prefer an explicit workspace_id from the row (cloud
+        # backend); else derive from the owner id (engine convention).
+        from db import derive_workspace_id
+
+        workspace_id = ""
+        if run_row:
+            workspace_id = str(run_row.get("workspace_id") or "").strip()
+        if not workspace_id:
+            workspace_id = derive_workspace_id(owner_id)
+
+        trigger_source = str((run_row or {}).get("trigger_source") or "").strip() or None
+        runner = str((run_row or {}).get("runner") or "").strip() or None
+        input_bytes = _json_byte_len((run_row or {}).get("input_json"))
+        output_bytes = _json_byte_len((run_row or {}).get("output_json"))
+
+        props: Dict[str, Any] = {
+            "run_id": run_id,
+            "worker_id": worker_id or None,
+            "status": status,
+            "trigger_source": trigger_source,
+            "runner": runner,
+        }
+
+        if event == "run_started":
+            props.update(
+                {
+                    "input_bytes": input_bytes,
+                    "input_present": bool(input_bytes),
+                }
+            )
+        else:
+            # terminal: attach duration + cost + tokens (cost persisted just
+            # before this call). tokens/cost are computed from the transcript so
+            # they are correct regardless of the backend's run-row columns.
+            duration_ms = _run_duration_ms(run_row)
+            total_tokens: Optional[int] = None
+            total_cost_usd: Optional[float] = None
+            try:
+                from cost import estimate_cost_usd, total_tokens_from_transcript
+
+                total_tokens = total_tokens_from_transcript(run_id)
+                total_cost_usd = estimate_cost_usd(total_tokens)
+            except Exception:
+                total_tokens = None
+                total_cost_usd = None
+            props.update(
+                {
+                    "duration_ms": duration_ms,
+                    "total_tokens": total_tokens,
+                    "total_cost_usd": total_cost_usd,
+                }
+            )
+            if event == "run_completed":
+                props["output_bytes"] = output_bytes
+            elif event == "run_failed":
+                # error_category is computed from the SAME classify_failure the
+                # runs API uses — NEVER a hand-typed string (taxonomy parity).
+                props["error_category"] = run_metrics.classify_failure(
+                    error_code=error_code, error=error
+                )
+                props["error_code"] = error_code or None
+            elif event == "run_cancelled":
+                # cancelled is its own category; keep it off the failure funnel.
+                props["error_category"] = "cancelled"
+                props["error_code"] = error_code or None
+
+        analytics_posthog.capture_event(
+            distinct_id=owner_id or "",
+            event=event,
+            properties=props,
+            groups={"workspace": workspace_id} if workspace_id else None,
+        )
+    except Exception:  # pragma: no cover - belt-and-suspenders
+        logger.debug("PostHog run-lifecycle emit failed for %s", run_id, exc_info=True)
+
+
 def update_run_status(
     run_id: str,
     status: str,
@@ -1079,6 +1239,22 @@ def update_run_status(
         "error": error,
         "error_code": error_code,
     })
+
+    # PostHog: emit the run-lifecycle outcome event from this single terminal
+    # point (one event per running/completed/failed/cancelled transition). The
+    # cost row was just persisted above so total_tokens/total_cost_usd are read
+    # from the same transcript. No-op + never raises when analytics is disabled.
+    if status in _RUN_STATUS_EVENT:
+        _emit_run_lifecycle_event(
+            run_id=run_id,
+            status=status,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            error=error if error is not None else previous_error,
+            error_code=error_code,
+            run_row=run_row,
+            repos=repos_obj,
+        )
 
 
 # --- run output storage + validation (services/run_outputs.py) ---

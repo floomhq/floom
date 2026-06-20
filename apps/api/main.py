@@ -1034,6 +1034,16 @@ async def lifespan(app: FastAPI):
                 await _sweep_task
             except asyncio.CancelledError:
                 pass
+    # Flush buffered PostHog product-analytics events so a Railway redeploy /
+    # graceful shutdown does not drop them. No-op + never raises when analytics
+    # is disabled (POSTHOG_API_KEY unset). Outside the deploy=="local" branch so
+    # the web role flushes too.
+    try:
+        from services.analytics_posthog import shutdown as _analytics_shutdown
+
+        _analytics_shutdown()
+    except Exception as _analytics_exc:  # pragma: no cover - defensive
+        logger.debug("PostHog analytics shutdown failed (non-fatal): %s", _analytics_exc)
 
 
 app = FastAPI(
