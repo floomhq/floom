@@ -8,6 +8,10 @@ Files:
 - `autodeploy-api.sh` - deterministic wrapper for systemd/webhook autodeploys
 - `workeros-api-autodeploy.service` - API oneshot unit
 
+This repo versions the self-hosted Workeros API autodeploy unit only. Managed
+cloud API deploy/autodeploy configuration belongs in the cloud deployment repo
+and should not be added here.
+
 The wrapper never runs `git pull`. It fetches `origin/main`, rejects tracked
 changes, staged changes, untracked files, and local-only commits with an
 actionable error, then resets a clean deploy mirror to `origin/main` and invokes

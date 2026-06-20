@@ -27,3 +27,16 @@ def test_autodeploy_unit_is_versioned():
     assert "WORKEROS_ROOT=/opt/workeros" in oss
     assert "WORKEROS_DEPLOY_CMD=/opt/workeros/ops/deploy-api.sh" in oss
     assert "ExecStart=/opt/workeros/ops/autodeploy-api.sh" in oss
+
+
+def test_cloud_autodeploy_is_out_of_oss_scope():
+    assert not (ROOT / "ops" / "workeros-cloud-api-autodeploy.service").exists()
+
+    readme = (ROOT / "ops" / "README.md").read_text(encoding="utf-8")
+    deploy = (ROOT / "ops" / "DEPLOY.md").read_text(encoding="utf-8")
+
+    for text in (readme, deploy):
+        lower = text.lower()
+        assert "self-hosted" in lower
+        assert "cloud" in lower
+        assert "deploy" in lower
