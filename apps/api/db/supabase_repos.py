@@ -2434,6 +2434,12 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             "duration_ms",
             "cancelled_at",
             "bundle_snapshot_path",
+            # Per-run cost accounting. The engine's _persist_run_cost now routes
+            # through repos.runs.update (it used to write raw sqlite, so cloud
+            # runs never got these). Without these keys here, cloud total_tokens
+            # / total_cost_usd stay null and the monthly-spend aggregate is 0.
+            "total_tokens",
+            "total_cost_usd",
         ):
             if key in fields:
                 payload[key] = fields[key]
