@@ -1,10 +1,4 @@
-Workeros License
-
-The Workeros source code in this repository is licensed under the Sustainable
-Use License Version 1.0, except for third-party components incorporated into
-the software, which remain licensed under their original licenses.
-
-Sustainable Use License
+Workeros Source Available License
 
 Version 1.0
 
@@ -19,17 +13,43 @@ non-sublicensable, non-transferable license to use, copy, distribute, make
 available, and prepare derivative works of the software, in each case subject
 to the limitations below.
 
-Limitations
+Permitted Uses
 
-You may use or modify the software only for your own internal business
-purposes or for non-commercial or personal use.
+You may use, copy, modify, and run the software for:
 
-You may distribute the software or provide it to others only if you do so free
-of charge for non-commercial purposes.
+- internal business use;
+- non-commercial or personal use;
+- building, operating, or supporting your own products or services, provided
+  that the software itself, or a substantially similar hosted or managed
+  version of it, is not offered to third parties as the product or service; and
+- paid consulting, integration, implementation, or support work for a customer,
+  provided the customer's use would be permitted under this license.
 
-You may not alter, remove, or obscure any licensing, copyright, or other
-notices of the licensor in the software. Any use of the licensor's trademarks
-is subject to applicable law.
+You may distribute the software or modified copies of the software only under
+this license and only for uses permitted above. You may charge for consulting,
+integration, implementation, or support services related to permitted uses, but
+you may not sell, resell, sublicense, or commercially distribute the software
+itself except under a separate written agreement with the licensor.
+
+Prohibited Uses
+
+You may not, without a separate written agreement with the licensor:
+
+- offer the software, or a substantially similar hosted or managed service, to
+  third parties as a commercial product;
+- operate a managed Workeros service, hosted Workeros service, white-label
+  Workeros service, or competing automation/runtime platform whose core value
+  is substantially similar to the software;
+- sell, resell, rent, lease, sublicense, or commercially distribute the software
+  itself; or
+- remove, alter, or obscure any licensing, copyright, trademark, or other
+  notices of the licensor in the software.
+
+Trademarks
+
+This license does not grant any right to use the licensor's names, logos,
+trademarks, or service marks except as required to preserve notices in the
+software.
 
 Patents
 

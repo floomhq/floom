@@ -10,7 +10,7 @@ _Last updated: 2026-06-19._
 
 - **Security** - P0/P1 issues verified patched; no live secrets and no current
   infrastructure details in git history, so history is safe to publish as-is.
-- **Hygiene** - SUL-1.0 LICENSE, README badge, CONTRIBUTING, CODE_OF_CONDUCT,
+- **Hygiene** - Workeros Source Available License, README badge, CONTRIBUTING, CODE_OF_CONDUCT,
   SECURITY, issue/PR templates, clean repo root, and package metadata.
 - **Dependency review** - Dependabot plus third-party license/SBOM policy are
   documented for release review.

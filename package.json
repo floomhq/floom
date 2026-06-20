@@ -2,7 +2,7 @@
   "name": "workeros",
   "version": "1.0.0",
   "description": "The source-available, self-hosted runtime for AI workers. Sandboxed by default.",
-  "license": "SUL-1.0",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
     "url": "https://github.com/floomhq/workeros.git"

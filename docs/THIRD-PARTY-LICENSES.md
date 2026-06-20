@@ -1,8 +1,8 @@
 # Third-Party Licenses And SBOM
 
-Workeros is source-available under SUL-1.0. Third-party packages keep their own
-licenses. This page is the release-time inventory policy for dependency license
-review and SBOM publication.
+Workeros is source-available under the Workeros Source Available License.
+Third-party packages keep their own licenses. This page is the release-time
+inventory policy for dependency license review and SBOM publication.
 
 ## Dependency Manifests
 
@@ -57,7 +57,7 @@ syft . -o cyclonedx-json > workeros-sbom.cdx.json
 
 Release reviewers should check that:
 
-- No dependency license conflicts with SUL-1.0 distribution.
+- No dependency license conflicts with Workeros source-available distribution.
 - New dependencies are necessary and maintained.
 - High and critical production advisories are resolved or explicitly documented.
 - Generated SBOM files match the release tag, not an uncommitted working tree.

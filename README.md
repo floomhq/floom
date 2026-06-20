@@ -1,7 +1,7 @@
 # Workeros
 
 [![CI](https://github.com/floomhq/workeros/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/workeros/actions/workflows/ci.yml)
-[![License: SUL-1.0](https://img.shields.io/badge/License-SUL--1.0-blue.svg)](LICENSE)
+[![License: Workeros Source Available](https://img.shields.io/badge/License-Workeros%20Source%20Available-blue.svg)](LICENSE)
 
 Workeros is a source-available AI runtime for creating, running, and supervising
 background AI workers. Sandboxed by default.
@@ -101,8 +101,8 @@ runtime contract.
   and provenance.
 - [Contributing](CONTRIBUTING.md) - local checks, first-contribution map, and PR
   expectations.
-- [Licensing](docs/LICENSING.md) - what SUL-1.0 allows and what needs a
-  commercial agreement.
+- [Licensing](docs/LICENSING.md) - what the Workeros Source Available License
+  allows and what needs a commercial agreement.
 - [Third-party licenses](docs/THIRD-PARTY-LICENSES.md) - dependency inventory
   and SBOM release process.
 
@@ -136,7 +136,9 @@ privately rather than opening a public issue.
 
 ## License
 
-[Sustainable Use License 1.0](LICENSE) (c) Workeros contributors. Workeros is
-free for internal business use, non-commercial use, and personal use. Offering
-Workeros itself as a paid hosted service or commercial product requires a
+[Workeros Source Available License 1.0](LICENSE) (c) Workeros contributors.
+Workeros is free for internal business use, non-commercial use, personal use,
+building your own products or services, and consulting/integration work for
+permitted deployments. Offering Workeros itself as a hosted service, managed
+platform, white-label product, or competing commercial service requires a
 separate commercial agreement.
