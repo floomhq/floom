@@ -129,11 +129,11 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     setCreating(false);
     patch({ sel: id, tab: null });
   };
-  const close = () => {
+  const close = useCallback(() => {
     setListCollapsed(false);
     setCreating(false);
     patch({ sel: null, tab: null });
-  };
+  }, [patch]);
   const toggleTagValue = (family: TagFamilyKey, value: string) => {
     const cur = state.tags[family] ?? [];
     const next = cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
@@ -194,6 +194,32 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     }
   };
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // GAP-POPCLOSE: the +Add panel opens as an inline split-pane (not a Base UI
+  // Dialog), so it has no backdrop/onOpenChange. Give it the app's standard
+  // dismissible-popover behaviour (AlertsBell pattern): close on click-outside
+  // and Escape, in addition to the X button. Only while the add panel is the
+  // thing on screen (creating && no item selected) — when an item detail is
+  // open, that pane owns Escape via the onKeyDown handler above.
+  const addPaneRef = useRef<HTMLDivElement>(null);
+  const addPanelOpen = creating && !isOpen;
+  useEffect(() => {
+    if (!addPanelOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (addPaneRef.current && !addPaneRef.current.contains(e.target as Node)) {
+        close();
+      }
+    };
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [addPanelOpen, close]);
 
   const header = config.hideTitle ? null : (
     <div style={{ padding: `22px ${PAGE_X}px 0` }}>
@@ -492,7 +518,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
               {listOrGrid(true)}
             </div>
           </div>
-          <div className="c-detailcol">
+          <div className="c-detailcol" ref={creating && !isOpen ? addPaneRef : undefined}>
             {creating && config.add?.panel ? (
               <>
                 <div className="c-dhead">

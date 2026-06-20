@@ -222,6 +222,57 @@ describe("CollectionView — split detail (§8e)", () => {
     expect(screen.queryByText("create form")).not.toBeInTheDocument();
   });
 
+  // GAP-POPCLOSE: the +Add panel is an inline split-pane (no backdrop), but it
+  // must still dismiss like a proper popover — on click-outside and on Escape,
+  // not only via the ✕.
+  it("+Add panel dismisses on click-outside (GAP-POPCLOSE)", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        config={makeConfig({
+          add: { label: "Add", panel: { title: "Create thing", render: () => <div>create form</div> } },
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText("create form")).toBeInTheDocument();
+
+    // A click anywhere outside the add pane (here: the document body) closes it.
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByText("create form")).not.toBeInTheDocument();
+  });
+
+  it("+Add panel dismisses on Escape (GAP-POPCLOSE)", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        config={makeConfig({
+          add: { label: "Add", panel: { title: "Create thing", render: () => <div>create form</div> } },
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText("create form")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+    expect(screen.queryByText("create form")).not.toBeInTheDocument();
+  });
+
+  it("mouseDown INSIDE the +Add panel does NOT dismiss it (GAP-POPCLOSE)", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        config={makeConfig({
+          add: { label: "Add", panel: { title: "Create thing", render: () => <div>create form</div> } },
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    const form = screen.getByText("create form");
+    fireEvent.mouseDown(form);
+    expect(screen.getByText("create form")).toBeInTheDocument();
+  });
+
   it("clears selection and toasts when ?sel points at a missing item", () => {
     const onInvalidSel = vi.fn();
     render(

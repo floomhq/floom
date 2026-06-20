@@ -16,7 +16,7 @@
 import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Paperclip } from "lucide-react";
 import { GenericOutput } from "@/components/generic-output";
-import { ApprovalActionItems } from "@/components/share/ApprovalActionItems";
+import { ApprovalActionItems, hasActionItems } from "@/components/share/ApprovalActionItems";
 import type { ApprovalRow } from "@/lib/types";
 
 /* ---- helpers --------------------------------------------------------------- */
@@ -116,11 +116,19 @@ function ProposedOutput({ approval }: { approval: ApprovalRow }) {
   }
 
   // Structured items (records / actions) render as the real ApprovalActionItems.
-  const items = <ApprovalActionItems decisionInput={di} />;
-  if (items) return <div className="c-appr-proposed">{items}</div>;
+  // Guard on whether items actually exist — `<ApprovalActionItems>` is a JSX
+  // element (always truthy) even when it renders null, so branching on the
+  // element would swallow the `preview` and the empty-state fallback below.
+  if (hasActionItems(di)) {
+    return (
+      <div className="c-appr-proposed">
+        <ApprovalActionItems decisionInput={di} />
+      </div>
+    );
+  }
 
   // Otherwise the preview string, rendered as itself.
-  if (approval.preview) {
+  if (approval.preview && approval.preview.trim()) {
     const t = (approval.type ?? approval.preview_type ?? inferPreviewType(approval.preview)) as string;
     return (
       <div className="c-appr-proposed">
