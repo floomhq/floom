@@ -122,10 +122,6 @@ def _with_prompt_cache(messages: list, model: str) -> list:
 
 def _provider_credentials_error(model: str) -> Optional[str]:
     if _is_litellm_model(model):
-        if "gemini" in model.lower() and not (
-            os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        ):
-            return "Gemini model configured but GEMINI_API_KEY or GOOGLE_API_KEY is not available in the worker-author sandbox"
         if "bedrock" in model.lower():
             has_auth = bool(
                 os.environ.get("AWS_ACCESS_KEY_ID")
