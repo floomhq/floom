@@ -9,7 +9,7 @@ pyyaml==6.0.1
 python-multipart==0.0.27
 httpx==0.28.1
 openai==2.41.1
-openai-agents[litellm]==0.17.4
+openai-agents[litellm]==0.17.6
 litellm==1.89.0
 ddgs==9.14.4
 pypdf==6.13.2
