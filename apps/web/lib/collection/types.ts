@@ -172,7 +172,7 @@ export interface CollectionConfig<T> {
   row: (item: T) => ListRowSpec;
   card?: (item: T) => CardSpec;
 
-  detail: (item: T) => {
+  detail: (item: T, activeTab?: string) => {
     header: DetailHeader;
     tabs: DetailTab[];
     /**
