@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
 // PR S19 (I-1, I-6): draft-and-create makes up to 3 OpenAI calls with
-// YAML retry. On hard prompts that's 30-60s. Default 10s Vercel timeout
+// YAML retry. On hard prompts that's 30-60s. Default 10s web host timeout
 // was returning empty 504 -> the UI showed an empty error toast.
 export const maxDuration = 60;
 
@@ -61,7 +61,7 @@ async function handler(
 ) {
   const { path } = await params;
   // Preserve the raw encoded pathname. `params.path` can differ between local
-  // Next and Vercel for filenames that intentionally contain percent-encoded
+  // Next and web hosts for filenames that intentionally contain percent-encoded
   // text (for example a stored literal `%20`), while nextUrl.pathname keeps the
   // request path shape the browser sent.
   const proxyMarker = "/api/proxy";
