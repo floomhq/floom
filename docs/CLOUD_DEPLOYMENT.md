@@ -62,9 +62,36 @@ WORKEROS_CLOUD_DB_USER=...
 WORKEROS_CLOUD_DB_PASS=...
 ```
 
-`railway.toml` also pins `numReplicas = 1`. Do not increase API replicas until
-scheduled-run dispatch is split into a dedicated single-replica worker service
-or the scheduler lock/readiness flow is reviewed for the new topology.
+`railway.toml` pins `numReplicas = 1` per service.
+
+## Two-service split (web + worker) — LIVE (2026-06-20)
+
+The cloud runs as **two Railway services** sharing one image/repo, split by
+`WORKEROS_ROLE` (the cloud `lifespan` in `apps/api/main.py` is role-aware):
+
+| Service | `WORKEROS_ROLE` | Runs |
+|---|---|---|
+| `workeros-cloud-api` | `web` | HTTP only — scheduler/drain/recovery disabled |
+| `workeros-cloud-worker` | `worker` | scheduler (advisory lock 87452311) + drain loop |
+
+This removes the single-process GIL contention (the ~41s pre-sandbox prep gap) — the
+web no longer competes with the executor. `WORKEROS_ROLE` unset = `all` (the old
+single-replica monolith) still works for non-split deploys. The scheduler lock is now
+**graceful**: if held (rolling deploy / other env), a process **skips the scheduler
+instead of crashing** (fixes the old rolling-deploy deadlock).
+
+### Deploy / redeploy
+- Both services deploy the same working tree: `railway up --service <name>` (each reads
+  its own `WORKEROS_ROLE`). Redeploy web → run the smoke gate; redeploy worker → check it
+  logs "Queue drain loop started".
+- **First-time split (procedure used):** deploy monolith to the API → smoke → create the
+  worker (`railway add --service workeros-cloud-worker`, clone the API env minus `RAILWAY_*`
+  + `WORKEROS_ROLE=worker`) → `railway up` the worker, confirm it drains + takes the
+  scheduler lock → set `WORKEROS_ROLE=web` on the API (auto-redeploys) → smoke. **Order
+  matters: verify the worker drains BEFORE flipping the API to web**, so run execution is
+  never interrupted.
+- **Failover note:** the lifespan runs once at boot — if the lock-holder dies, no live
+  replica re-acquires until restart. Restart `workeros-cloud-worker` to re-take a freed lock.
 
 Slack, signing, upload, approval, and webhook secrets must also be set when
 those surfaces are enabled:
