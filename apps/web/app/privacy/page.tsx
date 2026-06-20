@@ -40,8 +40,8 @@ export default function PrivacyPage() {
             database.
           </li>
           <li>
-            <strong>Conversations and brain packs</strong>: workspace agent
-            chat history and any brain-pack files you create.
+            <strong>Conversations and brain folders</strong>: workspace agent
+            chat history and any Brain files you create.
           </li>
           <li>
             <strong>Artifacts</strong>: files produced by runs, stored on the
@@ -67,7 +67,7 @@ export default function PrivacyPage() {
         <h2 className="text-base font-medium pt-2">Retention and deletion</h2>
         <p>
           The account owner controls retention. Runs, secrets, connections,
-          conversations, and brain packs can be deleted through the app or by
+          conversations, and brain folders can be deleted through the app or by
           removing them from the server. There is no separate data-export
           requirement because the owner already controls the database and
           filesystem directly.

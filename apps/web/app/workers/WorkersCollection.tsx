@@ -698,7 +698,7 @@ function BrainTab({ w }: { w: WorkerSummary }) {
     api.contexts
       .list()
       .then(setPacks)
-      .catch((err) => reportError("Could not load knowledge packs.", err));
+      .catch((err) => reportError("Could not load brain folders.", err));
   }, []);
   useEffect(() => {
     refreshPacks();
