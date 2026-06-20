@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -19,12 +18,7 @@ RUN pip install --no-cache-dir uv
 COPY requirements.txt ./requirements.txt
 COPY apps/api/requirements.txt ./apps/api/requirements.txt
 COPY engine/apps/api/requirements.txt ./engine/apps/api/requirements.txt
-# Persistent BuildKit cache for uv's wheel downloads: even when requirements
-# change (e.g. an engine bump), wheels are reused from cache instead of being
-# re-downloaded from PyPI — the bulk of the old ~3min build. (Was --no-cache,
-# which actively defeated this.)
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # --- App code ------------------------------------------------------------------
 # (.dockerignore keeps .env files, node_modules, tests, and other non-runtime
@@ -38,12 +32,11 @@ COPY . .
 # dependency layer above; on `railway up` every dep is already satisfied so it is
 # a fast no-op.
 ARG GIT_TOKEN
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    TOKEN="$(printf '%s' "$GIT_TOKEN")"; \
+RUN TOKEN="$(printf '%s' "$GIT_TOKEN")"; \
     if [ -n "$TOKEN" ]; then \
       git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/" && \
       git submodule update --init --recursive && \
-      uv pip install --system -r requirements.txt; \
+      uv pip install --system --no-cache -r requirements.txt; \
       status=$?; \
       git config --global --unset-all url."https://${TOKEN}@github.com/".insteadOf || true; \
       [ "$status" -eq 0 ] || exit "$status"; \
