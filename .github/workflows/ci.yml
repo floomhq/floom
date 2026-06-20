@@ -97,6 +97,8 @@ jobs:
         run: npm run lint
       - name: Em-dash guard
         run: npm run lint:emdash
+      - name: Unit tests
+        run: npm test
 
   mcp-tests:
     name: MCP tests

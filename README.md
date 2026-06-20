@@ -67,7 +67,7 @@ workers/      Worker folders (worker.yml + run.py or SKILL.md)
 data/         SQLite DB + run artifacts
 ```
 
-**Platform support:** Linux, macOS, Windows (Python 3.11+, Node 18+).
+**Platform support:** Linux, macOS, Windows (Python 3.11+, Node 20+).
 
 ## Core Concepts
 

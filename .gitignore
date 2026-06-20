@@ -14,7 +14,7 @@ workspace.md
 workspace.base.md
 
 # Data
-# Glob covers the SQLite WAL/SHM sidecars (floom.db-wal, floom.db-shm) too — the
+# Glob covers the SQLite WAL/SHM sidecars (floom.db-wal, floom.db-shm) too - the
 # -wal can hold un-checkpointed sessions/secrets, so it must never be committed.
 data/floom.db*
 data/artifacts/*
@@ -23,7 +23,7 @@ data/blobs/
 data/run-bundles/
 data/*.log
 # The API runs from apps/api/, so its local SQLite DB + run bundles live at
-# apps/api/data/ — the repo-root data/ rules above don't reach it. This dir
+# apps/api/data/ - the repo-root data/ rules above don't reach it. This dir
 # holds OAuth tokens, secrets, sessions and PATs; never commit it.
 apps/api/data/
 contexts/*
@@ -34,6 +34,7 @@ contexts/*
 
 # Audit reports (may contain leaked secret values in evidence; keep local only)
 docs/launch-readiness/agent-runs/
+.branch-audit/
 # Local review/feedback drops are iteration evidence, not OSS source.
 feedback/
 
