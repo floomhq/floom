@@ -21,7 +21,18 @@ import posthog from "posthog-js";
 import type { CurrentUser } from "@/lib/types";
 
 const SCHEMA_VERSION = 1;
-const DEFAULT_HOST = "https://us.i.posthog.com";
+// Ingestion goes through the first-party reverse proxy (next.config.ts rewrites
+// /ingest/* -> PostHog). Same-origin ingestion means CSP `connect-src 'self'`
+// covers it with no PostHog domain in the allowlist, and ad/tracking blockers
+// (which block i.posthog.com) cannot drop events. Overridable via
+// NEXT_PUBLIC_POSTHOG_HOST (e.g. point straight at us.i.posthog.com to bypass
+// the proxy, or at an EU/self-hosted host). Keep this in sync with the
+// POSTHOG_PROXY_PATH used by the rewrites.
+const DEFAULT_HOST = "/ingest";
+// ui_host tells the SDK where the PostHog app lives (toolbar links, "view in
+// PostHog" deep-links) since api_host is now a relative proxy path, not a
+// PostHog URL. Overridable for EU/self-hosted via NEXT_PUBLIC_POSTHOG_UI_HOST.
+const DEFAULT_UI_HOST = "https://us.posthog.com";
 
 let initialized = false;
 let identifiedUserId: string | null = null;
@@ -64,6 +75,7 @@ export function initPostHog() {
 
   posthog.init(key, {
     api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || DEFAULT_HOST,
+    ui_host: process.env.NEXT_PUBLIC_POSTHOG_UI_HOST || DEFAULT_UI_HOST,
     // Autocapture stays ON for exploratory funnels; named intent events below
     // are explicit so they survive DOM refactors.
     autocapture: true,
