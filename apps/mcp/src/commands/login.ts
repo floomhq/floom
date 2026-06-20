@@ -40,6 +40,16 @@ type CloudBootstrap = {
   api_base?: string;
 };
 
+type WorkspaceRow = {
+  id: string;
+  name?: string;
+};
+
+type WorkspaceListResponse = {
+  workspaces?: WorkspaceRow[];
+  active_id?: string | null;
+};
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -280,13 +290,7 @@ async function pollCloudExchange(args: {
       api_token: exchanged.api_token,
       authed_at: new Date().toISOString(),
     };
-    await writeCredentials(creds);
-    log.ok(`Logged in`);
-    log.kv("API", apiBase);
-    log.kv("Token saved to", credentialsPath());
-    log.blank();
-    log.info("Tip: run `floom workspaces list` to pick a workspace.");
-    return 0;
+    return saveCloudCredentials(creds, apiBase);
   }
   if (!exchanged.refresh_token) {
     throw new Error("Hosted login succeeded but the server did not return a usable CLI credential.");
@@ -312,11 +316,53 @@ async function pollCloudExchange(args: {
     supabase_anon_key: supabaseAnonKey,
     authed_at: new Date().toISOString(),
   };
-  await writeCredentials(creds);
+  return saveCloudCredentials(creds, apiBase);
+}
+
+async function saveCloudCredentials(creds: StoredCredentials, apiBase: string): Promise<number> {
+  const workspace = await resolveInitialCloudWorkspace(creds);
+  const savedCreds: StoredCredentials = {
+    ...creds,
+    ...(workspace
+      ? {
+          workspace_id: workspace.id,
+          workspace_name: workspace.name || workspace.id,
+        }
+      : {}),
+  };
+  await writeCredentials(savedCreds);
   log.ok(`Logged in`);
   log.kv("API", apiBase);
+  if (workspace) {
+    log.kv("Workspace", `${workspace.name || workspace.id} (${workspace.id})`);
+  }
   log.kv("Token saved to", credentialsPath());
   log.blank();
-  log.info("Tip: run `floom workspaces list` to pick a workspace.");
+  if (workspace) {
+    log.info("Tip: run `floom workers list` to inspect this workspace.");
+  } else {
+    log.info("Tip: run `floom workspaces list` to pick a workspace.");
+  }
   return 0;
+}
+
+export async function resolveInitialCloudWorkspace(
+  credentials: StoredCredentials,
+): Promise<WorkspaceRow | null> {
+  try {
+    const client = new WorkerosApiClient(credentials.api_base, credentials);
+    const data = (await client.requestJson("GET", "/workspaces")) as WorkspaceListResponse;
+    const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
+    if (data.active_id) {
+      const active = workspaces.find((row) => row.id === data.active_id);
+      if (active) return active;
+      return { id: data.active_id, name: data.active_id };
+    }
+    if (workspaces.length === 1) {
+      return workspaces[0];
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }

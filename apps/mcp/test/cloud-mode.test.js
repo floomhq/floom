@@ -18,7 +18,7 @@ import {
   createAuthenticatedClient,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
-import { cloudRateLimitRetryMs } from "../dist/commands/login.js";
+import { cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
 
 test("cloud login honors Retry-After headers on cli-exchange 429", () => {
   const error = new WorkerosApiError(
@@ -193,6 +193,22 @@ async function startMockApi() {
   return { server, port: server.address().port, seen };
 }
 
+async function startMockWorkspaceApi(responseBody, status = 200) {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({ method: req.method, url: req.url, headers: req.headers });
+    if (req.url === "/api/workspaces") {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(responseBody));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  server.listen(0);
+  await once(server, "listening");
+  return { server, port: server.address().port, seen };
+}
+
 async function startMockDoctorApi() {
   const seen = [];
   const server = createServer((req, res) => {
@@ -218,6 +234,63 @@ async function startMockDoctorApi() {
   await once(server, "listening");
   return { server, port: server.address().port, seen };
 }
+
+test("cloud login resolver selects API active_id workspace", async () => {
+  const api = await startMockWorkspaceApi({
+    active_id: "ws_active",
+    workspaces: [
+      { id: "ws_other", name: "Other" },
+      { id: "ws_active", name: "Default Team" },
+    ],
+  });
+  try {
+    const workspace = await resolveInitialCloudWorkspace({
+      api_base: `http://127.0.0.1:${api.port}`,
+      mode: "cloud",
+      api_token: "pat-test",
+      authed_at: new Date().toISOString(),
+    });
+    assert.deepEqual(workspace, { id: "ws_active", name: "Default Team" });
+    const call = api.seen.find((r) => r.url === "/api/workspaces");
+    assert.ok(call, "expected hosted /api/workspaces call");
+    assert.equal(call.headers["x-floom-token"], "pat-test");
+  } finally {
+    api.server.close();
+  }
+});
+
+test("cloud login resolver selects sole workspace when active_id is absent", async () => {
+  const api = await startMockWorkspaceApi({
+    active_id: null,
+    workspaces: [{ id: "ws_only", name: "Only Team" }],
+  });
+  try {
+    const workspace = await resolveInitialCloudWorkspace({
+      api_base: `http://127.0.0.1:${api.port}`,
+      mode: "cloud",
+      api_token: "pat-test",
+      authed_at: new Date().toISOString(),
+    });
+    assert.deepEqual(workspace, { id: "ws_only", name: "Only Team" });
+  } finally {
+    api.server.close();
+  }
+});
+
+test("cloud login resolver keeps login non-fatal when workspace lookup fails", async () => {
+  const api = await startMockWorkspaceApi({ detail: "boom" }, 500);
+  try {
+    const workspace = await resolveInitialCloudWorkspace({
+      api_base: `http://127.0.0.1:${api.port}`,
+      mode: "cloud",
+      api_token: "pat-test",
+      authed_at: new Date().toISOString(),
+    });
+    assert.equal(workspace, null);
+  } finally {
+    api.server.close();
+  }
+});
 
 test("cloud client sends JWT + X-Workeros-Workspace and rewrites /workers to /api/workers", async () => {
   await withTempHome(async () => {
