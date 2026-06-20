@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 # Per-request caches populated by batch queries, consumed by per-item calls.
 # Each asyncio task / threadpool thread inherits a copy of the context so there
@@ -115,6 +116,7 @@ from apps.api.db._secret_crypto import (
     vault_store_secret,
     vault_update_secret,
     vault_read_secret,
+    vault_read_secrets,
     vault_delete_secret,
     vault_secret_name,
 )
@@ -3439,11 +3441,71 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
         return {str(item["name"]) for item in _response_rows(response)}
 
     def resolve(self, *, user_id: str, names: Iterable[str]) -> dict[str, str]:
+        requested_names = sorted({str(name) for name in names if str(name)})
+        if not requested_names:
+            return {}
+
+        builder = self._client.table("secrets").select("name,value,vault_secret_id")
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.in_("name", requested_names).execute()
+        rows = _response_rows(response)
+        if not rows:
+            return {}
+
+        vault_ids: list[UUID] = []
+        row_by_vault_id: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            vault_id = row.get("vault_secret_id")
+            if not vault_id:
+                continue
+            try:
+                parsed = UUID(str(vault_id))
+            except (TypeError, ValueError):
+                _repo_logger.warning("invalid vault_secret_id for secret %s", row.get("name"))
+                continue
+            vault_ids.append(parsed)
+            row_by_vault_id[str(parsed)] = row
+
+        try:
+            vault_values = vault_read_secrets(self._client, vault_ids)
+        except Exception as exc:
+            # Deploy-order tolerant: if the batch RPC migration is not applied yet,
+            # fall back to per-secret Vault reads instead of breaking all runs.
+            _repo_logger.warning("vault_read_secrets failed; falling back to single reads: %s", exc)
+            vault_values = {}
+            for vault_id in vault_ids:
+                try:
+                    value = vault_read_secret(self._client, vault_id)
+                except Exception as single_exc:
+                    _repo_logger.warning(
+                        "vault_read_secret failed for secret %s: %s",
+                        row_by_vault_id.get(str(vault_id), {}).get("name"),
+                        single_exc,
+                    )
+                    continue
+                if value is not None:
+                    vault_values[str(vault_id)] = value
+
         secrets: dict[str, str] = {}
-        for name in names:
-            value = self.read_value(user_id=user_id, name=name)
+        for row in rows:
+            name = str(row.get("name") or "")
+            if not name:
+                continue
+            vault_id = row.get("vault_secret_id")
+            if vault_id:
+                value = vault_values.get(str(vault_id))
+            else:
+                ciphertext = _bytea_bytes(row.get("value"))
+                value = decrypt_secret(ciphertext) if ciphertext is not None else None
             if value:
                 secrets[name] = value
+
+        if secrets:
+            used_builder = self._client.table("secrets").update(
+                {"last_used_at": datetime.now(timezone.utc).isoformat()}
+            )
+            used_builder = _scope_by_workspace(used_builder, user_id=user_id)
+            used_builder.in_("name", list(secrets)).execute()
         return secrets
 
 

@@ -133,6 +133,16 @@ WORKEROS_E2B_WARM_POOL_SIZE_PER_KEY=1
 WORKEROS_E2B_WARM_POOL_MAX_AGE_SECONDS=900
 ```
 
+If the Python E2B template already contains the worker runtime packages, enable
+the baked-dependency fast path so runs do not spend time in `pip install`:
+
+```bash
+WORKEROS_E2B_PYTHON_DEPS_BAKED=1
+# Optional. Omit to use the engine default list:
+# boto3,google-auth,httpx,litellm,numpy,openai,python-dotenv,requests
+WORKEROS_E2B_PYTHON_BAKED_PACKAGES=boto3,google-auth,httpx,litellm,numpy,openai,python-dotenv,requests
+```
+
 Memory-specific E2B templates are required for workers that declare
 `resources.memory_mb`. For the NovaSearch 2GB path:
 
@@ -245,6 +255,9 @@ WORKEROS_LLM_GATEWAY_KEY=
 - Assuming the LiteLLM gateway is active when `WORKEROS_LLM_GATEWAY_URL` is unset.
 - Forgetting to apply Supabase migrations before deploying code that depends on
   new RLS or schema behavior.
+- Enabling the NovaSearch E2B fast path without
+  `WORKEROS_E2B_PYTHON_DEPS_BAKED=1`; the engine will still run `pip install`
+  unless the baked-deps flag is set and the requirements are covered.
 - Missing `WORKEROS_CLOUD_DB_*` lock envs; Cloud API startup now fails closed
   rather than running an unlocked scheduler.
 - Rotating or omitting `WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY`; GitHub PATs and
