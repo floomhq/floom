@@ -1000,6 +1000,15 @@ async def lifespan(app: FastAPI):
             )
         # Launch hourly connection health sweep
         _sweep_task = asyncio.create_task(_hourly_sweep_loop())
+    # PostHog LLM-obs ingestion canary (Track A §C1): emit a synthetic event at
+    # startup to PROVE capture reaches the project. No-op + never raises when
+    # POSTHOG_API_KEY is unset. Detects the silent no-events ingestion gap.
+    try:
+        from services.ai_observability import emit_ingestion_canary
+        if emit_ingestion_canary(source="startup"):
+            logger.info("PostHog LLM-obs ingestion canary fired on startup")
+    except Exception as _canary_exc:
+        logger.debug("Ingestion canary failed (non-fatal): %s", _canary_exc)
     yield
     # Shutdown
     if deploy == "local":

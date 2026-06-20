@@ -54,6 +54,24 @@ def _env(name: str) -> str:
     return (os.environ.get(name) or "").strip()
 
 
+def _on_delivery_error(error: Any, items: Any = None) -> None:
+    """posthog-python ``on_error`` hook: a batch failed to deliver (4xx/5xx /
+    queue drop). Route to the AI-obs delivery counter so the swallowed failure
+    becomes a visible metric. Lazy import avoids an init-time circular import.
+    Never raises."""
+    try:
+        from services.ai_observability import record_delivery_event
+
+        n = 1
+        try:
+            n = max(1, len(items)) if items is not None else 1
+        except Exception:
+            n = 1
+        record_delivery_event("emit_failed", n)
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("PostHog on_error hook failed", exc_info=True)
+
+
 def _get_client() -> Optional[Any]:
     """Lazily construct the module-level Posthog client.
 
@@ -83,6 +101,9 @@ def _get_client() -> Optional[Any]:
                 # Batch on a background thread; flush at 20 events or every 2s.
                 flush_at=20,
                 flush_interval=2,
+                # Surface delivery failures (4xx/5xx, queue drops) the SDK would
+                # otherwise swallow, so AI-obs delivery telemetry can count them.
+                on_error=_on_delivery_error,
             )
             logger.info("PostHog analytics enabled (host=%s).", host)
         except Exception:  # pragma: no cover - defensive init guard

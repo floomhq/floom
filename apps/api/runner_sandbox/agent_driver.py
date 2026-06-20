@@ -634,6 +634,13 @@ class AgentDriver(SandboxDriver):
                         usage_row["total_cost_usd"] = summary["total_cost_usd"]
                     if summary.get("generation_count"):
                         usage_row["generation_count"] = summary["generation_count"]
+                    # Cost provenance (§A2): never let a partial sum masquerade as
+                    # a complete cost. When any generation was unpriced, flag it.
+                    usage_row["cost_source"] = summary.get("cost_source")
+                    usage_row["pricing_version"] = summary.get("pricing_version")
+                    usage_row["cost_is_partial"] = summary.get("cost_is_partial")
+                    if summary.get("unpriced_generation_count"):
+                        usage_row["unpriced_generation_count"] = summary["unpriced_generation_count"]
                 transcript.append(usage_row)
             self._persist_transcript(output_dir, transcript, artifacts)
             missing_outputs = self._missing_required_outputs(config, outputs)

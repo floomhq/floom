@@ -40,8 +40,11 @@ single blended ``cost.py`` rate.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import re as _re
+import threading
 import time
 import traceback
 import uuid
@@ -55,6 +58,15 @@ logger = logging.getLogger("floom.ai_observability")
 # Schema version for the AI-obs property contract (independent of the product
 # analytics SCHEMA_VERSION). Bump on a breaking AI-obs property change.
 AI_SCHEMA_VERSION = 1
+
+# Pricing-map provenance for cost (§A2). Bump when the litellm dependency (and
+# therefore the model-pricing map) is upgraded so cost rows are attributable to
+# a known price table. cost_source distinguishes a real per-token price from a
+# fallback / unknown so a dashboard can trust (or quarantine) a number.
+PRICING_VERSION = "litellm-1"
+COST_SOURCE_LITELLM = "litellm_per_token"
+COST_SOURCE_BLENDED = "blended_fallback"
+COST_SOURCE_UNKNOWN = "unknown"
 
 # AI-payload capture modes (§A3). metadata = tokens/cost/model only (default).
 CAPTURE_METADATA = "metadata"
@@ -76,6 +88,117 @@ _DEFAULT_SAMPLE_RATE = 1.0
 
 def _env(name: str) -> str:
     return (os.environ.get(name) or "").strip()
+
+
+# ---------------------------------------------------------------------------
+# Delivery telemetry (§A5/§C1) — internal counters so silent drops are visible.
+# The fail-soft P1 client swallows flush failures / 4xx-5xx / queue drops; these
+# counters + a startup canary give us a way to PROVE capture reaches the project
+# (no-events ingestion gap) and to alert when delivery degrades.
+# ---------------------------------------------------------------------------
+
+_delivery_lock = threading.Lock()
+_DELIVERY_COUNTERS: Dict[str, int] = {
+    "emit_attempted": 0,
+    "emit_failed": 0,
+    "flush_attempted": 0,
+    "flush_failed": 0,
+    "canary_fired": 0,
+}
+
+
+def record_delivery_event(name: str, n: int = 1) -> None:
+    """Increment an internal delivery counter (thread-safe). Never raises."""
+    try:
+        with _delivery_lock:
+            _DELIVERY_COUNTERS[name] = _DELIVERY_COUNTERS.get(name, 0) + int(n)
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+def delivery_counters() -> Dict[str, int]:
+    """Snapshot of internal delivery counters (for /system health + tests)."""
+    with _delivery_lock:
+        return dict(_DELIVERY_COUNTERS)
+
+
+def _reset_delivery_counters_for_tests() -> None:
+    with _delivery_lock:
+        for k in _DELIVERY_COUNTERS:
+            _DELIVERY_COUNTERS[k] = 0
+
+
+def emit_ingestion_canary(*, source: str = "startup", owner_id: str = "") -> bool:
+    """Emit a synthetic ``posthog_ingestion_canary`` event to prove capture
+    reaches the project (silent-drop / no-events gap detector — spec §C1).
+
+    Fires on app startup and any scheduled tick. No-op when analytics is
+    disabled. Returns True when an event was handed to the client. Never raises.
+    The distinct_id falls back to a stable synthetic id so the canary attributes
+    even when no owner context is available at startup.
+    """
+    if not is_enabled():
+        return False
+    try:
+        distinct = owner_id or "workeros-system-canary"
+        props = {
+            "ai_schema_version": AI_SCHEMA_VERSION,
+            "canary_source": source,
+            "delivery_counters": delivery_counters(),
+            "emitted_at_monotonic": round(time.monotonic(), 3),
+        }
+        _emit("posthog_ingestion_canary", distinct, props, None)
+        record_delivery_event("canary_fired")
+        # Force a flush so the canary is delivered promptly (and so a flush
+        # failure is recorded right here rather than silently batched away).
+        flush_with_telemetry()
+        return True
+    except Exception:  # pragma: no cover - belt-and-suspenders
+        logger.debug("ingestion canary emit failed", exc_info=True)
+        return False
+
+
+def flush_with_telemetry() -> None:
+    """Flush the underlying PostHog client, recording success/failure so a
+    swallowed flush error becomes a visible counter increment. Never raises."""
+    record_delivery_event("flush_attempted")
+    try:
+        analytics_posthog.flush()
+    except Exception:  # pragma: no cover - flush() already swallows
+        record_delivery_event("flush_failed")
+        logger.debug("AI-obs flush failed", exc_info=True)
+
+
+def make_insert_id(*parts: Any) -> str:
+    """Deterministic ``$insert_id`` from stable event coordinates.
+
+    PostHog dedupes on ``$insert_id``. Deriving it from (run_id, event_type,
+    index, ...) — NOT random/time — makes a retry / replay / backfill of the
+    *same logical event* carry the *same* id, so PostHog drops the duplicate
+    instead of double-counting tokens/cost/generations.
+    """
+    raw = "|".join("" if p is None else str(p) for p in parts)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()  # noqa: S324 - id, not crypto
+
+
+def exception_fingerprint(exc_type: str, message: str) -> str:
+    """Stable grouping key for ``$exception`` with volatile bits stripped.
+
+    Removes ids / paths / hex / numbers / quoted literals from the message so
+    the same logical error groups into ONE issue regardless of the specific
+    run_id, file path, or numeric value in the text (no cardinality blowup).
+    """
+    text = f"{exc_type}: {message or ''}"
+    # strip uuids first (before paths/hex/numbers eat their pieces), then
+    # absolute/relative paths, hex blobs, then bare numbers.
+    text = _re.sub(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", "<uuid>", text)
+    text = _re.sub(r"(?:/[\w.\-]+)+/?", "<path>", text)
+    text = _re.sub(r"\b0x[0-9a-fA-F]+\b", "<hex>", text)
+    text = _re.sub(r"\b[0-9a-fA-F]{16,}\b", "<hex>", text)
+    text = _re.sub(r"['\"][^'\"]*['\"]", "<str>", text)
+    text = _re.sub(r"\b\d[\d,.]*\b", "<n>", text)
+    text = _re.sub(r"\s+", " ", text).strip().lower()
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]  # noqa: S324
 
 
 def sample_rate() -> float:
@@ -109,18 +232,26 @@ def normalize_capture_mode(mode: Optional[str]) -> str:
 # Cost (§A2) — per-generation, from input/output tokens via litellm pricing.
 # ---------------------------------------------------------------------------
 
-def generation_cost_usd(
+def generation_cost_detail(
     model: str,
     input_tokens: int,
     output_tokens: int,
-) -> Optional[float]:
-    """USD cost for one generation via ``litellm.cost_per_token``.
+) -> "tuple[Optional[float], str, bool]":
+    """USD cost for one generation, WITH provenance (§A2 cost-provenance fix).
 
-    Returns ``None`` when the model id is unknown to litellm (so the caller can
-    fall back / leave cost null rather than emit a wrong number). Never raises.
+    Returns ``(cost_usd, cost_source, model_priced)``:
+      * ``cost_usd`` — the per-token cost, or ``None`` when the model id is
+        unknown to litellm (so the caller can leave cost null rather than emit a
+        wrong number).
+      * ``cost_source`` — ``"litellm_per_token"`` when litellm priced it,
+        ``"unknown"`` when the model is unknown / unpriced.
+      * ``model_priced`` — True iff litellm returned a real price for this model.
+
+    Never raises. ``blended_fallback`` is reserved for a caller that deliberately
+    substitutes the single blended ``cost.py`` rate (this module never does).
     """
     if not model:
-        return None
+        return None, COST_SOURCE_UNKNOWN, False
     try:
         import litellm
 
@@ -129,11 +260,26 @@ def generation_cost_usd(
             prompt_tokens=max(0, int(input_tokens or 0)),
             completion_tokens=max(0, int(output_tokens or 0)),
         )
-        return round(float(prompt_cost) + float(completion_cost), 8)
+        cost = round(float(prompt_cost) + float(completion_cost), 8)
+        return cost, COST_SOURCE_LITELLM, True
     except Exception:
         # Unknown model / bad id form: don't guess, leave null.
         logger.debug("litellm cost_per_token failed for model=%s", model, exc_info=True)
-        return None
+        return None, COST_SOURCE_UNKNOWN, False
+
+
+def generation_cost_usd(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> Optional[float]:
+    """USD cost for one generation via ``litellm.cost_per_token``.
+
+    Returns ``None`` when the model id is unknown to litellm. Thin wrapper over
+    :func:`generation_cost_detail` kept for existing callers/tests. Never raises.
+    """
+    cost, _source, _priced = generation_cost_detail(model, input_tokens, output_tokens)
+    return cost
 
 
 def provider_from_model(model: str) -> Optional[str]:
@@ -188,8 +334,15 @@ class AITraceContext:
     total_tokens: int = field(default=0)
     total_cost_usd: float = field(default=0.0)
     _cost_known: bool = field(default=False)
+    # cost provenance (§A2): count generations litellm could NOT price so the
+    # run-level cost can be flagged partial rather than silently summing a hole.
+    unpriced_generation_count: int = field(default=0)
+    _cost_sources: set = field(default_factory=set)
     _latencies_ms: List[float] = field(default_factory=list)
     _started_at: float = field(default_factory=time.monotonic)
+    # monotonic indices for deterministic $insert_id (one per logical event).
+    _gen_index: int = field(default=0)
+    _span_index: int = field(default=0)
 
     def __post_init__(self) -> None:
         self.capture_mode = normalize_capture_mode(self.capture_mode)
@@ -252,17 +405,22 @@ class AITraceContext:
         in_tok = max(0, int(input_tokens or 0))
         out_tok = max(0, int(output_tokens or 0))
         tot = int(total_tokens) if total_tokens is not None else (in_tok + out_tok)
-        cost = generation_cost_usd(model, in_tok, out_tok)
+        cost, cost_source, model_priced = generation_cost_detail(model, in_tok, out_tok)
 
         # rollup (always, even if this event is sampled out of PostHog, so the
         # trace summary + run cost stay correct).
         self.generation_count += 1
+        self._gen_index += 1
+        gen_index = self._gen_index
         self.total_input_tokens += in_tok
         self.total_output_tokens += out_tok
         self.total_tokens += tot
         if cost is not None:
             self.total_cost_usd += cost
             self._cost_known = True
+        if not model_priced:
+            self.unpriced_generation_count += 1
+        self._cost_sources.add(cost_source)
         if is_error:
             self.error_count += 1
         if latency_s is not None:
@@ -272,6 +430,8 @@ class AITraceContext:
             return sid
 
         props = self._base_ai_props(sid, parent_id or self.trace_id)
+        # Deterministic dedupe id: same (run, kind, index) => same id on replay.
+        props["$insert_id"] = make_insert_id(self.run_id, "$ai_generation", gen_index)
         props.update(
             {
                 "$ai_model": model or None,
@@ -280,10 +440,19 @@ class AITraceContext:
                 "$ai_output_tokens": out_tok,
                 "$ai_cache_read_input_tokens": int(cached_input_tokens or 0) or None,
                 "$ai_total_cost_usd": cost,
+                "cost_source": cost_source,
+                "pricing_version": PRICING_VERSION,
+                "model_priced": model_priced,
                 "$ai_is_error": bool(is_error),
                 "$ai_http_status": http_status,
             }
         )
+        # Stamp per-event sample_rate so a drill-down event is self-describing;
+        # run-level totals (on $ai_trace) are ALWAYS unsampled (see finish()).
+        _sr = sample_rate()
+        if _sr < 1.0:
+            props["sample_rate"] = _sr
+            props["sampled"] = True
         if latency_s is not None:
             props["$ai_latency"] = round(float(latency_s), 4)
         # bodies only when mode opts in
@@ -312,6 +481,8 @@ class AITraceContext:
         """Emit a ``$ai_span`` for a tool call / sandbox op. Returns the span id."""
         sid = span_id or new_span_id()
         self.span_count += 1
+        self._span_index += 1
+        span_index = self._span_index
         if is_error:
             self.error_count += 1
         if latency_s is not None:
@@ -321,6 +492,7 @@ class AITraceContext:
             return sid
 
         props = self._base_ai_props(sid, parent_id or self.trace_id)
+        props["$insert_id"] = make_insert_id(self.run_id, "$ai_span", span_index)
         props.update(
             {
                 "$ai_span_name": name or None,
@@ -328,6 +500,10 @@ class AITraceContext:
                 "$ai_is_error": bool(is_error),
             }
         )
+        _sr = sample_rate()
+        if _sr < 1.0:
+            props["sample_rate"] = _sr
+            props["sampled"] = True
         if latency_s is not None:
             props["$ai_latency"] = round(float(latency_s), 4)
         inp = self._maybe_body(input_body)
@@ -346,6 +522,32 @@ class AITraceContext:
         for any generation (so the run row stays null rather than showing 0)."""
         return round(self.total_cost_usd, 8) if self._cost_known else None
 
+    @property
+    def cost_is_partial(self) -> bool:
+        """True when ANY generation was unpriced (§A2). A partial sum silently
+        replacing null is worse than null, so callers must NOT treat
+        ``total_cost_usd`` as a complete figure when this is set."""
+        return self.unpriced_generation_count > 0
+
+    @property
+    def cost_source(self) -> str:
+        """Aggregate cost provenance for the trace.
+
+        ``litellm_per_token`` only when every generation was litellm-priced;
+        ``unknown`` when none priced; otherwise the same mix is still reported as
+        partial via ``cost_is_partial`` while the dominant source is surfaced."""
+        sources = {s for s in self._cost_sources if s}
+        if not sources:
+            return COST_SOURCE_UNKNOWN
+        if sources == {COST_SOURCE_LITELLM}:
+            return COST_SOURCE_LITELLM
+        if COST_SOURCE_LITELLM in sources:
+            # mixed priced + unpriced -> still litellm-sourced, flagged partial.
+            return COST_SOURCE_LITELLM
+        if COST_SOURCE_BLENDED in sources:
+            return COST_SOURCE_BLENDED
+        return COST_SOURCE_UNKNOWN
+
     def _p95_latency_ms(self) -> Optional[float]:
         if not self._latencies_ms:
             return None
@@ -355,7 +557,14 @@ class AITraceContext:
 
     def summary(self) -> Dict[str, Any]:
         """Trace-derived run rollup. Used to fix run_completed cost/tokens at
-        the right layer (§A2). Keys map onto the run-event properties."""
+        the right layer (§A2). Keys map onto the run-event properties.
+
+        These are the UNSAMPLED run-level totals: every generation/span updates
+        the rollup BEFORE the per-event sampling decision, so totals are the true
+        full figures regardless of ``POSTHOG_AI_SAMPLE_RATE``. Dashboards MUST
+        sum tokens/cost/generation_count from these run-level totals (on
+        ``$ai_trace`` / ``run_completed``); the sampled ``$ai_generation`` /
+        ``$ai_span`` events are drill-down detail only."""
         return {
             "ai_trace_id": self.trace_id,
             "generation_count": self.generation_count,
@@ -365,6 +574,10 @@ class AITraceContext:
             "total_output_tokens": self.total_output_tokens or None,
             "total_tokens": self.total_tokens or None,
             "total_cost_usd": self.rolled_total_cost_usd,
+            "cost_source": self.cost_source,
+            "pricing_version": PRICING_VERSION,
+            "cost_is_partial": self.cost_is_partial,
+            "unpriced_generation_count": self.unpriced_generation_count,
             "p95_step_latency_ms": self._p95_latency_ms(),
         }
 
@@ -376,7 +589,10 @@ class AITraceContext:
         try:
             props = {
                 "$ai_trace_id": self.trace_id,
-                "$ai_span_id": new_span_id(),
+                # Deterministic so a replayed run emits the SAME trace row (one
+                # $ai_trace per run_id, deduped by PostHog on $insert_id).
+                "$ai_span_id": make_insert_id(self.run_id, "$ai_trace"),
+                "$insert_id": make_insert_id(self.run_id, "$ai_trace"),
                 "run_id": self.run_id,
                 "worker_id": self.worker_id or None,
                 "workspace_id": self.workspace_id or None,
@@ -385,6 +601,10 @@ class AITraceContext:
                 "status": status,
                 "$ai_is_error": bool(is_error or self.error_count > 0),
                 "duration_ms": int((time.monotonic() - self._started_at) * 1000),
+                # Run-level totals here are UNSAMPLED (full truth); sum dashboards
+                # from these, never from the sampled drill-down events.
+                "totals_unsampled": True,
+                "sample_rate": sample_rate(),
             }
             props.update(
                 {k: v for k, v in self.summary().items() if k != "ai_trace_id"}
@@ -422,12 +642,19 @@ def capture_exception(
         return
     try:
         exc_type = type(exc).__name__
-        exc_value = str(exc)
+        # Scrub secrets/PII from message + stack BEFORE send (§A3 scrub path).
+        # A prompt/tool-arg/path can carry a pasted key or an email into the
+        # exception text; never echo it verbatim into PostHog.
+        exc_value = _redact_pii(_scrub_secrets(str(exc)))
         stack = "".join(
             traceback.format_exception(type(exc), exc, exc.__traceback__)
         )
+        stack = _redact_pii(_scrub_secrets(stack))
         if len(stack) > 8000:
             stack = stack[:8000] + "\n…[truncated]"
+        # Stable grouping key: strip volatile ids/paths/numbers so the same
+        # logical crash groups into one issue without cardinality blowup.
+        fingerprint = exception_fingerprint(exc_type, exc_value)
         props: Dict[str, Any] = {
             # PostHog Error Tracking schema: $exception_list groups by type+message.
             "$exception_list": [
@@ -439,6 +666,10 @@ def capture_exception(
             ],
             "$exception_type": exc_type,
             "$exception_message": exc_value,
+            "$exception_fingerprint": fingerprint,
+            # Deterministic id: one $exception per (run, fingerprint) so a retry
+            # of the same crashing run does not double-count the issue.
+            "$insert_id": make_insert_id(run_id, "$exception", fingerprint),
             "run_id": run_id,
             "worker_id": worker_id or None,
             "workspace_id": workspace_id or None,
@@ -482,13 +713,20 @@ def _emit(
     groups: Optional[Dict[str, str]],
 ) -> None:
     """Forward to the P1 client (which injects schema_version/emitter, swallows,
-    drops None distinct_id). Never raises."""
-    analytics_posthog.capture_event(
-        distinct_id=owner_id or "",
-        event=event,
-        properties=properties,
-        groups=groups,
-    )
+    drops None distinct_id). Records delivery telemetry so a swallowed failure is
+    a visible counter (the fail-soft client otherwise hides 4xx/5xx/queue drops).
+    Never raises."""
+    record_delivery_event("emit_attempted")
+    try:
+        analytics_posthog.capture_event(
+            distinct_id=owner_id or "",
+            event=event,
+            properties=properties,
+            groups=groups,
+        )
+    except Exception:  # pragma: no cover - capture_event already swallows
+        record_delivery_event("emit_failed")
+        logger.debug("AI-obs emit failed for %s", event, exc_info=True)
 
 
 def _prepare_body(value: Any, *, redact: bool) -> Any:
@@ -536,8 +774,6 @@ def _scrub_secrets(text: str) -> str:
     except Exception:
         return text
 
-
-import re as _re
 
 _EMAIL_RE = _re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE_RE = _re.compile(r"\+?\d[\d\s().-]{7,}\d")
