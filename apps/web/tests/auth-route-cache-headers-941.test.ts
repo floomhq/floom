@@ -1,6 +1,6 @@
-﻿// #941 — authenticated JSON endpoints must never be shared-cacheable.
+// #941 — authenticated JSON endpoints must never be shared-cacheable.
 // Regression: every identity-bearing route sets private/no-store explicitly
-// (a web host applied `public, max-age=0, must-revalidate` when nothing was set).
+// (Vercel applied `public, max-age=0, must-revalidate` when nothing was set).
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
@@ -23,7 +23,7 @@ describe("#941 cache headers on authenticated JSON routes", () => {
       jsonUpstream({ username: "u", role: "owner", scopes: ["*"] }),
     );
     const { GET } = await import("@/app/api/me/route");
-    const res = await GET(new NextRequest("https://localhost:3000/api/me"));
+    const res = await GET(new NextRequest("https://workers.floom.dev/api/me"));
     expect(res.headers.get("cache-control")).toBe(NO_STORE);
   });
 
@@ -31,7 +31,7 @@ describe("#941 cache headers on authenticated JSON routes", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonUpstream());
     const { POST } = await import("@/app/api/auth/login/route");
     const res = await POST(
-      new NextRequest("https://localhost:3000/api/auth/login", {
+      new NextRequest("https://workers.floom.dev/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username: "u", password: "p" }),
@@ -44,7 +44,7 @@ describe("#941 cache headers on authenticated JSON routes", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonUpstream());
     const { POST } = await import("@/app/api/auth/logout/route");
     const res = await POST(
-      new NextRequest("https://localhost:3000/api/auth/logout", { method: "POST" }),
+      new NextRequest("https://workers.floom.dev/api/auth/logout", { method: "POST" }),
     );
     expect(res.headers.get("cache-control")).toBe(NO_STORE);
   });
@@ -52,11 +52,11 @@ describe("#941 cache headers on authenticated JSON routes", () => {
   it("/api/auth/setup GET + POST respond private no-store", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonUpstream({ setup_required: false }));
     const { GET, POST } = await import("@/app/api/auth/setup/route");
-    const g = await GET(new NextRequest("https://localhost:3000/api/auth/setup"));
+    const g = await GET(new NextRequest("https://workers.floom.dev/api/auth/setup"));
     expect(g.headers.get("cache-control")).toBe(NO_STORE);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonUpstream());
     const p = await POST(
-      new NextRequest("https://localhost:3000/api/auth/setup", {
+      new NextRequest("https://workers.floom.dev/api/auth/setup", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username: "u", password: "p" }),

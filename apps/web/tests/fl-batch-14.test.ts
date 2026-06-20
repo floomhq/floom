@@ -22,23 +22,24 @@ describe("#616 Settings Developer section", () => {
     expect(s).toContain('import { GitWorkspacePanel } from "@/components/GitWorkspacePanel"');
   });
 
-  it("defines Developer as the visible Settings home for account integrations", () => {
-    // Phase 3 recomposes Settings into the Collection pattern. Git no longer
-    // has a standalone workspace tab; it lives under Account · Developer.
+  it("defines Connect & automate as the account-scoped home for Git sync", () => {
+    // The Workspace/Account split moved token CRUD into two dedicated panes and
+    // re-homed the developer reference (API/MCP/CLI/Git) under "Connect &
+    // automate". Git still lives there, account-scoped.
     const nav = src("lib/settings/nav-groups.ts");
-    expect(nav).toContain('{ key: "developer", label: "Developer", scope: "account"');
+    expect(nav).toContain('{ key: "connect", label: "Connect & automate", scope: "account"');
     const s = src("app/settings/page.tsx");
-    expect(s).toContain('"developer"');
-    expect(s).toContain("function DeveloperSection()");
+    expect(s).toContain('"connect"');
+    expect(s).toContain("function ConnectSection()");
   });
 
-  it("renders GitWorkspacePanel inside the Developer detail", () => {
+  it("renders GitWorkspacePanel inside the Connect & automate detail", () => {
     const s = src("app/settings/page.tsx");
-    const developerSectionIdx = s.indexOf("function DeveloperSection()");
-    expect(developerSectionIdx).toBeGreaterThanOrEqual(0);
-    // Window covers the whole DeveloperSection body (now includes the API tab
-    // ahead of the Git tab, so the Git panel sits further down than before).
-    expect(s.slice(developerSectionIdx, developerSectionIdx + 4000)).toContain("<GitWorkspacePanel />");
+    const connectSectionIdx = s.indexOf("function ConnectSection()");
+    expect(connectSectionIdx).toBeGreaterThanOrEqual(0);
+    // Window covers the whole ConnectSection body (the API tab sits ahead of the
+    // Git tab, so the Git panel is further down).
+    expect(s.slice(connectSectionIdx, connectSectionIdx + 5000)).toContain("<GitWorkspacePanel />");
   });
 
   it("keeps GitWorkspacePanel wired to the /system/git API wrappers", () => {

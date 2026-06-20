@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 // Standalone preview harness for the real Share modal (round-09 share-real).
 // Not part of the product surface: a dev/QA route to screenshot the modal in
@@ -22,7 +22,7 @@ function usePreviewGrantsStub() {
       const method = (init?.method ?? "GET").toUpperCase();
       if (url.includes("/share/grants") && method === "GET") {
         return new Response(
-          JSON.stringify([{ id: "g1", email: "morten@example.com", created_at: "" }]),
+          JSON.stringify([{ id: "g1", email: "morten@floom.dev", created_at: "" }]),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
@@ -34,7 +34,7 @@ function usePreviewGrantsStub() {
   }, []);
 }
 
-const SAMPLE_URL = "https://localhost:3000/s/fls_8x2Kp9QvA3mWnZ7tLrYbHd4";
+const SAMPLE_URL = "https://workers.floom.dev/s/fls_8x2Kp9QvA3mWnZ7tLrYbHd4";
 
 // A public-link create() that resolves to a fixed sample URL so screenshots are
 // stable. revoke() resolves after a tick.

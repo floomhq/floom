@@ -34,3 +34,33 @@ describe("public API base (UI display)", () => {
     expect(getPublicApiHost()).toBe("localhost:8000");
   });
 });
+
+// #953 — internal Railway origins must never surface in the UI.
+describe("#953 internal infra hosts are never displayed", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("remaps a *.up.railway.app base to the configured default", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://api-production-b866.up.railway.app");
+    expect(getPublicApiBase()).toBe(DEFAULT_PUBLIC_API_BASE);
+    expect(getPublicApiHost()).toBe("localhost:8000");
+  });
+
+  it("remaps railway.internal hosts", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "http://api.railway.internal:8080");
+    expect(getPublicApiBase()).toBe(DEFAULT_PUBLIC_API_BASE);
+  });
+
+  it("does NOT remap legitimate self-hosted domains", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://api.acme-corp.com");
+    expect(getPublicApiBase()).toBe("https://api.acme-corp.com");
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "http://localhost:8000");
+    expect(getPublicApiBase()).toBe("http://localhost:8000");
+  });
+
+  it("does NOT remap lookalike domains (railway.app.evil.com)", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://up.railway.app.evil.com");
+    expect(getPublicApiBase()).toBe("https://up.railway.app.evil.com");
+  });
+});

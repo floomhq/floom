@@ -1,4 +1,4 @@
-﻿/* PR S20: Inter + JetBrains Mono replaced by Geist Sans + Geist Mono
+/* PR S20: Inter + JetBrains Mono replaced by Geist Sans + Geist Mono
    (loaded via next/font in layout.tsx). The previous @import added a
    network hop the new approach inlines instead. */
 @import "tailwindcss";
@@ -102,7 +102,7 @@
 }
 
 :root {
-  /* v4 Cool palette (APP-UI-V4-SPEC §1, design-system/app — Phase 1 token swap).
+  /* v4 Cool palette (APP-UI-V4-SPEC §1, design.floom.dev/app — Phase 1 token swap).
      Source of truth: docs/design/final.html :root. Warm OS palette superseded. */
   --bg-app: #FBFBFC;
   --bg-card: #FFFFFF;
@@ -932,7 +932,7 @@ html.dark .grain {
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
 /* Tab cell: round only the TOP corners so the active underline reads as a
-   STRAIGHT, square-ended rule (round-09 Maintainer: underline must be straight,
+   STRAIGHT, square-ended rule (round-09 Federico: underline must be straight,
    not swirled/boxed; accent is links-only). */
 .c-dtab { display:inline-flex; align-items:center; gap:7px; padding:5px 11px 6px; border-radius:9px 9px 0 0; color:var(--muted-foreground); font-size:13px; white-space:nowrap; position:relative; }
 .c-dtab:hover { background:var(--bg-2); }
@@ -974,7 +974,7 @@ html.dark .grain {
 /* Bounded dashed drop-zone box for drop-led empty states (e.g. Library). The
    box itself is the drop target affordance — subtle dashed outline, DS line
    colour, generous padding so the icon/title/help/actions sit inside it. */
-.c-dropbox { gap:10px; align-self:center; max-width:520px; padding:40px 44px; border:1.5px dashed var(--line); border-radius:var(--radius-card); background:color-mix(in srgb, var(--bg-2) 35%, transparent); }
+.c-dropbox { gap:10px; align-self:center; margin-inline:auto; max-width:520px; padding:40px 44px; border:1.5px dashed var(--line); border-radius:var(--radius-card); background:color-mix(in srgb, var(--bg-2) 35%, transparent); }
 
 /* responsive (SPEC §8c): persistent ≥1100; drawer 768–1100; stack <768 */
 @media (max-width:1100px) {

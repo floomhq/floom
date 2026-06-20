@@ -1,4 +1,4 @@
-// Round-09 (Maintainer 2026-06-17) — Emily + creation real-component build.
+// Round-09 (Federico 2026-06-17) — Emily + creation real-component build.
 //   1. Worker-creation hero reuses the REAL PromptInput composer (not a bespoke
 //      textarea + "Hire worker" button) and Enter submits.
 //   2. Emily dock full-screen exposes an explicit CLOSE control + a
@@ -13,12 +13,27 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+// EmilyHomeEmpty (now shown in create mode too) reads these hooks — stub them.
+vi.mock("@/lib/query/hooks", () => ({
+  useOverview: () => ({
+    data: { stats: { work_shipped_7d: 7 }, outcomes: [], recent_runs: [], scheduled_today: [], needs_attention: [] },
+    isError: false,
+    isLoading: false,
+  }),
+  useWorkers: () => ({
+    data: [{ id: "w1", archived: false, system: false, is_example: false }],
+    isError: false,
+    isLoading: false,
+  }),
+}));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const mod = await importOriginal<Record<string, unknown>>();
   return {
     ...mod,
     api: {
       ...(mod.api as Record<string, unknown>),
+      me: vi.fn().mockResolvedValue({ display_name: "Fede", email: "fede@floom.dev" }),
       contexts: { list: vi.fn().mockResolvedValue([]) },
       chat: { uploadAttachments: vi.fn().mockResolvedValue([]) },
       conversations: { list: vi.fn().mockResolvedValue([]) },
@@ -46,24 +61,25 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
   };
 });
 
-import { EmilyChatPage, EmilyDock } from "@/components/emily/EmilyChat";
+import { EmilyChatCore, EmilyDock } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider } from "@/components/emily/emily-fullscreen";
 
-describe("Emily creation flow — native composer", () => {
-  it("create hero uses the real PromptInput (auto-resize TEXTAREA, not a form button)", () => {
-    render(<EmilyChatPage createMode />);
-    const composer = screen.getByPlaceholderText("Create me: a worker that…");
-    // The real PromptInput is a <textarea>; the old hand-rolled hero used a
-    // separate "Hire worker" submit button which we removed.
+describe("Emily creation flow — consistent Emily empty state", () => {
+  it("create uses the real PromptInput (auto-resize TEXTAREA), no bespoke hero", async () => {
+    render(<EmilyChatCore fullPage createMode />);
+    // Consistent Emily empty state: generic composer placeholder (NOT the bespoke
+    // "Create me: a worker that…" hero), no "Hire worker" submit button.
+    const composer = await screen.findByPlaceholderText("Message Emily...");
     expect(composer.tagName).toBe("TEXTAREA");
     expect(screen.queryByRole("button", { name: /hire worker/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
   });
 
-  it("Enter submits the create prompt (no click required)", async () => {
+  it("Enter submits the create prompt wrapped as a worker-draft directive (behavior preserved)", async () => {
     const user = userEvent.setup();
     sendMessage.mockClear();
-    render(<EmilyChatPage createMode />);
-    const composer = screen.getByPlaceholderText("Create me: a worker that…");
+    render(<EmilyChatCore fullPage createMode />);
+    const composer = await screen.findByPlaceholderText("Message Emily...");
     await user.click(composer);
     await user.keyboard("Send a daily digest{Enter}");
     // Enter fires exactly one submit (no click required).
@@ -116,7 +132,7 @@ describe("Emily dock — full screen controls", () => {
     expect(dock().className).not.toContain("flex-1");
     await user.click(screen.getByRole("button", { name: /expand emily/i }));
     // Fullscreen: flex-1 (fills main area) and NOT fixed inset overlay (which
-    // would cover the left nav — the regression Maintainer flagged).
+    // would cover the left nav — the regression Federico flagged).
     expect(dock().getAttribute("aria-label")).toMatch(/fullscreen/i);
     expect(dock().className).toContain("flex-1");
     expect(dock().className).not.toContain("fixed");

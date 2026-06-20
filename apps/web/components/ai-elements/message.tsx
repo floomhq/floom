@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
-// Local AI Elements message primitives.
+// Local AI Elements message primitives, matching the Vercel AI Elements API
+// used by their Message Actions examples.
 
 import type { ComponentProps } from "react";
 import { Button } from "@/components/ui/button";

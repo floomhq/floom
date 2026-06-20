@@ -11,7 +11,7 @@ import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
-import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
+import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
 import { RunStatusBadge } from "@/components/RunStatus";
 import { StatusPill } from "@/components/collection/StatusPill";
 import {
@@ -813,20 +813,21 @@ export default function ConnectionsCollection({
   const config: CollectionConfig<UnifiedConn> = {
     title: "Integrations",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
-    headerSlot: <ConnectionsTabs />,
+    headerSlot: <ConnectionsChips />,
     items,
     loading,
     error,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
+    // The TYPE dimension (connection / mcp / secret) is the job of the
+    // ConnectionsChips surface-nav (Connected / Browse apps / MCP / Secrets), so
+    // duplicating it as filter chips here was redundant (P0-2, Federico
+    // 2026-06-19). Chips answer "which surface"; the TagBar answers "which status
+    // within it". Only the STATUS chips remain, the one dimension the chips do
+    // not cover. Type stays in searchOf so a search like "mcp" still matches.
     tagsOf: (i) =>
-      ({ type: [i.kind], status: [i.statusKey] }) as Partial<Record<TagFamilyKey, string[]>>,
+      ({ status: [i.statusKey] }) as Partial<Record<TagFamilyKey, string[]>>,
     tags: {
-      type: [
-        { value: "connection", label: "Connection" },
-        { value: "mcp", label: "MCP" },
-        { value: "secret", label: "Secret" },
-      ],
       status: [
         { value: "active", label: "active" },
         { value: "reauth", label: "reauth" },

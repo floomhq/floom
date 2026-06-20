@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect } from "react";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
@@ -6,7 +6,7 @@ import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-st
 // Root error boundary. Catches any unhandled error in the app shell.
 //
 // The most common case on cold navigation is a ChunkLoadError: the browser has
-// a cached HTML page that references chunk hashes from an older web build
+// a cached HTML page that references chunk hashes from an older Vercel
 // deployment. When the new deployment lands, those chunk URLs 404. A hard
 // reload fetches the fresh HTML (and its fresh chunk hashes), fixing the issue
 // transparently.

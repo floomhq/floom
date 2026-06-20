@@ -106,8 +106,8 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 function allowedHosts(req: NextRequest): Set<string> {
   const hosts = new Set<string>();
-  // The request's own host, plus the forwarded host when a platform rewrite or
-  // proxy fronts the function.
+  // The request's own host, plus the forwarded host (the public domain when a
+  // platform rewrite/proxy fronts the function, e.g. the Cloud /app rewrite).
   const add = (h: string | null | undefined) => {
     if (h) hosts.add(h.split(",")[0].trim().toLowerCase());
   };

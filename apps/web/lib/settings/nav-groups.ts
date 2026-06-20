@@ -1,15 +1,20 @@
 // Settings nav, grouped per APP-UI-V4-SPEC §4: TWO labeled groups —
 //   Workspace · {name}  and  Account · {user}
-// with a counts strip like "6 workspace · 3 account".
+// with a counts strip like "7 workspace · 4 account".
 //
-// MECE rules (#1088):
-//   Workspace = shared/admin controls (System, Channels, Assistant, Members,
-//               Version history, Danger). No token management here — tokens
-//               live in Developer regardless of their grant scope.
-//   Account   = per-user controls (Profile, Developer for all API/CLI/MCP/token
-//               access, Appearance). Developer consolidates personal access
-//               tokens AND workspace tokens (admin-only sub-tab) so there is
-//               exactly one place to manage credentials/tokens.
+// Scope is communicated by WHERE a thing lives (the group it sits in) plus a
+// scope chip in each detail pane. This is the core of the token-confusion fix
+// (mockup: settings-mockup/index.html):
+//   - "Workspace token" lives under WORKSPACE  — one shared token (fl_wt_…)
+//     for this workspace's CLI & CI. Rotating it affects everyone.
+//   - "Personal access tokens" live under ACCOUNT — yours (fl_pat_…), they
+//     follow you across every workspace and act on your behalf.
+// Each token pane carries a scope chip + a cross-link to the other so the
+// "is this mine or the workspace's?" question is answered in-place.
+//
+// "Connect & automate" (account scope) holds the developer reference snippets
+// (REST API, MCP install, CLI, Git sync) — no token CRUD, those moved to the
+// two token panes above.
 
 export type SettingsScope = "workspace" | "account";
 
@@ -19,9 +24,11 @@ export interface SettingsNavItem {
     | "channels"
     | "assistant"
     | "members"
+    | "workspace_token"
     | "versions"
     | "danger"
-    | "developer"
+    | "personal_tokens"
+    | "connect"
     | "appearance"
     | "profile";
   label: string;
@@ -30,16 +37,18 @@ export interface SettingsNavItem {
 }
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
-  // Workspace · {name}
-  { key: "system", label: "System", scope: "workspace", description: "Workspace defaults" },
+  // Workspace · {name} — shared/admin controls.
+  { key: "system", label: "General", scope: "workspace", description: "Workspace defaults" },
+  { key: "members", label: "Members", scope: "workspace", description: "People & roles" },
   { key: "channels", label: "Channels", scope: "workspace", description: "Slack, email & WhatsApp" },
   { key: "assistant", label: "Assistant", scope: "workspace", description: "Configure Emily" },
-  { key: "members", label: "Members", scope: "workspace", description: "People & roles" },
+  { key: "workspace_token", label: "Workspace token", scope: "workspace", description: "Shared token for this workspace's CLI & CI" },
   { key: "versions", label: "Version history", scope: "workspace", description: "Git-tracked workspace changelog" },
-  { key: "danger", label: "Danger", scope: "workspace", description: "Irreversible actions" },
-  // Account · {user}
+  { key: "danger", label: "Danger zone", scope: "workspace", description: "Irreversible actions" },
+  // Account · {user} — per-user controls.
   { key: "profile", label: "Profile", scope: "account", description: "Display name & avatar" },
-  { key: "developer", label: "Developer", scope: "account", description: "API, CLI, MCP & access tokens" },
+  { key: "personal_tokens", label: "Personal access tokens", scope: "account", description: "Yours; work across every workspace" },
+  { key: "connect", label: "Connect & automate", scope: "account", description: "REST API, MCP, CLI & Git" },
   { key: "appearance", label: "Appearance", scope: "account", description: "Theme (light, dark, system)" },
 ];
 
@@ -47,7 +56,7 @@ export function settingsGroup(scope: SettingsScope): SettingsNavItem[] {
   return SETTINGS_NAV.filter((i) => i.scope === scope);
 }
 
-/** Count strip, e.g. "6 workspace · 2 account". */
+/** Count strip, e.g. "7 workspace · 4 account". */
 export function settingsCounts(): string {
   const ws = settingsGroup("workspace").length;
   const acct = settingsGroup("account").length;
