@@ -3,7 +3,7 @@
 // ReviewPack Review Pack — public client review flow (demo-client pilot).
 // German UI, mobile-first, no phone-frame chrome, no demo bar. Four screens:
 //   Gate (pack password) -> Identity (name/role) -> Review (job tabs, candidate
-//   cards, 👍/🤔/👎, auto-save) -> Done.
+//   cards, verdict buttons, auto-save) -> Done.
 // The token in the URL is the share secret; the pack password gates the body.
 // Reviewer identity + the unlocked password persist in localStorage so a reload
 // or a returning reviewer resumes without re-entering anything (contract:
@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { Check, ExternalLink, HelpCircle, Loader2, ThumbsDown, ThumbsUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { FloomMark } from "@/components/share/ShareCardShell";
 import type {
@@ -28,11 +28,6 @@ const VERDICT_LABEL: Record<ReviewVerdict, string> = {
   interested: "Interessiert",
   maybe: "Vielleicht",
   pass: "Nein",
-};
-const VERDICT_EMOJI: Record<ReviewVerdict, string> = {
-  interested: "👍",
-  maybe: "🤔",
-  pass: "👎",
 };
 const NOTE_MAX = 240;
 
@@ -56,6 +51,12 @@ function consensusMap(list: ReviewConsensus[]): Record<string, ReviewConsensus> 
   const out: Record<string, ReviewConsensus> = {};
   for (const c of list) out[keyOf(c.job_id, c.candidate_id)] = c;
   return out;
+}
+
+function VerdictIcon({ verdict, className = "h-3.5 w-3.5" }: { verdict: ReviewVerdict; className?: string }) {
+  if (verdict === "interested") return <ThumbsUp className={className} aria-hidden />;
+  if (verdict === "maybe") return <HelpCircle className={className} aria-hidden />;
+  return <ThumbsDown className={className} aria-hidden />;
 }
 
 export function ReviewFlow({ token }: { token: string }) {
@@ -450,7 +451,7 @@ export function ReviewFlow({ token }: { token: string }) {
                         key={i}
                         className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-[11px] text-[var(--ink-soft)]"
                       >
-                        <span>{VERDICT_EMOJI[chip.verdict]}</span>
+                        <VerdictIcon verdict={chip.verdict} className="h-3 w-3" />
                         {chip.reviewer_name}
                       </span>
                     ))}
@@ -486,7 +487,7 @@ export function ReviewFlow({ token }: { token: string }) {
                             : { background: "var(--bg-2)", color: "var(--ink)" }
                         }
                       >
-                        <span aria-hidden>{VERDICT_EMOJI[v]}</span>
+                        <VerdictIcon verdict={v} />
                         <span>{VERDICT_LABEL[v]}</span>
                       </button>
                     );
@@ -704,8 +705,8 @@ function DoneScreen({
   return (
     <CenteredShell>
       <div className="text-center">
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[var(--success)]/20 text-2xl text-[var(--success)]">
-          ✓
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[var(--success)]/20 text-[var(--success)]">
+          <Check className="h-6 w-6" aria-hidden />
         </div>
         <h1 className="mt-4 text-xl font-semibold text-[var(--ink)]">Review abgeschlossen</h1>
         <p className="mt-1.5 text-sm text-[var(--ink-soft)]">
@@ -725,7 +726,7 @@ function DoneScreen({
                 className="flex items-center justify-between gap-3 px-4 py-3 text-sm text-[var(--ink)] [&:not(:last-child)]:[border-bottom:var(--bd-div)]"
               >
                 <span className="min-w-0">
-                  <span className="mr-2">{VERDICT_EMOJI[p.verdict]}</span>
+                  <VerdictIcon verdict={p.verdict} className="mr-2 inline h-3.5 w-3.5" />
                   <span className="font-medium">{p.name}</span>
                 </span>
                 <span className="shrink-0 text-xs text-[var(--ink-soft)]">{p.job}</span>
