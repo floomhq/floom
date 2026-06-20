@@ -69,6 +69,14 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "worker_reported_error": "crash",
     "invalid_result_json": "crash",
     "missing_result": "crash",
+    # shutdown / redeploy-abandoned runs (spec §11 classifier gap): these are
+    # written with status=failed when the API restarts mid-run. They are an
+    # infrastructure crash, NOT "unknown" — mapping them to crash keeps the
+    # redeploy-killed runs out of the unknown bucket and aligns PostHog (which
+    # calls classify_failure) with the runs API.
+    "interrupted_by_restart": "crash",
+    "run_abandoned_server_restart": "crash",
+    "run_claimed_without_dispatch": "crash",
     # configuration / worker definition problems
     "invalid_worker": "config",
     "worker_not_found": "config",
@@ -107,13 +115,28 @@ _MESSAGE_SUBSTR_CATEGORY = (
     ("exceeded timeout", "timeout"),
     ("timed out", "timeout"),
     ("deadline exceeded", "timeout"),
+    # Iteration/tool-call caps are a timeout-class control limit, not a crash:
+    # the run kept looping until the cap fired. Live messages: "iteration cap
+    # exceeded", "tool iteration limit reached".
+    ("iteration cap", "timeout"),
+    ("tool iteration", "timeout"),
+    # Shutdown/redeploy-abandoned runs whose error_code was lost (cloud rows with
+    # null error_code) surface only as these messages. They are infra crashes.
     ("server disconnected", "crash"),
+    ("server restarted", "crash"),
+    ("no active executor", "crash"),
+    ("abandoned", "crash"),
     ("connection reset", "crash"),
     ("sandbox", "crash"),
     ("traceback", "crash"),
     ("path traversal", "crash"),
+    # Worker-reported failures ("worker reported failure", "failed to run the
+    # worker") are execution crashes, not unknown.
+    ("reported failure", "crash"),
+    ("failed to run", "crash"),
     ("out of memory", "resource"),
     ("oom", "resource"),
+    ("quota", "resource"),
     ("token", "resource"),
     ("spend cap", "resource"),
     ("missing secret", "auth"),
@@ -124,6 +147,11 @@ _MESSAGE_SUBSTR_CATEGORY = (
     ("name resolution", "network"),
     ("dns", "network"),
     ("network", "network"),
+    # Worker definition / config problems seen live: "worker config not found",
+    # "worker directory not found". Placed before the broad validation needles so
+    # a missing-config message is not miscategorised as validation.
+    ("config not found", "config"),
+    ("directory not found", "config"),
     ("schema", "validation"),
     ("validation", "validation"),
     ("invalid", "validation"),

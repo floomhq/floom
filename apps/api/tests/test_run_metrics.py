@@ -139,6 +139,69 @@ class TestClassifyFailure:
         # A real code wins even if the message mentions another category.
         assert classify_failure(error_code="timeout", error="connection refused") == "timeout"
 
+    # --- spec §11 classifier gap: shutdown/redeploy-abandoned runs must be
+    # crash, NOT unknown (they previously inflated the unknown bucket). ---
+    def test_interrupted_by_restart_is_crash(self):
+        assert classify_failure(error_code="interrupted_by_restart") == "crash"
+
+    def test_abandoned_server_restart_is_crash(self):
+        assert classify_failure(error_code="run_abandoned_server_restart") == "crash"
+
+    def test_claimed_without_dispatch_is_crash(self):
+        assert classify_failure(error_code="run_claimed_without_dispatch") == "crash"
+
+    # --- new live-message substring mappings (error_code null on the cloud). ---
+    def test_iteration_cap_message_is_timeout(self):
+        assert classify_failure(error="Run hit the iteration cap of 25") == "timeout"
+        assert classify_failure(error="tool iteration limit reached") == "timeout"
+
+    def test_server_restarted_message_is_crash(self):
+        assert classify_failure(error="API server restarted mid-run") == "crash"
+
+    def test_no_active_executor_message_is_crash(self):
+        assert classify_failure(
+            error="run abandoned (server restarted): no active executor after timeout window"
+        ) == "crash"
+
+    def test_abandoned_message_is_crash(self):
+        assert classify_failure(error="run abandoned before sandbox dispatch") == "crash"
+
+    def test_reported_failure_message_is_crash(self):
+        assert classify_failure(error="Worker reported failure during execution") == "crash"
+
+    def test_failed_to_run_message_is_crash(self):
+        assert classify_failure(error="Failed to run the worker bundle") == "crash"
+
+    def test_quota_message_is_resource(self):
+        assert classify_failure(error="API quota exceeded for this project") == "resource"
+
+    def test_worker_config_not_found_message_is_config(self):
+        assert classify_failure(error="worker config not found for id abc") == "config"
+
+    def test_directory_not_found_message_is_config(self):
+        assert classify_failure(error="worker directory not found on disk") == "config"
+
+    def test_new_categories_stay_within_taxonomy(self):
+        # Every value the classifier can return MUST be a declared category.
+        from services.run_metrics import FAILURE_CATEGORIES
+
+        samples = [
+            "interrupted_by_restart",
+            "run_abandoned_server_restart",
+            "run_claimed_without_dispatch",
+        ]
+        for code in samples:
+            assert classify_failure(error_code=code) in FAILURE_CATEGORIES
+        messages = [
+            "iteration cap exceeded",
+            "no active executor",
+            "worker config not found",
+            "quota exceeded",
+            "failed to run",
+        ]
+        for msg in messages:
+            assert classify_failure(error=msg) in FAILURE_CATEGORIES
+
 
 class TestFailuresByCategory:
     def test_groups_and_counts(self):
