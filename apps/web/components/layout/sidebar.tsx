@@ -367,7 +367,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   return (
     <>
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 lg:hidden">
         {/* #1305: white-label, workspace mark + name, not the Floom brand. */}
         <Link href="/overview" className="flex items-center gap-2 min-w-0">
           <WorkspaceMark size={22} />
@@ -401,7 +401,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
       {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
       <aside
         className={cn(
-          "sticky top-0 z-20 hidden h-screen flex-col [border-right:var(--bd-div)] bg-[var(--bg-app)] transition-[width] duration-200 md:flex overflow-hidden",
+          "sticky top-0 z-20 hidden h-screen flex-col [border-right:var(--bd-div)] bg-[var(--bg-app)] transition-[width] duration-200 lg:flex overflow-hidden",
           collapsed ? "w-[62px]" : "w-[228px]"
         )}
         aria-label="Main navigation"
@@ -529,7 +529,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
 
       {/* ── Mobile drawer ───────────────────────────────────────────────────── */}
       {open && (
-        <div className="md:hidden fixed inset-0 z-40 flex">
+        <div className="lg:hidden fixed inset-0 z-40 flex">
           <div
             className="absolute inset-0 bg-black/30"
             onClick={() => setOpen(false)}
