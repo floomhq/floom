@@ -441,7 +441,7 @@ def test_warm_pool_allows_scalar_run_inputs_but_still_keys_selected_contexts(mon
     assert search_key != profile_key
 
 
-def test_warm_pool_disabled_for_secrets_and_connections(monkeypatch, tmp_path):
+def test_warm_pool_allows_secrets_but_rejects_connections(monkeypatch, tmp_path):
     import runner_sandbox.e2b_driver as e2b_driver_mod
 
     monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
@@ -450,7 +450,7 @@ def test_warm_pool_disabled_for_secrets_and_connections(monkeypatch, tmp_path):
     (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
     cfg = SimpleNamespace(runtime=SimpleNamespace(command="python run.py", type="python"), contexts=[])
 
-    assert e2b_driver_mod._warm_pool_key(
+    secret_key, secret_err = e2b_driver_mod._warm_pool_key(
         worker_id="w",
         user_id="u",
         worker_dir=worker_dir,
@@ -458,7 +458,10 @@ def test_warm_pool_disabled_for_secrets_and_connections(monkeypatch, tmp_path):
         inputs={},
         secrets={"API_KEY": "secret"},
         sandbox_template="tmpl",
-    ) == (None, None)
+    )
+
+    assert secret_err is None
+    assert secret_key
 
     connection_cfg = SimpleNamespace(
         runtime=SimpleNamespace(command="python run.py", type="python"),
@@ -563,5 +566,5 @@ def test_cleanup_run_state_removes_run_scoped_files():
     sandbox = _FakeSandbox()
     assert e2b_driver_mod._cleanup_run_state(sandbox, "/home/user/worker", log_fn=lambda *_args: None) is True
     command = str(sandbox.commands.runs[-1]["command"])
-    assert "find . -mindepth 1 -maxdepth 1 -not -name context" in command
+    assert "rm -rf -- inputs inputs.json .env.local secrets.json connections.json result.json" in command
     assert "find /tmp -mindepth 1 -maxdepth 1" in command
