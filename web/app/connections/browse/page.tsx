@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -17,8 +18,13 @@ import {
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { groupActions } from "@/lib/connections/action-buckets";
 import { HIDDEN_CHANNEL_SLUGS } from "@/components/connections/connection-data";
-import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import {
@@ -184,10 +190,23 @@ function CatalogToolsPanel({ item }: { item: IntegrationCatalogItem }) {
     );
   }, [tools, toolSearch]);
 
+  // Group the FILTERED tools into plain-language buckets (display-only — the
+  // catalog data is untouched). Empty buckets fall away.
+  const buckets = useMemo(
+    () => groupActions(filteredTools, (t) => t.name),
+    [filteredTools]
+  );
+
+  const searching = toolSearch.trim().length > 0;
+
   if (loadingTools) return <LoadingState rows={4} />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "var(--muted-foreground)" }}>
+        These are the things a worker can do with {item.name} once connected,
+        grouped by what they&rsquo;re for.
+      </p>
       <div className="c-srch" style={{ maxWidth: "none", padding: "8px 11px" }}>
         <Search size={14} />
         <input
@@ -198,9 +217,87 @@ function CatalogToolsPanel({ item }: { item: IntegrationCatalogItem }) {
           onChange={(e) => setToolSearch(e.target.value)}
         />
       </div>
-      {filteredTools.length > 0 ? (
-        <ul style={{ display: "flex", flexDirection: "column", gap: 12, margin: 0, padding: 0, listStyle: "none" }}>
-          {filteredTools.map((tool) => (
+      {buckets.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {buckets.map((group) => (
+            <ActionBucketSection
+              key={group.def.key}
+              label={group.def.label}
+              blurb={group.def.blurb}
+              tools={group.items}
+              // While filtering, every visible bucket opens so matches aren't
+              // hidden behind a collapsed long-tail section.
+              open={searching || group.def.defaultOpen}
+            />
+          ))}
+        </div>
+      ) : tools !== null ? (
+        <p style={{ padding: "8px 2px", fontSize: 12.5, color: "var(--muted-foreground)" }}>
+          {searching ? "No actions match your filter." : "No action details available."}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// ActionBucketSection: one collapsible plain-language bucket of actions, with a
+// count on the header. `open` seeds the initial/forced state (it re-syncs when
+// the filter forces a bucket open), but the user can still toggle within that.
+function ActionBucketSection({
+  label,
+  blurb,
+  tools,
+  open,
+}: {
+  label: string;
+  blurb: string;
+  tools: CatalogToolItem[];
+  open: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(open);
+
+  // Re-sync when the filter-driven `open` changes (e.g. user starts typing).
+  useEffect(() => {
+    setIsOpen(open);
+  }, [open]);
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger
+        className="c-vpill group"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+          padding: "8px 10px",
+          background: "var(--bg-2)",
+          textAlign: "left",
+          cursor: "pointer",
+        }}
+      >
+        <ChevronDown
+          size={14}
+          style={{
+            flexShrink: 0,
+            color: "var(--muted-foreground)",
+            transition: "transform 120ms",
+            transform: isOpen ? "rotate(0deg)" : "rotate(-90deg)",
+          }}
+        />
+        <span style={{ minWidth: 0, flex: 1 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--ink)" }}>{label}</span>
+          <span style={{ marginTop: 1, display: "block", fontSize: 11.5, lineHeight: 1.4, color: "var(--muted-foreground)" }}>
+            {blurb}
+          </span>
+        </span>
+        <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 500, color: "var(--muted-foreground)", fontVariantNumeric: "tabular-nums" }}>
+          {tools.length}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ul style={{ display: "flex", flexDirection: "column", gap: 12, margin: 0, padding: "10px 0 6px 4px", listStyle: "none" }}>
+          {tools.map((tool) => (
             <li key={tool.name} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
               <Zap size={14} style={{ marginTop: 2, flexShrink: 0, color: "var(--accent)" }} />
               <div style={{ minWidth: 0 }}>
@@ -214,12 +311,8 @@ function CatalogToolsPanel({ item }: { item: IntegrationCatalogItem }) {
             </li>
           ))}
         </ul>
-      ) : tools !== null ? (
-        <p style={{ padding: "8px 2px", fontSize: 12.5, color: "var(--muted-foreground)" }}>
-          {toolSearch ? "No actions match your filter." : "No action details available."}
-        </p>
-      ) : null}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -432,7 +525,7 @@ export default function ConnectionsBrowsePage() {
         });
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Failed to load integrations";
+      const msg = error instanceof Error ? error.message : "Failed to load connections";
       setLoadError(msg);
       toast.error(msg);
     } finally {
@@ -464,7 +557,17 @@ export default function ConnectionsBrowsePage() {
   const config: CollectionConfig<IntegrationCatalogItem> = {
     title: "Browse apps",
     subtitle: "Connect the apps your workers need to take action.",
-    headerSlot: <ConnectionsChips />,
+    // Back to the unified Connections list (Browse apps is reached from the
+    // Connections "Add" button, not a section tab).
+    headerSlot: (
+      <Link
+        href="/connections"
+        className="inline-flex items-center gap-1 text-[13px] text-[var(--ink-soft)] hover:text-ink"
+      >
+        <ChevronLeft className="size-3.5" aria-hidden="true" />
+        Connections
+      </Link>
+    ),
     items,
     loading,
     error: loadError,
@@ -591,7 +694,8 @@ export default function ConnectionsBrowsePage() {
     },
     states: {
       empty: {
-        title: "No integrations found",
+        // #1707: canonical "Connections" wording across the surface.
+        title: "No connections found",
         help: "Clear filters or try a broader search.",
         icon: Search,
         action:

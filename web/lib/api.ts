@@ -437,18 +437,29 @@ export const api = {
     rollback: (id: string, versionId: string) =>
       fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
     // Worker feedback (SPEC §12) — anyone who can see the worker can comment.
-    feedback: {
-      list: (id: string) =>
-        fetchJson<import("@/lib/types").WorkerFeedback[]>(`/workers/${id}/feedback`),
-      create: (id: string, content: string) =>
-        fetchJson<import("@/lib/types").WorkerFeedback>(`/workers/${id}/feedback`, {
+      feedback: {
+        list: (id: string) =>
+          fetchJson<import("@/lib/types").WorkerFeedback[]>(`/workers/${id}/feedback`),
+        create: (id: string, content: string) =>
+          fetchJson<import("@/lib/types").WorkerFeedback>(`/workers/${id}/feedback`, {
           method: "POST",
           body: JSON.stringify({ content }),
         }),
-      remove: (id: string, feedbackId: string) =>
-        fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
+        remove: (id: string, feedbackId: string) =>
+          fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
+      },
+      alerts: {
+        list: (id: string) =>
+          fetchJson<import("@/lib/types").WorkerAlert[]>(`/workers/${id}/alerts`),
+        create: (id: string, body: import("@/lib/types").WorkerAlertCreate) =>
+          fetchJson<import("@/lib/types").WorkerAlert>(`/workers/${id}/alerts`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          }),
+        remove: (id: string, alertId: string) =>
+          fetchJson<void>(`/workers/${id}/alerts/${alertId}`, { method: "DELETE" }),
+      },
     },
-  },
   runs: {
     list: async (params?: {
       worker_id?: string;
@@ -672,6 +683,36 @@ export const api = {
       }
       return res.json() as Promise<import("@/lib/types").ApprovalUploadResponse>;
     },
+  },
+  // ReviewPack Review Pack (demo-client pilot) - public, no Workeros login.
+  // The token in the path is the share secret; the pack password gates reads.
+  review: {
+    publicGet: (token: string, password?: string, reviewerToken?: string) => {
+      const headers = new Headers();
+      if (password) headers.set("x-review-pack-password", password);
+      if (reviewerToken) headers.set("x-review-pack-reviewer-token", reviewerToken);
+      return fetchJson<import("@/lib/types").ReviewPackPublicResponse>(
+        `/review/public/${encodeURIComponent(token)}`,
+        { headers },
+      );
+    },
+    publicMyVotes: (token: string, reviewerToken: string, password?: string) => {
+      const headers = new Headers({ "x-review-pack-reviewer-token": reviewerToken });
+      if (password) headers.set("x-review-pack-password", password);
+      return fetchJson<import("@/lib/types").ReviewPackFeedbackResponse>(
+        `/review/public/${encodeURIComponent(token)}/feedback`,
+        { headers },
+      );
+    },
+    publicFeedback: (token: string, reviewerToken: string, input: import("@/lib/types").ReviewPackFeedbackInput) =>
+      fetchJson<import("@/lib/types").ReviewPackVoteResponse>(
+        `/review/public/${encodeURIComponent(token)}/feedback`,
+        {
+          method: "POST",
+          headers: { "x-review-pack-reviewer-token": reviewerToken },
+          body: JSON.stringify(input),
+        },
+      ),
   },
   secrets: {
     list: () => fetchJson<import("@/lib/types").SecretItem[]>("/secrets"),

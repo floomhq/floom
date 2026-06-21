@@ -118,7 +118,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
     render(<Harness config={makeConfig()} />);
     expect(screen.getByText("DACH Compliance")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "ok" }));
     expect(screen.queryByText("DACH Compliance")).not.toBeInTheDocument(); // failing filtered out
     expect(screen.getByText("Weekly Update")).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
     const user = userEvent.setup();
     render(<Harness config={makeConfig()} />);
 
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "dach" }));
     await user.click(screen.getByRole("button", { name: "recruiting" }));
     expect(screen.getByText("DACH Compliance")).toBeInTheDocument();
@@ -143,7 +143,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
   it("ANDs search with the active tag filter", async () => {
     const user = userEvent.setup();
     render(<Harness config={makeConfig()} />);
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "ok" }));
     await user.type(screen.getByRole("searchbox", { name: "Search" }), "gmail");
     expect(screen.getByText("Gmail Intake")).toBeInTheDocument();
@@ -222,6 +222,57 @@ describe("CollectionView — split detail (§8e)", () => {
     expect(screen.queryByText("create form")).not.toBeInTheDocument();
   });
 
+  // GAP-POPCLOSE: the +Add panel is an inline split-pane (no backdrop), but it
+  // must still dismiss like a proper popover — on click-outside and on Escape,
+  // not only via the ✕.
+  it("+Add panel dismisses on click-outside (GAP-POPCLOSE)", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        config={makeConfig({
+          add: { label: "Add", panel: { title: "Create thing", render: () => <div>create form</div> } },
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText("create form")).toBeInTheDocument();
+
+    // A click anywhere outside the add pane (here: the document body) closes it.
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByText("create form")).not.toBeInTheDocument();
+  });
+
+  it("+Add panel dismisses on Escape (GAP-POPCLOSE)", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        config={makeConfig({
+          add: { label: "Add", panel: { title: "Create thing", render: () => <div>create form</div> } },
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText("create form")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+    expect(screen.queryByText("create form")).not.toBeInTheDocument();
+  });
+
+  it("mouseDown INSIDE the +Add panel does NOT dismiss it (GAP-POPCLOSE)", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        config={makeConfig({
+          add: { label: "Add", panel: { title: "Create thing", render: () => <div>create form</div> } },
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    const form = screen.getByText("create form");
+    fireEvent.mouseDown(form);
+    expect(screen.getByText("create form")).toBeInTheDocument();
+  });
+
   it("clears selection and toasts when ?sel points at a missing item", () => {
     const onInvalidSel = vi.fn();
     render(
@@ -233,6 +284,87 @@ describe("CollectionView — split detail (§8e)", () => {
       />,
     );
     expect(onInvalidSel).toHaveBeenCalledWith("does-not-exist");
+  });
+});
+
+describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => {
+  // A valid id deep-linked via ?sel that isn't in the loaded (partial/paged)
+  // list must NOT false-toast: resolveMissing hydrates it, the detail opens.
+  it("hydrates a deep-linked id absent from the list and opens it WITHOUT a toast", async () => {
+    const onInvalidSel = vi.fn();
+    const resolveMissing = vi.fn(async (id: string) =>
+      id === "99"
+        ? { id: "99", name: "Hydrated Worker", status: "ok", content: ["recruiting"] }
+        : null,
+    );
+    render(
+      <CollectionView
+        config={makeConfig({ resolveMissing })}
+        // "99" is not in ITEMS — it only exists via resolveMissing.
+        state={{ ...emptyState("grid"), sel: "99" }}
+        onChange={() => {}}
+        onInvalidSel={onInvalidSel}
+      />,
+    );
+    // detail opens once hydration resolves; no false "not found" toast.
+    expect(await screen.findByText("About Hydrated Worker")).toBeInTheDocument();
+    expect(resolveMissing).toHaveBeenCalledWith("99");
+    expect(onInvalidSel).not.toHaveBeenCalled();
+  });
+
+  // A genuinely-missing id (resolveMissing → null) must still surface the toast.
+  it("still toasts (onInvalidSel) when resolveMissing returns null for a real miss", async () => {
+    const onInvalidSel = vi.fn();
+    const resolveMissing = vi.fn(async () => null);
+    render(
+      <CollectionView
+        config={makeConfig({ resolveMissing })}
+        state={{ ...emptyState("grid"), sel: "ghost-id" }}
+        onChange={() => {}}
+        onInvalidSel={onInvalidSel}
+      />,
+    );
+    await vi.waitFor(() => expect(onInvalidSel).toHaveBeenCalledWith("ghost-id"));
+    expect(resolveMissing).toHaveBeenCalledWith("ghost-id");
+    expect(screen.queryByText("About ghost-id")).not.toBeInTheDocument();
+  });
+
+  // A throw is a genuine miss too (e.g. 404/403 from the api client).
+  it("toasts when resolveMissing throws", async () => {
+    const onInvalidSel = vi.fn();
+    const resolveMissing = vi.fn(async () => {
+      throw new Error("404");
+    });
+    render(
+      <CollectionView
+        config={makeConfig({ resolveMissing })}
+        state={{ ...emptyState("grid"), sel: "boom-id" }}
+        onChange={() => {}}
+        onInvalidSel={onInvalidSel}
+      />,
+    );
+    await vi.waitFor(() => expect(onInvalidSel).toHaveBeenCalledWith("boom-id"));
+  });
+
+  // Guard: resolveMissing fires at most once per id (no loops/refetch storms).
+  it("calls resolveMissing only once for the same id", async () => {
+    const onInvalidSel = vi.fn();
+    const resolveMissing = vi.fn(async (id: string) => ({
+      id,
+      name: "Once",
+      status: "ok",
+      content: [],
+    }));
+    render(
+      <CollectionView
+        config={makeConfig({ resolveMissing })}
+        state={{ ...emptyState("grid"), sel: "once-id" }}
+        onChange={() => {}}
+        onInvalidSel={onInvalidSel}
+      />,
+    );
+    expect(await screen.findByText("About Once")).toBeInTheDocument();
+    expect(resolveMissing).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -253,5 +385,36 @@ describe("CollectionView — states (§7)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("boom");
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalled();
+  });
+
+  // #1726/#1709 polish pass 2: a truly-empty collection hides the toolbar
+  // (search + view toggle + add button) and tag filters — the empty state owns
+  // the screen — so there is no duplicate "Add"/"New worker" CTA or useless
+  // filter chrome with zero items.
+  it("hides the search/filter/view-toggle toolbar when the collection is empty", () => {
+    const { container } = render(<Harness config={makeConfig({ items: [] })} />);
+    expect(screen.getByText("No workers yet")).toBeInTheDocument();
+    // No search box, view toggle, tag bar, or toolbar add button on the empty surface.
+    expect(container.querySelector(".c-toolbar")).not.toBeInTheDocument();
+    expect(container.querySelector(".c-srch")).not.toBeInTheDocument();
+    expect(container.querySelector(".c-tagbar-wrap")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View mode" })).not.toBeInTheDocument();
+    // The empty-state fallback action (the page's add) is still reachable once,
+    // not duplicated by a toolbar button.
+    expect(screen.getAllByRole("button", { name: /Add/ })).toHaveLength(1);
+  });
+
+  // When a search/filter narrows a NON-empty list to zero, the toolbar STAYS so
+  // the user can clear the query (only a genuinely empty collection hides it).
+  it("keeps the toolbar when a filter narrows a non-empty list to zero", () => {
+    const { container } = render(
+      <Harness
+        config={makeConfig()}
+        initial={{ ...emptyState("grid"), q: "zzz-no-match" }}
+      />,
+    );
+    expect(screen.getByText("No workers yet")).toBeInTheDocument();
+    expect(container.querySelector(".c-toolbar")).toBeInTheDocument();
+    expect(container.querySelector(".c-srch")).toBeInTheDocument();
   });
 });

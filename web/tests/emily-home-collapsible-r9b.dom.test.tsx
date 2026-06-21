@@ -87,16 +87,18 @@ describe("HOME fullscreen Emily is collapsible", () => {
     // Home starts fullscreen.
     expect(await screen.findByLabelText(/emily dock \(fullscreen\)/i)).toBeInTheDocument();
 
-    // A visible collapse/minimize control exists on home (was gated off before).
-    const minimize = screen.getByRole("button", { name: /minimize emily/i });
+    // A visible collapse control exists on home (was gated off before). The
+    // full-screen toggle reads exactly "Exit full screen" while full (no longer
+    // the ambiguous "Minimize Emily") so the affordance is unmistakable.
+    const minimize = screen.getByRole("button", { name: /^exit full screen$/i });
     await user.click(minimize);
 
     // Collapse STICKS: dock is no longer fullscreen (back to a fixed-width rail).
     expect(dock().getAttribute("aria-label")).not.toMatch(/fullscreen/i);
     expect(dock().className).toContain("shrink-0");
 
-    // A maximize/expand control is now shown; clicking it returns to fullscreen.
-    const expand = screen.getByRole("button", { name: /expand emily/i });
+    // The full-screen control now reads "Full screen"; clicking it returns to fullscreen.
+    const expand = screen.getByRole("button", { name: /^full screen$/i });
     await user.click(expand);
     expect(dock().getAttribute("aria-label")).toMatch(/fullscreen/i);
   });

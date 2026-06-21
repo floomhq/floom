@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useIsDesktop } from "@/lib/use-is-desktop";
 import { Ambient } from "@/components/Ambient";
 import { CommandPalette } from "@/components/CommandPalette";
 import { IconSprite } from "@/components/IconSprite";
@@ -16,19 +16,11 @@ import { BootSplash } from "@/components/layout/BootSplash";
 import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 
 // Render exactly one Emily surface so only one chat instance mounts: the
-// desktop dock (≥768px) or the mobile bottom-sheet (<768px). Defaults to
-// desktop to match SSR (no hydration mismatch), corrected on mount.
-function useIsDesktop(): boolean {
-  const [isDesktop, setIsDesktop] = useState(true);
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
-    const sync = () => setIsDesktop(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-  return isDesktop;
-}
+// desktop dock (≥1024px) or the mobile/tablet bottom-sheet (<1024px).
+// `useIsDesktop` (lib/use-is-desktop) defaults to mobile so small viewports
+// always get the mobile Emily affordance, then syncs to the real breakpoint on
+// mount. The 1024 boundary (#1544) keeps the docked Emily off the tablet range
+// (768–1023), where the 3-column shell would crush the content pane.
 
 // Public, shareable "skill card" pages render full-bleed without the app
 // sidebar / command palette. /w and /s are standalone public share pages.
@@ -63,12 +55,12 @@ function pathMatchesPrefixes(pathname: string, prefixes: string[]) {
 // expiring connections, pending approvals) is reachable from every page, not
 // just /overview. Anchoring to the pane — not the viewport — keeps it left of
 // the Emily dock regardless of the dock's current width (rail/wide/full).
-// Self-fetches its data (no `items` prop). Desktop only — the mobile top bar
-// carries its own bell (see sidebar.tsx). z-30 sits above page content; the
-// dropdown opens leftward (right-0) so it stays inside the pane.
+// Self-fetches its data (no `items` prop). Desktop only (≥1024, lg) — the
+// mobile/tablet top bar carries its own bell (see sidebar.tsx). z-30 sits above
+// page content; the dropdown opens leftward (right-0) so it stays inside the pane.
 function GlobalAlertsBell() {
   return (
-    <div className="pointer-events-none absolute right-3 top-2 z-30 hidden md:block">
+    <div className="pointer-events-none absolute right-3 top-2 z-30 hidden lg:block">
       <div className="pointer-events-auto">
         <AlertsBell />
       </div>
@@ -90,7 +82,13 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         <BootSplash />
         <IconSprite />
         <Ambient />
-        <main className="relative z-10 min-h-screen w-full">{children}</main>
+        {/* The <body> is `h-screen overflow-hidden`, so a standalone page needs
+            its OWN scroll container or any content taller than the viewport is
+            clipped and unreachable. `min-h-screen` alone grew the page past the
+            fold with nothing able to scroll to it (#1717: the /approvals/review
+            multi-item proposed output was clipped). `h-full overflow-y-auto`
+            makes this pane the scroller, matching standard app pages. */}
+        <main className="relative z-10 h-full w-full overflow-y-auto">{children}</main>
         <Toaster position="bottom-right" closeButton />
       </>
     );
@@ -178,8 +176,9 @@ function StandardShellBody({
           )}
         >
           {/* Zero-height sticky bar keeps the bell pinned to the pane's
-              top-right while the page content scrolls underneath it. */}
-          <div className="pointer-events-none sticky top-0 z-30 hidden h-0 md:block">
+              top-right while the page content scrolls underneath it.
+              Desktop only (lg) — tablet/mobile use the sidebar header bell. */}
+          <div className="pointer-events-none sticky top-0 z-30 hidden h-0 lg:block">
             <div className="pointer-events-auto absolute right-3 top-2">
               <AlertsBell />
             </div>

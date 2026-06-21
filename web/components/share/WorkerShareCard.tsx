@@ -20,6 +20,7 @@ import { Clock, Layers, MousePointerClick, Webhook, Zap } from "lucide-react";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { GenericOutput } from "@/components/generic-output";
 import { SHARE_CARD_BODY_HEIGHT } from "@/components/share/ShareCardShell";
+import { sanitizeOutputText } from "@/lib/strip-citations";
 import type { PublicWorker } from "@/lib/types";
 
 const SLUG_ALIASES: Record<string, string> = {
@@ -209,7 +210,9 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
           )}
           {tab === "yaml" && (
             <pre className="overflow-x-auto px-5 py-4 font-mono text-[11px] leading-relaxed text-[var(--ink-soft)]">
-              {buildWorkerYml(worker)}
+              {/* worker.yml is synthesized from public fields; sanitize for
+                  consistency so no internal marker can ever render here (#1752). */}
+              {sanitizeOutputText(buildWorkerYml(worker))}
             </pre>
           )}
           {tab === "output" && hasExample && (

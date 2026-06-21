@@ -92,31 +92,30 @@ describe("create flow = the home fullscreen Emily, primed for create", () => {
     expect(await screen.findByLabelText(/emily dock \(fullscreen\)/i)).toBeInTheDocument();
   });
 
-  it("?create=1 renders the create hero (create placeholder + pills), NOT the home pulse", async () => {
+  it("?create=1 renders the SAME consistent Emily empty state — NO bespoke 'Hire a new worker' hero", async () => {
     search.mockReturnValue("create=1");
     renderDock();
-    // The create-primed composer placeholder (the create empty state), inside the
-    // same one Emily core — no separate /chat 'Hire a worker' page chrome.
-    expect(await screen.findByPlaceholderText("Create me: a worker that…")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Hire a new worker" })).toBeInTheDocument();
-    // The home pulse must NOT show in create mode (create takes precedence).
-    expect(screen.queryByText(/done this week/i)).not.toBeInTheDocument();
+    // The consistent Emily empty state: the generic 'Message Emily' composer
+    // inside the same one Emily core — no bespoke create hero, no separate chrome.
+    expect(await screen.findByPlaceholderText(/Message Emily/i)).toBeInTheDocument();
+    // The bespoke "Hire a new worker" hero must NOT exist anymore.
+    expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
   });
 
   it("?prime=<text> seeds the create composer", async () => {
     search.mockReturnValue("create=1&prime=" + encodeURIComponent("Send me a GitHub PR digest at 9am"));
     renderDock();
     const composer = (await screen.findByPlaceholderText(
-      "Create me: a worker that…",
+      /Message Emily/i,
     )) as HTMLTextAreaElement;
     expect(composer.value).toBe("Send me a GitHub PR digest at 9am");
   });
 
-  it("plain home (no ?create=1) shows the home empty state, not the create hero", async () => {
+  it("plain home (no ?create=1) shows the home empty state too — same surface as create", async () => {
     search.mockReturnValue("");
     renderDock();
-    // Home → Emily fullscreen with the normal 'Message Emily' composer; the create
-    // hero heading must be absent.
+    // Home → Emily fullscreen with the normal 'Message Emily' composer; no bespoke
+    // create hero on either surface.
     expect(await screen.findByPlaceholderText(/Message Emily/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
   });

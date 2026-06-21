@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
+import { IntegrationsShell } from "@/components/connections/IntegrationsShell";
 import { ListLoading, ListEmpty, ListError } from "@/components/collection/CollectionStates";
 import { api } from "@/lib/api";
 import type { ConnectionItem, SecretItem } from "@/lib/types";
@@ -49,15 +49,15 @@ type McpConfigPayload = {
 };
 
 const MCP_INSTALL_TARGETS = [
-  { label: "Codex / Generic", target: "generic", command: "workeros mcp install --target generic" },
-  { label: "Claude", target: "claude", command: "workeros mcp install --target claude" },
-  { label: "Cursor", target: "cursor", command: "workeros mcp install --target cursor" },
-  { label: "VS Code", target: "vscode", command: "workeros mcp install --target vscode" },
-  { label: "Windsurf", target: "windsurf", command: "workeros mcp install --target windsurf" },
-  { label: "Continue", target: "continue", command: "workeros mcp install --target continue" },
+  { label: "Codex / Generic", target: "generic", command: "floom mcp install --target generic" },
+  { label: "Claude", target: "claude", command: "floom mcp install --target claude" },
+  { label: "Cursor", target: "cursor", command: "floom mcp install --target cursor" },
+  { label: "VS Code", target: "vscode", command: "floom mcp install --target vscode" },
+  { label: "Windsurf", target: "windsurf", command: "floom mcp install --target windsurf" },
+  { label: "Continue", target: "continue", command: "floom mcp install --target continue" },
 ] as const;
 
-const IMPORT_CONFIG_COMMAND = "workeros connections import-mcp-config ~/.claude/settings.json";
+const IMPORT_CONFIG_COMMAND = "floom connections import-mcp-config ~/.claude/settings.json";
 const DEFAULT_MCP_JSON = `{
   "label": "github",
   "transport": "streamable_http",
@@ -500,17 +500,10 @@ export default function McpConnectionsPage() {
     MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command;
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">MCP</h1>
-        <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-          Use Floom as an MCP server in your AI client, or register MCP servers
-          your workers can call.
-        </p>
-      </header>
-
-      <ConnectionsChips />
-
+    <IntegrationsShell
+      title="MCP"
+      subtitle="Use Floom as an MCP server in your AI client, or register MCP servers your workers can call."
+    >
       {/* ============================================================= */}
       {/* Concept A — Use Floom Workers IN your AI client (secondary)   */}
       {/* ============================================================= */}
@@ -703,14 +696,14 @@ export default function McpConnectionsPage() {
                 </div>
                 {transport !== "stdio" && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="mcp-auth-secret" className="text-xs text-muted-foreground">Auth secret (bearer token)</Label>
+                  <Label htmlFor="mcp-auth-secret" className="text-xs text-muted-foreground">Access key</Label>
                   <select
                     id="mcp-auth-secret"
                     value={authSecret}
                     onChange={(e) => setAuthSecret(e.target.value)}
                     className="flex h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-3 text-sm outline-none"
                   >
-                    <option value="">No bearer token</option>
+                    <option value="">No access key</option>
                     {secrets.map((s) => (
                       <option key={s.name} value={s.name}>{s.name}</option>
                     ))}
@@ -954,7 +947,7 @@ export default function McpConnectionsPage() {
         stored here. Prefer the terminal? Run{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono">{IMPORT_CONFIG_COMMAND}</code>.
       </p>
-    </div>
+    </IntegrationsShell>
   );
 }
 

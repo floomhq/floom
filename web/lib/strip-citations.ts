@@ -42,3 +42,71 @@ export function stripCitationTokens(input: string): string {
     .replace(/[ \t]+\n/g, "\n");
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Internal redaction placeholders (#1703). The backend secret scrubber
+// (`scrub_secrets` / `_scrub`) replaces a worker secret's VALUE with a marker
+// of the form `<REDACTED:SECRET_ENV_NAME>` (or a bare `<REDACTED>`). That marker
+// is correct on the security side (the real value never leaks) but it must not
+// render inside a user-facing deliverable: a candidate's title coming back as
+// `<REDACTED:EXTERNAL_APIFY_PROFILE_SCRAPER_MODE> Stack Entwickler` looks broken
+// and leaks an internal pipeline detail (the secret's env-var name).
+//
+// We strip these markers at display/export time so the deliverable reads
+// cleanly without weakening the backend redaction. The token is replaced with
+// nothing; surrounding whitespace/punctuation left behind is then tidied.
+// ---------------------------------------------------------------------------
+// Secret names allow mixed/lower case (manifest/MCP secrets permit [A-Za-z_]),
+// so the marker name char-class must too — an uppercase-only class let
+// `<REDACTED:apifyToken>` / `<REDACTED:my_key>` leak through (#1752).
+const INTERNAL_PLACEHOLDER = /<REDACTED(?::[A-Za-z0-9_]+)?>/g;
+
+/**
+ * Remove internal `<REDACTED:NAME>` / `<REDACTED>` secret-scrubber markers from
+ * user-facing output text. Idempotent and safe on any string.
+ */
+export function stripInternalPlaceholders(input: string): string {
+  if (!input || typeof input !== "string") return input ?? "";
+  const out = input.replace(INTERNAL_PLACEHOLDER, "");
+  // Tidy whitespace/punctuation a removed token leaves behind, mirroring
+  // stripCitationTokens so "Foo <REDACTED:X> Bar" -> "Foo Bar", not "Foo  Bar".
+  // A leading token (common in shortlist titles like "<REDACTED:X> Stack ...")
+  // leaves a leading space, so trim per-line leading whitespace introduced by
+  // removal at the start of a line.
+  return out
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ ([.,;:!?])/g, "$1")
+    .replace(/[ \t]+\n/g, "\n")
+    // Trim only leading whitespace at the very start (a leading token artifact);
+    // do NOT touch per-line indentation so markdown lists/code blocks survive.
+    .replace(/^[ \t]+/, "");
+}
+
+/**
+ * Single display-time sanitizer for worker output text. Strips OpenAI citation
+ * markers AND internal `<REDACTED:...>` secret-scrubber placeholders. Use this
+ * everywhere worker output text (or its .md/.txt/.json export) reaches the user.
+ * Idempotent.
+ */
+export function sanitizeOutputText(input: string): string {
+  if (!input || typeof input !== "string") return input ?? "";
+  return stripInternalPlaceholders(stripCitationTokens(input));
+}
+
+/**
+ * Deep-walk a parsed JSON value and sanitize every string it contains. Used for
+ * the JSON-output download path, where the value is re-serialised rather than
+ * rendered through the text sanitizer. Returns a new structure; does not mutate.
+ */
+export function sanitizeJsonValue<T>(value: T): T {
+  if (typeof value === "string") return sanitizeOutputText(value) as unknown as T;
+  if (Array.isArray(value)) return value.map((v) => sanitizeJsonValue(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeJsonValue(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}

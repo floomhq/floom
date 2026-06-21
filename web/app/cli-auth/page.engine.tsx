@@ -21,11 +21,7 @@ export type CliAuthContentProps = {
 type AuthState = "idle" | "approving" | "denying" | "approved" | "denied" | "error";
 
 function cliAuthEndpoint(endpointBase: string, action: "approve" | "deny") {
-  const base = endpointBase.replace(/\/$/, "");
-  if (base.endsWith("/auth/cli")) {
-    return `${base}-${action}`;
-  }
-  return `${base}/${action}`;
+  return `${endpointBase.replace(/\/$/, "")}/${action}`;
 }
 
 export default function CliAuthPage() {
@@ -60,17 +56,9 @@ export function CliAuthContent({
         },
         body: JSON.stringify({ user_code: code }),
       });
-      const contentType = response.headers.get("content-type") || "";
-      const body = contentType.includes("application/json")
-        ? ((await response.json().catch(() => ({}))) as { detail?: string; ok?: boolean })
-        : {};
+      const body = (await response.json().catch(() => ({}))) as { detail?: string };
       if (!response.ok) {
         setErrorText(body.detail || "Authorization failed");
-        setState("error");
-        return;
-      }
-      if (body.ok !== true) {
-        setErrorText("Authorization did not complete. Please try again.");
         setState("error");
         return;
       }
@@ -89,7 +77,7 @@ export function CliAuthContent({
     // /login: no sidebar chrome, the page IS the single authorize action.
     <div className="grid min-h-screen w-full place-items-center bg-[var(--bg-app)] px-6 py-10 text-[var(--ink)]">
       <div className="w-full max-w-md">
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] px-8 py-9 shadow-[var(--hairline)]">
+        <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] px-8 py-9">
           {/* Brand mark — same play-arrow squircle as /login, never a text circle. */}
           <div className="mb-7 flex items-center gap-2.5">
             <FloomMark size={22} />

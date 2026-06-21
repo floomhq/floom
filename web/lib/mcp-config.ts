@@ -14,12 +14,12 @@ import { getPublicApiBase } from "@/lib/api-base";
 export function buildMcpServerConfig(
   secret: string,
   workspaceId?: string | null,
-): { mcpServers: { workeros: { url: string; headers: Record<string, string> } } } {
+): { mcpServers: { floom: { url: string; headers: Record<string, string> } } } {
   const headers: Record<string, string> = { "x-floom-secret": secret };
   if (workspaceId) headers["x-workeros-workspace"] = workspaceId;
   return {
     mcpServers: {
-      workeros: {
+      floom: {
         url: `${getPublicApiBase()}/mcp-tools/serve`,
         headers,
       },

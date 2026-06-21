@@ -40,4 +40,15 @@ describe("api.chat.uploadAttachments (#778)", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
   });
+
+  it("surfaces unsupported binary attachment errors", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 415,
+      json: async () => ({ detail: "Emily chat attachments currently support text files only" }),
+    });
+    const { api } = await import("@/lib/api");
+    const file = new File(["png"], "logo.png", { type: "image/png" });
+    await expect(api.chat.uploadAttachments([file])).rejects.toThrow(/text files only/);
+  });
 });

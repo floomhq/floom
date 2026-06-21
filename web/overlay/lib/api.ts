@@ -437,18 +437,29 @@ export const api = {
     rollback: (id: string, versionId: string) =>
       fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
     // Worker feedback (SPEC §12) — anyone who can see the worker can comment.
-    feedback: {
-      list: (id: string) =>
-        fetchJson<import("@/lib/types").WorkerFeedback[]>(`/workers/${id}/feedback`),
-      create: (id: string, content: string) =>
-        fetchJson<import("@/lib/types").WorkerFeedback>(`/workers/${id}/feedback`, {
+      feedback: {
+        list: (id: string) =>
+          fetchJson<import("@/lib/types").WorkerFeedback[]>(`/workers/${id}/feedback`),
+        create: (id: string, content: string) =>
+          fetchJson<import("@/lib/types").WorkerFeedback>(`/workers/${id}/feedback`, {
           method: "POST",
           body: JSON.stringify({ content }),
         }),
-      remove: (id: string, feedbackId: string) =>
-        fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
+        remove: (id: string, feedbackId: string) =>
+          fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
+      },
+      alerts: {
+        list: (id: string) =>
+          fetchJson<import("@/lib/types").WorkerAlert[]>(`/workers/${id}/alerts`),
+        create: (id: string, body: import("@/lib/types").WorkerAlertCreate) =>
+          fetchJson<import("@/lib/types").WorkerAlert>(`/workers/${id}/alerts`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          }),
+        remove: (id: string, alertId: string) =>
+          fetchJson<void>(`/workers/${id}/alerts/${alertId}`, { method: "DELETE" }),
+      },
     },
-  },
   runs: {
     list: async (params?: {
       worker_id?: string;

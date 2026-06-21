@@ -118,10 +118,12 @@
   --border-soft: rgba(20,23,26,0.05);
   --primary: #16171A;
   --primary-text: #FFFFFF;
-  --warning: #E5533D;
-  --success: #2F8F5B;
+  --warning: #C98A1A; /* amber — Floom DS: red is NOT a Floom color. Feeds --negative/--destructive/Failed status. */
+  /* a11y #1712/#1713: status colors darkened to clear WCAG AA (>=4.5:1) on the
+     light surfaces (#FBFBFC / #F2F3F5). Was #2F8F5B (3.90:1). Now 5.64:1. */
+  --success: #207346;
   --pending: #6B7280;
-  --info: #3E6FE0; /* "running"/in-progress accent (SPEC §4) */
+  --info: #3563CC; /* "running"/in-progress accent (SPEC §4) — was #3E6FE0 (4.46:1), now 5.33:1 */
   /* v4 cool radii (final.html: --r-card:16px, --r-btn:10px) */
   --radius-card: 16px;
   --radius-button: 10px;
@@ -142,17 +144,21 @@
   --paper-2: #F2F3F5;
   --ink: var(--text-primary);
   --ink-soft: #3a3b40;
-  --ink-mute: color-mix(in srgb, var(--text-muted) 80%, transparent);
-  --ink-faint: color-mix(in srgb, var(--text-muted) 58%, transparent);
+  /* a11y #1711/#1712: --ink-mute / --ink-faint were color-mixed with transparent
+     (lightened toward the bg → 3.21:1 / 2.21:1, both fail AA). Solid greys that
+     keep the muted hue but clear WCAG AA (>=4.5:1) on #FBFBFC and #F2F3F5.
+     Order preserved: ink-soft (darkest) > ink-mute > ink-faint (lightest). */
+  --ink-mute: #56606E;   /* 6.16:1 on bgApp / 5.74:1 on bg2 (was 3.21:1) */
+  --ink-faint: #646B76;  /* 5.20:1 on bgApp / 4.84:1 on bg2 (was 2.21:1) */
   /* v4 muted text color (final.html --muted), distinct from shadcn --muted bg below */
-  --muted-text: #6B7280;
+  --muted-text: #62697A; /* 5.31:1 on bgApp / 4.95:1 on bg2 (was #6B7280 = 4.35:1 on bg2) */
   --emerald: var(--success);
   --emerald-dark: color-mix(in srgb, var(--success) 80%, black);
   /* v4: --accent is blue (#3E6FE0); --primary is near-black (#16171A).
      CRITICAL (Codex trap): primary Buttons use --primary, NOT --accent —
      so a cool --accent swap does NOT turn buttons blue. See button.tsx fix. */
-  --accent: #3E6FE0;
-  --emily-mark: #3E6FE0;
+  --accent: #3563CC; /* a11y #1713: was #3E6FE0 (4.46:1); 5.33:1 as link/text, white-on-accent 5.51:1 */
+  --emily-mark: #3563CC;
   --sel: #EEF3FE;
   --accent-soft: var(--sel);
   --accent-line: rgba(62,111,224,.3);
@@ -262,10 +268,17 @@ html.dark {
   --paper-2: oklch(0.265 0 0);
   --ink: oklch(0.985 0 0);
   --ink-soft: oklch(0.75 0.015 286.067);
-  --ink-mute: oklch(0.62 0.012 286.067);
-  --ink-faint: oklch(0.42 0.01 286.067);
+  /* a11y #1712/#1713: lightened to clear WCAG AA on dark surfaces (bg / bg-2).
+     Was mute 0.62 (4.13:1 on bg2, borderline) / faint 0.42 (2.06:1, fails).
+     Order preserved: ink-soft (lightest) > ink-mute > ink-faint. */
+  --ink-mute: oklch(0.70 0.012 286.067);  /* 6.57:1 on bg / 5.63:1 on bg2 */
+  --ink-faint: oklch(0.65 0.01 286.067);  /* 5.43:1 on bg / 4.65:1 on bg2 (was 2.06:1) */
   /* shadcn muted bg (bg-2 equivalent in dark) */
   --muted: var(--bg-2);
+  /* a11y #1712: the light --success (#207346) is too dark to read on the dark
+     surfaces (3.02:1). Override with the lighter emerald used in dark mode so
+     success text/pills clear WCAG AA (7.04:1 on bg / 6.03:1 on bg2). */
+  --success: oklch(0.70 0.16 152);
   --emerald: oklch(0.7 0.16 152);
   --emerald-dark: oklch(0.8 0.13 152);
   /* v4 dark accent = #5B8DEF (final.html body.dark). Matte blue.
@@ -332,7 +345,8 @@ html.dark {
   --secondary-foreground: var(--ink);
   --muted-foreground: var(--ink-soft);
   --accent-foreground: var(--ink);
-  --destructive: oklch(0.704 0.191 22.216);
+  /* dedupe: dark --destructive must read the same amber token as light (was hardcoded red oklch). */
+  --destructive: var(--warning);
   --border: var(--line);
   --input: var(--line-strong);
   --ring: var(--accent-line);
@@ -745,18 +759,24 @@ html.dark .grain {
    from the existing token layer so day/dark themes are automatic.
    ========================================================================== */
 
+/* page-header row — title+description on one side, count strip on the other.
+   #1544: at desktop widths this is a horizontal flex (description left, counts
+   right). At mobile widths it stacks so the description gets its own full-width
+   line(s) ABOVE the counts, and the counts wrap instead of squishing the
+   description or clipping the rightmost chip. */
+.c-headrow { display:flex; flex-direction:column; align-items:flex-start; gap:12px; min-width:0; }
+.c-headrow .c-headtitle { min-width:0; flex-shrink:1; }
+@media (min-width:768px) {
+  .c-headrow { flex-direction:row; align-items:center; gap:18px; }
+  .c-headrow .c-counts { margin-left:auto; }
+}
+
 /* count strip — inline on the right of the title row (SPEC §11) */
-.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
-.c-counts::-webkit-scrollbar { display:none; }
+.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:wrap; row-gap:6px; min-width:0; }
 .c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:var(--bd-div); white-space:nowrap; flex:0 0 auto; }
 .c-counts .ct:first-child { padding-left:0; }
 .c-counts .ct:last-child { border-right:0; }
 .c-counts .ct b { color:var(--ink); font-weight:600; font-size:14px; }
-/* #1266: on very small screens (<390px) hide secondary counts (active/attention)
-   to keep the header single-line — primary "X workers" count always shows. */
-@media (max-width:389px) {
-  .c-counts .ct:not(:first-child) { display:none; }
-}
 
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
@@ -859,9 +879,11 @@ html.dark .grain {
 .c-gcard { border:var(--bd-card); background:var(--grid-card-bg,var(--bg-card)); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:148px; cursor:pointer; position:relative; box-shadow:none; text-align:left; transition:background .12s; }
 .c-gcard:hover { background:var(--bg-2); }
 .c-gcard.sel { background:var(--accent-soft); box-shadow:none; }
-.c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
-.c-gcard:hover .star { opacity:1; }
-.c-gcard .star.on { opacity:1; color:var(--accent); }
+/* Card star is now an IconButton (.star-btn). Card context owns only the
+   hover-reveal + starred-accent; button chrome comes from the primitive. */
+.c-gcard .star-btn { opacity:0; transition:opacity .12s; }
+.c-gcard:hover .star-btn { opacity:1; }
+.c-gcard .star-btn.on { opacity:1; color:var(--accent); }
 /* D-05: reserve space at top-right for the absolute star/lock cluster so a long
    worker name never collides with the star button. */
 .c-gtop { display:flex; align-items:center; gap:11px; padding-right:26px; min-width:0; }

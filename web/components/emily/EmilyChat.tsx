@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize, Minimize, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -14,12 +14,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { QueryClientContext } from "@tanstack/react-query";
 
 import { useEmilyFullscreen } from "./emily-fullscreen";
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
-import { CreateSourcePills } from "@/components/CreateSourcePills";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
 import {
@@ -35,12 +35,12 @@ import {
   useChatStream,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
-import { readStoredConversationId } from "@/lib/emily-chat-storage";
 import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 // Re-export so the create-mode wiring + its tests share one source of truth.
 export { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { api } from "@/lib/api";
+import { capturePostHogEvent } from "@/lib/posthog";
 import { reportError, logError } from "@/lib/notify";
 import type { ConversationSummary, SystemOverview } from "@/lib/types";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
@@ -399,106 +399,6 @@ function ChatEmptyState({
   );
 }
 
-// ── Create-worker hero (full-width hero for create mode, no messages) ─────────
-
-// Round-09 (Federico 2026-06-18): "The new worker should literally just be an
-// Emily chat with some pills. It's literally an Emily chat. That's it. Don't make
-// it anything more." Earlier rounds kept layering chrome on top (a greeting card,
-// then example CARDS with integration badges + an "Or start from an example"
-// section) which made it read as a launcher, not a chat. Stripped to: heading +
-// one-line subtext + 2-3 suggestion PILLS + the previous-chat note (when a prior
-// chat exists) + the SAME Emily composer the thread uses. Clicking a pill primes
-// the composer with that prompt. Nothing more.
-const CREATE_EXAMPLES = [
-  "Summarise my Granola meetings → HubSpot daily",
-  "Send me a GitHub PR digest at 9am",
-  "Score new CRM contacts against a job brief",
-] as const;
-
-function CreateWorkerHeroState({
-  input,
-  onInput,
-  onSubmit,
-  onAddSource,
-  attachedFiles,
-  onFilesChange,
-  hasPreviousChat,
-  onOpenRecent,
-}: {
-  input: string;
-  onInput: (v: string) => void;
-  onSubmit: () => void;
-  onAddSource: (source: string) => void;
-  attachedFiles: AttachedFile[];
-  onFilesChange: (files: AttachedFile[]) => void;
-  /** True when a non-create Emily chat is still active (its id is persisted). */
-  hasPreviousChat: boolean;
-  /** Opens the Recent chats popover so the user can jump back to that chat. */
-  onOpenRecent: () => void;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-full w-full px-6 py-12 gap-6">
-      {/* Heading + one-line subtext — it IS the Emily chat, primed for create */}
-      <div className="flex flex-col items-center text-center space-y-2 max-w-xl">
-        <EmilyAvatar size="md" />
-        <h1 className="text-xl font-semibold tracking-tight text-foreground leading-tight">
-          Hire a new worker
-        </h1>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          Describe the job in one sentence. I&apos;ll draft the worker, wire the
-          tools and brain, then open it for your review.
-        </p>
-      </div>
-
-      {/* The SAME Emily composer the chat thread uses (auto-resize, attachments,
-          source pills, Enter-to-submit). Indistinguishable from chatting. */}
-      <div className="w-full max-w-2xl space-y-2">
-        <PromptInput
-          value={input}
-          onChange={onInput}
-          onSubmit={onSubmit}
-          onFilesChange={onFilesChange}
-          attachedFiles={attachedFiles}
-          placeholder="Create me: a worker that…"
-        />
-        {/* Suggestion pills — click to prime the composer with that prompt */}
-        <div className="flex flex-wrap justify-center gap-1.5 px-1 pt-1">
-          {CREATE_EXAMPLES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => onInput(s)}
-              className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-        <div className="px-1">
-          <CreateSourcePills onPick={onAddSource} />
-        </div>
-      </div>
-
-      {/* Previous-chat note (Federico spec): if the user was chatting with Emily
-          before, the create-mode chat is a fresh ephemeral thread; tell them the
-          old one is still there. */}
-      {hasPreviousChat && (
-        <p className="text-xs text-muted-foreground">
-          Your previous chat is still running.{" "}
-          <button
-            type="button"
-            onClick={onOpenRecent}
-            className="font-medium text-foreground underline-offset-2 hover:underline"
-          >
-            find it in Recent chats
-          </button>
-          .
-        </p>
-      )}
-    </div>
-  );
-}
-
 // ── EmilyChat core (shared by dock and full-page) ────────────────────────────
 
 interface ChatCoreActions {
@@ -559,6 +459,11 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     loadConversation,
   } = useChatStream({ ephemeral: createMode });
   const router = useRouter();
+  // Read the query client via context (NOT useQueryClient) so it is `undefined`
+  // when no QueryClientProvider is mounted — the targeted list refresh below is
+  // then a no-op. In the app Emily is always under QueryProvider, so this is the
+  // live path; the optionality only matters for isolated component tests.
+  const queryClient = useContext(QueryClientContext);
   const [input, setInput] = useState(primeInput ?? "");
   // Seed the composer when primeInput ARRIVES after mount. The full-page chat
   // passes primeInput at mount (handled by useState above), but the dock core is
@@ -580,15 +485,6 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
   const [showScrollButton, setShowScrollButton] = useState(false);
   const openedRunDetailsRef = useRef(new Set<string>());
   const runDetailsNavReadyRef = useRef(false);
-  // Create-mode is an ephemeral chat, so it never persists its own id. If a
-  // non-create Emily chat was already running its id is in localStorage — detect
-  // it (client-only, after mount) to show the "previous chat is still running"
-  // note. `recentOpenSignal` bumps to pop the Recent chats list from that note.
-  const [hasPreviousChat, setHasPreviousChat] = useState(false);
-  const [recentOpenSignal, setRecentOpenSignal] = useState(0);
-  useEffect(() => {
-    if (createMode) setHasPreviousChat(Boolean(readStoredConversationId()));
-  }, [createMode]);
 
   // Track whether the user is near the bottom of the scroll container.
   // We use a ref (not state) so the scroll handler doesn't trigger re-renders.
@@ -640,9 +536,17 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     }
   }, [messages, scrollToBottom]);
 
-  // Refresh the workers page whenever Emily completes a create/update/delete
-  // so the user sees the new worker immediately without a manual refresh.
+  // #1559: keep the workers/runs/overview lists in sync whenever Emily completes
+  // a create/update/delete — WITHOUT the reload flicker the old per-card
+  // `router.refresh()` caused. `router.refresh()` re-fetches the WHOLE RSC tree,
+  // and firing it once per completed mutation card re-rendered the entire app on
+  // every card = visible flicker. Instead we (a) only TARGET the affected
+  // react-query lists (workers + overview + runs), and (b) debounce to ONE
+  // invalidation that runs after streaming ENDS — not per card. The lists are
+  // react-query backed (lib/query/hooks), so invalidating their keys revalidates
+  // just those queries in place; nothing else re-renders.
   const seenCardIds = useRef(new Set<string>());
+  const pendingListRefreshRef = useRef(false);
   useEffect(() => {
     for (const msg of messages) {
       if (msg.role !== "assistant" || !msg.parts) continue;
@@ -658,11 +562,29 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
           (card.status === "completed" || card.status === "failed")
         ) {
           seenCardIds.current.add(cardId);
-          router.refresh();
+          // Mark a refresh as pending; the flush effect below runs it ONCE after
+          // the stream settles, so a multi-mutation reply triggers a single
+          // targeted revalidation instead of one full reload per card.
+          pendingListRefreshRef.current = true;
         }
       }
     }
-  }, [messages, router]);
+  }, [messages]);
+
+  // Flush the pending list refresh ONCE streaming has finished. Targeted
+  // invalidation only — workers list, system overview, and runs (the three
+  // surfaces a create/update/delete can change). No full RSC refresh, no flicker.
+  // Query keys mirror lib/query/hooks `qk` (workers/overview/runs); using the
+  // key roots here revalidates every matching list variant in place. If there is
+  // no query client (no provider), this is a no-op.
+  useEffect(() => {
+    if (isStreaming || !pendingListRefreshRef.current) return;
+    pendingListRefreshRef.current = false;
+    if (!queryClient) return;
+    queryClient.invalidateQueries({ queryKey: ["workers"] });
+    queryClient.invalidateQueries({ queryKey: ["system", "overview"] });
+    queryClient.invalidateQueries({ queryKey: ["runs"] });
+  }, [isStreaming, queryClient]);
 
   useEffect(() => {
     if (!runDetailsNavReadyRef.current || isHydrating) return;
@@ -715,16 +637,20 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     setInput("");
   }, [autoSubmitPrime, createMode, primeInput, messages.length, isHydrating, sendMessage]);
 
-  // Create-mode source pill → append a natural "use my <source>" hint to the
-  // composer so the assistant knows which context to wire into the new worker.
-  const handleAddSource = useCallback((source: string) => {
-    setInput((prev) => {
-      const hint = `Use my ${source}.`;
-      if (prev.toLowerCase().includes(source.toLowerCase())) return prev;
-      const sep = prev.trim().length === 0 ? "" : prev.endsWith(" ") ? "" : " ";
-      return `${prev}${sep}${hint}`;
+  // INTENT: the create-worker flow opened. Fire once per createMode activation
+  // (this core is mounted once for the whole app, so guard against re-fires).
+  const createStartedRef = useRef(false);
+  useEffect(() => {
+    if (!createMode) {
+      createStartedRef.current = false;
+      return;
+    }
+    if (createStartedRef.current) return;
+    createStartedRef.current = true;
+    capturePostHogEvent("worker_create_started", {
+      source: homeMode ? "home" : fullPage ? "fullpage" : "dock",
     });
-  }, []);
+  }, [createMode, homeMode, fullPage]);
 
   const handleExport = useCallback(() => {
     exportConversationMarkdown(messages, conversationId);
@@ -773,47 +699,14 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
       )
   );
 
-  // In full-page create mode with no messages, show the wide hero instead of the
-  // narrow chat thread. The hero shares the same input/submit path so sending
-  // from the hero immediately starts the conversation and reveals the thread.
-  if (fullPage && createMode && !hasMessages && !isHydrating) {
-    return (
-      <div className="flex h-full flex-col">
-        {/* Controls row carries Recent chats so the "previous chat is still
-            running, find it in Recent chats" note has somewhere to point. The
-            dock renders its own controls (hideControls), so only show here when
-            this core owns its controls. */}
-        {!hideControls && (
-          <div className="flex shrink-0 items-center justify-end gap-1 [border-bottom:var(--bd-div)]/60 px-6 py-2">
-            <ChatControls
-              onNew={handleNew}
-              onExport={handleExport}
-              canExport={hasMessages}
-              activeConversationId={conversationId}
-              onLoadConversation={(id) => {
-                loadConversation(id);
-                isNearBottomRef.current = true;
-                setShowScrollButton(false);
-              }}
-              recentOpenSignal={recentOpenSignal}
-            />
-          </div>
-        )}
-        <div className="flex-1 overflow-y-auto">
-          <CreateWorkerHeroState
-            input={input}
-            onInput={setInput}
-            onSubmit={handleSubmit}
-            onAddSource={handleAddSource}
-            attachedFiles={attachedFiles}
-            onFilesChange={setAttachedFiles}
-            hasPreviousChat={hasPreviousChat}
-            onOpenRecent={() => setRecentOpenSignal((n) => n + 1)}
-          />
-        </div>
-      </div>
-    );
-  }
+  // Create is now visually the SAME as home (consistent Emily chat, Federico
+  // 2026-06-19): no bespoke "Hire a new worker" hero. Both home and create show
+  // the home empty state (greeting + pills) ABOVE a CENTERED composer (U1) — no
+  // separate bottom-anchored composer while empty. Once the thread has messages,
+  // the composer anchors to the bottom (preserved below). `createMode` stays a
+  // BEHAVIOR flag only (buildCreateWorkerMessage on first send + ephemeral thread).
+  const emptyHomeLike = homeMode || createMode;
+  const showCenteredComposer = emptyHomeLike && !hasMessages && !isHydrating;
 
   return (
     <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
@@ -859,17 +752,38 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
             <div className="flex h-full items-center justify-center px-6 text-center">
               <p className="text-xs text-muted-foreground">Loading conversation...</p>
             </div>
-          ) : homeMode ? (
-            // HOME empty state (Federico 2026-06-19): greeting + lean pulse +
-            // pills ABOVE the REAL composer (rendered at the bottom of this
-            // core). The pulse/pills seed THIS composer via setInput — no
-            // parallel textarea. Centered like ChatGPT/Claude's empty home.
+          ) : emptyHomeLike ? (
+            // HOME + CREATE empty state (Federico 2026-06-19): the SAME consistent
+            // Emily empty — greeting + lean pulse + pills — with the REAL composer
+            // CENTERED directly below them (U1), not anchored to the bottom. The
+            // pulse/pills seed THIS composer via setInput; there is exactly one
+            // composer. Create is indistinguishable from home here (createMode is
+            // a behavior flag only — see handleSubmit/buildCreateWorkerMessage).
             <div className="flex h-full flex-col items-center justify-center py-10">
               <EmilyHomeEmpty
                 initialData={homeInitialData}
                 onSeed={(text) => setInput(text)}
                 onPickMcp={() => mcpModal.open()}
               />
+              <div className="mt-6 w-full max-w-2xl px-6">
+                {/* Create mode uses the landing-style composer with a "Hire"
+                    send affordance. Normal home Emily keeps the default send
+                    control because it handles general assistant questions too. */}
+                <PromptInput
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={handleSubmit}
+                  onFilesChange={setAttachedFiles}
+                  attachedFiles={attachedFiles}
+                  sendDisabled={isStreaming}
+                  placeholder={`Message ${assistantName}...`}
+                  variant={createMode ? "landing" : "default"}
+                  // #1698: "New worker" / ?create=1 must give visible feedback
+                  // from ANY route. Focus the composer when entering create mode
+                  // so the click lands a caret here instead of a dead no-op.
+                  autoFocus={createMode}
+                />
+              </div>
             </div>
           ) : (
             <ChatEmptyState onSuggest={(text) => { setInput(text); }} isNewWorkspace={isNewWorkspace} />
@@ -906,31 +820,35 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
         )}
       </div>
 
-      {/* Input — error intentionally NOT repeated here; it already shows as an
-          inline system note in the message thread (errorAlreadyVisible guard above). */}
-      <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
-        <Separator className="mb-2" />
-        {/* Suggestion pills: visible in active chat (not on empty state, not while streaming) */}
-        <SuggestionPills
-          onSuggest={(text) => { setInput(text); }}
-          hidden={!hasMessages || isStreaming}
-        />
-        {/* B15: keep the textarea editable while Emily streams — only the SEND
-            action is gated on isStreaming (sendDisabled), so the user can draft
-            their next message during a response. */}
-        <PromptInput
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSubmit}
-          onFilesChange={setAttachedFiles}
-          attachedFiles={attachedFiles}
-          sendDisabled={isStreaming}
-          placeholder={createMode ? "Create me: a worker that…" : `Message ${assistantName}...`}
-        />
-        <p className="mt-1 text-center text-[10px] text-muted-foreground">
-          {assistantName} can make mistakes. Verify important results.
-        </p>
-      </div>
+      {/* Bottom-anchored composer — CONVERSATION state only. In the home/create
+          empty state the composer is centered with the greeting/pills above
+          (showCenteredComposer), so this bottom block is suppressed to avoid the
+          dead-whitespace Federico previously flagged. */}
+      {!showCenteredComposer && (
+        <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
+          <Separator className="mb-2" />
+          {/* Suggestion pills: visible in active chat (not on empty state, not while streaming) */}
+          <SuggestionPills
+            onSuggest={(text) => { setInput(text); }}
+            hidden={!hasMessages || isStreaming}
+          />
+          {/* B15: keep the textarea editable while Emily streams — only the SEND
+              action is gated on isStreaming (sendDisabled), so the user can draft
+              their next message during a response. */}
+          <PromptInput
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSubmit}
+            onFilesChange={setAttachedFiles}
+            attachedFiles={attachedFiles}
+            sendDisabled={isStreaming}
+            placeholder={`Message ${assistantName}...`}
+          />
+          <p className="mt-1 text-center text-[10px] text-muted-foreground">
+            {assistantName} can make mistakes. Verify important results.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -945,14 +863,17 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
 type DockMode = "collapsed" | "rail" | "wide";
 
 // Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px.
+// The dock only mounts on desktop (≥1024, useIsDesktop), so the fixed widths key
+// off `lg` to stay in lockstep with the shell breakpoint (#1544 tablet fix).
 const DOCK_WIDTH: Record<DockMode, string> = {
   collapsed: "w-[46px]",
-  rail: "w-full md:w-[330px]",
-  wide: "w-full md:w-[560px] md:max-w-[52vw]",
+  rail: "w-full lg:w-[330px]",
+  wide: "w-full lg:w-[560px] lg:max-w-[52vw]",
 };
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
+  const router = useRouter();
   const [mode, setMode] = useState<DockMode>("rail");
   // True fullscreen lives in shared context (AppShell hides the page pane and
   // this dock flex-grows to fill the main area — the left sidebar stays put).
@@ -1034,19 +955,29 @@ export function EmilyDock({ className }: { className?: string }) {
   // then cleared — re-renders must not keep re-seeding it.
   const [primeText, setPrimeText] = useState<string | undefined>(undefined);
   useEffect(() => {
-    if (createParam && isHomeRoute) {
-      setCreateLatched(true);
-      if (primeParam) setPrimeText(primeParam);
-      // Drop the params from the URL so create-prime is deep-linkable but not
-      // sticky across refresh/back (history.replace, no Next reload).
-      if (typeof window !== "undefined") {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("create");
-        url.searchParams.delete("prime");
-        window.history.replaceState(window.history.state, "", url.pathname + url.search);
-      }
+    if (!createParam) return;
+    // #1698: the create deep-link (`?create=1`) must open the create flow
+    // CONSISTENTLY regardless of the route it lands on. On a NON-home route it
+    // would otherwise just sit in the URL doing nothing (a broken first action),
+    // while the page's Collection keeps owning the surface. Forward it to the
+    // home create surface so create always opens the same way — and the param
+    // never lingers on a Collection route to be mistaken for view state.
+    if (!isHomeRoute) {
+      const prime = primeParam ? `&prime=${encodeURIComponent(primeParam)}` : "";
+      router.replace(`/?create=1${prime}`);
+      return;
     }
-  }, [createParam, isHomeRoute, primeParam]);
+    setCreateLatched(true);
+    if (primeParam) setPrimeText(primeParam);
+    // Drop the params from the URL so create-prime is deep-linkable but not
+    // sticky across refresh/back (history.replace, no Next reload).
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("create");
+      url.searchParams.delete("prime");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    }
+  }, [createParam, isHomeRoute, primeParam, router]);
   // Reset the create latch when the user navigates away from the home route so
   // the next visit shows the home greeting (not a stale create hero).
   useEffect(() => {
@@ -1080,8 +1011,16 @@ export function EmilyDock({ className }: { className?: string }) {
     if (isHomeRoute && (!userCollapsedHome || createMode)) {
       setFullscreen(true);
     }
-    // Leaving home does NOT force-exit fullscreen (the user may have it open
-    // intentionally elsewhere).
+    // Leaving home (home → non-home TRANSITION) docks Emily back to the rail so
+    // the destination page (Workers/Library/Runs/…) is visible. Without this the
+    // home auto-fullscreen latched on across navigation and AppShell hid <main>
+    // on EVERY route → Emily covered the page (P0). This fires only on the
+    // transition (guarded by `wasHome`), never on every render of a non-home
+    // route, so a fullscreen the user MANUALLY opens later on a non-home page
+    // (via the dock toggle) is not clobbered.
+    if (wasHome && !isHomeRoute) {
+      setFullscreen(false);
+    }
   }, [isHomeRoute, setFullscreen, userCollapsedHome, createMode]);
 
   // Collapse the home fullscreen Emily into the right rail (shows the Workers
@@ -1099,10 +1038,12 @@ export function EmilyDock({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col bg-background overflow-hidden [border-left:var(--bd-div)]",
+        "flex h-full flex-col bg-background overflow-hidden",
         // Fullscreen: flex-grow to fill the main area (page pane is hidden by
         // AppShell), sidebar stays to the left. Otherwise: fixed-width rail.
-        isFull ? "flex-1 min-w-0" : cn("shrink-0", DOCK_WIDTH[mode]),
+        // Left divider only in docked mode; in fullscreen it would double up
+        // against the sidebar's right border.
+        isFull ? "flex-1 min-w-0" : cn("shrink-0 [border-left:var(--bd-div)]", DOCK_WIDTH[mode]),
         className
       )}
       aria-label={
@@ -1168,10 +1109,10 @@ export function EmilyDock({ className }: { className?: string }) {
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={toggleFull}
-              title={isFull ? `Exit full screen` : `Full screen ${assistantName}`}
-              aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
+              title={isFull ? "Exit full screen" : "Full screen"}
+              aria-label={isFull ? "Exit full screen" : "Full screen"}
             >
-              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {isFull ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           ) : (
             <Button
@@ -1179,10 +1120,10 @@ export function EmilyDock({ className }: { className?: string }) {
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={isFull ? collapseHome : maximizeHome}
-              title={isFull ? `Minimize ${assistantName}` : `Full screen ${assistantName}`}
-              aria-label={isFull ? `Minimize ${assistantName}` : `Expand ${assistantName}`}
+              title={isFull ? "Exit full screen" : "Full screen"}
+              aria-label={isFull ? "Exit full screen" : "Full screen"}
             >
-              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {isFull ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           )}
           {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,
@@ -1298,9 +1239,9 @@ export function EmilyDock({ className }: { className?: string }) {
           onHasMessagesChange={setCoreHasMessages}
           onConversationIdChange={setCoreConversationId}
           isNewWorkspace={isNewWorkspace}
-          // CREATE takes precedence over the home greeting: when entering via
-          // "New worker"/?create=1 the same Emily renders the "Hire a worker"
-          // create hero (create pills + sources) instead of the home pulse.
+          // CREATE renders the SAME consistent Emily empty state as home (greeting
+          // + pills + centered composer) — createMode is a behavior flag only
+          // (wraps the first send via buildCreateWorkerMessage + ephemeral thread).
           createMode={createMode}
           primeInput={createMode ? primeText : undefined}
           homeMode={isHomeRoute && !createMode}
@@ -1316,24 +1257,25 @@ export function EmilyMobileSheet() {
   const assistantName = useAssistantName();
   const pathname = usePathname();
   const isHomeRoute = pathname === "/" || pathname === "/overview";
-  // HOME (Federico 2026-06-19): on mobile the home is the SAME real Emily — the
-  // bottom sheet opens by default on the home route so the home greeting + pulse
-  // + pills render in Emily's empty state (homeMode), seeding Emily's composer.
-  // Off the home route it stays a tap-to-open FAB as before.
+  // MOBILE Emily (Federico 2026-06-19): on mobile the page pane shows the
+  // Workers list (the home pane) and Emily lives behind a clearly-labeled
+  // floating "Ask <assistant>" FAB. We do NOT auto-open the sheet — an aggressive
+  // auto-open hid the FAB and left no reliable affordance to reach Emily (#1544).
+  // The user taps the FAB to open the SAME real Emily, sized for the sheet; on
+  // the home route it opens in homeMode (greeting + pulse + pills + composer).
+  // Closing returns to the Workers list behind it.
   const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (isHomeRoute) setOpen(true);
-  }, [isHomeRoute]);
   return (
     <>
       {!open && (
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label={`Open ${assistantName}`}
-          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-background shadow-lg [border:var(--bd-card)]"
+          aria-label={`Ask ${assistantName}`}
+          className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-[var(--radius-pill)] bg-background py-2.5 pl-3 pr-4 shadow-lg [border:var(--bd-card)]"
         >
-          <EmilyAvatar size="sm" />
+          <MessageCircle className="size-5 text-[var(--text-primary)]" />
+          <span className="text-sm font-semibold leading-none text-[var(--text-primary)]">Ask {assistantName}</span>
         </button>
       )}
       {open && (

@@ -1,14 +1,14 @@
 /**
  * Copy for the WorkspaceSwitcher "Workspace actions" group (#1005).
  *
- * OSS speaks the template-zip vocabulary ("Export workspace" / "Share as
- * template link" / "Duplicate workspace"); workeros-cloud speaks the
- * multi-tenant invite vocabulary ("Download copy" / "Invite someone by link" /
- * "Make a local copy"). Gating the copy here lets cloud consume the engine
- * WorkspaceSwitcher directly instead of forking the 515-line component.
+ * Self-hosted installs use template-zip vocabulary ("Export workspace" /
+ * "Share as template link" / "Duplicate workspace"); managed multi-tenant
+ * deployments may prefer invite vocabulary ("Download copy" / "Invite someone
+ * by link" / "Make a local copy"). Gating the copy here lets downstream hosts
+ * consume the engine WorkspaceSwitcher directly instead of forking it.
  *
- * The underlying actions are identical in both modes — only the user-facing
- * wording changes — so the cloud overlay collapses to a submodule bump.
+ * The underlying actions are identical in both modes; only the user-facing
+ * wording changes.
  */
 export interface WorkspaceActionCopy {
   exportLabel: string;
@@ -65,7 +65,7 @@ export function getWorkspaceActionCopy(isCloudMode: boolean): WorkspaceActionCop
   return isCloudMode ? CLOUD_COPY : OSS_COPY;
 }
 
-/** True when the bundle is built for workeros-cloud (multi-tenant hosted). */
+/** True when the bundle is built for a managed multi-tenant deployment. */
 export function isCloudMode(): boolean {
   return process.env.NEXT_PUBLIC_WORKEROS_DEPLOY === "cloud";
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/web-session";
 
-const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
+const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 
 /** POST /api/auth/logout — clears both the web session and backend session cookies. */
 export async function POST(req: NextRequest) {

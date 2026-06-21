@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Copy, Check, Download, FileText, Pencil, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RunStatusBadge, RunStatusGlyph } from "@/components/RunStatus";
 import { Tool } from "@/components/ai-elements/tool";
@@ -26,6 +27,7 @@ import {
   exportStateText,
 } from "@/lib/run-format";
 import { stripCitationTokens } from "@/lib/strip-citations";
+import { getToolCardTitle } from "@/lib/useChatStream";
 import type { LogEntry, RunDetail, RunPart, TranscriptRow, ToolCallEntry, ApprovalEntry } from "@/lib/types";
 
 type Props = {
@@ -55,6 +57,7 @@ export function RunDetailSplitPane({
   onReplay,
   onCancel,
 }: Props) {
+  const [replayConfirmOpen, setReplayConfirmOpen] = useState(false);
   const transcriptParts = parts.length > 0 ? parts : partsFromRun(run);
   const timeline = buildTimeline(run, transcriptParts);
   const isActive = run.status === "running" || run.status === "queued";
@@ -122,7 +125,7 @@ export function RunDetailSplitPane({
                 <span>{run.total_tokens.toLocaleString()} tokens</span>
               </>
             )}
-            {run.total_cost_usd != null && run.total_cost_usd > 0 && (
+            {run.total_cost_usd != null && (
               <>
                 <span className="text-muted-foreground/60">·</span>
                 <span>Cost: ${run.total_cost_usd.toFixed(2)}</span>
@@ -141,14 +144,12 @@ export function RunDetailSplitPane({
             </Button>
           </Link>
           {run.can_replay !== false && (
-            /* #1274: confirm before replaying to prevent accidental duplicate runs. */
+            /* #1274: confirm before replaying to prevent accidental duplicate runs.
+               Uses the shared ConfirmDialog (not native window.confirm). */
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                if (!window.confirm("Re-run this worker with the same inputs?")) return;
-                onReplay?.();
-              }}
+              onClick={() => setReplayConfirmOpen(true)}
             >
               <RotateCcw className="size-3.5 mr-1.5" />
               Re-run
@@ -168,6 +169,18 @@ export function RunDetailSplitPane({
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={replayConfirmOpen}
+        onOpenChange={setReplayConfirmOpen}
+        title="Re-run this worker?"
+        body="It will run again with the same inputs."
+        confirmLabel="Re-run"
+        onConfirm={() => {
+          setReplayConfirmOpen(false);
+          onReplay?.();
+        }}
+      />
 
       {streamUnavailable && isActive && (
         <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3">
@@ -217,7 +230,7 @@ export function RunDetailSplitPane({
               <TabsList variant="line">
                 <TabsTrigger value="output">Output</TabsTrigger>
                 <TabsTrigger value="inputs">Inputs</TabsTrigger>
-                <TabsTrigger value="transcript">Steps</TabsTrigger>
+                <TabsTrigger value="transcript">Activity</TabsTrigger>
                 {(run.tool_calls?.length ?? 0) > 0 && (
                   <TabsTrigger value="tool-calls">Tool calls</TabsTrigger>
                 )}
@@ -293,10 +306,12 @@ function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
   const durationValue =
     run.duration_ms != null ? formatDuration(run.duration_ms) : status === "unknown" ? "Unknown" : "Running";
   return (
-    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-5">
+    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-7">
       <RunMetric label="Status" value={statusLabel(status)} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
       <RunMetric label="Duration" value={durationValue} />
+      <RunMetric label="Tokens" value={run.total_tokens != null ? run.total_tokens.toLocaleString() : "Not reported"} />
+      <RunMetric label="Cost" value={run.total_cost_usd != null ? `$${run.total_cost_usd.toFixed(2)}` : "Not reported"} />
       <RunMetric label="Output" value={`${outputItemCount(run)} item${outputItemCount(run) === 1 ? "" : "s"}`} />
       <RunMetric label="Files" value={`${run.artifacts.length} file${run.artifacts.length === 1 ? "" : "s"}`} />
     </dl>
@@ -387,7 +402,7 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
           return (
             <Tool
               key={`${part.callId}-${index}`}
-              name={part.toolName}
+              name={getToolCardTitle(part.toolName, result ? "completed" : "running")}
               args={part.args}
               callId={part.callId}
               result={result?.result}
@@ -948,7 +963,7 @@ function buildTimeline(run: RunDetail, parts: RunPart[]): TimelineItem[] {
     if (part.type === "step-start") {
       rows.push({ label: `Step ${part.stepNumber}`, duration: "start", status: run.status });
     } else if (part.type === "tool-call") {
-      rows.push({ label: part.toolName, detail: part.callId, duration: "tool", status: run.status });
+      rows.push({ label: getToolCardTitle(part.toolName, "completed"), detail: part.callId, duration: "tool", status: run.status });
     } else if (part.type === "text") {
       rows.push({ label: "Assistant text", detail: clip(part.text), duration: "stream", status: run.status });
     } else if (part.type === "reasoning") {

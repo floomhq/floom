@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { KeyRound, TestTube2, Trash2, Plus, Check, X, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
-import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
+import { IntegrationsShell } from "@/components/connections/IntegrationsShell";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { computeIsAdmin, useIsAdmin } from "@/lib/use-is-admin";
 import type { CurrentUser, SecretItem } from "@/lib/types";
@@ -174,14 +174,10 @@ function SecretsContent() {
   // #943 — members see a restricted notice instead of the inventory.
   if (!roleCheckPending && !isAdmin) {
     return (
-      <div className="space-y-6">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">Secrets</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-            Manage environment secrets for your workers. Values are write-only.
-          </p>
-        </header>
-        <ConnectionsChips />
+      <IntegrationsShell
+        title="Secrets"
+        subtitle="Manage environment secrets for your workers. Values are write-only."
+      >
         <Card className="[border:var(--bd-card)] shadow-none bg-card">
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
             <KeyRound className="mx-auto mb-3 h-5 w-5 opacity-60" />
@@ -189,34 +185,31 @@ function SecretsContent() {
             and admins. Ask an admin if a worker is missing a credential.
           </CardContent>
         </Card>
-      </div>
+      </IntegrationsShell>
     );
   }
 
+  const addSecretAction = (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() => setAddingOpen((v) => !v)}
+      className="gap-1.5"
+    >
+      <Plus className="w-4 h-4" />
+      Add secret
+    </Button>
+  );
+
   return (
-    <div className="space-y-6">
+    <IntegrationsShell
+      title="Secrets"
+      subtitle="Manage environment secrets for your workers. Values are write-only."
+      actions={addSecretAction}
+    >
       {/* Secrets lives under /connections/secrets (P2-9) and shares the
           Connections chip nav (Federico 2026-06-19: "the chips to filter are
           enough" — the in-page tab row became chip-style filter nav). */}
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Secrets</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-            Manage environment secrets for your workers. Values are write-only.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setAddingOpen((v) => !v)}
-          className="gap-1.5"
-        >
-          <Plus className="w-4 h-4" />
-          Add secret
-        </Button>
-      </header>
-      <ConnectionsChips />
-
       {addingOpen && (
         <Card className="[border:var(--bd-card)] shadow-none bg-card">
           <CardHeader>
@@ -272,7 +265,7 @@ function SecretsContent() {
           ) : secrets.length === 0 ? (
             <ListEmpty
               icon={KeyRound}
-              title="No secrets configured"
+              title="No secrets yet"
               help="Workers that call external APIs require secrets. Add them here and reference them in your worker YAML."
               action={
                 <Button
@@ -469,6 +462,6 @@ function SecretsContent() {
         <code className="bg-muted px-1 py-0.5 text-xs">.env</code>{" "}
         take effect immediately without restarting workers.
       </p>
-    </div>
+    </IntegrationsShell>
   );
 }

@@ -138,7 +138,7 @@ describe("Settings Collection (Phase 3)", () => {
     expect(screen.getByText("Slack, email & WhatsApp")).toBeInTheDocument();
     expect(screen.getByText("Configure Emily")).toBeInTheDocument();
     expect(screen.getByText("People & roles")).toBeInTheDocument();
-    expect(screen.getByText("Git-tracked workspace changelog")).toBeInTheDocument();
+    expect(screen.getByText("Restore points, download a copy, and undo")).toBeInTheDocument();
     expect(screen.getByText("Theme (light, dark, system)")).toBeInTheDocument();
 
     await user.click(screen.getByText("Members"));

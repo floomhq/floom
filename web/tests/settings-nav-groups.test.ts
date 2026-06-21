@@ -17,14 +17,14 @@ import {
 // reference now lives under "Connect & automate".
 
 describe("Settings nav groups (§4)", () => {
-  it("Workspace group: General·Members·Channels·Assistant·Workspace token·Version history·Danger zone", () => {
+  it("Workspace group: General·Members·Channels·Assistant·Workspace token·Backups & history·Danger zone", () => {
     expect(settingsGroup("workspace").map((i) => i.label)).toEqual([
       "General",
       "Members",
       "Channels",
       "Assistant",
       "Workspace token",
-      "Version history",
+      "Backups & history",
       "Danger zone",
     ]);
   });

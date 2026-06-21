@@ -10,10 +10,10 @@ describe("public API base (UI display)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("falls back to the floom-hosted URL when NEXT_PUBLIC_API_BASE is unset", () => {
+  it("falls back to the local API URL when NEXT_PUBLIC_API_BASE is unset", () => {
     vi.stubEnv("NEXT_PUBLIC_API_BASE", "");
     expect(getPublicApiBase()).toBe(DEFAULT_PUBLIC_API_BASE);
-    expect(getPublicApiHost()).toBe("workers-api.floom.dev");
+    expect(getPublicApiHost()).toBe("localhost:8000");
   });
 
   it("shows the self-hosted URL when configured (localhost dev)", () => {
@@ -31,7 +31,7 @@ describe("public API base (UI display)", () => {
   it("ignores whitespace-only config and falls back", () => {
     vi.stubEnv("NEXT_PUBLIC_API_BASE", "   ");
     expect(getPublicApiBase()).toBe(DEFAULT_PUBLIC_API_BASE);
-    expect(getPublicApiHost()).toBe("workers-api.floom.dev");
+    expect(getPublicApiHost()).toBe("localhost:8000");
   });
 });
 
@@ -41,10 +41,10 @@ describe("#953 internal infra hosts are never displayed", () => {
     vi.unstubAllEnvs();
   });
 
-  it("remaps a *.up.railway.app base to the stable public alias", () => {
+  it("remaps a *.up.railway.app base to the configured default", () => {
     vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://api-production-b866.up.railway.app");
     expect(getPublicApiBase()).toBe(DEFAULT_PUBLIC_API_BASE);
-    expect(getPublicApiHost()).toBe("workers-api.floom.dev");
+    expect(getPublicApiHost()).toBe("localhost:8000");
   });
 
   it("remaps railway.internal hosts", () => {
