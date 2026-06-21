@@ -12,6 +12,7 @@ import { FloomMark } from "@/components/share/ShareCardShell";
 import { approvalActionLine } from "@/components/share/ApprovalActionItems";
 import { ApprovalReviewBody } from "@/components/share/ApprovalReviewBody";
 import type { ApprovalRow, Artifact } from "@/lib/types";
+import { sanitizeOutputText } from "@/lib/strip-citations";
 import { AnnotationsViewer } from "./annotations";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
@@ -414,12 +415,18 @@ function TextArtifactPreview({
     );
   }
 
+  // This is the SHARED review surface (a recipient may have no account) and the
+  // preview text comes from decision_input_json / a fetched artifact, neither of
+  // which the backend strips of internal <REDACTED:...> / citation markers. The
+  // client is the only defense, so sanitize before any render branch (#1752).
+  const clean = sanitizeOutputText(text);
+
   if (kind === "html") {
     return (
       <div className="max-h-[52vh] overflow-auto bg-white">
         <iframe
-          title={file.title}
-          srcDoc={text}
+          title={sanitizeOutputText(file.title)}
+          srcDoc={clean}
           sandbox=""
           referrerPolicy="no-referrer"
           className="h-[52vh] min-h-[420px] w-full [border:0] bg-white"
@@ -430,13 +437,13 @@ function TextArtifactPreview({
 
   if (kind === "table") {
     const delimiter = file.title.toLowerCase().endsWith(".tsv") || (file.detail || "").toLowerCase().endsWith(".tsv") ? "\t" : undefined;
-    const rows = Papa.parse<string[]>(text, { delimiter, skipEmptyLines: true }).data;
+    const rows = Papa.parse<string[]>(clean, { delimiter, skipEmptyLines: true }).data;
     return <TablePreview rows={rows} />;
   }
 
   return (
     <pre className="max-h-[52vh] overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-[var(--ink)]">
-      {text}
+      {clean}
     </pre>
   );
 }
@@ -657,7 +664,7 @@ function ApprovalFilePreview({
           <span className="flex min-w-0 items-center gap-2">
             {fileKindIcon(kind)}
             <span className="min-w-0">
-              <span className="block truncate text-sm font-medium text-[var(--ink)]">{file.title}</span>
+              <span className="block truncate text-sm font-medium text-[var(--ink)]">{sanitizeOutputText(file.title)}</span>
               <span className="block truncate text-xs text-[var(--ink-soft)]">{[file.detail, meta].filter(Boolean).join(" · ")}</span>
             </span>
           </span>
@@ -693,14 +700,26 @@ function ReviewContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Noindex public approval pages so share links don't appear in search results.
+  // Noindex public approval pages so share links don't appear in search results,
+  // and force a no-referrer policy document-wide so the tokenised review URL is
+  // never leaked via the Referer header to the worker-controlled media host.
+  // `referrerPolicy` is not a valid attribute on <video>, so the inline preview
+  // video request would otherwise carry the full ?id=...&token=... URL as Referer.
+  // The page-level <meta name="referrer"> covers <video> (and every subresource).
   useEffect(() => {
     if (!isSignedLink) return;
-    const meta = document.createElement("meta");
-    meta.name = "robots";
-    meta.content = "noindex,nofollow";
-    document.head.appendChild(meta);
-    return () => { document.head.removeChild(meta); };
+    const robots = document.createElement("meta");
+    robots.name = "robots";
+    robots.content = "noindex,nofollow";
+    document.head.appendChild(robots);
+    const referrer = document.createElement("meta");
+    referrer.name = "referrer";
+    referrer.content = "no-referrer";
+    document.head.appendChild(referrer);
+    return () => {
+      document.head.removeChild(robots);
+      document.head.removeChild(referrer);
+    };
   }, [isSignedLink]);
 
   const load = useCallback(async () => {
@@ -835,7 +854,7 @@ function ReviewContent() {
   }, [annotationsPayload, chatComment, approval, isDestructiveDelete, isAgentTool, isSignedLink, load, removeCurrent, token]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--bg)]">
+    <div className="flex h-screen flex-col bg-[var(--bg)]">
       {/* Topbar: brand + who-asked + shared-link marker (consistent header) */}
       <div className="flex items-center justify-between [border-bottom:var(--bd-div)] px-6 py-3.5">
         <div className="flex items-center gap-2.5">
@@ -857,7 +876,7 @@ function ReviewContent() {
         )}
       </div>
 
-      <div className="flex-1 px-6 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-8">
         {loading ? (
           <div className="mx-auto max-w-[820px] space-y-3">
             <div className="h-5 w-1/2 animate-pulse rounded bg-[var(--bg-2)]" />

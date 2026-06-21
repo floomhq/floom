@@ -15,6 +15,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 _BEDROCK = "bedrock/us.anthropic.claude-sonnet-4-6"
+_GEMINI = "gemini/gemini-3.5-flash"
 
 
 def _load_worker_author_module():
@@ -61,6 +62,15 @@ def test_worker_author_reports_missing_bedrock_credentials(monkeypatch):
     assert "AWS credentials" in worker_author._provider_credentials_error(_BEDROCK)
 
 
+def test_worker_author_reports_missing_gemini_credentials(monkeypatch):
+    worker_author = _load_worker_author_module()
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _GEMINI)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    assert "GEMINI_API_KEY" in worker_author._provider_credentials_error(_GEMINI)
+
+
 def test_worker_author_routes_bedrock_through_litellm(monkeypatch):
     worker_author = _load_worker_author_module()
     monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _BEDROCK)
@@ -87,6 +97,139 @@ def test_worker_author_routes_bedrock_through_litellm(monkeypatch):
     assert captured["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 
+def test_worker_author_routes_gemini_through_litellm(monkeypatch):
+    worker_author = _load_worker_author_module()
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _GEMINI)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return "OK"
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        out = worker_author._codegen_chat(
+            messages=[{"role": "system", "content": "S"}, {"role": "user", "content": "u"}],
+            max_output_tokens=12,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+
+    assert out == "OK"
+    assert captured["model"] == _GEMINI
+    assert captured["max_tokens"] == 12
+    assert captured["messages"][0]["content"] == "S"
+
+
+def test_worker_author_parses_first_json_object_with_trailing_text():
+    worker_author = _load_worker_author_module()
+    raw = '{"worker_yml": "id: w\\n", "run_code": "print(1)"}\n\nHere is why this works.'
+
+    parsed = worker_author._extract_json_object(raw)
+
+    assert parsed["worker_yml"] == "id: w\n"
+    assert parsed["run_code"] == "print(1)"
+
+
+def test_worker_author_repairs_missing_manifest_name_from_suggested_id():
+    worker_author = _load_worker_author_module()
+    worker_yml = """
+schema_version: "0.3"
+title: "Topic Bullets"
+description: "Create three bullets for a topic."
+version: "0.1.0"
+trigger:
+  type: manual
+exec:
+  entry: "run.py"
+  runner: e2b
+  inputs:
+    - name: topic
+      type: string
+      required: true
+  outputs:
+    - name: bullets
+      type: markdown
+      required: true
+"""
+    parsed = {
+        "worker_yml": worker_yml,
+        "suggested_id": "topic-bullets",
+        "run_code": "outputs = {'bullets': '- one\\n- two\\n- three'}\n",
+    }
+
+    assert worker_author._validate_generated_bundle(parsed, "make topic bullets") is None
+
+
+def test_worker_author_repairs_missing_manifest_title_from_name():
+    worker_author = _load_worker_author_module()
+    worker_yml = """
+schema_version: "0.3"
+name: "topic-bullets"
+description: "Create three bullets for a topic."
+version: "0.1.0"
+trigger:
+  type: manual
+exec:
+  entry: "run.py"
+  runner: e2b
+  inputs:
+    - name: topic
+      type: string
+      required: true
+  outputs:
+    - name: bullets
+      type: markdown
+      required: true
+"""
+    parsed = {
+        "worker_yml": worker_yml,
+        "run_code": "outputs = {'bullets': '- one\\n- two\\n- three'}\n",
+    }
+
+    assert worker_author._validate_generated_bundle(parsed, "make topic bullets") is None
+
+
+def test_worker_author_repairs_exec_inputs_outputs_mapping_shape():
+    worker_author = _load_worker_author_module()
+    worker_yml = """
+schema_version: "0.3"
+name: "topic-summary"
+title: "Topic Summary"
+description: "Create a concise markdown summary for a topic."
+version: "0.1.0"
+trigger:
+  type: manual
+exec:
+  entry: "run.py"
+  runner: e2b
+  inputs:
+    topic:
+      type: string
+      required: true
+  outputs:
+    summary:
+      type: markdown
+      required: true
+"""
+    parsed = {
+        "worker_yml": worker_yml,
+        "run_code": "outputs = {'summary': '# Summary\\n\\nA concise summary.'}\n",
+    }
+
+    assert worker_author._validate_generated_bundle(parsed, "summarize a topic") is None
+    manifest = worker_author._repair_generated_worker_manifest(
+        worker_author._load_manifest(worker_yml),
+        prompt="summarize a topic",
+    )
+    assert manifest["exec"]["inputs"] == [
+        {"name": "topic", "type": "string", "required": True}
+    ]
+    assert manifest["exec"]["outputs"] == [
+        {"name": "summary", "type": "markdown", "required": True}
+    ]
+
+
 def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypatch):
     from runner_sandbox.e2b_driver import _worker_author_platform_env
 
@@ -102,6 +245,19 @@ def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypat
     assert env["AWS_ACCESS_KEY_ID"] == "AKIAEXAMPLE"
     assert env["AWS_SECRET_ACCESS_KEY"] == "secret"
     assert env["AWS_REGION_NAME"] == "us-west-2"
+
+
+def test_worker_author_env_bridge_forwards_gemini_key(monkeypatch):
+    from runner_sandbox.e2b_driver import _worker_author_platform_env
+
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _GEMINI)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    env = _worker_author_platform_env()
+
+    assert env["WORKEROS_CODEGEN_MODEL"] == _GEMINI
+    assert env["GEMINI_API_KEY"] == "test-gemini-key"
 
 
 def test_worker_author_manifest_does_not_require_byo_ai_key():

@@ -265,7 +265,7 @@ function SecretsContent() {
           ) : secrets.length === 0 ? (
             <ListEmpty
               icon={KeyRound}
-              title="No secrets configured"
+              title="No secrets yet"
               help="Workers that call external APIs require secrets. Add them here and reference them in your worker YAML."
               action={
                 <Button

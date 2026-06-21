@@ -173,10 +173,10 @@ export function ConnectionEventPicker({
   if (connectedApps.length === 0) {
     return (
       <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 space-y-2">
-        <p className="text-sm text-muted-foreground">No connected integrations yet.</p>
+        <p className="text-sm text-muted-foreground">No connections yet.</p>
         <Link href="/connections/browse" className="inline-flex items-center gap-1 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card px-2 py-1 text-xs hover:bg-muted">
           <Plus className="w-3 h-3" />
-          Connect an integration
+          Add a connection
         </Link>
       </div>
     );
@@ -186,10 +186,10 @@ export function ConnectionEventPicker({
     <div className="space-y-3">
       {/* Step 1: App */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground ">Integration</Label>
+        <Label className="text-xs text-muted-foreground ">Connection</Label>
         <Select value={selectedApp} onValueChange={handleAppChange}>
           <SelectTrigger className="w-full [border:var(--bd-card)]">
-            <SelectValue placeholder="Pick a connected integration">
+            <SelectValue placeholder="Pick a connection">
               {selectedApp ? (
                 <span className="flex items-center gap-2">
                   <BrandLogo icon={appIcon(selectedApp)} className="size-4 shrink-0" />
@@ -216,7 +216,7 @@ export function ConnectionEventPicker({
           href="/connections/browse"
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-muted-foreground transition-colors"
         >
-          Connect another integration
+          Add another connection
         </Link>
       </div>
 
@@ -232,7 +232,7 @@ export function ConnectionEventPicker({
               </p>
             </div>
           ) : triggers.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No events found for this integration.</p>
+            <p className="text-xs text-muted-foreground">No events found for this connection.</p>
           ) : (
             <Select value={composioEvent} onValueChange={handleEventChange}>
               <SelectTrigger className="w-full [border:var(--bd-card)]">

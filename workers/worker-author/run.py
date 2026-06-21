@@ -98,6 +98,19 @@ def _suggested_id_from_prompt(prompt: str) -> str:
     return slug or "worker"
 
 
+def _title_from_worker_id(worker_id: str) -> str:
+    words = [word for word in re.split(r"[-_\s]+", worker_id or "") if word]
+    title = " ".join(word.capitalize() for word in words).strip()
+    return title or "Generated Worker"
+
+
+def _description_from_prompt(prompt: str, title: str) -> str:
+    clean = re.sub(r"\s+", " ", (prompt or "").strip())
+    if clean:
+        return clean[:220]
+    return f"Worker generated from the prompt: {title}."
+
+
 def _with_prompt_cache(messages: list, model: str) -> list:
     if not _is_anthropic_model(model):
         return list(messages)
@@ -120,8 +133,37 @@ def _with_prompt_cache(messages: list, model: str) -> list:
     return out
 
 
+def _extract_json_object(raw: str) -> Dict[str, Any]:
+    """Parse the first JSON object from an LLM response.
+
+    Some providers honor ``response_format={"type": "json_object"}`` loosely and
+    still append commentary after the object. ``json.loads`` then fails with
+    ``Extra data`` even though the leading object is usable.
+    """
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+        text = text.strip()
+        if text.lower().startswith("json"):
+            text = text[4:].lstrip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        if start != -1:
+            text = text[start:]
+    parsed, _end = json.JSONDecoder().raw_decode(text)
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("top-level JSON value is not an object", text, 0)
+    return parsed
+
+
 def _provider_credentials_error(model: str) -> Optional[str]:
     if _is_litellm_model(model):
+        if "gemini" in model.lower() and not (
+            os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        ):
+            return "Gemini model configured but GEMINI_API_KEY or GOOGLE_API_KEY is not available in the worker-author sandbox"
         if "bedrock" in model.lower():
             has_auth = bool(
                 os.environ.get("AWS_ACCESS_KEY_ID")
@@ -257,14 +299,14 @@ def _read_existing_workers(workers_dir: Optional[str] = None) -> List[str]:
     return []
 
 
-def _validate_worker_yml(yml_string: str) -> Optional[str]:
+def _validate_worker_yml(yml_string: str, *, prompt: str = "", suggested_id: str = "") -> Optional[str]:
     """Validate a worker.yml string. Returns error string or None if valid."""
     try:
         import yaml as pyyaml
         manifest = pyyaml.safe_load(yml_string)
         if not isinstance(manifest, dict):
             return "worker_yml must be a YAML mapping"
-        manifest = _repair_generated_worker_manifest(manifest)
+        manifest = _repair_generated_worker_manifest(manifest, prompt=prompt, suggested_id=suggested_id)
         schema_ver = manifest.get("schema_version")
         if schema_ver != "0.3":
             return f"schema_version must be '0.3', got {schema_ver!r}"
@@ -297,12 +339,26 @@ def _load_manifest(yml_string: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _repair_generated_worker_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
+def _repair_generated_worker_manifest(
+    manifest: Dict[str, Any],
+    *,
+    prompt: str = "",
+    suggested_id: str = "",
+) -> Dict[str, Any]:
     """Normalize tiny schema drift in generated WorkerContract YAML."""
     repaired = dict(manifest)
     schema_version = repaired.get("schema_version")
     if schema_version is not None and not isinstance(schema_version, str):
         repaired["schema_version"] = str(schema_version)
+    name = repaired.get("name")
+    if not isinstance(name, str) or not name.strip():
+        repaired["name"] = (suggested_id or _suggested_id_from_prompt(prompt)).strip()
+    else:
+        repaired["name"] = name.strip()
+    if not isinstance(repaired.get("title"), str) or not str(repaired.get("title") or "").strip():
+        repaired["title"] = _title_from_worker_id(str(repaired.get("name") or ""))
+    if not isinstance(repaired.get("description"), str) or not str(repaired.get("description") or "").strip():
+        repaired["description"] = _description_from_prompt(prompt, str(repaired.get("title") or "Generated Worker"))
     if repaired.get("schema_version") == "0.3":
         version = repaired.get("version")
         if not isinstance(version, str) or not version.strip():
@@ -311,7 +367,32 @@ def _repair_generated_worker_manifest(manifest: Dict[str, Any]) -> Dict[str, Any
             repaired["version"] = "0.1.0"
     if "version" in repaired and repaired["version"] is not None and not isinstance(repaired["version"], str):
         repaired["version"] = str(repaired["version"])
+    exec_block = repaired.get("exec")
+    if isinstance(exec_block, dict):
+        repaired_exec = dict(exec_block)
+        for key in ("inputs", "outputs"):
+            if key in repaired_exec:
+                repaired_exec[key] = _normalize_named_schema_list(repaired_exec[key])
+        repaired["exec"] = repaired_exec
     return repaired
+
+
+def _normalize_named_schema_list(value: Any) -> Any:
+    """Convert Gemini-style named schema maps to WorkerContract lists."""
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return value
+    normalized: List[Dict[str, Any]] = []
+    for name, spec in value.items():
+        item: Dict[str, Any] = {"name": str(name)}
+        if isinstance(spec, dict):
+            item.update(spec)
+            item["name"] = str(item.get("name") or name)
+        elif spec is not None:
+            item["type"] = str(spec)
+        normalized.append(item)
+    return normalized
 
 
 def _exec_block(manifest: Dict[str, Any]) -> Dict[str, Any]:
@@ -386,11 +467,19 @@ def _validate_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Optional[
     if not isinstance(worker_yml, str) or not worker_yml.strip():
         return "worker_yml is empty"
 
-    yaml_error = _validate_worker_yml(worker_yml)
+    yaml_error = _validate_worker_yml(
+        worker_yml,
+        prompt=prompt,
+        suggested_id=str(parsed.get("suggested_id") or ""),
+    )
     if yaml_error:
         return yaml_error
 
-    manifest = _load_manifest(worker_yml)
+    manifest = _repair_generated_worker_manifest(
+        _load_manifest(worker_yml) or {},
+        prompt=prompt,
+        suggested_id=str(parsed.get("suggested_id") or ""),
+    )
     if not manifest:
         return "worker_yml must be a YAML mapping"
 
@@ -667,24 +756,8 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
             f"{time.perf_counter() - attempt_started_at:.2f}s"
         )
         raw = (resp.choices[0].message.content or "").strip()
-        # Bedrock/Anthropic Claude (and some other providers) wrap JSON in a
-        # ```json ... ``` markdown fence or add a short preamble, so a bare
-        # json.loads fails at char 0 ("Expecting value: line 1 column 1"). Strip a
-        # fence if present, else fall back to the outermost {...} object.
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1] if "\n" in raw else raw[3:]
-            if raw.rstrip().endswith("```"):
-                raw = raw.rstrip()[:-3]
-            raw = raw.strip()
-            if raw.lower().startswith("json"):
-                raw = raw[4:].lstrip()
-        if not raw.startswith("{"):
-            _start, _end = raw.find("{"), raw.rfind("}")
-            if _start != -1 and _end > _start:
-                raw = raw[_start : _end + 1]
-
         try:
-            parsed = json.loads(raw)
+            parsed = _extract_json_object(raw)
         except json.JSONDecodeError as exc:
             last_error = f"LLM returned non-JSON: {exc}"
             log(f"worker-author: attempt {attempt} JSON parse error: {exc}", level="warning")
@@ -704,7 +777,11 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
 
         import yaml as pyyaml
 
-        repaired_manifest = _repair_generated_worker_manifest(_load_manifest(worker_yml) or {})
+        repaired_manifest = _repair_generated_worker_manifest(
+            _load_manifest(worker_yml) or {},
+            prompt=prompt,
+            suggested_id=str(parsed.get("suggested_id") or ""),
+        )
         parsed["worker_yml"] = pyyaml.safe_dump(
             repaired_manifest,
             sort_keys=False,

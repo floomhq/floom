@@ -68,10 +68,12 @@ describe("Emily creation flow — consistent Emily empty state", () => {
   it("create uses the real PromptInput (auto-resize TEXTAREA), no bespoke hero", async () => {
     render(<EmilyChatCore fullPage createMode />);
     // Consistent Emily empty state: generic composer placeholder (NOT the bespoke
-    // "Create me: a worker that…" hero), no "Hire worker" submit button.
+    // "Create me: a worker that…" hero). #1706: the composer CTA IS "Hire worker"
+    // (the canonical action label); assert no separate bespoke "Hire a new worker" HEADING.
     const composer = await screen.findByPlaceholderText("Message Emily...");
     expect(composer.tagName).toBe("TEXTAREA");
-    expect(screen.queryByRole("button", { name: /hire worker/i })).not.toBeInTheDocument();
+    // The landing send button's accessible name is now "Hire worker" (canonical per #1706)
+    // so we no longer assert it's absent — we assert the bespoke hero HEADING is absent.
     expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
   });
 
@@ -100,9 +102,11 @@ describe("Emily dock — full screen controls", () => {
       </EmilyFullscreenProvider>,
     );
 
-  it("rail header exposes a make-fullscreen (Expand) control in the right sidebar", () => {
+  it("rail header exposes a make-fullscreen (Full screen) control in the right sidebar", () => {
     renderDock();
-    expect(screen.getByRole("button", { name: /expand emily/i })).toBeInTheDocument();
+    // The full-screen toggle reads exactly "Full screen" (no longer the
+    // ambiguous "Expand") so the affordance is unmistakable.
+    expect(screen.getByRole("button", { name: /^full screen$/i })).toBeInTheDocument();
     // Not in full screen yet → no Close-full-screen control.
     expect(screen.queryByRole("button", { name: /close full screen/i })).not.toBeInTheDocument();
   });
@@ -111,16 +115,16 @@ describe("Emily dock — full screen controls", () => {
     const user = userEvent.setup();
     renderDock();
     // Single click → fullscreen (no rail→wide→full multi-step). Round-09 r9:
-    // the primary expand control is now TRUE one-click fullscreen.
-    await user.click(screen.getByRole("button", { name: /expand emily/i }));
+    // the primary full-screen control is now TRUE one-click fullscreen.
+    await user.click(screen.getByRole("button", { name: /^full screen$/i }));
     const close = screen.getByRole("button", { name: /close full screen/i });
     expect(close).toBeInTheDocument();
-    // Toggle now reads "Shrink Emily" while full.
-    expect(screen.getByRole("button", { name: /shrink emily/i })).toBeInTheDocument();
+    // Toggle now reads "Exit full screen" while full.
+    expect(screen.getByRole("button", { name: /^exit full screen$/i })).toBeInTheDocument();
     await user.click(close);
-    // Back to rail → Close gone, Expand back.
+    // Back to rail → Close gone, Full screen back.
     expect(screen.queryByRole("button", { name: /close full screen/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /expand emily/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^full screen$/i })).toBeInTheDocument();
   });
 
   it("fullscreen makes the dock flex-grow to fill the main area (not a fixed-width rail, not a fixed overlay)", async () => {
@@ -130,7 +134,7 @@ describe("Emily dock — full screen controls", () => {
     // Rail: fixed width, not flex-grow, no full-screen overlay.
     expect(dock().className).toContain("shrink-0");
     expect(dock().className).not.toContain("flex-1");
-    await user.click(screen.getByRole("button", { name: /expand emily/i }));
+    await user.click(screen.getByRole("button", { name: /^full screen$/i }));
     // Fullscreen: flex-1 (fills main area) and NOT fixed inset overlay (which
     // would cover the left nav — the regression Federico flagged).
     expect(dock().getAttribute("aria-label")).toMatch(/fullscreen/i);
@@ -144,7 +148,7 @@ describe("Emily dock — full screen controls", () => {
     const { container } = renderDock();
     // Not full yet → no centered fullPage thread container.
     expect(container.querySelector(".max-w-2xl.mx-auto")).toBeNull();
-    await user.click(screen.getByRole("button", { name: /expand emily/i }));
+    await user.click(screen.getByRole("button", { name: /^full screen$/i }));
     // In full mode the core is rendered with fullPage → max-w-2xl mx-auto w-full
     // wrapper, so the thread takes proper height and the composer is anchored.
     expect(container.querySelector(".max-w-2xl.mx-auto.w-full")).not.toBeNull();

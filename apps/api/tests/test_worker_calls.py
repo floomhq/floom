@@ -459,6 +459,51 @@ def test_workeros_call_worker_raises_without_env(tmp_path, monkeypatch):
         workeros.call_worker("some-worker", {})
 
 
+def test_workeros_call_worker_fails_fast_on_pending_approval(tmp_path, monkeypatch):
+    from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT
+
+    (tmp_path / "workeros.py").write_text(WORKEROS_PY_CONTENT)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop("workeros", None)
+
+    monkeypatch.setenv("WORKEROS_API_URL", "https://api.example.test")
+    monkeypatch.setenv("WORKEROS_RUN_TOKEN", "run-token")
+
+    calls = []
+
+    class _Resp:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return self._body
+
+    def fake_urlopen(req, timeout):
+        calls.append(req.full_url)
+        if req.full_url.endswith("/workers/review-gated/runs"):
+            return _Resp(b'{"run_id": "run-child"}')
+        if req.full_url.endswith("/runs/run-child"):
+            return _Resp(b'{"status": "pending_approval"}')
+        raise AssertionError(f"unexpected URL {req.full_url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    import workeros  # type: ignore[import]
+
+    with pytest.raises(RuntimeError, match="awaiting approval"):
+        workeros.call_worker("review-gated", {}, timeout=30)
+    assert calls == [
+        "https://api.example.test/workers/review-gated/runs",
+        "https://api.example.test/runs/run-child",
+    ]
+
+
 def test_workeros_managed_llm_helpers_use_run_token_header(tmp_path, monkeypatch):
     from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT
 

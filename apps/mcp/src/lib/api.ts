@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { readCredentials, updateCredentials, type StoredCredentials } from "./credentials.js";
 
+const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
+
 export class FloomApiError extends Error {
   constructor(
     message: string,
@@ -333,5 +335,5 @@ export function resolveLoginApiBase(opts: { cloud?: boolean } = {}): string {
     opts.cloud === true ||
     (process.env.WORKEROS_CLOUD || "").trim() === "1" ||
     (process.env.WORKEROS_CLOUD || "").trim().toLowerCase() === "true";
-  return cloud ? "https://api.floom.example.com" : "https://localhost:8000";
+  return cloud ? DEFAULT_CLOUD_API_BASE : "https://localhost:8000";
 }

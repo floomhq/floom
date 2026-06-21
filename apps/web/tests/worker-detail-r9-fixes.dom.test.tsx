@@ -9,8 +9,11 @@ import { QueryProvider } from "@/components/providers/QueryProvider";
 //          primary row — no "Visual editor of worker.yml" framing text or gap
 //          element sits BETWEEN .c-dtabs and .c-dtabs2.
 
+// Mutable search string so a test can simulate a deep-linked active tab
+// (?sel=...&tab=Source) before mounting.
+let mockSearch = "";
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(mockSearch),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/",
 }));
@@ -74,6 +77,7 @@ vi.mock("@/lib/useApprovalsSync", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  mockSearch = "";
 });
 
 async function openDetail() {
@@ -110,6 +114,46 @@ describe("R9 worker-detail FIX 1 — Advanced group is visible ON the tab row", 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Versions" }));
     // Versions now renders as a real tab on the primary row.
     await waitFor(() => expect(screen.getByRole("tab", { name: "Versions" })).toBeTruthy());
+  });
+});
+
+describe("worker-detail #1680 — Advanced menu marks the ACTIVE view, mutually exclusive", () => {
+  it("checks ONLY the active advanced tab even when several are pinned", async () => {
+    // Pin both Source and Versions, deep-link the detail with Source active.
+    window.localStorage.setItem(
+      "floom.workerDetail.pinnedTabs",
+      JSON.stringify(["Source", "Versions"]),
+    );
+    mockSearch = `sel=${WORKER_ID}&tab=Source`;
+
+    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
+    render(
+      <QueryProvider>
+        <WorkersCollection initialWorkers={[worker as never]} />
+      </QueryProvider>,
+    );
+    await waitFor(() => expect(document.querySelector(".c-dtabs")).toBeTruthy());
+
+    fireEvent.click(await screen.findByRole("button", { name: /Advanced tabs/i }));
+    const source = await screen.findByRole("menuitemcheckbox", { name: "Source" });
+    const versions = screen.getByRole("menuitemcheckbox", { name: "Versions" });
+    // Exactly one checkmark — the active view (Source), NOT the pinned set.
+    expect(source.getAttribute("aria-checked")).toBe("true");
+    expect(versions.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("an inactive advanced view is unchecked even while pinned (no double checkmark)", async () => {
+    await openDetail(); // active tab = Overview (first base tab), nothing advanced
+    fireEvent.click(screen.getByRole("button", { name: /Advanced tabs/i }));
+    // Pin Source and Versions; neither is the active view, so neither is checked.
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Source" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Versions" }));
+    const checked = screen
+      .getAllByRole("menuitemcheckbox")
+      .filter((el) => el.getAttribute("aria-checked") === "true");
+    // selectWorkerTab uses the (mocked, no-op) router, so the URL-driven active
+    // tab stays Overview — the menu must therefore show ZERO checkmarks, never two.
+    expect(checked.length).toBeLessThanOrEqual(1);
   });
 });
 

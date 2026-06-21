@@ -2204,6 +2204,10 @@ class ApprovalEntry(BaseModel):
     decided_at: Optional[str] = None
     reason: Optional[str] = None
     follow_up_run_id: Optional[str] = None
+    # #1732: tokenised /approvals/review deep link the operator (or the CLI) can
+    # open to approve/reject. None when no signer secret is configured. Same link
+    # the chat tool + approvals list emit (built via core.approval_signing).
+    link: Optional[str] = None
 
 
 class RunDetail(BaseModel):
@@ -2619,6 +2623,11 @@ class WorkerResult(BaseModel):
     # S47 HITL: present when a worker requests human approval before executing.
     # Contains {label: str, preview: str} as emitted by the worker in result.json.
     decision_required: Optional[Dict[str, Any]] = None
+    # Track A LLM-obs: trace-derived run rollup (generation_count, span_count,
+    # total_tokens, total_cost_usd, p95_step_latency_ms, ai_trace_id). Present
+    # only for agent-mode runs; the runner uses it to persist real cost/tokens
+    # summed from per-generation captures instead of a flat blended estimate.
+    ai_summary: Optional[Dict[str, Any]] = None
 
 
 class StructuredLog(BaseModel):
@@ -2725,8 +2734,16 @@ class WorkerStats(BaseModel):
     runs_30d: int = 0
     success_rate_30d: Optional[float] = None
     avg_duration_ms: Optional[float] = None
+    median_duration_ms: Optional[float] = None
     p95_duration_ms: Optional[float] = None
+    # How many orphaned/never-closed runs were excluded from the duration
+    # aggregate (duration > absolute timeout ceiling). Surfaced so the headline
+    # is honest about a stuck-run long tail rather than silently dropping it.
+    duration_outliers_excluded: int = 0
     total_failures: int = 0
+    # Failed runs grouped by failure category (timeout/crash/config/auth/
+    # network/resource/validation/quality/cancelled/unknown). Empty when none.
+    failures_by_category: Dict[str, int] = Field(default_factory=dict)
     last_error: Optional[str] = None
     last_error_at: Optional[str] = None
 
@@ -2739,6 +2756,10 @@ class WorkspaceStats(BaseModel):
     total_runs_7d: int = 0
     success_rate_7d: Optional[float] = None
     avg_duration_ms: Optional[float] = None
+    median_duration_ms: Optional[float] = None
+    p95_duration_ms: Optional[float] = None
+    duration_outliers_excluded: int = 0
+    failures_by_category: Dict[str, int] = Field(default_factory=dict)
     most_active_worker_id: Optional[str] = None
     most_active_worker_name: Optional[str] = None
 

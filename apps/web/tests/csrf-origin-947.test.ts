@@ -49,7 +49,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("blocks the documented attack: cross-site POST to auth/tokens", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/auth/tokens", {
         origin: "https://evil.com",
@@ -61,7 +61,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("allows a same-origin POST", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/auth/tokens", {
         origin: `https://${HOST}`,
@@ -73,7 +73,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("blocks a mutating request with NO Origin and NO Referer", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/workers", { cookie: await validCookie() }),
     );
@@ -84,7 +84,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
     // Referer is spoofable and modern browsers always send Origin on a
     // mutating cross-site request, so an absent Origin is treated as
     // cross-origin and blocked regardless of Referer.
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/workers", {
         referer: `https://${HOST}/workers`,
@@ -95,7 +95,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("#986: a forged same-origin Referer cannot bypass the Origin check", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/auth/tokens", {
         referer: `https://${HOST}/settings`, // attacker spoofs Referer, omits Origin
@@ -106,7 +106,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("does NOT block safe methods (GET) regardless of Origin", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/workers", {
         method: "GET",
@@ -119,7 +119,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("blocks cross-site mutations even on public token-gated endpoints", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/approvals/public/abc/approve", {
         origin: "https://evil.com",
@@ -129,7 +129,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("allows same-origin POST to public token-gated approval endpoints", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/approvals/public/abc/approve", {
         origin: `https://${HOST}`,
@@ -139,7 +139,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("honors x-forwarded-host (platform rewrite/proxy in front of the function)", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/workers", {
         forwardedHost: "internal-deploy.vercel.app",
@@ -153,7 +153,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
 
   it("honors CSRF_TRUSTED_ORIGINS allowlist", async () => {
     process.env.CSRF_TRUSTED_ORIGINS = "https://trusted.partner.example";
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/workers", {
         origin: "https://trusted.partner.example",
@@ -164,7 +164,7 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
   });
 
   it("still blocks unauthenticated same-origin mutations (auth gate intact)", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(
       req("/api/proxy/workers", { origin: `https://${HOST}` }),
     );

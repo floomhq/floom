@@ -31,9 +31,9 @@ import contexts as _contexts_module
 from contexts import (
     CONTEXTS_DIR,
     context_mount_matches_inputs,
-    context_total_size,
-    context_updated_at,
+    context_tree_summary,
     context_scope_for_user,
+    load_context_metadata,
     normalize_context_mount,
     use_context_scope,
 )
@@ -257,6 +257,8 @@ _WORKER_AUTHOR_PROVIDER_ENV_VARS = (
     "AWS_DEFAULT_REGION",
     "AWS_BEARER_TOKEN_BEDROCK",
     "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
     "PLATFORM_OPENAI_API_KEY",
     "OPENAI_API_KEY",
     # worker-author smoke-tests the worker it generates in a NESTED E2B sandbox,
@@ -682,7 +684,10 @@ def _sandbox_resource_log_line(config: WorkerConfig | None, sandbox_template: st
     default_memory_mb, default_cpu_count = _default_template_resources(kind)
     memory_label = f"{requested_memory_mb}MB requested" if requested_memory_mb else f"{default_memory_mb}MB template default"
     cpu_label = f"{requested_cpu_count} requested" if requested_cpu_count else f"{default_cpu_count} template default"
-    template_label = sandbox_template or "E2B SDK default template"
+    # #1700: never emit the raw E2B template id (e.g. gzm0071hrus9jwkse7w6) into
+    # run logs; it is an internal infra identifier. Report whether a custom
+    # template was used without exposing the id.
+    template_label = "custom template" if sandbox_template else "E2B SDK default template"
     return (
         "[e2b] Sandbox resources: "
         f"memory={memory_label}, cpu={cpu_label}, template={template_label}. "
@@ -845,13 +850,33 @@ def _timeout_elapsed_near_cap(elapsed_seconds: float, timeout_seconds: int) -> b
     return elapsed_seconds >= max(1.0, cap * 0.9)
 
 
+# Low-level transport/library exceptions surface their __repr__ as the message,
+# e.g. h2 emits "<ConnectionTerminated error_code:1, last_stream_id:343, ...>"
+# (h2/events.py). That repr is internal noise to an operator and must never be
+# stored in the user-visible run.error (#1700). Collapse any such angle-bracket
+# library repr to its class name; the full exception is still captured in the
+# server logs via logger.exception().
+_LIBRARY_REPR_RE = re.compile(r"<([A-Za-z_][A-Za-z0-9_]*)\b[^>]*>")
+
+
+def _sanitize_sandbox_exception_detail(detail: str) -> str:
+    """Strip raw library exception reprs from a sandbox error detail string.
+
+    Keeps a human-meaningful summary (the exception type name) instead of the
+    full ``<ConnectionTerminated error_code:1, last_stream_id:343, ...>`` repr.
+    """
+    cleaned = _LIBRARY_REPR_RE.sub(lambda m: m.group(1), detail or "")
+    return cleaned.strip()
+
+
 def _sandbox_exception_result(
     exc: Exception,
     *,
     elapsed_seconds: float,
     timeout_seconds: int,
 ) -> WorkerResult:
-    detail = str(exc).strip() or exc.__class__.__name__
+    raw_detail = str(exc).strip() or exc.__class__.__name__
+    detail = _sanitize_sandbox_exception_detail(raw_detail) or exc.__class__.__name__
     if _looks_like_timeout_exception(exc) and _timeout_elapsed_near_cap(elapsed_seconds, timeout_seconds):
         return WorkerResult(
             status="error",
@@ -1519,6 +1544,7 @@ def _warm_pool_context_key_entries(
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     with use_context_scope(context_scope_for_user(user_id)):
+        metadata = load_context_metadata()
         for context in selected_contexts:
             source = context.get("source", "local")
             entry: dict[str, Any] = {
@@ -1527,8 +1553,22 @@ def _warm_pool_context_key_entries(
             }
             if source == "local":
                 local_dir = _contexts_module.context_dir(context["name"])
-                entry["size"] = context_total_size(local_dir) if local_dir.exists() else 0
-                entry["updated_at"] = context_updated_at(local_dir)
+                pack_meta = metadata.get(str(context["name"])) if isinstance(metadata, dict) else None
+                summary = pack_meta.get("summary") if isinstance(pack_meta, dict) else None
+                sha256 = summary.get("sha256") if isinstance(summary, dict) else None
+                if isinstance(sha256, str) and sha256.strip():
+                    entry["fingerprint"] = f"sha256:{sha256.strip()}"
+                    entry["size"] = int(summary.get("total_size_bytes") or 0)
+                    entry["updated_at"] = summary.get("updated_at")
+                else:
+                    summary = context_tree_summary(local_dir) if local_dir.exists() else {
+                        "sha256": hashlib.sha256().hexdigest(),
+                        "total_size_bytes": 0,
+                        "updated_at": None,
+                    }
+                    entry["fingerprint"] = f"tree:{summary['sha256']}"
+                    entry["size"] = int(summary.get("total_size_bytes") or 0)
+                    entry["updated_at"] = summary.get("updated_at")
             entries.append(entry)
     return entries
 
@@ -1681,7 +1721,11 @@ class E2BSandboxDriver(SandboxDriver):
                 elapsed_seconds=elapsed_seconds,
                 timeout_seconds=effective_timeout_seconds,
             )
-            log_fn(f"E2B sandbox error after {elapsed_seconds:.3f}s: {result.error}", "error")
+            # #1700: prefix with [e2b] so the operator Logs tab filters this
+            # infra line, and log the SANITIZED result.error (never the raw h2
+            # ConnectionTerminated repr). The full exception is already captured
+            # above via logger.exception() for server-side debugging.
+            log_fn(f"[e2b] Sandbox error after {elapsed_seconds:.3f}s: {result.error}", "error")
             return result
 
     def _run_in_sandbox(

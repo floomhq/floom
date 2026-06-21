@@ -66,6 +66,21 @@ def _find_bundle_artifact(run_id: str, artifacts: list[Dict[str, Any]]) -> Optio
     return fallback if fallback.is_file() else None
 
 
+def _bundle_artifact_debug(run_id: str, artifacts: list[Dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for index, art in enumerate(artifacts or []):
+        rel = str(art.get("relative_path") or "")
+        name = str(art.get("name") or "")
+        path = str(art.get("path") or "")
+        exists = Path(path).is_file() if path else False
+        parts.append(
+            f"{index}:name={name!r},rel={rel!r},path={path!r},exists={exists}"
+        )
+    fallback = ARTIFACTS_DIR / run_id / "out" / "bundle.json"
+    parts.append(f"fallback={str(fallback)!r},exists={fallback.is_file()}")
+    return "; ".join(parts)
+
+
 def _read_authored_bundle(
     run_id: str, artifacts: list[Dict[str, Any]]
 ) -> Optional[Dict[str, Any]]:
@@ -212,19 +227,93 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
                 touched = True
         return touched
 
+    def _coerce_to_list(block: Any, key: str) -> bool:
+        """The generator intermittently emits inputs/outputs as a MAPPING keyed
+        by field name (``inputs: {text: {type: string}}``) instead of the
+        schema-required LIST (``inputs: [{name: text, type: string}]``).
+        WorkerContract then hard-rejects with ``Input should be a valid list``
+        (type list_type) and dead-ends the create flow (worker_creation_failed=
+        true, no worker added). Coerce a name->spec mapping into the list form —
+        injecting ``name`` from the key, and treating a bare string value as a
+        scalar ``type`` shorthand — so the kind/type normalization below +
+        registration succeed. Lossless: only restructures, never drops a field."""
+        if not isinstance(block, dict) or not isinstance(block.get(key), dict):
+            return False
+        coerced = []
+        for name, spec in block[key].items():
+            if isinstance(spec, dict):
+                item = {"name": name, **spec}
+            elif isinstance(spec, str):
+                item = {"name": name, "type": spec}
+            else:
+                item = {"name": name}
+            coerced.append(item)
+        block[key] = coerced
+        return True
+
     for block, key in ((raw, "inputs"), (raw, "outputs")):
-        if _fix_fields(block.get(key)):
+        coerced = _coerce_to_list(block, key)
+        if _fix_fields(block.get(key)) or coerced:
             changed = True
             log_fn(f"Normalized generated {key} kind/type so the worker registers", level="info")
     exec_block = raw.get("exec")
     if isinstance(exec_block, dict):
         for key in ("inputs", "outputs"):
-            if _fix_fields(exec_block.get(key)):
+            coerced = _coerce_to_list(exec_block, key)
+            if _fix_fields(exec_block.get(key)) or coerced:
                 changed = True
                 log_fn(f"Normalized generated {key} kind/type so the worker registers", level="info")
 
     if not changed:
         return worker_yml
+    import yaml as pyyaml
+    return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
+
+
+def _force_script_runtime_for_run_code(worker_yml: str, log_fn: Callable[..., None]) -> str:
+    """Force generated code bundles onto the script runtime.
+
+    Gemini can emit a contradictory bundle: ``run_code`` is present, ``skill_md``
+    is null, but the YAML only has ``exec.command``. The contract parser then
+    defaults to agent/skill runtime and later tries to execute SKILL.md, while
+    the actual runnable file is run.py. Repair only the execution metadata.
+    """
+    try:
+        import yaml as pyyaml
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception:
+        return worker_yml
+    if not isinstance(raw, dict):
+        return worker_yml
+
+    exec_block = raw.get("exec")
+    if not isinstance(exec_block, dict):
+        exec_block = {}
+        raw["exec"] = exec_block
+
+    changed = False
+    desired = {
+        "runtime": "python311",
+        "entry": "run.py",
+        "runner": "e2b",
+        "command": "python run.py",
+    }
+    for key, value in desired.items():
+        current = str(exec_block.get(key) or "").strip()
+        if current != value:
+            exec_block[key] = value
+            changed = True
+
+    if str(exec_block.get("mode") or "").strip().lower() == "agent":
+        exec_block.pop("mode", None)
+        changed = True
+    if str(raw.get("entrypoint") or "").strip() == "SKILL.md":
+        raw.pop("entrypoint", None)
+        changed = True
+
+    if not changed:
+        return worker_yml
+    log_fn("Forced generated run.py bundle onto script runtime", level="warning")
     import yaml as pyyaml
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
@@ -352,13 +441,23 @@ def _register_authored_worker(
     (e.g. a resumed/re-executed run), no second worker is created.
     """
     started_at = time.perf_counter()
+    log_fn(
+        "worker-author registration: entered "
+        f"outputs_keys={sorted(outputs.keys()) if isinstance(outputs, dict) else type(outputs).__name__} "
+        f"artifact_count={len(artifacts or [])}",
+        level="debug",
+    )
     if isinstance(outputs, dict) and outputs.get("created_worker_id"):
         return str(outputs["created_worker_id"])  # already registered
 
     stage_at = time.perf_counter()
     bundle_path = _find_bundle_artifact(run_id, artifacts)
     if bundle_path is None:
-        log_fn("worker-author produced no bundle.json — nothing to register", level="warning")
+        log_fn(
+            "worker-author produced no bundle.json - nothing to register "
+            f"({_bundle_artifact_debug(run_id, artifacts)})",
+            level="warning",
+        )
         return None
     log_fn(f"worker-author registration: found bundle artifact in {time.perf_counter() - stage_at:.2f}s")
 
@@ -389,6 +488,10 @@ def _register_authored_worker(
         log_fn("worker-author bundle missing worker_yml — nothing to register", level="warning")
         return None
 
+    skill_md = bundle.get("skill_md")
+    run_code = bundle.get("run_code")
+    requirements_txt = bundle.get("requirements_txt")
+
     # Safety-net: the worker-author LLM validates the YAML with its own loose
     # check, which is weaker than the canonical WorkerContract schema enforced
     # at registration. The common drift is OPTIONAL metadata (use_cases must be
@@ -397,13 +500,11 @@ def _register_authored_worker(
     # lossless to behaviour (these fields are display metadata only).
     stage_at = time.perf_counter()
     worker_yml = _normalize_authored_worker_yml(worker_yml, log_fn)
+    if isinstance(run_code, str) and run_code.strip() and not (isinstance(skill_md, str) and skill_md.strip()):
+        worker_yml = _force_script_runtime_for_run_code(worker_yml, log_fn)
     # G5 FIX 4: guarantee a runnable sample even when the LLM omits example_input.
     worker_yml = _backfill_example_input(worker_yml, bundle.get("sample_input_json"), log_fn)
     log_fn(f"worker-author registration: normalized manifest in {time.perf_counter() - stage_at:.2f}s")
-
-    skill_md = bundle.get("skill_md")
-    run_code = bundle.get("run_code")
-    requirements_txt = bundle.get("requirements_txt")
 
     # A bundle with NEITHER agent-mode SKILL.md NOR script-mode run.py has nothing
     # executable. Registering it would backfill the placeholder run.py stub, which
@@ -429,6 +530,14 @@ def _register_authored_worker(
     if isinstance(skill_md, str) and skill_md.strip():
         files.append(_main.DraftFile(path="SKILL.md", content=skill_md))
     if isinstance(run_code, str) and run_code.strip():
+        contract_error = _generated_run_py_contract_error(run_code)
+        if contract_error:
+            log_fn(
+                "worker-author bundle run.py has invalid runtime contract: "
+                f"{contract_error}; not auto-registering. The drafted bundle stays viewable.",
+                level="warning",
+            )
+            return None
         files.append(_main.DraftFile(path="run.py", content=run_code))
     if isinstance(requirements_txt, str) and requirements_txt.strip():
         files.append(_main.DraftFile(path="requirements.txt", content=requirements_txt))
@@ -504,6 +613,8 @@ _SMOKE_REPAIR_SYSTEM_PROMPT = (
     "artifacts[] entry, e.g. outputs={'report':'out/report.csv'};\n"
     "- write result.json to the WORKING DIRECTORY ('result.json'), NOT "
     "'out/result.json' (writing it under out/ makes the run produce no result);\n"
+    "- NEVER write outputs.json or output.json. They are legacy/wrong filenames "
+    "and the runtime will ignore them;\n"
     "- result.json schema: {\"status\":\"success\"|\"error\",\"outputs\":"
     "{<name>:<literal-value-for-scalar OR out/path-for-file>},\"artifacts\":"
     "[{\"name\",\"relative_path\",\"type\"}],\"error\":<msg on error>} on BOTH "
@@ -528,6 +639,23 @@ def _strip_code_fences(text: str) -> str:
             lines = lines[:-1]
         stripped = "\n".join(lines).strip()
     return stripped
+
+
+def _generated_run_py_contract_error(run_code: str) -> str | None:
+    """Return why generated run.py violates the file-level runtime contract.
+
+    This is a pre-persist guard for LLM-authored code. The runtime only reads
+    result.json; legacy outputs.json/output.json files are ignored and make a
+    generated worker look successful in code review while failing at run time.
+    """
+    lowered = run_code.lower()
+    legacy_names = ("outputs.json", "output.json")
+    for name in legacy_names:
+        if name in lowered:
+            return f"generated run.py writes legacy {name}; it must write result.json"
+    if "result.json" not in lowered:
+        return "generated run.py does not write result.json"
+    return None
 
 
 def _build_smoke_inputs(
@@ -664,6 +792,10 @@ def _repair_run_py(
         ast.parse(fixed)
     except SyntaxError:
         log_fn("Smoke repair produced invalid Python; discarding", level="warning")
+        return None
+    contract_error = _generated_run_py_contract_error(fixed)
+    if contract_error:
+        log_fn(f"Smoke repair produced invalid runtime contract: {contract_error}", level="warning")
         return None
     return fixed
 

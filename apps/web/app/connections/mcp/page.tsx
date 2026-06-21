@@ -696,14 +696,14 @@ export default function McpConnectionsPage() {
                 </div>
                 {transport !== "stdio" && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="mcp-auth-secret" className="text-xs text-muted-foreground">Auth secret (bearer token)</Label>
+                  <Label htmlFor="mcp-auth-secret" className="text-xs text-muted-foreground">Access key</Label>
                   <select
                     id="mcp-auth-secret"
                     value={authSecret}
                     onChange={(e) => setAuthSecret(e.target.value)}
                     className="flex h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-3 text-sm outline-none"
                   >
-                    <option value="">No bearer token</option>
+                    <option value="">No access key</option>
                     {secrets.map((s) => (
                       <option key={s.name} value={s.name}>{s.name}</option>
                     ))}

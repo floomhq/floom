@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 import importlib
+import inspect
 import json
 import sys
 import types
@@ -230,6 +231,14 @@ def test_patch_sensitive_unknown_context_404(client):
         headers=_auth(client),
     )
     assert resp.status_code == 404
+
+
+def test_context_sensitive_mutation_passes_repos_to_edit_check():
+    from routers import contexts as contexts_router
+
+    source = inspect.getsource(contexts_router.set_context_sensitive)
+    assert "_require_context_for_user(" in source
+    assert "repos=repos" in source
 
 
 # ---------------------------------------------------------------------------

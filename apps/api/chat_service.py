@@ -379,6 +379,14 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
         pass
     candidates: list[str] = [raw]
     try:
+        from auth.local_workspaces import local_workspace_base_user_id
+
+        base_local_user = str(local_workspace_base_user_id(raw) or "").strip()
+        if base_local_user and base_local_user != raw:
+            candidates.append(base_local_user)
+    except Exception:
+        pass
+    try:
         from db import get_db
 
         with get_db() as conn:

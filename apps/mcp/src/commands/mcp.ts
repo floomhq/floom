@@ -8,7 +8,7 @@ import { log, printJson, renderTable } from "../lib/output.js";
 
 type JsonObject = Record<string, unknown>;
 
-const DEFAULT_CLOUD_API_BASE = "https://api.floom.example.com";
+const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
 const MCP_SERVER_NAME = "floom";
 const LEGACY_MCP_SERVER_NAME = "workeros";

@@ -158,7 +158,7 @@ def call_worker(worker_id: str, inputs: dict, *, timeout: int = 300) -> dict:
         raise RuntimeError(f"call_worker: API did not return a run_id: {run_data}")
 
     # 2. Poll until the run reaches a terminal state
-    _TERMINAL = {"completed", "failed", "error"}
+    _TERMINAL = {"completed", "failed", "error", "approved", "rejected", "cancelled"}
     deadline = time.monotonic() + timeout
     poll_interval = 1.0
 
@@ -182,6 +182,11 @@ def call_worker(worker_id: str, inputs: dict, *, timeout: int = 300) -> dict:
             ) from exc
 
         status = row.get("status", "")
+        if status == "pending_approval":
+            raise RuntimeError(
+                f"call_worker: worker {worker_id!r} run {run_id!r} is awaiting approval; "
+                "worker-to-worker calls cannot auto-approve child runs"
+            )
         if status in _TERMINAL:
             if status != "completed":
                 err = row.get("error") or status

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FloomMark } from "@/components/layout/sidebar";
 import { sanitizeRedirect } from "@/lib/redirects";
+import { capturePostHogEvent } from "@/lib/posthog";
 
 type LoginMode = "loading" | "setup" | "username" | "secret";
 
@@ -79,13 +80,30 @@ function LoginContent() {
 
   const effectiveMode: LoginMode = forceSecret && (mode === "username" || mode === "setup") ? "secret" : mode;
 
+  // #1702: a failed magic-link redirect lands here with ?error=<code>. Surface a
+  // human message and a clear re-login action instead of a raw JSON dead-end.
+  const errorParam = searchParams.get("error");
+  useEffect(() => {
+    if (!errorParam) return;
+    const ERROR_MESSAGES: Record<string, string> = {
+      expired_link: "This sign-in link expired or was already used. Request a new one below.",
+      account_disabled: "This account has been disabled. Contact your workspace admin.",
+    };
+    setError(ERROR_MESSAGES[errorParam] || "Could not sign you in. Please try again.");
+  }, [errorParam]);
+
   useEffect(() => {
     void (async () => {
       try {
         const res = await fetch("/api/auth/setup", { cache: "no-store" });
         if (res.ok) {
           const data = (await res.json()) as { required?: boolean };
-          setMode(data.required ? "setup" : "username");
+          const nextMode = data.required ? "setup" : "username";
+          setMode(nextMode);
+          // INTENT: the first-admin signup form is being shown.
+          if (nextMode === "setup") {
+            capturePostHogEvent("signup_started", { method: "password" });
+          }
           return;
         }
       } catch {
@@ -103,6 +121,8 @@ function LoginContent() {
 
     try {
       if (effectiveMode === "setup") {
+        // INTENT: signup form submitted (before the server confirms).
+        capturePostHogEvent("signup_submitted", { method: "password" });
         const res = await fetch("/api/auth/setup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -112,12 +112,19 @@ export async function runsShowCommand(runId: string, options: { json?: boolean }
       trigger_source?: string;
       output?: Record<string, unknown>;
       artifacts?: Array<{ id: string; name: string }>;
+      approval_trail?: { status?: string; link?: string | null } | null;
     };
     log.heading(`Run ${detail.id}`);
     log.kv("Worker", detail.worker_id);
     log.kv("Status", detail.status);
     if (detail.duration_ms !== undefined) log.kv("Duration", `${detail.duration_ms}ms`);
     if (detail.trigger_source) log.kv("Trigger", detail.trigger_source);
+    // #1732: when the run is waiting on a human, surface the same tokenised
+    // review/approve link the web UI and chat tool emit so an operator can act
+    // straight from the terminal instead of hunting for the URL.
+    if (detail.status === "pending_approval" && detail.approval_trail?.link) {
+      log.kv("Review/approve at", detail.approval_trail.link);
+    }
     if (detail.output && Object.keys(detail.output).length) {
       log.blank();
       log.info("Output:");

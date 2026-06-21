@@ -526,6 +526,99 @@ def test_warm_pool_key_changes_when_local_context_changes(monkeypatch, tmp_path)
     assert first_key != second_key
 
 
+def test_warm_pool_key_uses_context_summary_sha_without_tree_scan(monkeypatch, tmp_path):
+    contexts_root = tmp_path / "contexts"
+    (contexts_root / "search-data").mkdir(parents=True)
+    (contexts_root / "search-data" / "embeddings.jsonl").write_text("indexed\n", encoding="utf-8")
+    monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_root))
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+
+    import contexts as contexts_mod
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    importlib.reload(contexts_mod)
+    importlib.reload(e2b_driver_mod)
+    contexts_mod.refresh_context_summary_metadata("search-data")
+    monkeypatch.setattr(
+        e2b_driver_mod,
+        "context_tree_summary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("context tree should not be scanned")),
+    )
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    cfg = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python", bundle_sha256="a" * 64),
+        contexts=[{"name": "search-data"}],
+    )
+
+    warm_key, warm_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+
+    assert warm_err is None
+    assert warm_key
+
+
+def test_warm_pool_key_changes_when_context_content_changes_with_preserved_mtime(monkeypatch, tmp_path):
+    contexts_root = tmp_path / "contexts"
+    context_dir = contexts_root / "search-data"
+    context_dir.mkdir(parents=True)
+    data_file = context_dir / "embeddings.jsonl"
+    original = "a" * 4096 + "first\n" + "z" * 4096
+    changed = "a" * 4096 + "second\n" + "z" * 4095
+    assert len(original) == len(changed)
+    fixed_ns = 1_700_000_000_000_000_000
+    data_file.write_text(original, encoding="utf-8")
+    os.utime(data_file, ns=(fixed_ns, fixed_ns))
+    monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_root))
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+
+    import contexts as contexts_mod
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    importlib.reload(contexts_mod)
+    importlib.reload(e2b_driver_mod)
+    contexts_mod.refresh_context_summary_metadata("search-data")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    cfg = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python", bundle_sha256="a" * 64),
+        contexts=[{"name": "search-data"}],
+    )
+
+    first_key, first_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+    data_file.write_text(changed, encoding="utf-8")
+    os.utime(data_file, ns=(fixed_ns, fixed_ns))
+    contexts_mod.refresh_context_summary_metadata("search-data")
+    second_key, second_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+
+    assert first_err is None
+    assert second_err is None
+    assert first_key
+    assert second_key
+    assert first_key != second_key
+
+
 def test_warm_pool_key_changes_when_bundle_content_changes_same_size(monkeypatch, tmp_path):
     import runner_sandbox.e2b_driver as e2b_driver_mod
 

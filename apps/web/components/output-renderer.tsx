@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { GenericOutput } from "@/components/generic-output";
 import type { OutputField } from "@/lib/types";
-import { stripCitationTokens } from "@/lib/strip-citations";
+import { sanitizeOutputText, sanitizeJsonValue } from "@/lib/strip-citations";
 
 function downloadBlob(content: string, filename: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -63,12 +63,14 @@ export function OutputRenderer({ field, runId }: { field: OutputField; runId?: s
       ? (() => {
           try {
             const parsed = typeof value === "string" ? JSON.parse(value) : value;
-            return JSON.stringify(parsed, null, 2);
+            // Deep-strip internal placeholders / citation markers from every
+            // string in the JSON before serialising for download (#1703).
+            return JSON.stringify(sanitizeJsonValue(parsed), null, 2);
           } catch {
-            return String(value);
+            return sanitizeOutputText(String(value));
           }
         })()
-      : stripCitationTokens(String(value));
+      : sanitizeOutputText(String(value));
 
   // The generic viewer surface gets a subtle card frame for markdown/text so the
   // content reads as a discrete block within the Output tab.

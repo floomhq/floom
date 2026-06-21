@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,9 +16,10 @@ import {
   FloomApiClient,
   FloomApiError,
   createAuthenticatedClient,
+  resolveLoginApiBase,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
-import { cloudRateLimitRetryMs } from "../dist/commands/login.js";
+import { cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
 
 test("cloud login honors Retry-After headers on cli-exchange 429", () => {
   const error = new FloomApiError(
@@ -42,6 +44,33 @@ test("cloud login treats cli-exchange 429 without retry metadata as slow_down", 
   const error = new FloomApiError("rate limited", 429, {});
 
   assert.equal(cloudRateLimitRetryMs(error, 2), 5_000);
+});
+
+test("cloud login defaults to hosted Floom API", () => {
+  const originalBase = process.env.WORKEROS_API_BASE;
+  const originalFloomBase = process.env.FLOOM_API_BASE;
+  const originalCloud = process.env.WORKEROS_CLOUD;
+  try {
+    delete process.env.WORKEROS_API_BASE;
+    delete process.env.FLOOM_API_BASE;
+    delete process.env.WORKEROS_CLOUD;
+    assert.equal(resolveLoginApiBase({ cloud: true }), "https://workeros-api.floom.dev");
+    process.env.WORKEROS_CLOUD = "1";
+    assert.equal(resolveLoginApiBase(), "https://workeros-api.floom.dev");
+  } finally {
+    if (originalBase === undefined) delete process.env.WORKEROS_API_BASE;
+    else process.env.WORKEROS_API_BASE = originalBase;
+    if (originalFloomBase === undefined) delete process.env.FLOOM_API_BASE;
+    else process.env.FLOOM_API_BASE = originalFloomBase;
+    if (originalCloud === undefined) delete process.env.WORKEROS_CLOUD;
+    else process.env.WORKEROS_CLOUD = originalCloud;
+  }
+});
+
+test("cloud login can persist api_token credentials from cli-exchange", () => {
+  const src = readFileSync(new URL("../src/commands/login.ts", import.meta.url), "utf8");
+  assert.match(src, /api_token: exchanged\.api_token/);
+  assert.match(src, /if \(exchanged\.api_token\)/);
 });
 
 async function withTempHome(fn) {
@@ -87,7 +116,7 @@ test("readCredentials back-compat treats legacy schema as OSS mode", async () =>
 test("readCredentials rejects cloud creds missing refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://api.floom.example.com",
+      api_base: "https://workeros-api.floom.dev",
       mode: "cloud",
       // refresh_token + supabase_url intentionally omitted
       authed_at: new Date().toISOString(),
@@ -100,7 +129,7 @@ test("readCredentials rejects cloud creds missing refresh_token", async () => {
 test("updateCredentials persists workspace_id without dropping refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://api.floom.example.com",
+      api_base: "https://workeros-api.floom.dev",
       mode: "cloud",
       refresh_token: "rt-1",
       supabase_url: "https://abc.supabase.co",
@@ -118,13 +147,13 @@ test("updateCredentials persists workspace_id without dropping refresh_token", a
 
 test("readCredentials accepts cloud PAT from environment", async () => {
   await withTempHome(async () => {
-    process.env.WORKEROS_API_BASE = "https://api.floom.example.com";
+    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     process.env.WORKEROS_API_TOKEN = "floom_pat_123";
     process.env.WORKEROS_WORKSPACE_ID = "ws_env";
     const creds = await readCredentials();
     assert.ok(creds);
     assert.equal(creds.mode, "cloud");
-    assert.equal(creds.api_base, "https://api.floom.example.com");
+    assert.equal(creds.api_base, "https://workeros-api.floom.dev");
     assert.equal(creds.api_token, "floom_pat_123");
     assert.equal(creds.workspace_id, "ws_env");
   });
@@ -186,6 +215,22 @@ async function startMockApi() {
   return { server, port: server.address().port, seen };
 }
 
+async function startMockWorkspaceApi(responseBody, status = 200) {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({ method: req.method, url: req.url, headers: req.headers });
+    if (req.url === "/api/workspaces") {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(responseBody));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  server.listen(0);
+  await once(server, "listening");
+  return { server, port: server.address().port, seen };
+}
+
 async function startMockDoctorApi() {
   const seen = [];
   const server = createServer((req, res) => {
@@ -212,7 +257,64 @@ async function startMockDoctorApi() {
   return { server, port: server.address().port, seen };
 }
 
-test("cloud client sends JWT + legacy x-workeros-workspace and rewrites /workers to /api/workers", async () => {
+test("cloud login resolver selects API active_id workspace", async () => {
+  const api = await startMockWorkspaceApi({
+    active_id: "ws_active",
+    workspaces: [
+      { id: "ws_other", name: "Other" },
+      { id: "ws_active", name: "Default Team" },
+    ],
+  });
+  try {
+    const workspace = await resolveInitialCloudWorkspace({
+      api_base: `http://127.0.0.1:${api.port}`,
+      mode: "cloud",
+      api_token: "pat-test",
+      authed_at: new Date().toISOString(),
+    });
+    assert.deepEqual(workspace, { id: "ws_active", name: "Default Team" });
+    const call = api.seen.find((r) => r.url === "/api/workspaces");
+    assert.ok(call, "expected hosted /api/workspaces call");
+    assert.equal(call.headers["x-floom-token"], "pat-test");
+  } finally {
+    api.server.close();
+  }
+});
+
+test("cloud login resolver selects sole workspace when active_id is absent", async () => {
+  const api = await startMockWorkspaceApi({
+    active_id: null,
+    workspaces: [{ id: "ws_only", name: "Only Team" }],
+  });
+  try {
+    const workspace = await resolveInitialCloudWorkspace({
+      api_base: `http://127.0.0.1:${api.port}`,
+      mode: "cloud",
+      api_token: "pat-test",
+      authed_at: new Date().toISOString(),
+    });
+    assert.deepEqual(workspace, { id: "ws_only", name: "Only Team" });
+  } finally {
+    api.server.close();
+  }
+});
+
+test("cloud login resolver keeps login non-fatal when workspace lookup fails", async () => {
+  const api = await startMockWorkspaceApi({ detail: "boom" }, 500);
+  try {
+    const workspace = await resolveInitialCloudWorkspace({
+      api_base: `http://127.0.0.1:${api.port}`,
+      mode: "cloud",
+      api_token: "pat-test",
+      authed_at: new Date().toISOString(),
+    });
+    assert.equal(workspace, null);
+  } finally {
+    api.server.close();
+  }
+});
+
+test("cloud client sends JWT + X-Workeros-Workspace and rewrites /workers to /api/workers", async () => {
   await withTempHome(async () => {
     const supa = await startMockSupabase();
     const api = await startMockApi();
@@ -252,7 +354,7 @@ test("cloud client sends JWT + legacy x-workeros-workspace and rewrites /workers
   });
 });
 
-test("cloud client sends PAT + legacy x-workeros-workspace and rewrites /workers to /api/workers", async () => {
+test("cloud client sends PAT + X-Workeros-Workspace and rewrites /workers to /api/workers", async () => {
   await withTempHome(async () => {
     const api = await startMockApi();
     try {

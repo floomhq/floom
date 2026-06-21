@@ -38,7 +38,7 @@ const NAV = [
   { href: "/library", label: "Brain", icon: Brain, keywords: "library context folders files knowledge resources" },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, keywords: "review pending actions" },
   { href: "/connections/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
-  { href: "/connections", label: "Integrations", icon: Plug, keywords: "connections oauth" },
+  { href: "/connections", label: "Connections", icon: Plug, keywords: "integrations connections oauth apps mcp secrets" },
   { href: "/settings", label: "Settings", icon: Settings, keywords: "config danger appearance" },
 ];
 

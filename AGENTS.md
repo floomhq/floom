@@ -27,8 +27,13 @@ MCP server (`apps/mcp`). Deeper docs: `README.md`, `ARCHITECTURE.md`, `CONTRIBUT
 ## Hard rules (do not violate)
 - **Never commit `apps/api/.env`, the root `.env`, or `data/`** — they hold API
   keys, secrets, OAuth tokens, sessions, and PATs. They are gitignored; keep it so.
-- **OSS has ZERO telemetry.** No analytics / PostHog / capture in this repo — it is
-  a trust/privacy line. Anything like that lives only in the closed cloud layer.
+- **No telemetry by default — never commit a key.** The repo ships analytics
+  wiring (PostHog) that is **inert unless a key is set**: with `POSTHOG_API_KEY` /
+  `NEXT_PUBLIC_POSTHOG_KEY` unset, nothing is collected and no data leaves the
+  instance — there is no key and no destination in the source. An operator who
+  wants analytics sets their own PostHog project key (events route to their
+  project). Keep it that way: never commit a key, and never send raw run
+  input/output, secret names/values, connection tokens, or PII.
 - **Don't let worker edits auto-push to this public repo.** For real work point
   `FLOOM_WORKERS_DIR` / `WORKEROS_WORKSPACE_DIR` outside the checkout; the engine
   refuses to version into its own source tree by default.

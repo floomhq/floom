@@ -43,7 +43,7 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
   { key: "channels", label: "Channels", scope: "workspace", description: "Slack, email & WhatsApp" },
   { key: "assistant", label: "Assistant", scope: "workspace", description: "Configure Emily" },
   { key: "workspace_token", label: "Workspace token", scope: "workspace", description: "Shared token for this workspace's CLI & CI" },
-  { key: "versions", label: "Version history", scope: "workspace", description: "Git-tracked workspace changelog" },
+  { key: "versions", label: "Backups & history", scope: "workspace", description: "Restore points, download a copy, and undo" },
   { key: "danger", label: "Danger zone", scope: "workspace", description: "Irreversible actions" },
   // Account · {user} — per-user controls.
   { key: "profile", label: "Profile", scope: "account", description: "Display name & avatar" },
