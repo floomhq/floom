@@ -2916,6 +2916,10 @@ class ContextFileMoveRequest(BaseModel):
     new_path: str  # #770: destination path within the same context
 
 
+class ContextRenameRequest(BaseModel):
+    new_name: str  # #1813: new folder/context name (validated server-side)
+
+
 class ContextSecretScanFile(BaseModel):
     path: str
     secret_warnings: List[SecretWarning] = Field(default_factory=list)

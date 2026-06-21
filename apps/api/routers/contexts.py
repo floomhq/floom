@@ -48,6 +48,7 @@ from models import (
     ContextDetail,
     ContextFileItem,
     ContextFileMoveRequest,
+    ContextRenameRequest,
     ContextSecretScanFile,
     ContextSecretScanResponse,
     ContextSensitiveRequest,
@@ -61,6 +62,7 @@ from models import (
 )
 from secret_scan import scan_bytes
 from services.context_access import (
+    _brain_pack_visibility,
     _context_actor_user_id,
     _context_detail,
     _context_file_path_or_400,
@@ -73,6 +75,7 @@ from services.context_access import (
     _asset_workspace_id,
     _ensure_brain_pack_row,
     _git_commit_context,
+    _git_commit_context_rename,
     _is_system_context_pack,
     _read_context_upload_bytes,
     _require_context_for_user,
@@ -487,6 +490,83 @@ def delete_context(
     # Record the deletion in git so the history is preserved but the directory is gone.
     _git_commit_context(safe_name, message=f"context {safe_name}: delete")
     return ContextDeleteResponse(status="deleted", referenced_by=referenced_by)
+
+
+@contexts_router.post("/contexts/{name}/rename", response_model=ContextDetail)
+def rename_context(
+    name: str,
+    payload: ContextRenameRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextDetail:
+    """#1813: rename a brain pack / Library folder, preserving its files,
+    metadata, git history, and visibility.
+
+    PR #1811 made folder creation auto-name (no blocking prompt) so the user can
+    "just choose one, I can change it later". Contexts had create + delete but no
+    rename, so auto-named folders were stuck. This closes that loop.
+
+    Owner/edit-gated (system packs -> 404 via the require helper). Rejects a name
+    that would clobber an existing folder (409) and a rename that would silently
+    break workers mounting the pack (409 with ``referenced_by``: detach first).
+    Moves the directory, carries metadata + visibility, and records the move in
+    git as old -> new.
+    """
+    from contexts import context_dir, context_owner_id, rename_context_metadata
+
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, metadata = _require_context_for_user(
+        name, user_id=context_user_id, repos=repos
+    )
+    new_name = _context_name_or_400(payload.new_name)
+    if new_name == safe_name:
+        raise HTTPException(status_code=400, detail="new_name is the same as the current name")
+    new_root = context_dir(new_name)
+    if new_root.exists():
+        raise HTTPException(status_code=409, detail="A folder with that name already exists")
+    referenced_by = _workers_referencing_context(
+        safe_name, user_id=context_user_id, repos=repos
+    )
+    if referenced_by:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Folder is referenced by workers; detach it before renaming.",
+                "referenced_by": referenced_by,
+            },
+        )
+    # Preserve visibility across the rename (auto-named folders are private, but a
+    # shared pack must stay shared). Read it before the dir + metadata move.
+    old_visibility = _brain_pack_visibility(safe_name, metadata, repos=repos)
+    context_dir(safe_name).rename(new_root)
+    rename_context_metadata(safe_name, new_name)
+    # Re-materialize the access-control mirror row under the new id and carry the
+    # prior visibility (the row is keyed by pack name, so the rename needs a new row).
+    owner_id = context_owner_id(new_name)
+    if owner_id:
+        _ensure_brain_pack_row(new_name, owner_id=owner_id, repos=repos)
+        if old_visibility and old_visibility != "private":
+            asset_access = getattr(repos, "asset_access", None)
+            if asset_access is not None and hasattr(asset_access, "set_visibility"):
+                try:
+                    asset_access.set_visibility(
+                        workspace_id=_asset_workspace_id(owner_id),
+                        actor_id=context_user_id,
+                        asset_type="brain_pack",
+                        asset_id=new_name,
+                        visibility=old_visibility,
+                    )
+                except Exception:
+                    pass  # visibility carry-over is best-effort, never blocks rename
+    author_name, author_email = _git_author(auth)
+    _git_commit_context_rename(
+        safe_name,
+        new_name,
+        message=f"context {safe_name}: rename -> {new_name}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+    return _context_detail(new_name, repos=repos, user_id=context_user_id)
 
 
 @contexts_router.get("/contexts/{name}/files/{file_path:path}")

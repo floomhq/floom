@@ -580,6 +580,26 @@ def delete_context_metadata(name: str) -> None:
         save_context_metadata(metadata)
 
 
+def rename_context_metadata(old_name: str, new_name: str) -> None:
+    """#1813: move a context's metadata entry from old_name to new_name.
+
+    Carries every field (writeable, owner_id, sensitive, category, summary, and
+    per-file metadata) so a folder rename preserves all pack state. No-op when
+    there is no entry for old_name. The caller guarantees new_name is free.
+    """
+    old_safe = validate_context_name(old_name)
+    new_safe = validate_context_name(new_name)
+    if old_safe == new_safe:
+        return
+    metadata = load_context_metadata()
+    entry = metadata.pop(old_safe, None)
+    if entry is None:
+        return
+    entry["updated_at"] = now_iso()
+    metadata[new_safe] = entry
+    save_context_metadata(metadata)
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 

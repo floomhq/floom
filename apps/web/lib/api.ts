@@ -817,6 +817,12 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
         { method: "DELETE" }
       ),
+    // #1813: rename a folder/brain pack (auto-named folders -> a chosen name).
+    rename: (name: string, newName: string) =>
+      fetchJson<import("./types").ContextDetail>(
+        `/contexts/${encodeURIComponent(name)}/rename`,
+        { method: "POST", body: JSON.stringify({ new_name: newName }) }
+      ),
     saveTextFile: async (name: string, path: string, content: string, tags?: string[]) => {
       const file = await fetchJson<import("./types").ContextFileItem>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,

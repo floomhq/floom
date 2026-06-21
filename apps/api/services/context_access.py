@@ -635,6 +635,38 @@ def _git_commit_context(
         logger.warning("git commit failed for context %s: %s", name, exc)
 
 
+def _git_commit_context_rename(
+    old_name: str,
+    new_name: str,
+    *,
+    message: str,
+    author_name: str = "Floom",
+    author_email: str = "workeros@local",
+) -> None:
+    """#1813: commit a folder rename, staging the removed old path and the added
+    new path in one commit so git records the move.
+
+    Sensitivity is preserved across the rename, so the new name's flag governs;
+    a sensitive pack never enters git (matching ``_git_commit_context``).
+    """
+    import git_ops as _git_ops
+    from services.git_service import _ensure_git_workspace_ready, _git_ops_lock, _git_workspace
+    from contexts import is_context_sensitive
+
+    if is_context_sensitive(new_name):
+        return  # sensitive contexts never enter git
+    try:
+        workspace = _git_workspace()
+        with _git_ops_lock:
+            _ensure_git_workspace_ready(workspace)
+            old_rel = _context_git_path(old_name)
+            new_rel = _context_git_path(new_name)
+            _git_ops.commit_paths(workspace, [old_rel, new_rel], message, author_name, author_email)
+            _git_ops.push_background(workspace)
+    except Exception as exc:
+        logger.warning("git commit failed for context rename %s -> %s: %s", old_name, new_name, exc)
+
+
 def _increment_file_ref_counts(file_ids: List[str]) -> None:
     """Increment file ref_counts in one short transaction tolerant of run bursts.
 
