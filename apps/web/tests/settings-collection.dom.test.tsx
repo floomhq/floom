@@ -152,6 +152,66 @@ describe("Settings Collection (Phase 3)", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 
+  it("presents the General section as sub-tabs (less scrolling) and deep-links via ?tab=", async () => {
+    const user = userEvent.setup();
+    // Admin so the General sub-tabs render their editable content (not just the
+    // read-only notice). is_admin gates nothing about the tab bar itself.
+    apiMock.me.mockResolvedValue({
+      user_id: "u1",
+      email: "admin@floom.dev",
+      display_name: "Admin User",
+      role: "admin",
+      is_admin: true,
+    });
+    const { default: SettingsPage } = await import("@/app/settings/page");
+
+    render(<SettingsPage />);
+
+    await user.click(screen.getByRole("button", { name: "List view" }));
+    await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByText("General"));
+
+    // The five General sub-areas are now tabs, not a single long scroll.
+    const tab = (name: string) => screen.findByRole("tab", { name });
+    expect(await tab("System info")).toBeInTheDocument();
+    expect(await tab("Workspace")).toBeInTheDocument();
+    expect(await tab("Behaviour")).toBeInTheDocument();
+    expect(await tab("Models")).toBeInTheDocument();
+    expect(await tab("Platform")).toBeInTheDocument();
+
+    // Default sub-tab is the first (System info) and ?tab is implicit (absent).
+    expect(await tab("System info")).toHaveAttribute("aria-selected", "true");
+    expect(new URLSearchParams(window.location.search).get("tab")).toBeNull();
+
+    // Selecting a sub-tab persists ?sel=system&tab=behaviour.
+    await user.click(await tab("Behaviour"));
+    await waitFor(() => {
+      const p = new URLSearchParams(window.location.search);
+      expect(p.get("sel")).toBe("system");
+      expect(p.get("tab")).toBe("behaviour");
+    });
+    expect(await tab("Behaviour")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("restores the General sub-tab from a ?sel=system&tab= deep-link on load", async () => {
+    window.history.replaceState(null, "", "/settings?sel=system&tab=platform");
+    apiMock.me.mockResolvedValue({
+      user_id: "u1",
+      email: "admin@floom.dev",
+      display_name: "Admin User",
+      role: "admin",
+      is_admin: true,
+    });
+    const { default: SettingsPage } = await import("@/app/settings/page");
+
+    render(<SettingsPage />);
+
+    const platformTab = await screen.findByRole("tab", { name: "Platform" }, { timeout: 3000 });
+    expect(platformTab).toHaveAttribute("aria-selected", "true");
+    // Platform sub-tab shows the platform-config summary, not System info rows.
+    expect(await screen.findByText("All required secrets are set")).toBeInTheDocument();
+  });
+
   it("uses the workspace display fallback for UUID names and renders one Settings heading", async () => {
     const user = userEvent.setup();
     apiMock.workspaceList.mockResolvedValue({
