@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { Plus, X, Copy, Hand, Clock as ClockIcon, Webhook, Plug as PlugIcon, Pencil } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getPublicApiBase } from "@/lib/api-base";
 import { CronBuilder } from "@/components/CronBuilder";
+import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { humanizeCron } from "@/lib/humanize-cron";
+import { browserTimezone } from "@/lib/timezones";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
 import type { ConnectionItem, TriggerSpec } from "@/lib/types";
 
@@ -44,7 +45,9 @@ export function makeTriggerRow(spec?: TriggerSpec): TriggerRow {
 }
 
 export function defaultTriggerRow(): TriggerRow {
-  return makeTriggerRow(undefined);
+  // New triggers default to the user's own timezone (falls back to UTC when
+  // Intl is unavailable, e.g. during SSR), instead of a hard-coded zone.
+  return { ...makeTriggerRow(undefined), cronTimezone: browserTimezone() };
 }
 
 function yamlString(value: string): string {
@@ -289,19 +292,18 @@ function TriggerRowEditor({
 
       {row.type === "schedule" && (
         <div className="space-y-3">
-          <CronBuilder
-            value={row.cronExpr}
-            onChange={(v) => onChange({ ...row, cronExpr: v })}
-          />
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Timezone</Label>
-            <Input
+            <TimezoneSelect
               value={row.cronTimezone}
-              onChange={(e) => onChange({ ...row, cronTimezone: e.target.value })}
-              className="[border:var(--bd-card)] font-mono text-sm"
-              placeholder="Europe/Berlin"
+              onChange={(tz) => onChange({ ...row, cronTimezone: tz })}
             />
           </div>
+          <CronBuilder
+            value={row.cronExpr}
+            timezone={row.cronTimezone || "UTC"}
+            onChange={(v) => onChange({ ...row, cronExpr: v })}
+          />
         </div>
       )}
 

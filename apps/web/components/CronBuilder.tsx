@@ -8,10 +8,12 @@
  * Custom mode reveals a raw input for power users.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { CalendarClock, AlertCircle } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { nextRun, formatNextRun, validateCron } from "@/lib/cron-next-run";
 
 // ---------------------------------------------------------------------------
 // Cron string builder helpers
@@ -102,13 +104,15 @@ interface CronBuilderProps {
   value: string;
   /** Called with the new cron expression whenever it changes */
   onChange: (cron: string) => void;
+  /** IANA timezone used to compute the "Next run" preview. Defaults to UTC. */
+  timezone?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function CronBuilder({ value, onChange }: CronBuilderProps) {
+export function CronBuilder({ value, onChange, timezone = "UTC" }: CronBuilderProps) {
   const [freq, setFreq] = useState<Frequency>("daily");
   const [hour, setHour] = useState(9);
   const [minute, setMinute] = useState(0);
@@ -185,6 +189,25 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
     ? describeFreq(freq, hour, minute, dow, dom)
     : "";
 
+  // The effective cron expression for this state (visual presets build it;
+  // custom mode uses the raw input). Drives validation + next-run preview.
+  const effectiveCron = freq === "custom"
+    ? customExpr
+    : buildCron(freq, hour, minute, dow, dom);
+
+  // Validation: only the custom raw input can be invalid (presets are always
+  // well-formed). Surface a plain-language error instead of silently emitting
+  // a broken expression.
+  const cronError = freq === "custom" ? validateCron(customExpr) : null;
+
+  // Next-run preview, computed in the schedule's timezone. Recomputes when the
+  // expression or timezone changes (not every render).
+  const nextRunLabel = useMemo(() => {
+    if (cronError) return null;
+    const when = nextRun(effectiveCron, timezone);
+    return when ? formatNextRun(when, timezone) : null;
+  }, [effectiveCron, timezone, cronError]);
+
   const showTimePicker = freq !== "minute" && freq !== "custom";
   const showDow = freq === "weekly";
   const showDom = freq === "monthly";
@@ -260,20 +283,24 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">Days of week</Label>
           <div className="flex flex-wrap gap-1.5">
-            {DOW_LABELS.map(([v, label]) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => toggleDow(v)}
-                className={`h-7 w-10 rounded-[var(--radius-button)] [border:var(--bd-pill)] text-xs font-medium transition-colors ${
-                  dow.includes(v)
-                    ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
-                    : "[border:var(--bd-card)] bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+            {DOW_LABELS.map(([v, label]) => {
+              const on = dow.includes(v);
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => toggleDow(v)}
+                  aria-pressed={on}
+                  className={`h-7 w-10 rounded-[var(--radius-ui)] text-xs font-medium transition-colors ${
+                    on
+                      ? "bg-[var(--accent)] text-white"
+                      : "bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -297,10 +324,31 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
         </div>
       )}
 
-      {/* Human preview */}
-      {preview && (
-        <p className="text-xs text-muted-foreground bg-muted rounded-[var(--radius-button)] px-3 py-2 font-medium">
-          {preview}
+      {/* Preview: plain-language description + computed next run (timezone-aware) */}
+      {!cronError && (preview || nextRunLabel) && (
+        <div className="bg-muted rounded-[var(--radius-ui)] px-3 py-2.5 space-y-1.5">
+          {preview && (
+            <p className="text-xs text-foreground font-medium">{preview}</p>
+          )}
+          {nextRunLabel && (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CalendarClock className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                Next run: <span className="text-foreground font-medium">{nextRunLabel}</span>
+                <span className="text-muted-foreground"> ({timezone})</span>
+              </span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Validation error (custom expression only). Uses the app's single
+          warning token (--destructive maps to --warning), matching the inline
+          validation pattern used elsewhere (e.g. CliCommandPanel). */}
+      {cronError && (
+        <p className="flex items-center gap-1.5 text-xs text-destructive">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span>{cronError}</span>
         </p>
       )}
 
