@@ -23,6 +23,7 @@ if API_DIR not in sys.path:
     sys.path.insert(0, API_DIR)
 
 import run_service  # noqa: E402
+from routers import connections as connections_router  # noqa: E402
 from services import analytics_posthog  # noqa: E402
 from services import ai_observability as ai  # noqa: E402
 from services import posthog_event_contract as contract  # noqa: E402
@@ -127,6 +128,25 @@ def _drive_approval_requested():
     )
 
 
+def _drive_connection_added():
+    connections_router._emit_connection_resolved(
+        event="connection_added",
+        connection_id="conn-1",
+        owner_id="owner-1",
+        provider="gmail",
+    )
+
+
+def _drive_connection_failed():
+    connections_router._emit_connection_resolved(
+        event="connection_failed",
+        connection_id="conn-1",
+        owner_id="owner-1",
+        provider="gmail",
+        failure_status="expired",
+    )
+
+
 def _ctx():
     return ai.AITraceContext(
         trace_id="run-1",
@@ -170,6 +190,8 @@ _DRIVERS = {
     "run_failed": lambda: _drive_run_lifecycle("failed", error_code="timeout", error="timed out"),
     "run_cancelled": lambda: _drive_run_lifecycle("cancelled", error_code="cancelled"),
     "worker_created": _drive_worker_created,
+    "connection_added": _drive_connection_added,
+    "connection_failed": _drive_connection_failed,
     "approval_requested": _drive_approval_requested,
     "$ai_generation": _drive_ai_generation,
     "$ai_span": _drive_ai_span,
