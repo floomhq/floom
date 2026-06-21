@@ -114,3 +114,20 @@ def test_different_accounts_are_preserved(monkeypatch, tmp_path):
         rows = c.get("/connections").json()
 
     assert [r["app_name"] for r in rows].count("gmail") == 2, rows
+
+
+def test_blank_label_rows_are_preserved(monkeypatch, tmp_path):
+    # Two active same-app rows with NO account label must NOT collapse — a blank
+    # label is "unknown account", not "same account" (mirrors the canonical
+    # find_by_app_account, which refuses to merge blank labels).
+    db, main = _load_app(monkeypatch, tmp_path)
+    repos = db.get_repositories()
+    owner = main._bootstrap_user_id()
+
+    _seed(repos, owner, conn_id="g-blank-1", app="gmail", label=None)
+    _seed(repos, owner, conn_id="g-blank-2", app="gmail", label=None)
+
+    with _client(main) as c:
+        rows = c.get("/connections").json()
+
+    assert [r["app_name"] for r in rows].count("gmail") == 2, rows

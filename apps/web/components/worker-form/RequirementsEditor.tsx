@@ -472,12 +472,12 @@ export function RequirementsEditor({
         </div>
         {!allReady && !skipped && (
           <p className="text-xs text-muted-foreground mt-0.5">
-            Connect the integrations this worker needs before creating it.
+            Add the connections this worker needs before creating it.
           </p>
         )}
         {skipped && (
           <p className="mt-0.5 text-xs text-[var(--warning)]">
-            Skipped. You can configure these later in Settings / Integrations.
+            Skipped. You can configure these later in Settings / Connections.
           </p>
         )}
       </CardHeader>

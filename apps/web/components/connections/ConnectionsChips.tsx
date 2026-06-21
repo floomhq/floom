@@ -30,7 +30,7 @@ export function ConnectionsChips() {
   ];
 
   return (
-    <nav className="c-tagbar" aria-label="Integrations sections">
+    <nav className="c-tagbar" aria-label="Connections sections">
       {chips.map((chip) => {
         const active = chip.match(pathname);
         return (

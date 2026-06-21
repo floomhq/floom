@@ -118,7 +118,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
     render(<Harness config={makeConfig()} />);
     expect(screen.getByText("DACH Compliance")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "ok" }));
     expect(screen.queryByText("DACH Compliance")).not.toBeInTheDocument(); // failing filtered out
     expect(screen.getByText("Weekly Update")).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
     const user = userEvent.setup();
     render(<Harness config={makeConfig()} />);
 
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "dach" }));
     await user.click(screen.getByRole("button", { name: "recruiting" }));
     expect(screen.getByText("DACH Compliance")).toBeInTheDocument();
@@ -143,7 +143,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
   it("ANDs search with the active tag filter", async () => {
     const user = userEvent.setup();
     render(<Harness config={makeConfig()} />);
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "ok" }));
     await user.type(screen.getByRole("searchbox", { name: "Search" }), "gmail");
     expect(screen.getByText("Gmail Intake")).toBeInTheDocument();

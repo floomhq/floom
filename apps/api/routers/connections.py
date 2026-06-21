@@ -940,10 +940,18 @@ def list_connections(
         label = _normalize_owner_account_label(
             d.get("display_name") or d.get("account_label")
         )
+        label_norm = str(label or "").strip().lower()
+        # #1727 — only collapse rows that share a REAL account label. Unlabeled
+        # rows (no display_name/account_label) must each be preserved — same
+        # stance as the canonical reconnect logic (find_by_app_account returns
+        # None on a blank label, refusing to merge). Key blank-label rows on
+        # their stable row id (NUL-prefixed so it can't collide with a literal
+        # label) so they are never merged together.
+        identity = label_norm if label_norm else f"\x00id:{d.get('id')}"
         return (
             str(d.get("app_name") or "").lower(),
             d.get("kind") or "composio",
-            str(label or "").strip().lower(),
+            identity,
             tuple(sorted(str(s) for s in (d.get("scopes") or []))),
         )
 

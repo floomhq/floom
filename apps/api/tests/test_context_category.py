@@ -9,6 +9,7 @@ Run: cd apps/api && python -m pytest tests/test_context_category.py -q
 from __future__ import annotations
 
 import importlib
+import inspect
 import sys
 from pathlib import Path
 
@@ -64,6 +65,14 @@ def test_set_and_clear_category(client):
     # clear it
     cleared = client.put("/contexts/research-pack/category", json={"category": ""})
     assert cleared.json()["category"] is None
+
+
+def test_context_category_mutation_passes_repos_to_edit_check():
+    from routers import contexts as contexts_router
+
+    source = inspect.getsource(contexts_router.set_context_category)
+    assert "_require_context_for_user(" in source
+    assert "repos=repos" in source
 
 
 def test_category_in_list(client):

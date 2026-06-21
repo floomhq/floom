@@ -2440,6 +2440,124 @@ def _apply_approval_phase_inputs(
     return out
 
 
+def _pause_run_for_required_approval(
+    *,
+    run_id: str,
+    worker_id: str,
+    owner_id: str,
+    config: WorkerConfig,
+    effective_inputs: Dict[str, Any],
+    decision_required: Dict[str, Any],
+    outputs: Dict[str, Any],
+    repos_obj: Repositories,
+    log_fn: Callable[[str, str], None],
+) -> None:
+    approval_id = f"apr_{uuid.uuid4().hex[:12]}"
+    label = decision_required.get("label") or (
+        config.approvals.label if config and config.approvals else "Approve action"
+    )
+    preview = decision_required.get("preview") or ""
+    original_inputs = {
+        k: v for k, v in effective_inputs.items()
+        if k not in (_APPROVAL_DECISION_KEY, _APPROVAL_PHASE_KEY)
+    }
+    try:
+        ttl_hours = float(os.environ.get("APPROVAL_TTL_HOURS", "24") or "24")
+    except ValueError:
+        ttl_hours = 24.0
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=ttl_hours)).isoformat()
+    preview_type = decision_required.get("preview_type") or decision_required.get("type")
+    preview_payload = decision_required.get("preview_payload")
+    preview_payload_json = json.dumps(preview_payload) if isinstance(preview_payload, (dict, list)) else None
+    try:
+        from cost import estimate_cost_usd, total_tokens_from_transcript
+
+        tokens_so_far = total_tokens_from_transcript(run_id)
+        cost_so_far = estimate_cost_usd(tokens_so_far)
+    except Exception:
+        tokens_so_far, cost_so_far = None, None
+    try:
+        repos_obj.approvals.create(
+            owner_id=owner_id,
+            id=approval_id,
+            run_id=run_id,
+            worker_id=worker_id,
+            status="pending",
+            label=label,
+            preview=preview,
+            created_at=_now_iso(),
+            expires_at=expires_at,
+            preview_type=(str(preview_type) if preview_type else None),
+            preview_payload_json=preview_payload_json,
+            decision_input_json=json.dumps(original_inputs),
+            tokens_so_far=tokens_so_far,
+            cost_usd_so_far=cost_so_far,
+        )
+    except Exception as exc:
+        logger.error("Failed to create approval row for run %s: %s", run_id, exc)
+    safe_outputs = (
+        _scrub_run_output(
+            outputs,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            repos=repos_obj,
+        )
+        if outputs
+        else {}
+    )
+    repos_obj.runs.update_status(
+        user_id=owner_id,
+        run_id=run_id,
+        status=RunStatus.PENDING_APPROVAL.value,
+        output_json=safe_outputs,
+    )
+    _publish_sse(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.PENDING_APPROVAL.value,
+        "approval_id": approval_id,
+        "label": label,
+    })
+    publish_run_part(run_id, {"type": "finish", "status": "pending_approval"})
+    _emit_approval_requested(
+        approval_id=approval_id,
+        run_id=run_id,
+        worker_id=worker_id,
+        owner_id=owner_id,
+        tool_name=decision_required.get("tool_name") or decision_required.get("tool"),
+        risk_level=decision_required.get("risk_level") or decision_required.get("risk"),
+    )
+    log_fn(f"Run awaiting approval: {label}")
+    worker_name_for_notify = worker_id
+    try:
+        worker_row = repos_obj.workers.get_any(worker_id=worker_id)
+        worker_name_for_notify = (worker_row or {}).get("name") or worker_id
+    except Exception:
+        pass
+    try:
+        from channels.common import notify_pending_approval_via_whatsapp
+        notify_pending_approval_via_whatsapp(
+            owner_id=owner_id,
+            run_id=run_id,
+            worker_name=worker_name_for_notify,
+            label=label,
+            approval_id=approval_id,
+        )
+    except Exception:
+        logger.warning("WhatsApp approval notify failed for run %s", run_id, exc_info=True)
+    try:
+        from channels.common import notify_pending_approval_via_slack
+        notify_pending_approval_via_slack(
+            owner_id=owner_id,
+            run_id=run_id,
+            worker_name=worker_name_for_notify,
+            label=label,
+            approval_id=approval_id,
+        )
+    except Exception:
+        logger.warning("Slack approval notify failed for run %s", run_id, exc_info=True)
+
+
 def execute_run(
     run_id: str,
     worker_id: str,
@@ -2470,8 +2588,7 @@ def execute_run(
         effective_inputs, run_id, config, repos_obj
     )
     perf.mark("approval_inputs")
-    run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
-    perf.mark("secrets")
+    run_secrets: Dict[str, str] = {}
 
     def log_fn(msg: str, level: str = "info") -> None:
         safe_msg = scrub_secrets(msg, run_secrets)
@@ -2532,6 +2649,41 @@ def execute_run(
                 return
         perf.mark("validate_inputs")
 
+        worker_needs_approval = bool(
+            config and getattr(config, "approvals", None) and config.approvals.required
+        )
+        approval_follow_up = (
+            worker_needs_approval
+            and _is_engine_approved_execution_run(run_id, repos_obj)
+        )
+        if worker_needs_approval and not approval_follow_up:
+            preview_payload = {
+                "message": "Approval required before this worker executes.",
+                "inputs": {
+                    k: v for k, v in effective_inputs.items()
+                    if k not in (_APPROVAL_DECISION_KEY, _APPROVAL_PHASE_KEY)
+                },
+            }
+            _pause_run_for_required_approval(
+                run_id=run_id,
+                worker_id=worker_id,
+                owner_id=owner_id,
+                config=config,
+                effective_inputs=effective_inputs,
+                decision_required={
+                    "label": config.approvals.label if config.approvals else "Approve action",
+                    "preview": json.dumps(preview_payload, indent=2)[:2000],
+                    "preview_type": "json",
+                    "preview_payload": preview_payload,
+                },
+                outputs={},
+                repos_obj=repos_obj,
+                log_fn=log_fn,
+            )
+            return
+
+        run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+        perf.mark("secrets")
         log_fn("Loading secrets", level="debug")
         perf.mark("loading_secrets_log")
         secrets = run_secrets

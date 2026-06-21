@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Paperclip } from "lucide-react";
 import { GenericOutput } from "@/components/generic-output";
 import { ApprovalActionItems, hasActionItems } from "@/components/share/ApprovalActionItems";
+import { sanitizeOutputText } from "@/lib/strip-citations";
 import type { ApprovalRow } from "@/lib/types";
 
 /* ---- helpers --------------------------------------------------------------- */
@@ -74,9 +75,12 @@ function emailPayload(a: ApprovalRow): { to?: string; subject?: string; body?: s
   const typed = (a.type ?? a.preview_type ?? "").toLowerCase();
   if (p && typeof p === "object" && !Array.isArray(p)) {
     const o = p as Record<string, unknown>;
-    const to = asString(o.to ?? o.recipient ?? o.email);
-    const subject = asString(o.subject ?? o.title);
-    const body = asString(o.body ?? o.text ?? o.content ?? o.message);
+    // Sanitize at the source: the backend does NOT strip internal
+    // <REDACTED:...> / citation markers from preview_payload, so the client is
+    // the only defense on this shared approval-review surface (#1752).
+    const to = sanitizeOutputText(asString(o.to ?? o.recipient ?? o.email));
+    const subject = sanitizeOutputText(asString(o.subject ?? o.title));
+    const body = sanitizeOutputText(asString(o.body ?? o.text ?? o.content ?? o.message));
     if (typed.includes("email") || to || subject) return { to, subject, body };
   }
   return null;

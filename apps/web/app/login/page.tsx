@@ -80,6 +80,18 @@ function LoginContent() {
 
   const effectiveMode: LoginMode = forceSecret && (mode === "username" || mode === "setup") ? "secret" : mode;
 
+  // #1702: a failed magic-link redirect lands here with ?error=<code>. Surface a
+  // human message and a clear re-login action instead of a raw JSON dead-end.
+  const errorParam = searchParams.get("error");
+  useEffect(() => {
+    if (!errorParam) return;
+    const ERROR_MESSAGES: Record<string, string> = {
+      expired_link: "This sign-in link expired or was already used. Request a new one below.",
+      account_disabled: "This account has been disabled. Contact your workspace admin.",
+    };
+    setError(ERROR_MESSAGES[errorParam] || "Could not sign you in. Please try again.");
+  }, [errorParam]);
+
   useEffect(() => {
     void (async () => {
       try {
