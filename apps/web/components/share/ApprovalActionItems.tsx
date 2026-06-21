@@ -7,6 +7,8 @@
 // item layout). A bold plain-language action line summarises the request for a
 // non-technical approver.
 
+import { sanitizeOutputText } from "@/lib/strip-citations";
+
 type Json = Record<string, unknown>;
 
 function isObject(v: unknown): v is Json {
@@ -79,15 +81,17 @@ function ItemRow({ item, verb }: { item: unknown; verb: string | null }) {
     return (
       <div className="overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)]">
         <div className="flex items-center gap-2 [border-bottom:var(--bd-div)] px-3 py-2">
-          <span className="flex-1 truncate text-[13px] font-medium">{title || "Item"}</span>
+          {/* decision_input_json is NOT stripped server-side; sanitize internal
+              <REDACTED:...> / citation markers at render (#1752). */}
+          <span className="flex-1 truncate text-[13px] font-medium">{sanitizeOutputText(title) || "Item"}</span>
           {verb && <span className="font-mono text-[11px] text-[var(--ink-soft)]">{verb}</span>}
         </div>
         {rest.length > 0 && (
           <dl className="[&>*+*]:[border-top:var(--bd-div)]">
             {rest.map(([k, v]) => (
               <div key={k} className="grid grid-cols-[120px_1fr] gap-3 px-3 py-1.5 text-xs">
-                <dt className="truncate text-[var(--ink-soft)]">{k.replace(/[_-]+/g, " ")}</dt>
-                <dd className="min-w-0 break-words">{asString(v)}</dd>
+                <dt className="truncate text-[var(--ink-soft)]">{sanitizeOutputText(k).replace(/[_-]+/g, " ")}</dt>
+                <dd className="min-w-0 break-words">{sanitizeOutputText(asString(v))}</dd>
               </div>
             ))}
           </dl>
@@ -99,7 +103,7 @@ function ItemRow({ item, verb }: { item: unknown; verb: string | null }) {
   return (
     <div className="flex items-start gap-2.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-2 text-[13px]">
       <span className="mt-2 size-1 shrink-0 rounded-[var(--radius-pill)] bg-[var(--ink-soft)]" aria-hidden />
-      <span className="min-w-0 break-words">{asString(item)}</span>
+      <span className="min-w-0 break-words">{sanitizeOutputText(asString(item))}</span>
     </div>
   );
 }
