@@ -40,6 +40,7 @@ import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 export { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { api } from "@/lib/api";
+import { capturePostHogEvent } from "@/lib/posthog";
 import { reportError, logError } from "@/lib/notify";
 import type { ConversationSummary, SystemOverview } from "@/lib/types";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
@@ -635,6 +636,21 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     sendMessage(buildCreateWorkerMessage(text));
     setInput("");
   }, [autoSubmitPrime, createMode, primeInput, messages.length, isHydrating, sendMessage]);
+
+  // INTENT: the create-worker flow opened. Fire once per createMode activation
+  // (this core is mounted once for the whole app, so guard against re-fires).
+  const createStartedRef = useRef(false);
+  useEffect(() => {
+    if (!createMode) {
+      createStartedRef.current = false;
+      return;
+    }
+    if (createStartedRef.current) return;
+    createStartedRef.current = true;
+    capturePostHogEvent("worker_create_started", {
+      source: homeMode ? "home" : fullPage ? "fullpage" : "dock",
+    });
+  }, [createMode, homeMode, fullPage]);
 
   const handleExport = useCallback(() => {
     exportConversationMarkdown(messages, conversationId);

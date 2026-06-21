@@ -6,6 +6,7 @@ import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, 
 import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
+import { groupPostHogWorkspace } from "@/lib/posthog";
 import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
@@ -99,6 +100,11 @@ export function WorkspaceSwitcher() {
           workspaces: data.workspaces ?? [],
           activeId,
         });
+        // Attach the active workspace as the PostHog `workspace` group with its
+        // name, so client events are workspace-attributed with readable group
+        // props. (Switching reloads the page, so this re-runs per workspace.)
+        const activeWorkspace = data.workspaces?.find((w) => w.id === activeId);
+        groupPostHogWorkspace(activeId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
         setCanExportWorkspace(computeIsAdmin(me));
       })
       .catch((err: Error) => {
