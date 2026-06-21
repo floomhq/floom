@@ -151,6 +151,16 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
 
   const isOpen = selected != null;
 
+  // Truly-empty collection (no items at all, not merely filtered to zero) and a
+  // settled fetch (not loading, not errored). On a genuinely empty surface the
+  // search bar, tag filters, view toggle and the toolbar add button are useless
+  // chrome — the empty state owns the screen (hero + its own action/composer),
+  // so we suppress the whole toolbar/tagbar and let the empty state lead. When a
+  // search/filter narrows a non-empty list to zero, the toolbar STAYS so the
+  // user can clear the query.
+  const collectionEmpty =
+    items.length === 0 && !config.loading && !config.error;
+
   // ---- detail (split right pane) ----
   // First pass resolves the tab set so we can derive the active tab key, then we
   // rebuild the detail passing that key — this lets a detail config (e.g. the
@@ -432,15 +442,17 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
 
       {!isOpen && !creating && (
         <>
-          <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>
-            {searchBox()}
-            {viewToggle}
-            <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
-              {config.toolbarActions}
-              {addButton}
+          {!collectionEmpty && (
+            <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>
+              {searchBox()}
+              {viewToggle}
+              <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+                {config.toolbarActions}
+                {addButton}
+              </div>
             </div>
-          </div>
-          {config.tags && (
+          )}
+          {config.tags && !collectionEmpty && (
             <div className="c-tagbar-wrap" style={{ padding: `12px ${PAGE_X}px 2px` }}>
               <TagBar
                 families={config.tags}

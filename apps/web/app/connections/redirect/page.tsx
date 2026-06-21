@@ -211,7 +211,7 @@ function RedirectInner() {
                   I&apos;ve authorized: take me back
                 </Button>
                 <Link href={returnTo} className={buttonVariants({ variant: "ghost", className: "mt-2 w-full" })}>
-                  Go to integrations
+                  Go to connections
                 </Link>
               </>
 
@@ -238,7 +238,7 @@ function RedirectInner() {
                   </a>
                 )}
                 <Link href={returnTo} className={buttonVariants({ variant: "ghost", className: "mt-2 w-full" })}>
-                  Go to integrations
+                  Go to connections
                 </Link>
               </>
 

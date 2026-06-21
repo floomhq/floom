@@ -386,4 +386,35 @@ describe("CollectionView — states (§7)", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalled();
   });
+
+  // #1726/#1709 polish pass 2: a truly-empty collection hides the toolbar
+  // (search + view toggle + add button) and tag filters — the empty state owns
+  // the screen — so there is no duplicate "Add"/"New worker" CTA or useless
+  // filter chrome with zero items.
+  it("hides the search/filter/view-toggle toolbar when the collection is empty", () => {
+    const { container } = render(<Harness config={makeConfig({ items: [] })} />);
+    expect(screen.getByText("No workers yet")).toBeInTheDocument();
+    // No search box, view toggle, tag bar, or toolbar add button on the empty surface.
+    expect(container.querySelector(".c-toolbar")).not.toBeInTheDocument();
+    expect(container.querySelector(".c-srch")).not.toBeInTheDocument();
+    expect(container.querySelector(".c-tagbar-wrap")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View mode" })).not.toBeInTheDocument();
+    // The empty-state fallback action (the page's add) is still reachable once,
+    // not duplicated by a toolbar button.
+    expect(screen.getAllByRole("button", { name: /Add/ })).toHaveLength(1);
+  });
+
+  // When a search/filter narrows a NON-empty list to zero, the toolbar STAYS so
+  // the user can clear the query (only a genuinely empty collection hides it).
+  it("keeps the toolbar when a filter narrows a non-empty list to zero", () => {
+    const { container } = render(
+      <Harness
+        config={makeConfig()}
+        initial={{ ...emptyState("grid"), q: "zzz-no-match" }}
+      />,
+    );
+    expect(screen.getByText("No workers yet")).toBeInTheDocument();
+    expect(container.querySelector(".c-toolbar")).toBeInTheDocument();
+    expect(container.querySelector(".c-srch")).toBeInTheDocument();
+  });
 });

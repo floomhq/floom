@@ -28,6 +28,7 @@ import {
   toUnified,
   humaniseAppName,
 } from "@/lib/connections/unify";
+import { resolveUserLabel } from "@/lib/workspace/display-name";
 
 // ---------------------------------------------------------------------------
 // #1233: Resolve owner_id to display name / email.
@@ -40,9 +41,14 @@ function resolveOwner(
 ): string {
   if (!ownerId) return "Not set";
   const member = members.find((m) => m.user_id === ownerId);
-  if (member) return member.display_name || member.email || ownerId;
-  // Fallback: truncate UUID so it's friendlier than the full 36-char string
-  return ownerId.length > 8 ? `${ownerId.slice(0, 8)}...` : ownerId;
+  // #1728: never surface a raw UUID. resolveUserLabel skips UUID-shaped
+  // candidates; when the only candidate IS the owner id (member matched but
+  // has no display_name/email, or no member matched at all) it falls back to
+  // the friendly "Workspace owner" label instead of leaking the UUID.
+  return resolveUserLabel(
+    [member?.display_name, member?.email],
+    "Workspace owner",
+  );
 }
 
 // ---------------------------------------------------------------------------

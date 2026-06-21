@@ -19,7 +19,7 @@ import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import type { CurrentUser } from "@/lib/types";
-import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -587,7 +587,10 @@ export function UserProfileFooter({
 }: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
-  const [workspaceName, setWorkspaceName] = useState("Floom workspace");
+  // #1709: canonical fallback is "My workspace" (resolveWorkspaceName), NOT the
+  // brand-specific "Floom workspace" — the app is white-labeled and the OSS /me
+  // has no workspace yet on first paint.
+  const [workspaceName, setWorkspaceName] = useState("My workspace");
 
   useEffect(() => {
     let active = true;
@@ -612,16 +615,24 @@ export function UserProfileFooter({
         if (active && current) setWorkspaceName(resolveWorkspaceName(current.name));
       })
       .catch(() => {
-        if (active) setWorkspaceName("Floom workspace");
+        if (active) setWorkspaceName("My workspace");
       });
     return () => {
       active = false;
     };
   }, []);
 
-  // Multi-member: prefer username, then email, then display_name
-  const primary = (user as (typeof user & { username?: string | null }) | null)?.username
-    || user?.email || user?.display_name || "Local user";
+  // Multi-member: prefer username, then email, then display_name. #1728: skip
+  // UUID-shaped candidates so a raw user/owner id never leaks as the identity
+  // line (the OSS /me can return an id-only username).
+  const primary = resolveUserLabel(
+    [
+      (user as (typeof user & { username?: string | null }) | null)?.username,
+      user?.email,
+      user?.display_name,
+    ],
+    "Local user",
+  );
   const secondary = workspaceName;
   // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
   // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this
