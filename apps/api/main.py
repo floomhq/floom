@@ -295,6 +295,43 @@ def _cloud_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _webhook_github_issue_action_allowed(
+    worker_id: str,
+    inputs: dict[str, Any],
+    config: dict[str, Any] | None,
+) -> bool:
+    """Return False when a worker opts into GitHub issue action filtering."""
+    if not isinstance(inputs.get("issue"), dict) or not isinstance(
+        inputs.get("repository"), dict
+    ):
+        return True
+    if inputs.get("zen"):
+        # GitHub ping payloads do not have an issue action and should not start
+        # issue-fixer workers.
+        return False
+
+    webhook_cfg = (config or {}).get("webhook") or {}
+    allowed = webhook_cfg.get("github_issue_actions")
+    if allowed is None:
+        trigger_cfg = (config or {}).get("trigger") or {}
+        allowed = trigger_cfg.get("github_issue_actions")
+    if allowed is None and worker_id == "claude-codex-pr-loop-v1":
+        allowed = ["opened"]
+    if allowed is None:
+        return True
+    if isinstance(allowed, str):
+        allowed_actions = {allowed.strip().lower()}
+    elif isinstance(allowed, list):
+        allowed_actions = {str(item).strip().lower() for item in allowed}
+    else:
+        return True
+    allowed_actions.discard("")
+    if not allowed_actions:
+        return True
+    action = str(inputs.get("action") or "").strip().lower()
+    return action in allowed_actions
+
+
 def _cloud_rate_identity(request: Request) -> str:
     pat = (request.headers.get("x-floom-token") or "").strip()
     if pat:
@@ -1568,6 +1605,9 @@ async def cloud_webhook_trigger(
                 inputs = {"payload": parsed}
         except Exception:
             inputs = {"raw": body.decode("utf-8", errors="replace")}
+
+    if not _webhook_github_issue_action_allowed(worker_id, inputs, config):
+        return engine_main.ActionResponse(status="ignored")
 
     delivery_id = (
         request.headers.get("webhook-id")
