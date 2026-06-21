@@ -65,6 +65,7 @@ from routers.contexts import list_contexts
 from services.context_access import _contexts_git_prefix, _write_context_file
 from services.git_service import _git_author, _git_workspace, _workers_git_prefix
 from services import git_service as _git_service
+from services.secret_paths import is_secret_bearing_export_path
 from services.worker_access import (
     _active_local_workspace_id,
     _list_visible_workers,
@@ -103,6 +104,24 @@ def _workspace_md_git_rel(workspace, workspace_md_path) -> str:
 
 def _workspace_git_versioning_disabled(git_ops, workspace) -> bool:
     return bool(getattr(git_ops, "is_engine_source_checkout", lambda _p: False)(workspace))
+
+
+def _exportable_workspace_git_paths(workspace) -> list[str]:
+    """Return workspace files safe to stage for outbound GitHub export."""
+    rel_paths: list[str] = []
+    for path in sorted(workspace.rglob("*")):
+        try:
+            rel = path.relative_to(workspace).as_posix()
+        except ValueError:
+            continue
+        if ".git" in rel.split("/"):
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        if is_secret_bearing_export_path(rel):
+            continue
+        rel_paths.append(rel)
+    return rel_paths
 
 
 class WorkspaceGitHubExportRequest(BaseModel):
@@ -484,7 +503,7 @@ def export_workspace_to_github(
     try:
         pushed_ref = _git_ops.commit_paths(
             workspace,
-            ["."],
+            _exportable_workspace_git_paths(workspace),
             "chore: export workspace snapshot",
             author_name=author_name,
             author_email=author_email,

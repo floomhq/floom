@@ -16,6 +16,9 @@ import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
+from core.config import _is_cloud_deploy
+from services.secret_paths import SECRETS_ENC_FILENAME
+
 if TYPE_CHECKING:
     from auth import AuthContext
 
@@ -274,7 +277,7 @@ def _git_cfg_delete(user_id: str) -> None:
         conn.execute("DELETE FROM git_workspace_config WHERE user_id = ?", (key,))
 
 
-_SECRETS_ENC_FILENAME = ".secrets.enc"
+_SECRETS_ENC_FILENAME = SECRETS_ENC_FILENAME
 
 # Host hook — registered by a downstream host startup.py to return the
 # workspace's AES key from Supabase Vault (pgsodium DARE) instead of
@@ -305,14 +308,21 @@ def _get_or_create_secrets_key(pat: str, repo_full_name: str) -> bytes:
       3. Local git (no GitHub): ~/.config/workeros/secrets.key. Generates and
          writes a random key with mode 600 on first use — same model as SSH keys.
     """
-    import github_api as _gh
 
     # 1. Cloud resolver (Supabase Vault)
     if _secrets_key_resolver is not None:
         return _secrets_key_resolver()
 
+    if _is_cloud_deploy():
+        raise RuntimeError(
+            "Cloud secrets key resolver is not configured; refusing to use "
+            "GitHub Variables or local key fallback for workspace secrets"
+        )
+
     # 2. OSS + GitHub: key lives in the GitHub repo as an Actions Variable
     if repo_full_name:
+        import github_api as _gh
+
         key = _gh.get_secrets_key(pat, repo_full_name)
         if key is None:
             key = os.urandom(32)
@@ -356,6 +366,10 @@ def _sync_secrets_to_enc(user_id: str, repos, pat: str, repo_full_name: str) -> 
     """
     import git_ops as _git_ops
 
+    if _is_cloud_deploy():
+        logger.debug("Skipping %s sync in cloud mode", _SECRETS_ENC_FILENAME)
+        return
+
     try:
         secrets: dict[str, str] = {}
         for row in repos.secrets.list(user_id=user_id):
@@ -386,6 +400,10 @@ def _load_secrets_from_enc(user_id: str, repos, pat: str, repo_full_name: str) -
 
     Called on startup (if already connected) and after linking a repo (fresh install).
     """
+    if _is_cloud_deploy():
+        logger.debug("Skipping %s load in cloud mode", _SECRETS_ENC_FILENAME)
+        return 0
+
     try:
         enc_path = _git_workspace() / _SECRETS_ENC_FILENAME
         if not enc_path.is_file():

@@ -146,6 +146,39 @@ def test_export_with_present_repo_pushes(app_env, monkeypatch):
     assert "pat-test" not in resp.text
 
 
+def test_exportable_workspace_git_paths_filters_secret_bearing_paths(tmp_path):
+    workspace_router = importlib.import_module("routers.workspace")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".git").mkdir()
+    (workspace / "workers").mkdir()
+    (workspace / "safe.md").write_text("safe\n", encoding="utf-8")
+    (workspace / "workers" / "run.py").write_text("print('safe')\n", encoding="utf-8")
+    denied_paths = [
+        ".secrets.enc",
+        ".env",
+        ".env.local",
+        ".git-credentials",
+        ".netrc",
+        "credentials.json",
+        "github-actions-cred.json",
+        "id_rsa",
+        "private.pem",
+        "service-account.json",
+        "worker.env",
+        "workers/prod-sa.json",
+    ]
+    for rel in denied_paths:
+        path = workspace / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("secret\n", encoding="utf-8")
+
+    staged_paths = set(workspace_router._exportable_workspace_git_paths(workspace))
+    assert {"safe.md", "workers/run.py"} <= staged_paths
+    for rel in denied_paths:
+        assert rel not in staged_paths
+
+
 def test_export_with_missing_repo_restores_from_bundle_then_pushes(app_env, monkeypatch):
     client, main, workspace = app_env
     _seed_pat(main)

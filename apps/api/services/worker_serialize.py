@@ -30,6 +30,7 @@ from core.urls import _frontend_base_url
 from services.public_view import _sanitize_operator_text
 from services.run_serialize import _make_run_summary
 from services.secrets_env import _available_secret_names_for_user
+from services.secret_paths import SECRET_BEARING_BASENAMES, is_secret_bearing_export_path
 from services.worker_access import (
     _normalize_trigger_type,
     _trigger_label,
@@ -78,6 +79,8 @@ _WORKER_FILE_IGNORE = frozenset({
     "build",
     "*.pyc",
 })
+
+_WORKSPACE_EXPORT_SECRET_BASENAMES = SECRET_BEARING_BASENAMES
 
 
 def _language_for_path(rel_path: str) -> str:
@@ -752,54 +755,10 @@ def _get_timeseries_batch(
         return {}
 
 
-_WORKSPACE_EXPORT_SECRET_BASENAMES = frozenset({
-    ".env",
-    ".netrc",
-    ".npmrc",
-    ".pypirc",
-    "credentials",
-    "credentials.json",
-    "secrets.json",
-    "secrets.yaml",
-    "secrets.yml",
-    ".secrets",
-})
-
-
 def _is_secret_bearing_export_path(rel: str) -> bool:
     """True if a worker-dir file may carry secret values (excluded from export
     AND from the worker Source file tree — see ``_should_ignore_worker_file``)."""
-    base = rel.rsplit("/", 1)[-1].lower()
-    if base in _WORKSPACE_EXPORT_SECRET_BASENAMES:
-        return True
-    # .env, .env.local, .env.production, foo.env, etc.
-    if base == ".env" or base.startswith(".env.") or base.endswith(".env"):
-        return True
-    # Private keys / certs.
-    if base.endswith((".pem", ".key", ".p12", ".pfx", ".pkcs12", ".p8", ".der", ".crt", ".cer", ".ppk")):
-        return True
-    # Cloud service-account / workload-identity credential JSON, e.g.
-    # vertex-wif-cred.json, gcp-service-account.json, my-sa.json (#1681). These
-    # do not match the fixed "credentials.json" basename, so match by delimited
-    # token. Tokens are split on - and _ so "results.json" / "package.json" /
-    # "my-wifi.json" are NOT matched (only whole-token "wif"/"sa"/"cred"/...).
-    if base.endswith(".json"):
-        stem = base[: -len(".json")]
-        tokens = set(re.split(r"[-_]+", stem))
-        credential_tokens = {
-            "cred",
-            "creds",
-            "credential",
-            "credentials",
-            "sa",
-            "serviceaccount",
-            "wif",
-        }
-        if tokens & credential_tokens:
-            return True
-        if "service-account" in stem or "service_account" in stem or "serviceaccount" in stem:
-            return True
-    return False
+    return is_secret_bearing_export_path(rel)
 
 
 def _iter_worker_dir_files(worker_id: str):

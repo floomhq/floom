@@ -122,3 +122,50 @@ def test_github_path_used_when_repo_present(tmp_path):
             sys.modules["github_api"] = original_gh_module
         else:
             sys.modules.pop("github_api", None)
+
+
+def test_cloud_without_resolver_refuses_github_variable_fallback(monkeypatch, tmp_path):
+    mock_gh = MagicMock()
+    mock_gh.get_secrets_key.return_value = None
+
+    key_file = tmp_path / "secrets.key"
+    original_resolver = _gitsvc._secrets_key_resolver
+    original_gh_module = sys.modules.get("github_api")
+    try:
+        _gitsvc._secrets_key_resolver = None
+        monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+        sys.modules["github_api"] = mock_gh
+        with patch.object(_gitsvc, "_LOCAL_KEY_PATH", key_file):
+            with pytest.raises(RuntimeError, match="Cloud secrets key resolver is not configured"):
+                _main._get_or_create_secrets_key(
+                    pat="ghp_fake",
+                    repo_full_name="org/repo",
+                )
+        mock_gh.get_secrets_key.assert_not_called()
+        mock_gh.set_secrets_key.assert_not_called()
+        assert not key_file.exists()
+    finally:
+        _gitsvc._secrets_key_resolver = original_resolver
+        if original_gh_module is not None:
+            sys.modules["github_api"] = original_gh_module
+        else:
+            sys.modules.pop("github_api", None)
+
+
+def test_cloud_sync_and_load_skip_encrypted_secrets_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.setattr(_gitsvc, "_git_workspace", lambda: tmp_path)
+
+    def unexpected_key_lookup(*_args, **_kwargs):
+        raise AssertionError("cloud sync/load must not resolve a .secrets.enc key")
+
+    monkeypatch.setattr(_gitsvc, "_get_or_create_secrets_key", unexpected_key_lookup)
+    repos = MagicMock()
+    enc_path = tmp_path / _gitsvc._SECRETS_ENC_FILENAME
+    enc_path.write_bytes(b"not-decrypted-in-cloud")
+
+    assert _gitsvc._sync_secrets_to_enc("user-1", repos, "ghp_fake", "org/repo") is None
+    assert _gitsvc._load_secrets_from_enc("user-1", repos, "ghp_fake", "org/repo") == 0
+    repos.secrets.list.assert_not_called()
+    repos.secrets.set.assert_not_called()
+    assert enc_path.read_bytes() == b"not-decrypted-in-cloud"
