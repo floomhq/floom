@@ -65,6 +65,12 @@ Git-backed operating record stored under `.floom/issues/` in the workspace git r
 | `/workspace/issues/{id}` | PATCH | Update title/body/status/labels/asset binding |
 | `/workspace/issues/{id}/comments` | POST | Append a comment |
 
+Issues ride the workspace git source of truth, so a git remote clone/push and the
+cloud bundle flow preserve them automatically. The curated `/workspace/export` +
+`/workspace/import` template bundle preserves them explicitly: issue files are
+written under `issues/` in the zip and restored into `.floom/issues/` on import
+(existing ids are never clobbered).
+
 ### Auth and system
 
 | Endpoint | Method | Description |

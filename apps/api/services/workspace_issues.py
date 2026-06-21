@@ -11,8 +11,11 @@ Layout, relative to the git workspace root (services.git_service._git_workspace)
   .floom/issues/ISSUE-0001.comments.ndjson — append-only comment log (NDJSON)
 
 Because every workspace has its own git root, the issue id namespace is
-per-workspace and is preserved through workspace export/import and the cloud
-bundle flow automatically (same git path as every other workspace asset).
+per-workspace. Issues ride the git source of truth, so a git remote clone/push
+and the cloud bundle flow preserve them automatically (same git path as every
+other workspace asset). The curated ``/workspace/export`` + ``/workspace/import``
+template bundle is an allow-list, not a raw git copy, so it preserves issues
+explicitly via ``iter_issue_export_files()`` / ``restore_issue_files()`` below.
 
 This module is intentionally dependency-light: it imports git_ops and the
 git_service resolution/commit helpers lazily, never ``main``, so it stays
@@ -466,3 +469,111 @@ def add_comment(
             author_email,
         )
     return comment
+
+
+# ---------------------------------------------------------------------------
+# Workspace template export / import
+#
+# The curated ``/workspace/export`` zip and ``/workspace/import`` restore path
+# are an explicit allow-list (workers, contexts, workspace config), NOT a raw
+# git copy, so issues would be silently dropped without these helpers. They keep
+# the bundle round-trip honest: export emits every issue file verbatim, import
+# writes back any issue id that does not already exist (never clobbers).
+# ---------------------------------------------------------------------------
+
+_ISSUE_COMMENTS_FILE_RE = re.compile(r"^ISSUE-(\d+)\.comments\.ndjson$")
+
+
+def iter_issue_export_files() -> List[Tuple[str, bytes]]:
+    """Return ``(basename, raw_bytes)`` for every issue file in the workspace.
+
+    Basenames are bare (``ISSUE-0001.md`` / ``ISSUE-0001.comments.ndjson``); the
+    caller places them under whatever bundle prefix it uses. Returns an empty
+    list when the workspace has no issues directory yet.
+    """
+    from services.git_service import _git_workspace
+
+    workspace = _git_workspace()
+    issues_dir = _issues_dir(workspace)
+    if not issues_dir.is_dir():
+        return []
+
+    files: List[Tuple[str, bytes]] = []
+    for child in sorted(issues_dir.iterdir(), key=lambda p: p.name):
+        if not child.is_file():
+            continue
+        if _ISSUE_FILE_RE.match(child.name) or _ISSUE_COMMENTS_FILE_RE.match(child.name):
+            files.append((child.name, child.read_bytes()))
+    return files
+
+
+def restore_issue_files(
+    files: List[Tuple[str, bytes]],
+    *,
+    author_name: str = "Floom",
+    author_email: str = "workeros@local",
+) -> List[str]:
+    """Write imported issue files into ``.floom/issues/`` and commit them.
+
+    ``files`` is an iterable of ``(basename, raw_bytes)`` produced by
+    :func:`iter_issue_export_files`. Any issue id whose ``.md`` already exists in
+    the target workspace is skipped (never clobber existing issues); a comment
+    log is only restored alongside an imported ``.md``. Returns the sorted list
+    of issue ids that were imported.
+    """
+    from services.git_service import _ensure_git_workspace_ready, _git_ops_lock, _git_workspace
+
+    import git_ops as _git_ops
+
+    # Group the incoming members by issue id so the .md gate controls whether its
+    # comment log is also restored.
+    grouped: Dict[str, Dict[str, bytes]] = {}
+    for name, data in files:
+        md_match = _ISSUE_FILE_RE.match(name)
+        cmt_match = _ISSUE_COMMENTS_FILE_RE.match(name)
+        if md_match:
+            issue_id = f"ISSUE-{int(md_match.group(1)):04d}"
+            grouped.setdefault(issue_id, {})["md"] = data
+        elif cmt_match:
+            issue_id = f"ISSUE-{int(cmt_match.group(1)):04d}"
+            grouped.setdefault(issue_id, {})["comments"] = data
+
+    if not grouped:
+        return []
+
+    workspace = _git_workspace()
+    issues_dir = _issues_dir(workspace)
+    imported: List[str] = []
+    rel_paths: List[str] = []
+
+    with _git_ops_lock:
+        _ensure_git_workspace_ready(workspace)
+        issues_dir.mkdir(parents=True, exist_ok=True)
+        for issue_id in sorted(grouped):
+            parts = grouped[issue_id]
+            if "md" not in parts:
+                # Orphan comment log with no issue body — skip, nothing to anchor it.
+                continue
+            md_path = workspace / _issue_md_rel(issue_id)
+            if md_path.exists():
+                # Never clobber an issue that already lives in this workspace.
+                continue
+            md_path.write_bytes(parts["md"])
+            rel_paths.append(_issue_md_rel(issue_id))
+            if "comments" in parts:
+                comments_path = workspace / _issue_comments_rel(issue_id)
+                comments_path.write_bytes(parts["comments"])
+                rel_paths.append(_issue_comments_rel(issue_id))
+            imported.append(issue_id)
+
+        if rel_paths:
+            _git_ops.commit_paths(
+                workspace,
+                rel_paths,
+                f"issues: import {len(imported)} issue(s)",
+                author_name,
+                author_email,
+            )
+            _git_ops.push_background(workspace)
+
+    return imported

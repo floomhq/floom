@@ -3025,6 +3025,7 @@ class WorkspaceShareLinkResponse(BaseModel):
 class WorkspaceImportResponse(BaseModel):
     workers_imported: List[str] = []
     contexts_imported: List[str] = []
+    issues_imported: List[str] = []
     skipped: List[Dict[str, str]] = []
     id_remaps: Dict[str, str] = {}
     required_secrets: List[str] = []
