@@ -271,3 +271,81 @@ def test_emily_tools_create_list_comment_close(monkeypatch, tmp_path):
     # Unknown issue is a soft error, not a crash.
     miss = impls._tool_issues_comment({"id": "ISSUE-4242", "body": "x"}, "local-user")
     assert miss["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# Regression: models.py field ownership (#1781 review)
+# ---------------------------------------------------------------------------
+
+def test_worker_list_summary_keeps_updated_at(monkeypatch, tmp_path):
+    """The issue models block must not steal WorkerListSummary.updated_at.
+
+    The block was once inserted between created_at and updated_at, orphaning
+    updated_at onto WorkspaceIssueCommentRequest and silently dropping it from
+    /workers responses.
+    """
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "dev")
+    _purge_api_modules()
+    models = importlib.import_module("models")
+
+    assert "updated_at" in models.WorkerListSummary.model_fields
+    assert "created_at" in models.WorkerListSummary.model_fields
+    # The comment request carries only a body, never updated_at.
+    assert set(models.WorkspaceIssueCommentRequest.model_fields) == {"body"}
+
+
+# ---------------------------------------------------------------------------
+# Regression: serialized read-modify-write (#1781 review)
+# ---------------------------------------------------------------------------
+
+def test_concurrent_close_and_comment_do_not_lose_updates(monkeypatch, tmp_path):
+    """A comment racing with a close must not restore status: open.
+
+    Both operations load/modify/write the same issue. Without serializing the
+    whole sequence under _git_ops_lock the later writer rewrites stale
+    frontmatter; the lock makes the outcome deterministic regardless of order.
+    """
+    import threading
+
+    workspace, _workers_dir = _make_workspace(tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "dev")
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workspace / "workers"))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
+    _purge_api_modules()
+    issues = importlib.import_module("services.workspace_issues")
+
+    created = issues.create_issue(title="race me", created_by="user_x")
+    issue_id = created["id"]
+
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def _close():
+        try:
+            barrier.wait()
+            issues.close_issue(issue_id)
+        except BaseException as exc:  # noqa: BLE001 - surfaced via errors list
+            errors.append(exc)
+
+    def _comment():
+        try:
+            barrier.wait()
+            issues.add_comment(issue_id, body="from the run", created_by="user_y")
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_close), threading.Thread(target=_comment)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert not errors, errors
+    final = issues.get_issue(issue_id)
+    # Regardless of interleaving, the close is never lost and the comment lands.
+    assert final["status"] == "closed"
+    assert final["comment_count"] == 1

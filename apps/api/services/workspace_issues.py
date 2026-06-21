@@ -165,20 +165,25 @@ def _issue_to_dict(meta: Dict[str, Any], body: str, comment_count: int) -> Dict[
 # Git commit helper
 # ---------------------------------------------------------------------------
 
-def _commit_paths(
+def _commit_paths_locked(
     workspace: Path,
     rel_paths: List[str],
     message: str,
     author_name: str,
     author_email: str,
 ) -> None:
-    import git_ops as _git_ops
-    from services.git_service import _ensure_git_workspace_ready, _git_ops_lock
+    """Commit + background push. Caller MUST already hold ``_git_ops_lock``.
 
-    with _git_ops_lock:
-        _ensure_git_workspace_ready(workspace)
-        _git_ops.commit_paths(workspace, rel_paths, message, author_name, author_email)
-        _git_ops.push_background(workspace)
+    Used by the read-modify-write paths (update/comment) so the load, write and
+    commit happen under a single lock acquisition and cannot lose updates to a
+    concurrent mutation of the same issue.
+    """
+    import git_ops as _git_ops
+    from services.git_service import _ensure_git_workspace_ready
+
+    _ensure_git_workspace_ready(workspace)
+    _git_ops.commit_paths(workspace, rel_paths, message, author_name, author_email)
+    _git_ops.push_background(workspace)
 
 
 def _next_issue_id(issues_dir: Path) -> str:
@@ -346,50 +351,57 @@ def update_issue(
     author_email: str = "workeros@local",
 ) -> Dict[str, Any]:
     from db import now_iso
-    from services.git_service import _git_workspace
+    from services.git_service import _git_ops_lock, _git_workspace
 
     issue_id = _validate_issue_id(issue_id)
     workspace = _git_workspace()
-    meta, current_body = _load_issue(workspace, issue_id)
 
-    if title is not None:
-        new_title = title.strip()
-        if not new_title:
-            raise IssueError("title cannot be empty")
-        meta["title"] = new_title
+    # Validate status before taking the lock so bad input fails fast.
     if status is not None:
         status = status.strip()
         if status not in ISSUE_STATUSES:
             raise IssueError(
                 f"Invalid status {status!r} (expected one of {', '.join(ISSUE_STATUSES)})"
             )
-        meta["status"] = status
-    if labels is not None:
-        meta["labels"] = _normalize_labels(labels)
-    if clear_asset:
-        meta["asset_type"] = None
-        meta["asset_id"] = None
-    elif asset_type is not None or asset_id is not None:
-        bound_type, bound_id = _validate_asset_binding(asset_type, asset_id)
-        meta["asset_type"] = bound_type
-        meta["asset_id"] = bound_id
-    if body is not None:
-        current_body = body
 
-    meta["updated_at"] = now_iso()
-    md_path = workspace / _issue_md_rel(issue_id)
-    md_path.write_text(_serialize_issue(meta, current_body), encoding="utf-8")
-    _commit_paths(
-        workspace,
-        [_issue_md_rel(issue_id)],
-        f"issues: update {issue_id}",
-        author_name,
-        author_email,
-    )
+    # Hold the lock across load/modify/write/commit so a concurrent mutation of
+    # the same issue cannot read stale frontmatter and clobber an earlier change
+    # (e.g. a comment racing with a close must not restore status: open).
+    with _git_ops_lock:
+        meta, current_body = _load_issue(workspace, issue_id)
 
-    return _issue_to_dict(
-        meta, current_body.strip(), len(_read_comments(workspace, issue_id))
-    )
+        if title is not None:
+            new_title = title.strip()
+            if not new_title:
+                raise IssueError("title cannot be empty")
+            meta["title"] = new_title
+        if status is not None:
+            meta["status"] = status
+        if labels is not None:
+            meta["labels"] = _normalize_labels(labels)
+        if clear_asset:
+            meta["asset_type"] = None
+            meta["asset_id"] = None
+        elif asset_type is not None or asset_id is not None:
+            bound_type, bound_id = _validate_asset_binding(asset_type, asset_id)
+            meta["asset_type"] = bound_type
+            meta["asset_id"] = bound_id
+        if body is not None:
+            current_body = body
+
+        meta["updated_at"] = now_iso()
+        md_path = workspace / _issue_md_rel(issue_id)
+        md_path.write_text(_serialize_issue(meta, current_body), encoding="utf-8")
+        _commit_paths_locked(
+            workspace,
+            [_issue_md_rel(issue_id)],
+            f"issues: update {issue_id}",
+            author_name,
+            author_email,
+        )
+        comment_count = len(_read_comments(workspace, issue_id))
+
+    return _issue_to_dict(meta, current_body.strip(), comment_count)
 
 
 def close_issue(
@@ -417,7 +429,7 @@ def add_comment(
     author_email: str = "workeros@local",
 ) -> Dict[str, Any]:
     from db import now_iso
-    from services.git_service import _git_workspace
+    from services.git_service import _git_ops_lock, _git_workspace
 
     issue_id = _validate_issue_id(issue_id)
     body = (body or "").strip()
@@ -425,28 +437,32 @@ def add_comment(
         raise IssueError("comment body is required")
 
     workspace = _git_workspace()
-    meta, issue_body = _load_issue(workspace, issue_id)
 
-    comment = {
-        "id": f"cmt_{secrets.token_hex(8)}",
-        "body": body,
-        "created_by": created_by,
-        "created_at": now_iso(),
-    }
-    comments_path = workspace / _issue_comments_rel(issue_id)
-    with comments_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(comment, ensure_ascii=False) + "\n")
+    # Hold the lock across load/append/touch/commit so the issue's updated_at
+    # touch cannot clobber a concurrent update of the same issue's frontmatter.
+    with _git_ops_lock:
+        meta, issue_body = _load_issue(workspace, issue_id)
 
-    # Touch the issue so updated_at reflects the new activity.
-    meta["updated_at"] = comment["created_at"]
-    md_path = workspace / _issue_md_rel(issue_id)
-    md_path.write_text(_serialize_issue(meta, issue_body), encoding="utf-8")
+        comment = {
+            "id": f"cmt_{secrets.token_hex(8)}",
+            "body": body,
+            "created_by": created_by,
+            "created_at": now_iso(),
+        }
+        comments_path = workspace / _issue_comments_rel(issue_id)
+        with comments_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(comment, ensure_ascii=False) + "\n")
 
-    _commit_paths(
-        workspace,
-        [_issue_comments_rel(issue_id), _issue_md_rel(issue_id)],
-        f"issues: comment on {issue_id}",
-        author_name,
-        author_email,
-    )
+        # Touch the issue so updated_at reflects the new activity.
+        meta["updated_at"] = comment["created_at"]
+        md_path = workspace / _issue_md_rel(issue_id)
+        md_path.write_text(_serialize_issue(meta, issue_body), encoding="utf-8")
+
+        _commit_paths_locked(
+            workspace,
+            [_issue_comments_rel(issue_id), _issue_md_rel(issue_id)],
+            f"issues: comment on {issue_id}",
+            author_name,
+            author_email,
+        )
     return comment
