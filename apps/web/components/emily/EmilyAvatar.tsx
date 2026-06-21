@@ -1,33 +1,34 @@
-import { Radar } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { GenerativeAvatar } from "@/components/GenerativeAvatar";
 
 /**
  * EmilyAvatar — the Emily assistant identity mark.
  *
- * Accent circle with a Lucide Radar icon (white stroke).
- * Radar evokes active scanning and discovery, fitting for an assistant that
- * helps inspect workers, runs, and workspace state.
+ * Generative avatar with a fixed seed "Emily" and a pinned blue palette
+ * (product accent #3E6FE0). Squircle shape: Emily is an AI worker, not a
+ * human user.
  *
- * No letter monogram, no sparkle.
+ * No letter monogram, no icon, no emoji.
  */
+
+const EMILY_PALETTE: [string, string, string] = ["#3E6FE0", "#22D3EE", "#6D5DF6"];
+
 export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
   const isSmall = size === "sm";
-  const sz = isSmall ? "size-6" : "size-8";
-  // Icon size: 14px inside 24px circle (sm) / 18px inside 32px circle (md)
-  const iconSize = isSmall ? 14 : 18;
+  const pxSize = isSmall ? 24 : 32;
   return (
     <span
       className={cn(
-        "relative shrink-0 inline-flex items-center justify-center rounded-[var(--radius-squircle)] bg-[var(--emily-mark)]",
-        sz,
+        "relative shrink-0 inline-flex items-center justify-center",
+        isSmall ? "size-6" : "size-8",
       )}
-      aria-label="Emily, chief of staff"
+      aria-label="Emily, Chief of Staff"
     >
-      <Radar
-        size={iconSize}
-        strokeWidth={2}
-        className="text-white"
-        aria-hidden="true"
+      <GenerativeAvatar
+        seed="Emily"
+        shape="squircle"
+        size={pxSize}
+        palette={EMILY_PALETTE}
       />
     </span>
   );

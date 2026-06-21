@@ -176,7 +176,7 @@ export function buildCsp(nonce: string): string {
     "object-src 'none'",
     "form-action 'self'",
     "img-src 'self' data: blob: https:",
-    "media-src 'self' blob:",
+    "media-src 'self' blob: https:",
     "frame-src 'self' blob:",
     "font-src 'self' data: https:",
     "style-src 'self' 'unsafe-inline'",
@@ -187,7 +187,7 @@ export function buildCsp(nonce: string): string {
   ].join("; ");
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Per-request CSP nonce, threaded to Next via the request headers so SSR

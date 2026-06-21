@@ -5,14 +5,12 @@ import Link from "next/link";
 import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { resolveUserLabel } from "@/lib/workspace/display-name";
 import { useConnections, useMembers, useSecrets, useWorkers } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
-import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
 import { RunStatusBadge } from "@/components/RunStatus";
 import { StatusPill } from "@/components/collection/StatusPill";
 import {
@@ -28,33 +26,27 @@ import {
   STATUS_PILL,
   TYPE_LABEL,
   toUnified,
-  collectionCounts,
   humaniseAppName,
 } from "@/lib/connections/unify";
+import { resolveUserLabel } from "@/lib/workspace/display-name";
 
 // ---------------------------------------------------------------------------
 // #1233: Resolve owner_id to display name / email.
 // Works client-side from the workspace members list fetched on load.
 // If backend later populates owner_display_name on ConnectionItem, prefer that.
-// #1728: never render a raw UUID — if no member match, fall back to "My workspace"
-//        instead of exposing the internal ID to the operator.
 // ---------------------------------------------------------------------------
-const OWNER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const OWNER_WS_PREFIX_RE = /^ws_/;
-
-// Exported for unit testing (#1728 UUID-masking guarantee).
 export function resolveOwner(
   ownerId: string | null | undefined,
   members: WorkspaceMember[],
 ): string {
   if (!ownerId) return "Not set";
   const member = members.find((m) => m.user_id === ownerId);
-  // #1728 — never surface a raw/truncated UUID or ws_-prefixed id as the Owner.
-  // resolveUserLabel skips UUID/blank member labels too; otherwise fall back to
-  // the friendly "My workspace" label (and guard a bare UUID / ws_ owner id).
-  if (member) return resolveUserLabel([member.display_name, member.email], "My workspace");
-  if (OWNER_UUID_RE.test(ownerId) || OWNER_WS_PREFIX_RE.test(ownerId)) return "My workspace";
-  return ownerId;
+  // #1728: never surface a raw UUID/ws_ owner id. When the id cannot be
+  // resolved to a real member label, fall back to the friendly workspace label.
+  return resolveUserLabel(
+    [member?.display_name, member?.email],
+    "My workspace",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -821,33 +813,35 @@ export default function ConnectionsCollection({
   };
 
   const config: CollectionConfig<UnifiedConn> = {
-    title: "Connections", /* #1707: unified terminology */
+    title: "Connections",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
-    headerSlot: <ConnectionsChips />,
     items,
     loading,
     error,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
-    // The TYPE dimension (connection / mcp / secret) is the job of the
-    // ConnectionsChips surface-nav (Connected / Browse apps / MCP / Secrets), so
-    // duplicating it as filter chips here was redundant (P0-2, Federico
-    // 2026-06-19). Chips answer "which surface"; the TagBar answers "which status
-    // within it". Only the STATUS chips remain, the one dimension the chips do
-    // not cover. Type stays in searchOf so a search like "mcp" still matches.
+    // IA (Federico 2026-06-19): Connected / MCP / Secrets are TYPE filters on the
+    // one unified list, surfaced through the STANDARD `filters` affordance the
+    // Workers/Runs collections use (the TagBar's collapsible filter button), not a
+    // bespoke top chip-row. "Browse apps" is no longer a section — it is the Add
+    // button (the add-app action), so it is dropped from this filter set. Status
+    // (active / reauth / error) stays as a second family for credential health.
     tagsOf: (i) =>
-      ({ status: [i.statusKey] }) as Partial<Record<TagFamilyKey, string[]>>,
+      ({ type: [i.kind], status: [i.statusKey] }) as Partial<
+        Record<TagFamilyKey, string[]>
+      >,
     tags: {
+      type: [
+        { value: "connection", label: "Connected" },
+        { value: "mcp", label: "MCP" },
+        { value: "secret", label: "Secrets" },
+      ],
       status: [
         { value: "active", label: "active" },
         { value: "reauth", label: "reauth" },
         { value: "error", label: "error" },
       ],
     },
-    // round-09 #6: secrets are NOT connections — count connections + secrets
-    // separately and scope the active/reauth/error health tiles to real
-    // connections, so a "set" secret can never read as an "active connection".
-    counts: collectionCounts(items),
     view: { default: "grid", grid: true },
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
@@ -1019,7 +1013,7 @@ export default function ConnectionsCollection({
                     </span>,
                   ],
                   ["Transport", c.mcp_transport || "—"],
-                  ["Access key", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
+                  ["Auth secret", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
                   ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
                   ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
                   ["Last used", formatLastUsed(c)],
@@ -1169,7 +1163,7 @@ export default function ConnectionsCollection({
     add: {
       label: "Add",
       panel: {
-        title: "Add a connection", /* #1707: unified terminology */
+        title: "Add a connection",
         render: () => (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 460 }}>
             <p style={pad}>Connect an app, register an MCP server, or store a secret.</p>
@@ -1198,7 +1192,7 @@ export default function ConnectionsCollection({
     },
     states: {
       empty: {
-        title: "No connections yet", /* #1707: unified terminology; primary empty state = "yet" */
+        title: "No connections yet",
         help: "Connect an app, add an MCP server, or store a secret your workers can use.",
       },
       errorRetry: () => {

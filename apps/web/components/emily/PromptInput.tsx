@@ -31,6 +31,7 @@ export function PromptInput({
   disabled,
   sendDisabled,
   variant = "default",
+  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -58,6 +59,13 @@ export function PromptInput({
    * landing variant simply drops the separate Uses-row to stay clean.
    */
   variant?: "default" | "landing";
+  /**
+   * #1698: when the composer is the PRIMARY first action (the home/create
+   * empty state reached via "New worker" / `?create=1`), focus it on mount so
+   * clicking "New worker" gives immediate, visible feedback (a caret lands in
+   * the composer) from ANY route — never a dead click with no change.
+   */
+  autoFocus?: boolean;
 }) {
   const isLanding = variant === "landing";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -81,6 +89,16 @@ export function PromptInput({
       textareaRef.current?.focus();
     }
   }, [disabled]);
+
+  // #1698: focus on mount when this composer is the primary first action
+  // (home/create empty state via "New worker" / `?create=1`). Gives the click
+  // immediate, visible feedback (caret lands here) regardless of the route the
+  // user came from. Guarded by `disabled` so it never steals focus mid-stream.
+  useEffect(() => {
+    if (autoFocus && !disabled) {
+      textareaRef.current?.focus();
+    }
+  }, [autoFocus, disabled]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -141,10 +159,16 @@ export function PromptInput({
           marketing landing prompt box; compact padding (py-2) keeps it short. */}
       <div
         className={cn(
+          // a11y #1711: the inner <textarea> is outline-none, so the composer
+          // had no visible focus indicator. Move the focus affordance to the
+          // wrapper: a token-based ring (--ring = --accent-line) appears whenever
+          // the composer is focused, satisfying the visible-focus requirement
+          // without changing the resting flat look.
           "flex items-center gap-2 rounded-xl bg-[var(--bg-app)] px-3 py-2",
+          "focus-within:ring-2 focus-within:ring-[var(--ring)] focus-within:ring-offset-0",
           isLanding
             ? "[border:none]"
-            : "[border:var(--bd-div)] focus-within:[border:var(--bd-div)]"
+            : "[border:var(--bd-div)]"
         )}
       >
         {/* Attach button */}
@@ -170,11 +194,12 @@ export function PromptInput({
           tabIndex={-1}
         />
 
-        {/* #1711: aria-label for AT; focus-visible:ring uses --accent for clear visibility */}
         <textarea
           ref={textareaRef}
-          aria-label="Message Emily"
-          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[120px] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:rounded-md"
+          // a11y #1711: explicit accessible name (the textarea has no visible
+          // <label>; the placeholder is not an accessible name).
+          aria-label="Describe the job for a new worker"
+          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[120px] overflow-auto"
           placeholder={placeholder ?? "Message Emily..."}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -183,10 +208,10 @@ export function PromptInput({
           disabled={disabled}
         />
 
-        {/* #1557/P1-10: labeled "Hire" affordance. #1709: aria-label is the
-            full canonical action "Hire worker" (superset of visible "Hire",
-            acceptable per WCAG SC 2.5.3; matches the canonical create-worker name). */}
         {isLanding ? (
+          // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
+          // landing's prompt CTA, not a bare arrow. Keeps the accessible name
+          // "Send message" so the send action stays discoverable to AT + tests.
           <Button
             size="sm"
             className="h-7 shrink-0 gap-1.5 px-3 text-xs font-medium"

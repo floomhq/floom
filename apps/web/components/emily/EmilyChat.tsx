@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize, Minimize, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -778,6 +778,10 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
                   variant={createMode ? "landing" : "default"}
+                  // #1698: "New worker" / ?create=1 must give visible feedback
+                  // from ANY route. Focus the composer when entering create mode
+                  // so the click lands a caret here instead of a dead no-op.
+                  autoFocus={createMode}
                 />
               </div>
             </div>
@@ -859,14 +863,17 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
 type DockMode = "collapsed" | "rail" | "wide";
 
 // Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px.
+// The dock only mounts on desktop (≥1024, useIsDesktop), so the fixed widths key
+// off `lg` to stay in lockstep with the shell breakpoint (#1544 tablet fix).
 const DOCK_WIDTH: Record<DockMode, string> = {
   collapsed: "w-[46px]",
-  rail: "w-full md:w-[330px]",
-  wide: "w-full md:w-[560px] md:max-w-[52vw]",
+  rail: "w-full lg:w-[330px]",
+  wide: "w-full lg:w-[560px] lg:max-w-[52vw]",
 };
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
+  const router = useRouter();
   const [mode, setMode] = useState<DockMode>("rail");
   // True fullscreen lives in shared context (AppShell hides the page pane and
   // this dock flex-grows to fill the main area — the left sidebar stays put).
@@ -948,19 +955,29 @@ export function EmilyDock({ className }: { className?: string }) {
   // then cleared — re-renders must not keep re-seeding it.
   const [primeText, setPrimeText] = useState<string | undefined>(undefined);
   useEffect(() => {
-    if (createParam && isHomeRoute) {
-      setCreateLatched(true);
-      if (primeParam) setPrimeText(primeParam);
-      // Drop the params from the URL so create-prime is deep-linkable but not
-      // sticky across refresh/back (history.replace, no Next reload).
-      if (typeof window !== "undefined") {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("create");
-        url.searchParams.delete("prime");
-        window.history.replaceState(window.history.state, "", url.pathname + url.search);
-      }
+    if (!createParam) return;
+    // #1698: the create deep-link (`?create=1`) must open the create flow
+    // CONSISTENTLY regardless of the route it lands on. On a NON-home route it
+    // would otherwise just sit in the URL doing nothing (a broken first action),
+    // while the page's Collection keeps owning the surface. Forward it to the
+    // home create surface so create always opens the same way — and the param
+    // never lingers on a Collection route to be mistaken for view state.
+    if (!isHomeRoute) {
+      const prime = primeParam ? `&prime=${encodeURIComponent(primeParam)}` : "";
+      router.replace(`/?create=1${prime}`);
+      return;
     }
-  }, [createParam, isHomeRoute, primeParam]);
+    setCreateLatched(true);
+    if (primeParam) setPrimeText(primeParam);
+    // Drop the params from the URL so create-prime is deep-linkable but not
+    // sticky across refresh/back (history.replace, no Next reload).
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("create");
+      url.searchParams.delete("prime");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    }
+  }, [createParam, isHomeRoute, primeParam, router]);
   // Reset the create latch when the user navigates away from the home route so
   // the next visit shows the home greeting (not a stale create hero).
   useEffect(() => {
@@ -1092,10 +1109,10 @@ export function EmilyDock({ className }: { className?: string }) {
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={toggleFull}
-              title={isFull ? `Exit full screen` : `Full screen ${assistantName}`}
-              aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
+              title={isFull ? "Exit full screen" : "Full screen"}
+              aria-label={isFull ? "Exit full screen" : "Full screen"}
             >
-              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {isFull ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           ) : (
             <Button
@@ -1103,10 +1120,10 @@ export function EmilyDock({ className }: { className?: string }) {
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={isFull ? collapseHome : maximizeHome}
-              title={isFull ? `Minimize ${assistantName}` : `Full screen ${assistantName}`}
-              aria-label={isFull ? `Minimize ${assistantName}` : `Expand ${assistantName}`}
+              title={isFull ? "Exit full screen" : "Full screen"}
+              aria-label={isFull ? "Exit full screen" : "Full screen"}
             >
-              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {isFull ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           )}
           {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,

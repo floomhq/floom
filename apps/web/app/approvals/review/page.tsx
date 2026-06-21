@@ -700,14 +700,26 @@ function ReviewContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Noindex public approval pages so share links don't appear in search results.
+  // Noindex public approval pages so share links don't appear in search results,
+  // and force a no-referrer policy document-wide so the tokenised review URL is
+  // never leaked via the Referer header to the worker-controlled media host.
+  // `referrerPolicy` is not a valid attribute on <video>, so the inline preview
+  // video request would otherwise carry the full ?id=...&token=... URL as Referer.
+  // The page-level <meta name="referrer"> covers <video> (and every subresource).
   useEffect(() => {
     if (!isSignedLink) return;
-    const meta = document.createElement("meta");
-    meta.name = "robots";
-    meta.content = "noindex,nofollow";
-    document.head.appendChild(meta);
-    return () => { document.head.removeChild(meta); };
+    const robots = document.createElement("meta");
+    robots.name = "robots";
+    robots.content = "noindex,nofollow";
+    document.head.appendChild(robots);
+    const referrer = document.createElement("meta");
+    referrer.name = "referrer";
+    referrer.content = "no-referrer";
+    document.head.appendChild(referrer);
+    return () => {
+      document.head.removeChild(robots);
+      document.head.removeChild(referrer);
+    };
   }, [isSignedLink]);
 
   const load = useCallback(async () => {
@@ -842,7 +854,7 @@ function ReviewContent() {
   }, [annotationsPayload, chatComment, approval, isDestructiveDelete, isAgentTool, isSignedLink, load, removeCurrent, token]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--bg)]">
+    <div className="flex h-screen flex-col bg-[var(--bg)]">
       {/* Topbar: brand + who-asked + shared-link marker (consistent header) */}
       <div className="flex items-center justify-between [border-bottom:var(--bd-div)] px-6 py-3.5">
         <div className="flex items-center gap-2.5">
@@ -864,7 +876,7 @@ function ReviewContent() {
         )}
       </div>
 
-      <div className="flex-1 px-6 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-8">
         {loading ? (
           <div className="mx-auto max-w-[820px] space-y-3">
             <div className="h-5 w-1/2 animate-pulse rounded bg-[var(--bg-2)]" />

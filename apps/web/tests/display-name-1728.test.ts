@@ -23,7 +23,7 @@ describe("#1728 user-label resolution never leaks a UUID", () => {
   });
 
   it("resolveUserLabel returns the fallback when only a UUID/empties are available", () => {
-    expect(resolveUserLabel([UUID])).toBe("Local user");
+    expect(resolveUserLabel([UUID])).toBe("You");
     expect(resolveUserLabel([null, "", UUID], "Workspace owner")).toBe("Workspace owner");
   });
 

@@ -30,14 +30,15 @@ function renderComposer(variant: "default" | "landing" = "default") {
 describe("PromptInput a11y (#1711)", () => {
   it("textarea has an accessible label", () => {
     renderComposer();
-    expect(screen.getByRole("textbox", { name: "Message Emily" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: /describe the job/i })).toBeTruthy();
   });
 
-  it("textarea renders a visible focus ring (focus-visible:ring)", () => {
+  it("composer wrapper renders a visible focus ring (focus-within:ring)", () => {
     renderComposer();
-    const textarea = screen.getByRole("textbox", { name: "Message Emily" });
-    expect(textarea.className).toMatch(/focus-visible:ring-2/);
-    expect(textarea.className).toMatch(/focus-visible:ring-\[var\(--accent\)\]/);
+    const textarea = screen.getByRole("textbox", { name: /describe the job/i });
+    const wrapper = textarea.parentElement as HTMLElement;
+    expect(wrapper.className).toMatch(/focus-within:ring-2/);
+    expect(wrapper.className).toMatch(/focus-within:ring-\[var\(--ring\)\]/);
   });
 });
 

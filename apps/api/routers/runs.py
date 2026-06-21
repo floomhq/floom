@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field
 import auth
 from auth import AuthContext, get_auth_context, get_optional_auth_context
 from core import hot_cache
+from core.approval_signing import try_approval_review_url
 from core.utils import _parse_iso8601, row_to_dict
 from db import DB_PATH, Repositories, get_repos
 from models import (
@@ -871,6 +872,20 @@ def get_run(
     try:
         _appr_row = repos.approvals.get_by_run_id(run_id=run_id)
         if _appr_row:
+            # #1732: surface the same tokenised review/approve link the chat tool
+            # and approvals list emit, so the CLI can print "Review/approve at".
+            # Only meaningful while pending; None when no signer is configured.
+            _appr_link = (
+                try_approval_review_url(
+                    {
+                        "id": _appr_row.get("id"),
+                        "run_id": _appr_row.get("run_id") or run_id,
+                        "owner_id": _appr_row.get("owner_id"),
+                    }
+                )
+                if str(_appr_row.get("status", "")) == "pending"
+                else None
+            )
             _approval_trail = ApprovalEntry(
                 id=str(_appr_row.get("id", "")),
                 status=str(_appr_row.get("status", "pending")),
@@ -880,6 +895,7 @@ def get_run(
                 decided_at=_appr_row.get("decided_at"),
                 reason=_appr_row.get("reason"),
                 follow_up_run_id=_appr_row.get("follow_up_run_id"),
+                link=_appr_link,
             )
     except Exception:
         pass

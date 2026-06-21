@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("IntegrationsShell", () => {
-  it("keeps the collection-style page header and section nav above page content", () => {
+  it("keeps the collection-style page header and a back link to Connections above page content", () => {
     render(
       <IntegrationsShell
         title="MCP"
@@ -23,17 +23,23 @@ describe("IntegrationsShell", () => {
     );
 
     const heading = screen.getByRole("heading", { level: 1, name: "MCP" });
-    const nav = screen.getByRole("navigation", { name: "Connections sections" }); /* #1707: unified terminology */
+    // The old bespoke chip section-nav is gone — these standalone add/manage
+    // pages link BACK to the unified Connections list (Connected / MCP / Secrets
+    // are now type filters on that one surface).
+    const back = screen.getByRole("link", { name: /connections/i });
     const subheading = screen.getByRole("heading", { level: 2, name: "MCP servers your workers can use" });
 
-    expect(heading.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(nav.compareDocumentPosition(subheading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(back).toHaveAttribute("href", "/connections");
+    expect(back.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(heading.compareDocumentPosition(subheading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("Use Floom as an MCP server in your AI client.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "MCP" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Add secret" })).toBeInTheDocument();
+
+    // The removed chip section-nav must not reappear.
+    expect(screen.queryByRole("navigation", { name: /integrations sections/i })).toBeNull();
   });
 
-  it("is used by standalone Integrations section pages", () => {
+  it("is used by standalone Connections section pages, with no chip section-nav", () => {
     const appRoot = path.resolve(__dirname, "..", "app");
 
     for (const relativePath of ["connections/mcp/page.tsx", "connections/secrets/page.tsx"]) {

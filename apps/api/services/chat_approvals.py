@@ -4,8 +4,9 @@ Extracted verbatim from chat_service.py: the workspace-agent approval tools and
 the shared decision path (run approvals, destructive-action approvals, agent-tool
 approvals). chat_service re-imports these names for backward compatibility. The
 approval-backend functions, request models, DB and FastAPI deps are lazy-imported
-inside the functions (avoiding an import cycle); _APPROVALS_BASE_URL is lazy-
-imported from chat_service (it is shared with the system-prompt builder there).
+inside the functions (avoiding an import cycle); the operator-facing review link
+is built via the shared core.approval_signing.try_approval_review_url helper so
+the chat tool, run-detail serializer, and CLI all emit the same link.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from core.approval_signing import approval_public_token, try_approval_public_token
+from core.approval_signing import approval_public_token, try_approval_review_url
 
 logger = logging.getLogger("floom.chat")
 
@@ -29,7 +30,6 @@ def _approval_public_token(row: Any) -> str:
 
 def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """Return pending approvals with direct links the operator can open."""
-    from chat_service import _APPROVALS_BASE_URL
     from db import get_db as _get_db
     try:
         with _get_db() as conn:
@@ -51,14 +51,12 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
             # Emily surfaces a working link instead of inventing a fake URL.
             # DEGRADE, never raise: when no signer secret is configured (e.g.
             # hosted mode), omit the link rather than 503 the whole pending-list
-            # tool — the operator still sees their pending approvals.
-            review_url = None
-            if approval_id and row["run_id"] and row["owner_id"]:
-                token = try_approval_public_token(
-                    {"id": approval_id, "run_id": row["run_id"], "owner_id": row["owner_id"]}
-                )
-                if token:
-                    review_url = f"{_APPROVALS_BASE_URL}/approvals/review?id={approval_id}&token={token}"
+            # tool — the operator still sees their pending approvals. Shared with
+            # the run-detail serializer + CLI via core.approval_signing so every
+            # surface emits the same link.
+            review_url = try_approval_review_url(
+                {"id": approval_id, "run_id": row["run_id"], "owner_id": row["owner_id"]}
+            )
             result.append({
                 "id": approval_id,
                 "owner_id": row["owner_id"],

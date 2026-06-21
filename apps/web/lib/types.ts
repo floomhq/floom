@@ -413,6 +413,25 @@ export interface WorkerFeedback {
   created_at: string;
 }
 
+// A registered per-worker alert (email and/or outbound webhook) fired on run
+// terminal events. Maps to GET/POST/DELETE /workers/{id}/alerts.
+export interface WorkerAlert {
+  id: string;
+  worker_id: string;
+  url?: string | null;
+  email_to?: string[] | null;
+  on: string[]; // events: "failed" | "completed"
+  description?: string | null;
+  created_at: string;
+}
+
+export interface WorkerAlertCreate {
+  url?: string;
+  email_to?: string[];
+  on: string[];
+  description?: string;
+}
+
 // Read-only allow-list projection of a worker returned by
 // GET /workers/public/{id}?token=. Strictly a subset of WorkerDetail: no
 // secrets, source files, run history, owner id, or webhook url.

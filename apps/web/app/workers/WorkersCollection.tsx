@@ -17,6 +17,7 @@ import type {
   RunSummary,
   TriggerSpec,
   WorkerInput,
+  WorkerAlert,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import {
@@ -40,10 +41,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { ActionMenu } from "@/components/ui/action-menu";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, Brain, ChevronDown, Lock, MoreHorizontal, Plus } from "lucide-react";
+import {
+  ArrowRight,
+  Brain,
+  ChevronDown,
+  Lock,
+  Mail,
+  MoreHorizontal,
+  Plus,
+  Trash2,
+  Webhook,
+  X,
+} from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
@@ -67,7 +80,6 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -430,10 +442,52 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 }
 
 
+// #1679: the embedded per-worker Runs tab must source its rows from the SAME
+// query the global /runs surface uses — api.runs.list({ worker_id }) — NOT from
+// the worker-detail `recent_runs` field. The detail field is built backend-side
+// by runs.list_for_worker (scoped only by `w.owner_id`), whereas /runs is scoped
+// by `(actor_user_id OR owner_id)`; for a worker whose runs were triggered by a
+// non-owner actor the narrow query returns empty, so the tab showed "No runs yet"
+// while /runs showed the full history for the same worker. Using the proven
+// worker-scoped list query here makes the two surfaces agree.
+//
+// Module-level cache keyed by worker id so the (synchronously-rendered) tab badge
+// and this tab body read the SAME data — that shared source is what stops the
+// "Runs N" badge flipping 0↔1 across tab clicks.
+const workerRunsCache = new Map<string, RunSummary[]>();
+const WORKER_RUNS_LIMIT = 20;
+
+function useWorkerRuns(workerId: string): RunSummary[] | undefined {
+  const [runs, setRuns] = useState<RunSummary[] | undefined>(() =>
+    workerRunsCache.get(workerId),
+  );
+  useEffect(() => {
+    let alive = true;
+    // Serve the cache immediately, then refresh in the background so a return to
+    // the tab is instant and never blanks (mirrors the worker-detail cache).
+    const cached = workerRunsCache.get(workerId);
+    if (cached) setRuns(cached);
+    api.runs
+      .list({ worker_id: workerId, limit: WORKER_RUNS_LIMIT })
+      .then((rows) => {
+        workerRunsCache.set(workerId, rows);
+        if (alive) setRuns(rows);
+      })
+      // #1446: per-worker tab; log only (no toast per expanded worker).
+      .catch((err) => logError("Could not load runs for this worker.", err));
+    return () => {
+      alive = false;
+    };
+  }, [workerId]);
+  return runs;
+}
+
 // Runs: recent runs w/ durations, link to the full Runs surface.
 function RunsTab({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
-  const runs = d?.recent_runs ?? (w.last_run ? [w.last_run] : []);
+  const fetched = useWorkerRuns(w.id);
+  // Until the worker-scoped fetch resolves, fall back to the summary's last_run
+  // so the tab is never momentarily empty for a worker that has run.
+  const runs = fetched ?? (w.last_run ? [w.last_run] : []);
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 9 }}>
@@ -1172,61 +1226,375 @@ function OpsInputsPanel({ w }: { w: WorkerSummary }) {
   );
 }
 
-// Operations > Alerts & webhooks: split EMAIL-ON-EVENT from WEBHOOK-POST, honest
-// about the backend. Per-worker alert rows (email + webhook channels) are wired;
-// the workspace failure-email RECIPIENT is a confirmed silent no-op (no UI field
-// to set failure_email_to) — surfaced as a neutral callout, not implied working.
+// Operations > Alerts & webhooks: CONFIGURABLE per-worker alert rows (#1677).
+// Each row fires on selected run terminal events (failed / completed) and
+// delivers to an email recipient list and/or an outbound webhook URL. Wired to
+// the real CRUD: GET/POST/DELETE /workers/{id}/alerts. Webhook POSTs are signed
+// (X-Workeros-Signature) and SSRF-pinned server-side; email goes via Resend.
+const ALERT_EVENTS = ["failed", "completed"] as const;
+type AlertEvent = (typeof ALERT_EVENTS)[number];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
-  if (d === undefined) return <Loading />;
-  if (d === null) return <DetailError />;
+  const [alerts, setAlerts] = useState<WorkerAlert[] | undefined | null>(undefined);
+
+  const reload = useCallback(async () => {
+    try {
+      setAlerts(await api.workers.alerts.list(w.id));
+    } catch (err) {
+      logError("Could not load alerts.", err);
+      setAlerts(null);
+    }
+  }, [w.id]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h4 style={h4}>Alerts (email on event)</h4>
-        <ConfigInfoGrid
-          rows={[
-            ["Events", "failed, completed"],
-            ["Recipients", "Workspace members (validated at save)"],
-            ["Channel", "Email via Resend"],
-          ]}
-        />
-        <p style={{ ...muted, fontSize: 12.5, marginTop: 8 }}>
-          Email a workspace member when this worker&apos;s run fails or completes.
-        </p>
+        <h4 style={h4}>Configured alerts</h4>
+        {alerts === undefined ? (
+          <Loading />
+        ) : alerts === null ? (
+          <DetailError />
+        ) : alerts.length === 0 ? (
+          <div
+            className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
+            style={{ ...muted, fontSize: 12.5 }}
+          >
+            No alerts yet. Add one below to be notified when this worker&apos;s runs
+            fail or complete.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {alerts.map((a) => (
+              <AlertRow
+                key={a.id}
+                alert={a}
+                onDeleted={() => void reload()}
+                workerId={w.id}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
-      <section>
-        <h4 style={h4}>Webhooks (POST on event)</h4>
-        <ConfigInfoGrid
-          rows={[
-            ["Events", "failed, completed"],
-            ["Signing", "X-Workeros-Signature (HMAC)"],
-            ["Egress", "Internal/metadata targets blocked (SSRF-pinned)"],
-            ["Current", d.webhook_url ? <span key="u" className="font-mono text-xs">{d.webhook_url}</span> : "Not set"],
-          ]}
-        />
-        <p style={{ ...muted, fontSize: 12.5, marginTop: 8 }}>
-          POST the run outcome to an external URL on the same events, signed and
-          redirect-blocked.
-        </p>
-      </section>
+      <AddAlertForm workerId={w.id} onCreated={() => void reload()} />
 
-      {/* Honest callout for the confirmed workspace failure-email no-op (N3). */}
-      <div
-        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
-        style={{ fontSize: 12.5, color: "var(--ink-soft)" }}
+      <p style={{ ...muted, fontSize: 12.5 }}>
+        Webhook POSTs are signed with an <code>X-Workeros-Signature</code> HMAC header
+        and blocked from internal / metadata targets. Email delivery goes to workspace
+        members via Resend.
+      </p>
+    </div>
+  );
+}
+
+// One configured alert: its channels + events, with a delete control.
+function AlertRow({
+  alert,
+  workerId,
+  onDeleted,
+}: {
+  alert: WorkerAlert;
+  workerId: string;
+  onDeleted: () => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await api.workers.alerts.remove(workerId, alert.id);
+      toast.success("Alert removed.");
+      onDeleted();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove alert");
+      setDeleting(false);
+    }
+  };
+  return (
+    <div
+      className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
+      style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {alert.on.map((ev) => (
+            <span key={ev} className="c-vpill" style={{ padding: "3px 8px", fontSize: 11.5 }}>
+              on {ev}
+            </span>
+          ))}
+        </div>
+        {alert.email_to && alert.email_to.length > 0 && (
+          <div className="flex items-center gap-2" style={{ fontSize: 12.5 }}>
+            <Mail className="size-3.5 shrink-0" style={{ color: "var(--muted-foreground)" }} aria-hidden="true" />
+            <span className="min-w-0 break-words">{alert.email_to.join(", ")}</span>
+          </div>
+        )}
+        {alert.url && (
+          <div className="flex items-center gap-2" style={{ fontSize: 12.5 }}>
+            <Webhook className="size-3.5 shrink-0" style={{ color: "var(--muted-foreground)" }} aria-hidden="true" />
+            <span className="min-w-0 break-words font-mono text-xs">{alert.url}</span>
+          </div>
+        )}
+        {alert.description && (
+          <span style={{ ...muted, fontSize: 12 }}>{alert.description}</span>
+        )}
+      </div>
+      <button
+        type="button"
+        aria-label="Remove alert"
+        className="c-vpill shrink-0"
+        style={{ padding: "5px 8px", cursor: "pointer" }}
+        onClick={() => void remove()}
+        disabled={deleting}
+        title="Remove alert"
       >
-        <strong style={{ color: "var(--ink)" }}>Heads up:</strong> the workspace-level
-        &quot;email me on run failures&quot; toggle sends to nobody unless a recipient is
-        configured server-side (no UI field exists for it yet). Per-worker alert and
-        webhook channels above are wired and do deliver.
-        <div style={{ marginTop: 6, color: "var(--muted-foreground)" }}>
-          One alert row carries one event set plus an email and/or a webhook channel; the
-          two channels are split here for clarity.
+        <Trash2 className="size-3.5" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+// The add-alert form: event toggles + recipient email(s) + webhook URL. At least
+// one channel (email or URL) and one event are required. Validates email + URL
+// format client-side; the backend re-validates (membership, SSRF) on save.
+function AddAlertForm({
+  workerId,
+  onCreated,
+}: {
+  workerId: string;
+  onCreated: () => void;
+}) {
+  const [events, setEvents] = useState<Set<AlertEvent>>(new Set(["failed"]));
+  const [emails, setEmails] = useState<string[]>([]);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [url, setUrl] = useState("");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setEvents(new Set(["failed"]));
+    setEmails([]);
+    setEmailDraft("");
+    setUrl("");
+    setDescription("");
+  };
+
+  const toggleEvent = (ev: AlertEvent) => {
+    setEvents((prev) => {
+      const next = new Set(prev);
+      if (next.has(ev)) next.delete(ev);
+      else next.add(ev);
+      return next;
+    });
+  };
+
+  const addEmail = () => {
+    const value = emailDraft.trim();
+    if (!value) return;
+    if (!EMAIL_RE.test(value)) {
+      toast.error(`Not a valid email address: ${value}`);
+      return;
+    }
+    if (emails.includes(value)) {
+      setEmailDraft("");
+      return;
+    }
+    setEmails((prev) => [...prev, value]);
+    setEmailDraft("");
+  };
+
+  const removeEmail = (addr: string) => setEmails((prev) => prev.filter((e) => e !== addr));
+
+  const trimmedUrl = url.trim();
+  const urlValid = (() => {
+    if (!trimmedUrl) return true; // optional
+    try {
+      const u = new URL(trimmedUrl);
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  })();
+
+  const hasChannel = emails.length > 0 || trimmedUrl.length > 0;
+  const canSave = hasChannel && events.size > 0 && urlValid && !saving;
+
+  const save = async () => {
+    if (events.size === 0) {
+      toast.error("Select at least one event.");
+      return;
+    }
+    if (!hasChannel) {
+      toast.error("Add a recipient email or a webhook URL.");
+      return;
+    }
+    if (!urlValid) {
+      toast.error("Webhook URL must be a valid http(s) URL.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.workers.alerts.create(workerId, {
+        on: ALERT_EVENTS.filter((e) => events.has(e)),
+        ...(emails.length > 0 ? { email_to: emails } : {}),
+        ...(trimmedUrl ? { url: trimmedUrl } : {}),
+        ...(description.trim() ? { description: description.trim() } : {}),
+      });
+      toast.success("Alert saved.");
+      reset();
+      onCreated();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save alert");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section>
+      <h4 style={h4}>Add alert</h4>
+      <div
+        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-4"
+        style={{ display: "flex", flexDirection: "column", gap: 16 }}
+      >
+        {/* Events */}
+        <div className="flex flex-col gap-2">
+          <Label style={{ fontSize: 12.5 }}>Fire on</Label>
+          <div className="flex flex-wrap gap-2">
+            {ALERT_EVENTS.map((ev) => {
+              const on = events.has(ev);
+              return (
+                <button
+                  key={ev}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={on}
+                  className="c-vpill"
+                  style={{
+                    padding: "5px 11px",
+                    cursor: "pointer",
+                    ...(on
+                      ? { background: "var(--bg-3)", color: "var(--ink)", fontWeight: 500 }
+                      : {}),
+                  }}
+                  onClick={() => toggleEvent(ev)}
+                >
+                  Run {ev}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Recipient emails (multi) */}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`alert-email-${workerId}`} style={{ fontSize: 12.5 }}>
+            Recipient email(s)
+          </Label>
+          {emails.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {emails.map((addr) => (
+                <span
+                  key={addr}
+                  className="c-vpill"
+                  style={{ padding: "3px 6px 3px 9px", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }}
+                >
+                  {addr}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${addr}`}
+                    onClick={() => removeEmail(addr)}
+                    style={{ display: "inline-flex", cursor: "pointer", color: "var(--muted-foreground)" }}
+                  >
+                    <X className="size-3" aria-hidden="true" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Input
+              id={`alert-email-${workerId}`}
+              type="email"
+              placeholder="you@example.com"
+              value={emailDraft}
+              onChange={(e) => setEmailDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === ",") {
+                  e.preventDefault();
+                  addEmail();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="c-vpill shrink-0"
+              style={{ ...pillBtn, cursor: "pointer" }}
+              onClick={addEmail}
+            >
+              <Plus className="size-3.5" aria-hidden="true" /> Add
+            </button>
+          </div>
+          <span style={{ ...muted, fontSize: 11.5 }}>
+            Must be a workspace member. Press Enter to add each address.
+          </span>
+        </div>
+
+        {/* Webhook URL */}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`alert-url-${workerId}`} style={{ fontSize: 12.5 }}>
+            Webhook URL
+          </Label>
+          <Input
+            id={`alert-url-${workerId}`}
+            type="url"
+            placeholder="https://hooks.example.com/workeros"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            aria-invalid={!urlValid}
+          />
+          {!urlValid && (
+            <span style={{ fontSize: 11.5, color: "#C98A1A" }}>
+              Enter a valid http(s) URL.
+            </span>
+          )}
+        </div>
+
+        {/* Description (optional) */}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`alert-desc-${workerId}`} style={{ fontSize: 12.5 }}>
+            Description <span style={muted}>(optional)</span>
+          </Label>
+          <Input
+            id={`alert-desc-${workerId}`}
+            placeholder="e.g. Page on-call on failure"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className="c-addbtn"
+            style={{ ...pillBtn, cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.55 }}
+            onClick={() => void save()}
+            disabled={!canSave}
+          >
+            {saving ? "Saving…" : "Save alert"}
+          </button>
+          {!hasChannel && (
+            <span style={{ ...muted, fontSize: 11.5 }}>
+              Add a recipient email or a webhook URL.
+            </span>
+          )}
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1394,18 +1762,24 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
 function CustomizeTabsMenu({
   workerId,
   pinned,
+  activeTab,
   onToggle,
   onSelectTab,
 }: {
   workerId: string;
   pinned: Set<WorkerDetailTab>;
+  /** The currently active detail-tab key (drives the single, mutually-exclusive checkmark). */
+  activeTab?: string;
   onToggle: (key: WorkerDetailTab) => void;
   onSelectTab: (workerId: string, key: WorkerDetailTab) => void;
 }) {
   // R9: the advanced group is a clearly-visible affordance ON the primary tab
-  // row (an "Advanced ▾" button) — not a header-overflow control. Selecting an
-  // item pins that tab onto the row AND opens it. The chevron + label read as a
-  // tab group, so Source/Versions/Brain/Tools are obviously reachable.
+  // row (an "Advanced ▾" button) — not a header-overflow control. The menu is a
+  // VIEW SWITCHER: the checkmark marks the currently ACTIVE advanced view, so it
+  // is mutually exclusive (at most one, #1680 — previously it showed the pinned
+  // SET, lighting up Source AND Versions at once). Picking an item opens it (and
+  // pins it onto the row if it was not already pinned); re-picking the active
+  // tab unpins it (the only unpin affordance), falling back to the base tabs.
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -1422,22 +1796,33 @@ function CustomizeTabsMenu({
             label + items in DropdownMenuGroup. */}
         <DropdownMenuGroup>
           <DropdownMenuLabel>Advanced tabs</DropdownMenuLabel>
-          {ADVANCED_DETAIL_TABS.map((key) => (
-            <DropdownMenuCheckboxItem
-              key={key}
-              checked={pinned.has(key)}
-              // base-ui fires onClick before state churn; closeOnClick stays open so
-              // the user can pin several tabs without reopening the menu.
-              closeOnClick={false}
-              onCheckedChange={(checked) => {
-                onToggle(key);
-                // Pinning selects the tab so the user lands on what they just added.
-                if (checked) onSelectTab(workerId, key);
-              }}
-            >
-              {key}
-            </DropdownMenuCheckboxItem>
-          ))}
+          {ADVANCED_DETAIL_TABS.map((key) => {
+            const isActive = activeTab === key;
+            return (
+              <DropdownMenuCheckboxItem
+                key={key}
+                // Checkmark = ACTIVE view, not the pinned set → exactly one (or
+                // none) is ever checked.
+                checked={isActive}
+                // base-ui fires onClick before state churn; closeOnClick stays open so
+                // the user can pin several tabs without reopening the menu.
+                closeOnClick={false}
+                onCheckedChange={() => {
+                  if (isActive) {
+                    // Re-picking the active advanced tab removes its pin (the
+                    // only unpin path); the view falls back to the first tab.
+                    if (pinned.has(key)) onToggle(key);
+                    return;
+                  }
+                  // Open the view; pin it onto the row first if it is not there yet.
+                  if (!pinned.has(key)) onToggle(key);
+                  onSelectTab(workerId, key);
+                }}
+              >
+                {key}
+              </DropdownMenuCheckboxItem>
+            );
+          })}
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -1496,10 +1881,9 @@ function WorkerDetailActions({
   return (
     <>
       {(canManage || can("run", w)) && (
-        <button
-          type="button"
-          className="c-addbtn"
-          style={pillBtn}
+        <Button
+          variant="outline"
+          size="sm"
           // R9: kill the jarring popup + hard-nav. The Run button routes to the
           // calm inline /run/{worker} page (schema-driven inputs + live
           // output-first run panel), the same standalone runnable surface — no
@@ -1508,20 +1892,19 @@ function WorkerDetailActions({
           title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
-        </button>
+        </Button>
       )}
       {(canManage || can("edit", w)) && (
-        <DropdownMenu>
-          <DropdownMenuTrigger className="c-vpill" style={pillBtn} aria-label="More worker actions">
-            <MoreHorizontal className="size-3.5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44 p-1">
-            <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
-            {/* Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
-                (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
-                the schedule, which a raw worker.yml `enabled:` PUT does not do. */}
-            <DropdownMenuItem
-              onClick={() => {
+        <ActionMenu
+          label="More worker actions"
+          items={[
+            { label: "Edit", onSelect: () => setEditOpen(true) },
+            // Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
+            // (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
+            // the schedule, which a raw worker.yml `enabled:` PUT does not do.
+            {
+              label: w.enabled === false ? "Resume" : "Pause",
+              onSelect: () => {
                 const pausing = w.enabled !== false;
                 const action = pausing ? api.workers.pause : api.workers.resume;
                 action(w.id)
@@ -1531,15 +1914,14 @@ function WorkerDetailActions({
                     toast.success(pausing ? "Worker paused" : "Worker resumed");
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not update worker"));
-              }}
-            >
-              {w.enabled === false ? "Resume" : "Pause"}
-            </DropdownMenuItem>
-            {/* Share — opens the real Share modal (company access + grants +
-                anonymous public link with revoke), not a bare copy-link. */}
-            <DropdownMenuItem onClick={() => setShareOpen(true)}>Share</DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
+              },
+            },
+            // Share — opens the real Share modal (company access + grants +
+            // anonymous public link with revoke), not a bare copy-link.
+            { label: "Share", onSelect: () => setShareOpen(true) },
+            {
+              label: workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live",
+              onSelect: () => {
                 const next = workerStageKey(w) === "live" ? "draft" : "live";
                 api.workers.setStage(w.id, next)
                   .then((updated) => {
@@ -1547,12 +1929,11 @@ function WorkerDetailActions({
                     onUpdated({ ...w, stage: updated.stage });
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not update stage"));
-              }}
-            >
-              {workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
+              },
+            },
+            {
+              label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+              onSelect: () => {
                 const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
                 const action = isArchived ? api.workers.restore : api.workers.archive;
                 action(w.id)
@@ -1561,26 +1942,29 @@ function WorkerDetailActions({
                     onUpdated({ ...w });
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not update worker"));
-              }}
-            >
-              {(w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => {
-                if (!window.confirm(`Delete "${w.name}"? This cannot be undone.`)) return;
+              },
+            },
+            {
+              label: "Delete",
+              destructive: true,
+              // Replaces window.confirm with the shared ConfirmDialog.
+              confirm: {
+                title: `Delete "${w.name}"?`,
+                body: "This cannot be undone.",
+                confirmLabel: "Delete",
+                destructive: true,
+              },
+              onSelect: () => {
                 api.workers.delete(w.id)
                   .then(() => {
                     toast.success("Worker deleted");
                     onUpdated({ ...w, _deleted: true } as WorkerSummary & { _deleted?: boolean });
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not delete worker"));
-              }}
-            >
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              },
+            },
+          ]}
+        />
       )}
 
       {/* R9: the Run popup is gone — the Run button now routes to the calm
@@ -1678,12 +2062,16 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
     <form
       onSubmit={handleSubmit}
       className="mt-4 flex w-full items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
-      style={{ maxWidth: 480 }} /* #1726: w-full + raised cap (380→480) so the "Describe the job you want done…" placeholder is not clipped */
+      style={{ maxWidth: 440 }}
     >
       <input
         ref={inputRef}
         type="text"
-        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        // text-ellipsis so a long *placeholder* (or value) degrades to an
+        // ellipsis on a too-narrow input instead of hard-clipping mid-word
+        // ("…want dor"). The wider max-width above lets the intended
+        // placeholder render in full at the normal empty-state width.
+        className="min-w-0 flex-1 truncate bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         placeholder="Describe the job you want done…"
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -1693,7 +2081,7 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
         type="submit"
         disabled={!value.trim()}
         className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
-        aria-label="Hire worker" /* #1706: canonical create-worker label */
+        aria-label="Create worker"
       >
         <ArrowRight className="size-3.5" />
       </button>
@@ -1836,12 +2224,6 @@ export default function WorkersCollection({
     resolveMissing: async (id) => {
       try {
         const d = await api.workers.get(id);
-        // #1701: guard against a non-throwing phantom (null/empty body) so a
-        // dead link fires the not-found toast instead of silently opening an
-        // empty detail panel. NOTE: we deliberately do NOT require d.id === id —
-        // a worker id alias resolves to a different canonical id (#1558), which
-        // is a legitimate hit, not a miss.
-        if (!d || !d.id) return null;
         detailCache.set(d.id, d); // warm the detail-pane cache too
         return detailToSummary(d);
       } catch {
@@ -1940,7 +2322,7 @@ export default function WorkersCollection({
         quickActions: [],
       };
     },
-    detail: (w) => {
+    detail: (w, activeTab) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
         <>
@@ -1999,9 +2381,13 @@ export default function WorkersCollection({
             return {
               key,
               label: key,
-              // #1251: badge matches the count listed in the Runs tab.
+              // #1251 / #1679: badge matches the count listed in the Runs tab.
+              // Both read the SAME worker-scoped runs cache (api.runs.list) so the
+              // badge can no longer disagree with the tab body or flip 0↔1: until
+              // that fetch resolves the badge stays on the summary's last_run
+              // fallback, then settles to the real worker-scoped count.
               count: key === "Runs"
-                ? (detailCache.get(w.id)?.recent_runs?.length
+                ? (workerRunsCache.get(w.id)?.length
                     ?? (w.last_run ? 1 : undefined))
                 : undefined,
               render: () => <Tab w={w} />,
@@ -2015,6 +2401,7 @@ export default function WorkersCollection({
           <CustomizeTabsMenu
             workerId={w.id}
             pinned={pinnedTabs}
+            activeTab={activeTab}
             onToggle={togglePinnedTab}
             onSelectTab={selectWorkerTab}
           />
@@ -2022,7 +2409,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "Hire worker", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed; #1706: canonical "Hire worker"
+    add: { label: "New worker", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed. Label matches the sidebar primary CTA (one action, one label).
     states: {
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {
