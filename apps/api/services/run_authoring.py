@@ -480,6 +480,14 @@ def _register_authored_worker(
     if isinstance(skill_md, str) and skill_md.strip():
         files.append(_main.DraftFile(path="SKILL.md", content=skill_md))
     if isinstance(run_code, str) and run_code.strip():
+        contract_error = _generated_run_py_contract_error(run_code)
+        if contract_error:
+            log_fn(
+                "worker-author bundle run.py has invalid runtime contract: "
+                f"{contract_error}; not auto-registering. The drafted bundle stays viewable.",
+                level="warning",
+            )
+            return None
         files.append(_main.DraftFile(path="run.py", content=run_code))
     if isinstance(requirements_txt, str) and requirements_txt.strip():
         files.append(_main.DraftFile(path="requirements.txt", content=requirements_txt))
@@ -555,6 +563,8 @@ _SMOKE_REPAIR_SYSTEM_PROMPT = (
     "artifacts[] entry, e.g. outputs={'report':'out/report.csv'};\n"
     "- write result.json to the WORKING DIRECTORY ('result.json'), NOT "
     "'out/result.json' (writing it under out/ makes the run produce no result);\n"
+    "- NEVER write outputs.json or output.json. They are legacy/wrong filenames "
+    "and the runtime will ignore them;\n"
     "- result.json schema: {\"status\":\"success\"|\"error\",\"outputs\":"
     "{<name>:<literal-value-for-scalar OR out/path-for-file>},\"artifacts\":"
     "[{\"name\",\"relative_path\",\"type\"}],\"error\":<msg on error>} on BOTH "
@@ -579,6 +589,23 @@ def _strip_code_fences(text: str) -> str:
             lines = lines[:-1]
         stripped = "\n".join(lines).strip()
     return stripped
+
+
+def _generated_run_py_contract_error(run_code: str) -> str | None:
+    """Return why generated run.py violates the file-level runtime contract.
+
+    This is a pre-persist guard for LLM-authored code. The runtime only reads
+    result.json; legacy outputs.json/output.json files are ignored and make a
+    generated worker look successful in code review while failing at run time.
+    """
+    lowered = run_code.lower()
+    legacy_names = ("outputs.json", "output.json")
+    for name in legacy_names:
+        if name in lowered:
+            return f"generated run.py writes legacy {name}; it must write result.json"
+    if "result.json" not in lowered:
+        return "generated run.py does not write result.json"
+    return None
 
 
 def _build_smoke_inputs(
@@ -715,6 +742,10 @@ def _repair_run_py(
         ast.parse(fixed)
     except SyntaxError:
         log_fn("Smoke repair produced invalid Python; discarding", level="warning")
+        return None
+    contract_error = _generated_run_py_contract_error(fixed)
+    if contract_error:
+        log_fn(f"Smoke repair produced invalid runtime contract: {contract_error}", level="warning")
         return None
     return fixed
 
