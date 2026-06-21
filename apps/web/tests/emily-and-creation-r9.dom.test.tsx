@@ -68,10 +68,12 @@ describe("Emily creation flow — consistent Emily empty state", () => {
   it("create uses the real PromptInput (auto-resize TEXTAREA), no bespoke hero", async () => {
     render(<EmilyChatCore fullPage createMode />);
     // Consistent Emily empty state: generic composer placeholder (NOT the bespoke
-    // "Create me: a worker that…" hero), no "Hire worker" submit button.
+    // "Create me: a worker that…" hero). #1706: the composer CTA IS "Hire worker"
+    // (the canonical action label); assert no separate bespoke "Hire a new worker" HEADING.
     const composer = await screen.findByPlaceholderText("Message Emily...");
     expect(composer.tagName).toBe("TEXTAREA");
-    expect(screen.queryByRole("button", { name: /hire worker/i })).not.toBeInTheDocument();
+    // The landing send button's accessible name is now "Hire worker" (canonical per #1706)
+    // so we no longer assert it's absent — we assert the bespoke hero HEADING is absent.
     expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
   });
 

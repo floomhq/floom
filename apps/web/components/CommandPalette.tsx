@@ -38,7 +38,7 @@ const NAV = [
   { href: "/library", label: "Brain", icon: Brain, keywords: "library context folders files knowledge resources" },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, keywords: "review pending actions" },
   { href: "/connections/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
-  { href: "/connections", label: "Integrations", icon: Plug, keywords: "connections oauth" },
+  { href: "/connections", label: "Connections", icon: Plug, keywords: "connections integrations oauth" } /* #1707: unified terminology; keep "integrations" as search keyword */,
   { href: "/settings", label: "Settings", icon: Settings, keywords: "config danger appearance" },
 ];
 
@@ -151,7 +151,7 @@ export function CommandPalette() {
             onSelect={() => go("/?create=1")}
           >
             <Plus />
-            New worker
+            Hire worker {/* #1706: canonical create-worker label */}
           </CommandItem>
           <CommandItem
             value="action reload workers rescan refresh"

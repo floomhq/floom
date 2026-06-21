@@ -320,7 +320,7 @@ function LogsTab({ r }: { r: RunSummary }) {
           Logs
           {/* Live indicator while stream is open and run is active */}
           {logConnected && isActive && (
-            <span style={{ marginLeft: 8, color: "var(--accent, #3E6FE0)", fontWeight: 500, fontSize: 10 }}>
+            <span style={{ marginLeft: 8, color: "var(--accent, #3661C7)", fontWeight: 500, fontSize: 10 }}>
               Live
             </span>
           )}

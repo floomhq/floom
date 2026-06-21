@@ -44,8 +44,8 @@ describe("Connections IA — chip nav, not a tab row or Browse button", () => {
       </TestQueryProvider>,
     );
 
-    // The chip nav (aria-label="Integrations sections") with all 4 surfaces.
-    const chipNav = await screen.findByRole("navigation", { name: /integrations sections/i });
+    // The chip nav (aria-label="Connections sections") with all 4 surfaces. (#1707: unified terminology)
+    const chipNav = await screen.findByRole("navigation", { name: /connections sections/i });
     const connected = within(chipNav).getByRole("link", { name: /^connected$/i });
     expect(connected).toHaveAttribute("href", "/connections");
     const browse = within(chipNav).getByRole("link", { name: /browse apps/i });
@@ -65,7 +65,7 @@ describe("Connections IA — chip nav, not a tab row or Browse button", () => {
   });
 });
 
-describe("Sidebar IA — Integrations is a single nav row, no Secrets sub-item", () => {
+describe("Sidebar IA — Connections is a single nav row, no Secrets sub-item", () => {
   it("NavLinks has no Secrets sidebar sub-item", async () => {
     vi.doMock("@/lib/useApprovalsSync", () => ({ useApprovalsCount: () => 0 }));
     vi.doMock("@/lib/query/prefetch", () => ({
@@ -79,8 +79,9 @@ describe("Sidebar IA — Integrations is a single nav row, no Secrets sub-item",
       </TestQueryProvider>,
     );
 
-    const integrations = screen.getByRole("link", { name: /integrations/i });
-    expect(integrations).toHaveAttribute("href", "/connections");
+    /* #1707: sidebar now says "Connections" not "Integrations" */
+    const connections = screen.getByRole("link", { name: /^connections$/i });
+    expect(connections).toHaveAttribute("href", "/connections");
 
     // The option-A Secrets sidebar sub-item is reverted: no Secrets link here.
     expect(screen.queryByRole("link", { name: /^secrets$/i })).toBeNull();

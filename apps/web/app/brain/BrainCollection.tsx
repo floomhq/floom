@@ -424,7 +424,7 @@ function DropCreateFolderOverlay({
 
 // Empty-state actions: drop is the headline (in EmptyState.help); here we offer
 // the two clickable paths under it. "Browse files" mirrors a drop (primary,
-// filled button); "New empty folder" is the secondary, quieter path.
+// filled button); "New folder" is the secondary, quieter path. (#1709: canonical name)
 function EmptyStateActions({
   onBrowse,
   onNewFolder,
@@ -449,7 +449,7 @@ function EmptyStateActions({
           cursor: "pointer",
         }}
       >
-        New empty folder
+        New folder
       </button>
     </div>
   );

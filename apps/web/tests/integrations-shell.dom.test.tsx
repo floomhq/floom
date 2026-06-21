@@ -23,7 +23,7 @@ describe("IntegrationsShell", () => {
     );
 
     const heading = screen.getByRole("heading", { level: 1, name: "MCP" });
-    const nav = screen.getByRole("navigation", { name: "Integrations sections" });
+    const nav = screen.getByRole("navigation", { name: "Connections sections" }); /* #1707: unified terminology */
     const subheading = screen.getByRole("heading", { level: 2, name: "MCP servers your workers can use" });
 
     expect(heading.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

@@ -170,9 +170,11 @@ export function PromptInput({
           tabIndex={-1}
         />
 
+        {/* #1711: aria-label for AT; focus-visible:ring uses --accent for clear visibility */}
         <textarea
           ref={textareaRef}
-          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[120px] overflow-auto"
+          aria-label="Message Emily"
+          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[120px] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:rounded-md"
           placeholder={placeholder ?? "Message Emily..."}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -181,10 +183,10 @@ export function PromptInput({
           disabled={disabled}
         />
 
+        {/* #1557/P1-10: labeled "Hire" affordance. #1709: aria-label is the
+            full canonical action "Hire worker" (superset of visible "Hire",
+            acceptable per WCAG SC 2.5.3; matches the canonical create-worker name). */}
         {isLanding ? (
-          // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
-          // landing's prompt CTA, not a bare arrow. Keeps the accessible name
-          // "Send message" so the send action stays discoverable to AT + tests.
           <Button
             size="sm"
             className="h-7 shrink-0 gap-1.5 px-3 text-xs font-medium"
@@ -192,7 +194,7 @@ export function PromptInput({
             disabled={!canSend}
             style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
             type="button"
-            aria-label="Send message"
+            aria-label="Hire worker"
           >
             Hire
             <ArrowUp className="size-3.5" />

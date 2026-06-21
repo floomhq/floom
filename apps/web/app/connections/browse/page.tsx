@@ -591,7 +591,7 @@ export default function ConnectionsBrowsePage() {
     },
     states: {
       empty: {
-        title: "No integrations found",
+        title: "No connections found",
         help: "Clear filters or try a broader search.",
         icon: Search,
         action:
