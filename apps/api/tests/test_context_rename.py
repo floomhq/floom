@@ -87,6 +87,33 @@ def test_rename_preserves_visibility(client):
     assert client.get("/contexts/shared-facts").json()["visibility"] == "workspace"
 
 
+def test_rename_into_stale_shared_id_does_not_leak_private(client):
+    """#1813 P1: a private folder renamed onto a pack id whose brain_packs row
+    was left "workspace" by a previously renamed shared folder must NOT inherit
+    that stale shared visibility.
+
+    `ensure_brain_pack` never downgrades an existing row's visibility, so the
+    rename path must rewrite the destination visibility to the source value for
+    every case — including private — or it silently exposes the folder.
+    """
+    # 1) Make `facts` shared, then rename it away. That leaves a stale
+    #    brain_packs row keyed `facts` with visibility=workspace (the rename
+    #    materializes a row for the NEW name and never clears the old id).
+    assert client.put("/contexts/facts/visibility", json={"visibility": "workspace"}).status_code == 200
+    assert client.post("/contexts/facts/rename", json={"new_name": "moved-away"}).status_code == 200
+
+    # 2) A fresh, private folder.
+    assert client.post("/contexts/draft", json={"writeable": True, "sensitive": False}).status_code in (200, 201)
+    assert client.get("/contexts/draft").json()["visibility"] == "private"
+
+    # 3) Rename it onto the now-free `facts` id (which still has the stale
+    #    workspace row). It MUST stay private.
+    resp = client.post("/contexts/draft/rename", json={"new_name": "facts"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["visibility"] == "private"
+    assert client.get("/contexts/facts").json()["visibility"] == "private"
+
+
 def test_rename_to_existing_name_conflicts(client):
     assert client.post("/contexts/other", json={"writeable": True}).status_code in (200, 201)
     resp = client.post("/contexts/facts/rename", json={"new_name": "other"})

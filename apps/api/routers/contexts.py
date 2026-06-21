@@ -545,19 +545,25 @@ def rename_context(
     owner_id = context_owner_id(new_name)
     if owner_id:
         _ensure_brain_pack_row(new_name, owner_id=owner_id, repos=repos)
-        if old_visibility and old_visibility != "private":
-            asset_access = getattr(repos, "asset_access", None)
-            if asset_access is not None and hasattr(asset_access, "set_visibility"):
-                try:
-                    asset_access.set_visibility(
-                        workspace_id=_asset_workspace_id(owner_id),
-                        actor_id=context_user_id,
-                        asset_type="brain_pack",
-                        asset_id=new_name,
-                        visibility=old_visibility,
-                    )
-                except Exception:
-                    pass  # visibility carry-over is best-effort, never blocks rename
+        # Always rewrite the destination row's visibility to the source value,
+        # INCLUDING "private". `ensure_brain_pack` never downgrades an existing
+        # row's visibility, so if `new_name` reuses a pack id left behind by a
+        # previously deleted/renamed shared folder, the stale row would keep its
+        # old "workspace" visibility. Carrying only non-private values would then
+        # silently expose a renamed private folder. set_visibility writes the
+        # value unconditionally, making the carry-over deterministic.
+        asset_access = getattr(repos, "asset_access", None)
+        if old_visibility and asset_access is not None and hasattr(asset_access, "set_visibility"):
+            try:
+                asset_access.set_visibility(
+                    workspace_id=_asset_workspace_id(owner_id),
+                    actor_id=context_user_id,
+                    asset_type="brain_pack",
+                    asset_id=new_name,
+                    visibility=old_visibility,
+                )
+            except Exception:
+                pass  # visibility carry-over is best-effort, never blocks rename
     author_name, author_email = _git_author(auth)
     _git_commit_context_rename(
         safe_name,
