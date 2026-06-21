@@ -52,7 +52,9 @@ def is_secret_bearing_export_path(rel: str) -> bool:
         return True
     if base in _PRIVATE_KEY_BASENAMES:
         return True
-    if normalized.lower().startswith(".git/"):
+    # Any `.git` directory anywhere in the path (root .git/ OR a nested repo
+    # like workers/foo/.git/config) carries git internals incl. credentials.
+    if ".git" in normalized.lower().split("/"):
         return True
     # .env, .env.local, .env.production, foo.env, etc.
     if base == ".env" or base.startswith(".env.") or base.endswith(".env"):
