@@ -141,7 +141,14 @@ async function startMockApi() {
         const body = await readRawBody(request);
         state.lastPut = { contentType: request.headers["content-type"], body };
         ctx.files[filePath] = body;
-        json(response, 200, { path: filePath, size: body.length, mime_type: "text/plain", is_binary: false, updated_at: "now" });
+        const payload = { path: filePath, size: body.length, mime_type: "text/plain", is_binary: false, updated_at: "now" };
+        // Mirror the API: a detected high-confidence secret comes back on the
+        // write response so the CLI can warn the operator.
+        if (state.flagSecretOnPut) {
+          payload.has_secret_warning = true;
+          payload.secret_warnings = [{ pattern: "aws_access_key_id", line: 2, masked: "AKIA****************" }];
+        }
+        json(response, 200, payload);
         return;
       }
       if (request.method === "GET") {
@@ -195,6 +202,30 @@ test("contexts create then push uploads file bytes verbatim", async () => {
     );
     assert.ok(api.seen.includes("PUT /contexts/crm-brain/files/docs/playbook.md"));
     assert.ok(!(api.state.lastPut.contentType || "").includes("application/json"));
+  } finally {
+    api.server.close();
+    await once(api.server, "close");
+  }
+});
+
+test("contexts push surfaces secret warnings in the default (non-JSON) path", async () => {
+  const api = await startMockApi();
+  try {
+    api.state.flagSecretOnPut = true;
+    const home = await makeTempHome(api.baseUrl);
+    await runCli(["contexts", "create", "crm-brain"], { HOME: home });
+    const localFile = join(home, "creds.env");
+    await writeFile(localFile, "name=demo\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n");
+    const pushed = await runCli(
+      ["contexts", "push", "crm-brain", "creds.env", localFile],
+      { HOME: home },
+    );
+    assert.equal(pushed.code, 0, pushed.stderr);
+    // Success line still prints to stdout; the warning goes to stderr.
+    assert.match(pushed.stdout, /Pushed creds\.env to context crm-brain/);
+    assert.match(pushed.stderr, /possible secret/i);
+    assert.match(pushed.stderr, /aws_access_key_id/);
+    assert.match(pushed.stderr, /AKIA/);
   } finally {
     api.server.close();
     await once(api.server, "close");

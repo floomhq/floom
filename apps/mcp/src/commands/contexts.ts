@@ -21,11 +21,22 @@ type ContextSummary = {
   sensitive?: boolean;
 };
 
+type SecretWarning = {
+  pattern: string;
+  line: number;
+  masked: string;
+};
+
 type ContextFileItem = {
   path: string;
   size: number;
   mime_type: string;
   is_binary: boolean;
+  // Set when the pushed content matched a high-confidence secret pattern; the
+  // API populates secret_warnings on the write response so operators can move
+  // the credential out of the brain pack. See models.ContextFileItem.
+  has_secret_warning?: boolean;
+  secret_warnings?: SecretWarning[];
 };
 
 type ContextDetail = ContextSummary & { files?: ContextFileItem[] };
@@ -189,6 +200,16 @@ export async function contextsPushCommand(
       return 0;
     }
     log.ok(`Pushed ${cleanPath} to context ${name} (${result.size} bytes).`);
+    // Surface secret-detection findings the API returns on the write response.
+    // Without this the default (non-JSON) path silently hides the only warning
+    // that a credential leaked into the brain pack.
+    if (result.has_secret_warning) {
+      const warnings = result.secret_warnings ?? [];
+      log.warn(`${cleanPath} contains ${warnings.length || "a"} possible secret${warnings.length === 1 ? "" : "s"}. Move credentials to Secrets instead of the brain pack.`);
+      for (const w of warnings) {
+        log.warn(`  line ${w.line}: ${w.pattern} (${w.masked})`);
+      }
+    }
     return 0;
   } catch (error) {
     if (error instanceof FloomApiError && error.status === 404) {
