@@ -139,7 +139,12 @@ def create_workspace(
 
     _require_local_workspace_mode()
     base_user_id = local_workspace_base_user_id(auth.user_id)
-    return _local_workspace_out(create_local_workspace(base_user_id, payload.name))
+    try:
+        created = create_local_workspace(base_user_id, payload.name)
+    except ValueError as exc:
+        # #1738 — duplicate workspace name for this account.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _local_workspace_out(created)
 
 
 @workspaces_router.patch("/workspaces/{workspace_id}", response_model=LocalWorkspaceOut)

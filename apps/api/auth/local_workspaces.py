@@ -127,6 +127,13 @@ def create_local_workspace(owner_user_id: str, name: str) -> dict[str, Any]:
     ensure_default_workspace(owner_user_id)
     workspace_id = "ws_" + uuid.uuid4().hex[:14]
     clean_name = _strip_html_tags((name or "").strip()) or "Untitled"
+    # #1738 — reject a duplicate name (case-insensitive) for this owner. A
+    # transient create failure (e.g. the #1687 session death) used to be retried
+    # into a SECOND identically-named workspace, leaving an ambiguous switcher and
+    # orphaned duplicates. A clear conflict lets the caller reuse the existing one.
+    for existing in list_local_workspaces(owner_user_id):
+        if str(existing.get("name", "")).strip().lower() == clean_name.lower():
+            raise ValueError(f"a workspace named '{clean_name}' already exists")
     created_at = now_iso()
     with get_db() as conn:
         conn.execute(
