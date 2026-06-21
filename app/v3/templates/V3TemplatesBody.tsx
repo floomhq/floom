@@ -14,6 +14,7 @@ import {
   CATEGORIES,
   TEMPLATES,
   WORKSPACES,
+  getWorkspaceWorkers,
   type Category,
 } from "@/components/landing-ref/data";
 import { V3Composer } from "../V3Composer";
@@ -32,11 +33,20 @@ export function V3TemplatesBody() {
   const [cat, setCat] = useState<Category | "All">("All");
   const [q, setQ] = useState("");
 
-  // Category pills: "All" + every category that actually has a worker.
+  function switchMode(m: Mode) {
+    setMode(m);
+    setCat("All");
+    setQ("");
+  }
+
+  // Category pills: "All" + every category present in the active tab's items.
   const pills = useMemo(() => {
-    const present = new Set(TEMPLATES.map((t) => t.category));
+    const present =
+      mode === "workers"
+        ? new Set(TEMPLATES.map((t) => t.category))
+        : new Set(WORKSPACES.map((w) => w.category));
     return ["All", ...CATEGORIES.filter((c) => present.has(c))] as const;
-  }, []);
+  }, [mode]);
 
   const filtered = useMemo(() => {
     let list = TEMPLATES;
@@ -49,6 +59,25 @@ export function V3TemplatesBody() {
           t.job.toLowerCase().includes(needle) ||
           t.tools.some((tool) => tool.toLowerCase().includes(needle)),
       );
+    }
+    return list;
+  }, [cat, q]);
+
+  const filteredWorkspaces = useMemo(() => {
+    let list = WORKSPACES;
+    if (cat !== "All") list = list.filter((w) => w.category === cat);
+    const needle = q.trim().toLowerCase();
+    if (needle) {
+      list = list.filter((w) => {
+        const workerNames = getWorkspaceWorkers(w)
+          .map((t) => t.name.toLowerCase())
+          .join(" ");
+        return (
+          w.name.toLowerCase().includes(needle) ||
+          w.pitch.toLowerCase().includes(needle) ||
+          workerNames.includes(needle)
+        );
+      });
     }
     return list;
   }, [cat, q]);
@@ -90,7 +119,7 @@ export function V3TemplatesBody() {
           {(["workers", "workspaces"] as const).map((m) => (
             <button
               key={m}
-              onClick={() => setMode(m)}
+              onClick={() => switchMode(m)}
               className="rounded-full px-4 py-1.5 text-[13px] font-medium capitalize transition-colors"
               style={
                 mode === m
@@ -104,43 +133,42 @@ export function V3TemplatesBody() {
         </div>
       </motion.div>
 
+      {/* controls — filter + search, for both tabs */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.16, ease: EASE }}
+        className="mb-7 flex flex-wrap items-center gap-2"
+      >
+        <div className="flex flex-wrap gap-1.5">
+          {pills.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCat(c as Category | "All")}
+              className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition-colors"
+              style={
+                cat === c
+                  ? { background: "var(--v3-accent)", color: "#fff" }
+                  : { background: "var(--bg-2)", color: "var(--text-muted)" }
+              }
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex min-w-[200px] items-center gap-2 rounded-[10px] bg-secondary px-3 py-2">
+          <Search className="h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={mode === "workers" ? "Search workers…" : "Search workspaces…"}
+            className="w-full bg-transparent text-[12.5px] placeholder:text-muted-foreground"
+          />
+        </div>
+      </motion.div>
+
       {mode === "workers" ? (
         <>
-          {/* controls */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.16, ease: EASE }}
-            className="mb-7 flex flex-wrap items-center gap-2"
-          >
-            <div className="flex flex-wrap gap-1.5">
-              {pills.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setCat(c as Category | "All")}
-                  className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition-colors"
-                  style={
-                    cat === c
-                      ? { background: "var(--v3-accent)", color: "#fff" }
-                      : { background: "var(--bg-2)", color: "var(--text-muted)" }
-                  }
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-            <div className="ml-auto flex min-w-[200px] items-center gap-2 rounded-[10px] bg-secondary px-3 py-2">
-              <Search className="h-3.5 w-3.5 text-muted-foreground" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search workers…"
-                className="w-full bg-transparent text-[12.5px] placeholder:text-muted-foreground"
-              />
-            </div>
-          </motion.div>
-
-          {/* grid */}
           <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((t, i) => (
               <V3TemplateCard key={t.slug} t={t} i={i} animate="mount" />
@@ -153,11 +181,18 @@ export function V3TemplatesBody() {
           )}
         </>
       ) : (
-        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-          {WORKSPACES.map((w, i) => (
-            <V3WorkspaceCard key={w.slug} w={w} i={i} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredWorkspaces.map((w, i) => (
+              <V3WorkspaceCard key={w.slug} w={w} i={i} />
+            ))}
+          </div>
+          {filteredWorkspaces.length === 0 && (
+            <div className="py-16 text-center text-[13.5px] text-muted-foreground">
+              No workspaces match. Describe what you need below and Floom drafts it.
+            </div>
+          )}
+        </>
       )}
 
       {/* custom CTA */}

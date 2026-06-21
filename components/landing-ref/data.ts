@@ -347,6 +347,48 @@ export const WORKSPACES: Workspace[] = [
     pitch: "Archive the noise, draft every reply, brief you each morning.",
     workers: ["inbox-manager", "email-reply-drafter", "research-brief-writer"],
   },
+  {
+    slug: "content-engine",
+    name: "Content Engine",
+    category: "Marketing",
+    pitch: "Find the keywords, write the article, ground it in real research.",
+    workers: ["seo-opportunity-scout", "seo-article-writer", "research-brief-writer"],
+  },
+  {
+    slug: "chief-of-staff",
+    name: "Chief of Staff",
+    category: "Founder",
+    pitch: "Inbox handled, metrics in your inbox, replies drafted in your voice.",
+    workers: ["inbox-manager", "metrics-reporter", "email-reply-drafter"],
+  },
+  {
+    slug: "talent-pipeline",
+    name: "Talent Pipeline",
+    category: "Recruiting",
+    pitch: "Find companies hiring, source the candidates, write them up.",
+    workers: ["recruiting-sourcer", "cv-writeup", "lead-research-worker"],
+  },
+  {
+    slug: "revenue-ops",
+    name: "Revenue Ops",
+    category: "Sales",
+    pitch: "Research every lead, keep the CRM clean, report the numbers.",
+    workers: ["lead-research-worker", "crm-sync-secretary", "metrics-reporter"],
+  },
+  {
+    slug: "competitive-intel",
+    name: "Competitive Intel",
+    category: "Research",
+    pitch: "Watch the news, brief the moves, find the keyword gaps.",
+    workers: ["ai-news-reporter", "research-brief-writer", "seo-opportunity-scout"],
+  },
+  {
+    slug: "support-desk",
+    name: "Support Desk",
+    category: "Customer",
+    pitch: "Draft every reply, route the bugs, look up the answers.",
+    workers: ["email-reply-drafter", "bug-triage-coordinator", "research-brief-writer"],
+  },
 ];
 
 export function getWorkspace(slug: string): Workspace | undefined {
