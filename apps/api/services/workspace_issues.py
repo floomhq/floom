@@ -538,6 +538,10 @@ def _valid_issue_md_bytes(data: bytes, expected_issue_id: str) -> bool:
     labels = meta.get("labels")
     if labels is not None and not isinstance(labels, list):
         return False
+    if not _optional_str_or_none(meta.get("asset_type")) or not _optional_str_or_none(
+        meta.get("asset_id")
+    ):
+        return False
     for key in ("source", "created_by", "created_at", "updated_at"):
         if not _optional_str_or_none(meta.get(key)):
             return False
