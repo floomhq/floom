@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { inspect } from "node:util";
 import { parse as parseYaml } from "yaml";
-import { createAuthenticatedClient, WorkerosApiError, WorkerosConnectionError } from "../lib/api.js";
+import { createAuthenticatedClient, FloomApiError, FloomConnectionError } from "../lib/api.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
 type WorkerSummary = {
@@ -254,7 +254,7 @@ function validateNativeRuntimeContract(
     /["']execute["']/.test(runPy);
   if (usesComposioCli) {
     errors.push(
-      "run.py shells out to `composio execute`; E2B workers must call the Workeros proxy at /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}",
+      "run.py shells out to `composio execute`; E2B workers must call the Floom proxy at /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}",
     );
   }
 
@@ -353,7 +353,7 @@ async function collectWorkerFiles(dir: string): Promise<{ files: Array<{ path: s
       const info = await stat(absolute);
       const relPath = toBundlePath(dir, absolute);
       if (SECRET_BUNDLE_FILE_RE.test(relPath)) {
-        errors.push(`${relPath} looks like credential material; store credentials in Workeros secrets instead`);
+        errors.push(`${relPath} looks like credential material; store credentials in Floom secrets instead`);
         continue;
       }
       if (info.size > 5 * 1024 * 1024) {
@@ -556,7 +556,7 @@ function formatConnections(connections: unknown): string[] {
   return connections.map((connection) => formatConnection(connection)).filter(Boolean);
 }
 
-function apiErrorDetail(error: WorkerosApiError): string {
+function apiErrorDetail(error: FloomApiError): string {
   const body = error.body;
   if (body && typeof body === "object" && "detail" in body) {
     const detail = (body as { detail: unknown }).detail;
@@ -565,7 +565,7 @@ function apiErrorDetail(error: WorkerosApiError): string {
   return error.message;
 }
 
-function isExpiredAuthError(error: WorkerosApiError): boolean {
+function isExpiredAuthError(error: FloomApiError): boolean {
   if (error.status === 401) return true;
   if (error.status !== 403) return false;
   const detail = apiErrorDetail(error).toLowerCase();
@@ -577,25 +577,25 @@ function emitApiError(error: unknown): number {
   if (message.includes("Not logged in")) {
     return emitError("Not authenticated.", "Run: floom login");
   }
-  if (error instanceof WorkerosConnectionError) {
+  if (error instanceof FloomConnectionError) {
     return emitError(
-      "Workeros API is unreachable.",
+      "Floom API is unreachable.",
       `Tried ${error.apiBase}. Check WORKEROS_API_BASE/FLOOM_API_BASE and network connectivity.`,
     );
   }
-  if (error instanceof WorkerosApiError && isExpiredAuthError(error)) {
+  if (error instanceof FloomApiError && isExpiredAuthError(error)) {
     return emitError("Your session expired.", "Re-run: floom login");
   }
-  if (error instanceof WorkerosApiError && error.status === 403) {
+  if (error instanceof FloomApiError && error.status === 403) {
     return emitError(
       "Request was forbidden.",
       `API said: ${apiErrorDetail(error)}. Check that this token can access the target worker/workspace.`,
     );
   }
-  if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
-    return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/workeros/issues");
+  if (error instanceof FloomApiError && error.status && error.status >= 500) {
+    return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues");
   }
-  if (error instanceof WorkerosApiError && error.status && error.status >= 400) {
+  if (error instanceof FloomApiError && error.status && error.status >= 400) {
     return emitError(`API rejected worker source: ${apiErrorDetail(error)}`, "Fix the worker files and retry: floom workers validate <dir>");
   }
   throw error;
@@ -630,7 +630,7 @@ export async function workersPushCommand(dir: string): Promise<number> {
       await client.requestJson("GET", `/workers/${encodeURIComponent(source.workerId)}`);
       exists = true;
     } catch (error) {
-      if (error instanceof WorkerosApiError && error.status === 404) {
+      if (error instanceof FloomApiError && error.status === 404) {
         exists = false;
       } else {
         throw error;
@@ -641,7 +641,7 @@ export async function workersPushCommand(dir: string): Promise<number> {
       try {
         await client.requestJson("POST", "/workers", { body: payload });
       } catch (error) {
-        if (error instanceof WorkerosApiError && error.status === 409 && /already exists/i.test(apiErrorDetail(error))) {
+        if (error instanceof FloomApiError && error.status === 409 && /already exists/i.test(apiErrorDetail(error))) {
           return emitError(
             `Worker id '${source.workerId}' already exists outside the active workspace.`,
             "Choose a unique worker id in worker.yml, then run: floom workers validate <dir> && floom workers push <dir>",
@@ -653,9 +653,9 @@ export async function workersPushCommand(dir: string): Promise<number> {
         try {
           await client.requestJson("PUT", `/workers/${encodeURIComponent(source.workerId)}/files`, { body: filesPayload(source) });
         } catch (error) {
-          if (error instanceof WorkerosApiError && (error.status === 404 || error.status === 405)) {
+          if (error instanceof FloomApiError && (error.status === 404 || error.status === 405)) {
             return emitError(
-              "This Workeros API created the worker but does not support full worker bundle uploads.",
+              "This Floom API created the worker but does not support full worker bundle uploads.",
               `PUT /workers/${source.workerId}/files returned HTTP ${error.status}. Upgrade the API before pushing workers with data/ or lib/ files.`,
             );
           }
@@ -669,9 +669,9 @@ export async function workersPushCommand(dir: string): Promise<number> {
     try {
       await client.requestJson("PUT", `/workers/${encodeURIComponent(source.workerId)}/files`, { body: filesPayload(source) });
     } catch (error) {
-      if (error instanceof WorkerosApiError && (error.status === 404 || error.status === 405)) {
+      if (error instanceof FloomApiError && (error.status === 404 || error.status === 405)) {
         return emitError(
-          "This Workeros API does not support full worker bundle updates.",
+          "This Floom API does not support full worker bundle updates.",
           `PUT /workers/${source.workerId}/files returned HTTP ${error.status}. Upgrade the API or use a new worker id.`,
         );
       }
@@ -711,11 +711,11 @@ export async function workersListCommand(options: { json?: boolean }): Promise<n
     if (message.includes("Not logged in")) {
       return emitError("Not authenticated.", "Run: floom login", options.json);
     }
-    if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+    if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
       return emitError("Your session expired.", "Re-run: floom login", options.json);
     }
-    if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
-      return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/workeros/issues", options.json);
+    if (error instanceof FloomApiError && error.status && error.status >= 500) {
+      return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
     }
     throw error;
   }
@@ -760,14 +760,14 @@ export async function workersShowCommand(workerId: string, options: { json?: boo
     if (message.includes("Not logged in")) {
       return emitError("Not authenticated.", "Run: floom login", options.json);
     }
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       return emitError(`Worker '${workerId}' not found.`, "List available workers: floom workers list", options.json);
     }
-    if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+    if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
       return emitError("Your session expired.", "Re-run: floom login", options.json);
     }
-    if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
-      return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/workeros/issues", options.json);
+    if (error instanceof FloomApiError && error.status && error.status >= 500) {
+      return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
     }
     throw error;
   }
@@ -847,14 +847,14 @@ export async function workersInfoCommand(workerId: string, options: { json?: boo
     if (message.includes("Not logged in")) {
       return emitError("Not authenticated.", "Run: floom login", options.json);
     }
-    if (error instanceof WorkerosApiError && error.status === 404) {
+    if (error instanceof FloomApiError && error.status === 404) {
       return emitError(`Worker '${workerId}' not found.`, "List available workers: floom workers list", options.json);
     }
-    if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+    if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
       return emitError("Your session expired.", "Re-run: floom login", options.json);
     }
-    if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
-      return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/workeros/issues", options.json);
+    if (error instanceof FloomApiError && error.status && error.status >= 500) {
+      return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
     }
     throw error;
   }

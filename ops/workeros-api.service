@@ -1,5 +1,5 @@
 [Unit]
-Description=Workeros API
+Description=Workeros API (legacy compatibility unit)
 After=network.target
 
 [Service]

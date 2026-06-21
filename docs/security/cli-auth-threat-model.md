@@ -8,7 +8,7 @@ approval page (`apps/web/app/cli-auth/page.tsx`), and the CLI login command
 
 ## What the flow is
 
-Workeros OS is **single-tenant**: the owner (holder of `FLOOM_SECRET`) is the
+Floom OS is **single-tenant**: the owner (holder of `FLOOM_SECRET`) is the
 only principal. The CLI uses the standard OAuth 2.0 **device authorization
 grant** (RFC 8628) shape:
 

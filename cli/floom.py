@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""floom — minimal CLI for Workeros / Workeros.
+"""floom â€” minimal CLI for Floom / Floom.
 
 Commands:
   floom dev           Start API + web dev servers concurrently
@@ -65,7 +65,7 @@ def _api(method: str, path: str, **kwargs) -> requests.Response:
 @click.option("--api-base", envvar="FLOOM_API_BASE", default="http://localhost:8000", help="API base URL")
 @click.pass_context
 def cli(ctx: click.Context, secret: str, token: str, api_base: str):
-    """floom — Workeros operator CLI."""
+    """floom â€” Floom operator CLI."""
     # #598: allow --secret / --token flags to override env vars at call time
     ctx.ensure_object(dict)
     if secret:
@@ -130,7 +130,7 @@ def dev():
 
 @cli.command()
 def reload():
-    """POST /workers/reload — reload all workers from disk."""
+    """POST /workers/reload â€” reload all workers from disk."""
     try:
         r = _api("post", "/workers/reload")
         r.raise_for_status()

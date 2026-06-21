@@ -4,7 +4,7 @@ The string WORKEROS_PY_CONTENT is written to a temp dir before a run.py worker
 subprocess starts, making `from workeros import call_worker` available to the script.
 """
 
-WORKEROS_PY_CONTENT = '''"""WorkerOS stdlib for run.py workers.
+WORKEROS_PY_CONTENT = '''"""Floom stdlib for run.py workers.
 
 Usage inside run.py:
     from workeros import call_worker, llm_chat, embed
@@ -40,7 +40,7 @@ def _platform_headers() -> dict:
             "Content-Type": "application/json",
         }
     return {
-        "X-Workeros-Run-Token": _RUN_TOKEN,
+        "X-Floom-Run-Token": _RUN_TOKEN,
         "Content-Type": "application/json",
     }
 
@@ -65,7 +65,7 @@ def _post_json(path: str, body: dict, *, timeout: int = 120) -> dict:
 def llm_chat(messages: list, *, model: str | None = None, timeout: int = 120, **kwargs) -> dict:
     """Call the workspace-managed chat model using this run's scoped token.
 
-    Provider credentials stay in the WorkerOS API; the sandbox only sends its
+    Provider credentials stay in the Floom API; the sandbox only sends its
     run token. The request is OpenAI chat-completions shaped.
     """
     run_id = os.environ.get("FLOOM_RUN_ID", "")

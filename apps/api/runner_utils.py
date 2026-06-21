@@ -44,7 +44,7 @@ def _extra_worker_roots() -> list[Path]:
     """Additional legitimate worker-source roots beyond FLOOM_WORKERS_DIR.
 
     Cloud historically materialized a class of seeded/example worker bundles
-    under ``/opt/workeros/var/workers`` (the ``var/workers`` dir the
+    under ``/opt/floom/var/workers`` (the ``var/workers`` dir the
     #1048 audit flagged) and stored their absolute path in
     ``skill_versions.bundle_path``. Those bundles live ONLY there, not under
     the deployed ``engine/workers`` tree, so a scheduled run must be allowed to
@@ -134,7 +134,7 @@ def _resolve_worker_bundle_dir(
     Fixes the ``var/workers`` vs ``engine/workers`` drift (#1048 follow-up):
     a worker's ``runtime.bundle_path`` can be a STALE ABSOLUTE path baked at
     registration time from an older ``FLOOM_WORKERS_DIR`` (e.g.
-    ``/opt/workeros/var/workers/job-digest``). At run time
+    ``/opt/floom/var/workers/job-digest``). At run time
     ``FLOOM_WORKERS_DIR`` points at ``.../engine/workers``, so the stale
     absolute path resolves outside the current root and the traversal guard
     rejected a legitimate scheduled run.

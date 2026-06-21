@@ -590,7 +590,7 @@ _SMOKE_CODE_FAILURE_CODES = frozenset(
 )
 
 _SMOKE_REPAIR_SYSTEM_PROMPT = (
-    "You fix Workeros script-mode worker run.py files. The script runs as "
+    "You fix Floom script-mode worker run.py files. The script runs as "
     "`python run.py` in an E2B sandbox and MUST:\n"
     "- read inputs.json via json.load(open('inputs.json'));\n"
     "- treat SCALAR inputs as the literal value inline (never open() them); a "

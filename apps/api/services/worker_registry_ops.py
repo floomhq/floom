@@ -1,4 +1,4 @@
-﻿"""Worker registration operations: manifest parsing, id allocation, file
+"""Worker registration operations: manifest parsing, id allocation, file
 embedding, skill-version + git-commit + DB persistence.
 
 The subsystem that turns uploaded/drafted worker files into persisted workers,
@@ -261,7 +261,7 @@ def _parse_worker_payload(
         raise HTTPException(
             status_code=400,
             detail=(
-                "exec.runner: local is not supported by the hosted Workeros API. "
+                "exec.runner: local is not supported by the hosted Floom API. "
                 "Set exec.runner: e2b for workers created through the API or MCP."
             ),
         )
@@ -326,7 +326,7 @@ def _git_commit_worker(
     worker_id: str,
     *,
     message: str,
-    author_name: str = "WorkerOS",
+    author_name: str = "Floom",
     author_email: str = "workeros@local",
 ) -> None:
     import git_ops as _git_ops

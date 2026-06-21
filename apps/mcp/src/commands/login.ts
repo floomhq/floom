@@ -1,7 +1,7 @@
-﻿import open from "open";
+import open from "open";
 import {
-  WorkerosApiClient,
-  WorkerosApiError,
+  FloomApiClient,
+  FloomApiError,
   resolveLoginApiBase,
 } from "../lib/api.js";
 import { promptYesNo } from "../lib/prompt.js";
@@ -82,7 +82,7 @@ function retryAfterSecondsFromHeader(headers: Headers | undefined): number | nul
 }
 
 export function cloudRateLimitRetryMs(
-  error: WorkerosApiError,
+  error: FloomApiError,
   pollingIntervalSeconds: number,
 ): number {
   const retryAfterSeconds =
@@ -95,7 +95,7 @@ export type LoginOptions = {
   cloud?: boolean;
 };
 
-// Heuristic: the cloud verification_url points at workeros.example.com
+// Heuristic: the cloud verification_url points at floom.example.com
 // (or /app/cli-auth). The OSS engine points at localhost:3000/cli-auth.
 // Lets the CLI auto-detect cloud-vs-oss even when --cloud is omitted, so a
 // user running `floom login` against WORKEROS_API_BASE=<cloud> still gets
@@ -103,7 +103,7 @@ export type LoginOptions = {
 function detectCloudFromVerificationUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    if (u.hostname === "workeros.example.com") return true;
+    if (u.hostname === "floom.example.com") return true;
     if (u.pathname.startsWith("/app/")) return true;
     return false;
   } catch {
@@ -139,7 +139,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
   log.step("Requesting device authorization...");
 
   const loginApiBase = resolveLoginApiBase(options);
-  const client = new WorkerosApiClient(loginApiBase);
+  const client = new FloomApiClient(loginApiBase);
   // The engine endpoint /cli-auth/devices lives at /api/cli-auth/devices
   // when the cloud FastAPI app mounts the engine under /api. We don't have
   // saved credentials yet, so resolvePath in the client can't help. Probe
@@ -224,7 +224,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
       }
       await sleep(started.polling_interval_seconds * 1000);
     } catch (error) {
-      if (error instanceof WorkerosApiError) {
+      if (error instanceof FloomApiError) {
         if (error.status === 403) {
           log.err("CLI authorization was denied.");
           log.info("Run: floom login to try again");
@@ -269,7 +269,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
 }
 
 async function pollCloudExchange(args: {
-  client: WorkerosApiClient;
+  client: FloomApiClient;
   loginApiBase: string;
   deviceCode: string;
   userCode: string;
@@ -350,7 +350,7 @@ export async function resolveInitialCloudWorkspace(
   credentials: StoredCredentials,
 ): Promise<WorkspaceRow | null> {
   try {
-    const client = new WorkerosApiClient(credentials.api_base, credentials);
+    const client = new FloomApiClient(credentials.api_base, credentials);
     const data = (await client.requestJson("GET", "/workspaces")) as WorkspaceListResponse;
     const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
     if (data.active_id) {

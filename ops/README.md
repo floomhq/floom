@@ -1,4 +1,4 @@
-# Workeros Ops
+# Floom Ops
 
 Operational scripts and systemd units for the production API.
 
@@ -6,9 +6,9 @@ Operational scripts and systemd units for the production API.
 
 Files:
 - `autodeploy-api.sh` - deterministic wrapper for systemd/webhook autodeploys
-- `workeros-api-autodeploy.service` - API oneshot unit
+- `floom-api-autodeploy.service` - API oneshot unit
 
-This repo versions the self-hosted Workeros API autodeploy unit only. Managed
+This repo versions the self-hosted Floom API autodeploy unit only. Managed
 service deploy/autodeploy configuration is environment-specific and should not
 be added here.
 
@@ -20,16 +20,16 @@ the configured deploy command.
 Install or refresh the unit:
 
 ```bash
-install -m 0755 ops/autodeploy-api.sh /opt/workeros/ops/autodeploy-api.sh
-install -m 0644 ops/workeros-api-autodeploy.service /etc/systemd/system/workeros-api-autodeploy.service
+install -m 0755 ops/autodeploy-api.sh /opt/floom/ops/autodeploy-api.sh
+install -m 0644 ops/floom-api-autodeploy.service /etc/systemd/system/floom-api-autodeploy.service
 systemctl daemon-reload
-systemctl start workeros-api-autodeploy.service
+systemctl start floom-api-autodeploy.service
 ```
 
 Optional failure alerting:
 
 ```bash
-cat >/etc/workeros/autodeploy.env <<'EOF'
+cat >/etc/floom/autodeploy.env <<'EOF'
 WORKEROS_AUTODEPLOY_ALERT_WEBHOOK=https://example.invalid/webhook
 EOF
 ```
@@ -53,13 +53,13 @@ and schema checks pass.
 Files:
 - `backup-db.sh` - online SQLite `.backup`, artifacts tarball, manifest, retention pruning
 - `rotate-artifacts.py` - gzip old `transcript.jsonl` files and mark `runs.artifacts_archived`
-- `workeros-backup.service` - oneshot systemd unit that runs backup and rotation
-- `workeros-backup.timer` - hourly timer with 5m randomized delay
+- `floom-backup.service` - oneshot systemd unit that runs backup and rotation
+- `floom-backup.timer` - hourly timer with 5m randomized delay
 
 Backup output:
 
 ```text
-/root/backups/workeros-YYYY-MM-DD-HHMM/
+/root/backups/floom-YYYY-MM-DD-HHMM/
   floom.db.gz      # gzip-compressed SQLite online backup
   artifacts.tar.gz
   manifest.json
@@ -72,31 +72,31 @@ filled the disk. The snapshot is now gzip-compressed and hourly points reduced.)
 Restore a backup:
 
 ```bash
-gunzip -c /root/backups/workeros-YYYY-MM-DD-HHMM/floom.db.gz > /tmp/restore-floom.db
-sqlite3 /opt/workeros/data/floom.db ".restore '/tmp/restore-floom.db'"
+gunzip -c /root/backups/floom-YYYY-MM-DD-HHMM/floom.db.gz > /tmp/restore-floom.db
+sqlite3 /opt/floom/data/floom.db ".restore '/tmp/restore-floom.db'"
 ```
 
 Install or refresh production units:
 
 ```bash
-install -m 0755 ops/backup-db.sh /opt/workeros/ops/backup-db.sh
-install -m 0755 ops/rotate-artifacts.py /opt/workeros/ops/rotate-artifacts.py
-install -m 0644 ops/workeros-backup.service /etc/systemd/system/workeros-backup.service
-install -m 0644 ops/workeros-backup.timer /etc/systemd/system/workeros-backup.timer
+install -m 0755 ops/backup-db.sh /opt/floom/ops/backup-db.sh
+install -m 0755 ops/rotate-artifacts.py /opt/floom/ops/rotate-artifacts.py
+install -m 0644 ops/floom-backup.service /etc/systemd/system/floom-backup.service
+install -m 0644 ops/floom-backup.timer /etc/systemd/system/floom-backup.timer
 systemctl daemon-reload
-systemctl enable --now workeros-backup.timer
+systemctl enable --now floom-backup.timer
 ```
 
 Verify:
 
 ```bash
-systemctl list-timers workeros-backup.timer
-systemctl start workeros-backup.service
+systemctl list-timers floom-backup.timer
+systemctl start floom-backup.service
 ls -la /root/backups
 ```
 
 Tunables:
-- `WORKEROS_ROOT` repo root, default `/opt/workeros`
+- `WORKEROS_ROOT` repo root, default `/opt/floom`
 - `WORKEROS_API_DIR` API dir used to resolve relative `FLOOM_DB`, default `$WORKEROS_ROOT/apps/api`
 - `FLOOM_DB` source SQLite path, default `$WORKEROS_ROOT/data/floom.db`; relative paths resolve from `WORKEROS_API_DIR`
 - `FLOOM_ARTIFACTS_DIR` artifacts dir, default `$WORKEROS_ROOT/data/artifacts`; relative paths resolve from `WORKEROS_API_DIR`

@@ -1,0 +1,15 @@
+[Unit]
+Description=Floom hourly data snapshot and artifact rotation
+After=floom-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/floom
+EnvironmentFile=/etc/floom/api.env
+ExecStart=/opt/floom/ops/backup-db.sh
+Nice=10
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

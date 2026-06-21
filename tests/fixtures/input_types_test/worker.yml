@@ -9,7 +9,7 @@ use_cases:
 - Confirm default values and required flags render correctly.
 - Capture raw submitted values for regression checks.
 example_input:
-  text_input: Hello Workeros
+  text_input: Hello Floom
   textarea_input: |
     Multiline note for renderer verification.
     Second line stays intact.
@@ -20,7 +20,7 @@ example_input:
 example_output: |
   ## Input echo
 
-  - `text_input`: Hello Workeros
+  - `text_input`: Hello Floom
   - `number_input`: 42
   - `select_input`: beta
   - `boolean_input`: true

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import { readFileSync, realpathSync } from "node:fs";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
@@ -54,7 +54,7 @@ type RunResult = Promise<number> | number;
 
 function inferCommandName(argv = process.argv): "workeros" | "floom" {
   const invoked = argv[1] ? basename(argv[1]) : "";
-  return invoked === "floom" ? "floom" : "workeros";
+  return invoked === "workeros" ? "workeros" : "floom";
 }
 
 export function getPackageVersion(): string {
@@ -71,17 +71,17 @@ async function runAction(result: RunResult): Promise<void> {
   }
 }
 
-export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"): Command {
+export function buildCliProgram(commandName: "workeros" | "floom" = "floom"): Command {
   const program = new Command();
   program
     .name(commandName)
-    .description("Workeros CLI")
+    .description("Floom CLI")
     .version(getPackageVersion())
     .showHelpAfterError();
 
   program.command("login")
     .description("Login via browser device authorization")
-    .option("--cloud", "Authenticate against a hosted Workeros instance")
+    .option("--cloud", "Authenticate against a hosted Floom instance")
     .action(async (options: { cloud?: boolean }) => runAction(runLoginCommand(options)));
 
   program.command("logout")
@@ -258,7 +258,7 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .action(async (target: string | undefined, options: { json?: boolean }) =>
       runAction(mcpTestCommand(target, options)));
   mcp.command("add")
-    .description("Add Workeros to an MCP client config")
+    .description("Add Floom to an MCP client config")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
     .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
       runAction(mcpInstallCommand(options)));
@@ -309,7 +309,7 @@ export async function main(argv = process.argv): Promise<void> {
 function resolveExecutedPath(argv1?: string): string {
   if (!argv1) return "";
   const absolute = resolve(argv1);
-  // npm installs bins as symlinks (node_modules/.bin/workeros -> ../@floomhq/workeros/dist/cli.js).
+  // npm installs bins as symlinks (node_modules/.bin/floom -> ../@floomhq/floom/dist/cli.js).
   // import.meta.url is always the real module path, so compare against the resolved symlink target.
   try {
     return realpathSync(absolute);

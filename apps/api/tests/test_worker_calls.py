@@ -540,7 +540,7 @@ def test_workeros_managed_llm_helpers_use_run_token_header(tmp_path, monkeypatch
 
     assert workeros.llm_chat([{"role": "user", "content": "hello"}], timeout=9) == {"ok": True}
     assert captured["url"] == "https://api.example.test/runs/run-1/llm"
-    assert captured["headers"]["X-workeros-run-token"] == "run-token"
+    assert captured["headers"]["X-floom-run-token"] == "run-token"
     assert captured["timeout"] == 9
 
 

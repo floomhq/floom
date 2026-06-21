@@ -1,4 +1,4 @@
-# AGENTS.md — WorkerOS
+# AGENTS.md — Floom
 
 Self-hosted runtime for AI **workers** (script- or agent-mode jobs that run in E2B
 sandboxes). FastAPI + SQLite backend (`apps/api`), Next.js frontend (`apps/web`),
@@ -44,5 +44,5 @@ MCP server (`apps/mcp`). Deeper docs: `README.md`, `ARCHITECTURE.md`, `CONTRIBUT
 - `apps/api` — FastAPI + SQLite (Python 3.11+). Entry: `main.py`.
 - `apps/web` — Next.js 16 + Turbopack. **Read `apps/web/AGENTS.md` first** — it is a
   newer Next.js than your training data; consult the local docs before editing.
-- `apps/mcp` — MCP server / CLI (`@floomhq/workeros`).
+- `apps/mcp` — MCP server / CLI (`@floomhq/floom`).
 - `workers/` — example worker bundles, seeded into the DB on first boot.

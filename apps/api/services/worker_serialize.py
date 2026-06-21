@@ -655,7 +655,7 @@ def _build_worker_detail(
     triggers_spec = _build_triggers_spec(worker)
 
     # P2 (2026-05-29): runtime.bundle_path carries the absolute host path
-    # (/opt/workeros/workers/<id>) and is serialized into the public `config`.
+    # (/opt/floom/workers/<id>) and is serialized into the public `config`.
     # The UI never renders it, but the API exposed the deploy dir + storage
     # layout. Relativise to the bundle BASENAME (the worker id) so the value
     # stays self-consistent (worker_registry resolves it under WORKERS_DIR

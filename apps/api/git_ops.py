@@ -1,4 +1,4 @@
-﻿"""Git-backed workspace operations.
+"""Git-backed workspace operations.
 
 Every edit to a worker, context, or workspace file becomes a git commit.
 History = git log. Rollback = git checkout <sha>.
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Safety guard: never version into the engine's own source checkout
 #
 # _git_workspace() falls back to WORKERS_DIR.parent when WORKEROS_WORKSPACE_DIR
-# is unset. If the server is run from inside a clone of the WorkerOS source repo
+# is unset. If the server is run from inside a clone of the Floom source repo
 # (the common dev case), that fallback IS the source checkout — so every worker/
 # context/workspace edit would auto-commit into the engine's own repo, and
 # push_background would push it to that repo's origin (e.g. floomhq/workeros).
@@ -47,7 +47,7 @@ _engine_source_warned = False
 
 
 def is_engine_source_checkout(workspace_dir: Path) -> bool:
-    """True if workspace_dir is the WorkerOS engine's own source tree.
+    """True if workspace_dir is the Floom engine's own source tree.
 
     Detected by the engine entrypoint apps/api/main.py at the root. We must never
     auto-commit or push workspace snapshots into it.
@@ -67,7 +67,7 @@ def _block_engine_source_versioning(workspace_dir: Path) -> bool:
     if not _engine_source_warned:
         _engine_source_warned = True
         logger.warning(
-            "Workspace git versioning DISABLED: workspace root %s is the WorkerOS "
+            "Workspace git versioning DISABLED: workspace root %s is the Floom "
             "source checkout. Worker/context/workspace edits will not be committed "
             "or pushed (prevents leaking them into the engine repo and its origin). "
             "Set WORKEROS_WORKSPACE_DIR to a separate directory to enable local "
@@ -190,7 +190,7 @@ def clone_or_init(workspace_dir: Path, remote_url: str) -> bool:
             "Check WORKEROS_GIT_REMOTE and that the token/SSH key has read access."
         )
     _git(["config", "user.email", "workeros@local"], workspace_dir)
-    _git(["config", "user.name", "WorkerOS"], workspace_dir)
+    _git(["config", "user.name", "Floom"], workspace_dir)
     return True
 
 
@@ -210,12 +210,12 @@ def ensure_repo(workspace_dir: Path) -> bool:
     workspace_dir.mkdir(parents=True, exist_ok=True)
     _git(["init"], workspace_dir)
     _git(["config", "user.email", "workeros@local"], workspace_dir)
-    _git(["config", "user.name", "WorkerOS"], workspace_dir)
+    _git(["config", "user.name", "Floom"], workspace_dir)
 
     gitignore = workspace_dir / ".gitignore"
     if not gitignore.exists():
         gitignore.write_text(
-            "# WorkerOS workspace — auto-generated\n"
+            "# Floom workspace — auto-generated\n"
             "*.env\n.env\nsecrets.env\n"
             "workeros.db\nworkeros.db-wal\nworkeros.db-shm\n"
             ".venv/\nnode_modules/\n__pycache__/\n*.pyc\n",
@@ -230,7 +230,7 @@ def ensure_repo(workspace_dir: Path) -> bool:
                 "commit",
                 "-m",
                 "chore: initial workspace snapshot",
-                "--author=WorkerOS <workeros@local>",
+                "--author=Floom <workeros@local>",
             ],
             workspace_dir,
             check=False,
@@ -243,7 +243,7 @@ def commit_paths(
     workspace_dir: Path,
     rel_paths: list[str],
     message: str,
-    author_name: str = "WorkerOS",
+    author_name: str = "Floom",
     author_email: str = "workeros@local",
 ) -> Optional[str]:
     """Stage rel_paths and create a commit.
@@ -477,5 +477,5 @@ def clone_or_init_with_github_token(workspace_dir: Path, remote_url: str, token:
             "Check the GitHub token has read access."
         )
     _git(["config", "user.email", "workeros@local"], workspace_dir)
-    _git(["config", "user.name", "WorkerOS"], workspace_dir)
+    _git(["config", "user.name", "Floom"], workspace_dir)
     return True

@@ -1,5 +1,5 @@
 [Unit]
-Description=Workeros API autodeploy from origin/main
+Description=Workeros API autodeploy from origin/main (legacy compatibility unit)
 After=network-online.target
 Wants=network-online.target
 
@@ -13,4 +13,3 @@ EnvironmentFile=-/etc/workeros/autodeploy.env
 ExecStart=/opt/workeros/ops/autodeploy-api.sh
 StandardOutput=journal
 StandardError=journal
-

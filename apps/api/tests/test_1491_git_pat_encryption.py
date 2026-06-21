@@ -87,7 +87,7 @@ def test_github_token_auth_uses_askpass_not_tokenized_url(monkeypatch, tmp_path)
 
     monkeypatch.setattr(git_ops, "_git", fake_git)
 
-    git_ops.configure_remote(tmp_path, "https://github.com/floomhq/workeros.git")
+    git_ops.configure_remote(tmp_path, "https://github.com/floomhq/floom.git")
     git_ops.push_with_github_token(tmp_path, "ghp_plaintext_secret")
 
     flattened_args = " ".join(" ".join(args) for args, _env in calls)

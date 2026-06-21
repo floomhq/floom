@@ -13,7 +13,8 @@ from db import get_db, now_iso
 from .context import AuthContext
 
 
-ACTIVE_WORKSPACE_HEADER = "x-workeros-workspace"
+ACTIVE_WORKSPACE_HEADER = "x-floom-workspace"
+LEGACY_ACTIVE_WORKSPACE_HEADER = "x-workeros-workspace"
 DEFAULT_WORKSPACE_ID = "local-default"
 _WORKSPACE_ID_RE = re.compile(r"^(?:local-default|ws_[a-f0-9]{14})$")
 _DERIVED_USER_RE = re.compile(r"^(?P<base>.+)__ws_[a-f0-9]{14}$")
@@ -205,7 +206,10 @@ def rename_local_workspace(owner_user_id: str, workspace_id: str, name: str) -> 
 
 
 def requested_local_workspace_id(request: Request) -> str | None:
-    header_value = request.headers.get(ACTIVE_WORKSPACE_HEADER)
+    header_value = (
+        request.headers.get(ACTIVE_WORKSPACE_HEADER)
+        or request.headers.get(LEGACY_ACTIVE_WORKSPACE_HEADER)
+    )
     query_value = request.query_params.get("workspace_id")
     return _valid_workspace_id(header_value) or _valid_workspace_id(query_value)
 

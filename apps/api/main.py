@@ -1,4 +1,4 @@
-﻿"""Floom API — FastAPI backend for the OS for Background Workers."""
+"""Floom API — FastAPI backend for the OS for Background Workers."""
 
 import asyncio
 import os
@@ -909,7 +909,7 @@ async def lifespan(app: FastAPI):
             if _rows_updated:
                 logger.info("Migration #603: converted %d workers from exec.mode=hybrid to pure-script", _rows_updated)
     except Exception as _mig_exc:
-        logger.warning("Migration #603 (hybrid→pure-script) failed (non-fatal): %s", _mig_exc)
+        logger.warning("Migration #603 (hybrid -> pure-script) failed (non-fatal): %s", _mig_exc)
     # Ensure the git workspace repo is initialized (idempotent)
     try:
         _wgit = _git_workspace()
@@ -1170,8 +1170,11 @@ _CORS_ALLOWED_HEADERS = [
     "X-Requested-With",
     "X-Floom-Secret",
     "X-Floom-User",
+    # Compatibility: clients still send the legacy workspace/run-token headers.
     "X-Workeros-Workspace",
     "X-Workeros-Run-Token",
+    "X-Floom-Workspace",
+    "X-Floom-Run-Token",
 ]
 
 
@@ -1190,6 +1193,15 @@ def _active_context_scope() -> str | None:
 
 
 set_context_scope_resolver(_active_context_scope)
+
+
+def _run_token_header(request: Request) -> str:
+    """Return the run capability token from either current or legacy header."""
+    return (
+        request.headers.get("x-floom-run-token")
+        or request.headers.get("x-workeros-run-token")
+        or ""
+    ).strip()
 
 
 def _validate_startup_configuration() -> None:
@@ -1569,7 +1581,7 @@ async def auth_middleware(request: Request, call_next):
       - /connections/callback — OAuth browser redirect validates connection state
       - OPTIONS             — CORS preflight
 
-    Run-scoped tokens (X-Workeros-Run-Token header):
+    Run-scoped tokens (X-Floom-Run-Token header):
       Sandbox workers receive a WORKEROS_RUN_TOKEN env var — a short-lived
       HMAC-signed token that permits ONLY /runs/{id}/composio-execute/* calls.
       Presenting a run token on ANY other endpoint returns 403, making it
@@ -1642,7 +1654,7 @@ async def auth_middleware(request: Request, call_next):
     # is a narrow sandbox capability: it can only call its own Composio proxy
     # path. Worker-to-worker orchestration and destructive actions use the
     # authenticated operator/server paths, never this sandbox token.
-    run_token_header = request.headers.get("x-workeros-run-token", "")
+    run_token_header = _run_token_header(request)
     if run_token_header:
         run_id_from_token = verify_run_token(run_token_header, secret=secret)
         if run_id_from_token is None:
@@ -1751,7 +1763,7 @@ async def auth_middleware(request: Request, call_next):
 logger = logging.getLogger("floom.api")
 
 # Regex for run-authenticated Composio proxy (no x-floom-secret required;
-# auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
+# auth is by X-Floom-Run-Token, scoped to the run_id in the path).
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
 _RE_RUN_LLM_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/llm$")
@@ -1834,7 +1846,7 @@ print(
 # ---------------------------------------------------------------------------
 # SSE event queue registry
 # ---------------------------------------------------------------------------
-# Maps run_id → list of (queue, loop). Each connected SSE consumer gets one
+# Maps run_id -> list of (queue, loop). Each connected SSE consumer gets one
 # queue. Cross-thread asyncio.Queue.put_nowait is unsafe, so we capture the
 # loop the queue was bound to and use call_soon_threadsafe from worker threads.
 # ---------------------------------------------------------------------------
@@ -1995,9 +2007,9 @@ from services.secrets_env import _platform_openai_api_key  # noqa: E402  (re-exp
 
 
 def _workspace_instructions_asset_id(request: Request | None = None) -> str:
-    """Scope version history per cloud workspace when x-workeros-workspace is set."""
+    """Scope version history per cloud workspace when a workspace header is set."""
     if request is not None:
-        workspace_id = (request.headers.get("x-workeros-workspace") or "").strip()
+        workspace_id = requested_local_workspace_id(request) or ""
         if workspace_id and workspace_id != "local-default":
             return workspace_id
     return "default"
@@ -2421,7 +2433,7 @@ def global_search(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> SearchResponse:
-    """#806: global ⌘K search across workers, runs, brain packs, and
+    """#806: global Cmd-K search across workers, runs, brain packs, and
     connections (case-insensitive substring), owner/visibility scoped. Each
     type is capped so one source can't crowd out the others."""
     needle = q.strip().lower()
@@ -2938,7 +2950,7 @@ async def draft_worker_from_prompt(
     prompt_lower = prompt.lower()
     detected_connections = _detect_connections(prompt_lower)
 
-    user_message = f"""Design a Workeros worker for this task:
+    user_message = f"""Design a Floom worker for this task:
 
 {prompt}
 
@@ -3417,7 +3429,7 @@ async def draft_and_create_worker(
     detected_connections = _detect_connections(prompt_lower)
 
     user_message = (
-        f"Design a Workeros worker for this task:\n\n{prompt}\n\n"
+        f"Design a Floom worker for this task:\n\n{prompt}\n\n"
         f"Detected Composio apps that may be needed: "
         f"{detected_connections if detected_connections else 'none detected, infer from context'}\n\n"
         "Generate the full WorkerContract YAML and metadata JSON as specified. "
@@ -3711,7 +3723,7 @@ def update_worker(
         skill_path.write_text(
             f"# {_config.name}\n\n"
             "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
-            "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
+            "Current Floom execution uses `exec.command` from `worker.yml`.\n"
         , encoding='utf-8')
 
     invalidate_worker_cache()
@@ -4396,7 +4408,7 @@ def _authorize_run_platform_proxy(request: Request, run_id: str) -> None:
     from run_token import validate_worker_call_token as _validate_worker_call_token
     from run_token import verify_run_token as _verify_run_token
 
-    simple_token = request.headers.get("x-workeros-run-token", "")
+    simple_token = _run_token_header(request)
     if simple_token:
         token_run_id = _verify_run_token(simple_token)
         if token_run_id is None:
@@ -4509,7 +4521,7 @@ def composio_execute_proxy(
     import requests as _req_lib
     from run_token import verify_run_token as _verify_run_token
 
-    token_run_id = _verify_run_token(request.headers.get("x-workeros-run-token", ""))
+    token_run_id = _verify_run_token(_run_token_header(request))
     if token_run_id is None:
         raise HTTPException(status_code=401, detail="Missing or invalid run token")
     if token_run_id != run_id:
@@ -4517,7 +4529,7 @@ def composio_execute_proxy(
 
     # 1. Validate run_id — must exist in DB and be RUNNING.
     #    NOTE: get_any() is the UNSCOPED run lookup. That is correct *here* and
-    #    only here on an HTTP path: this endpoint is the sandbox→API callback,
+    #    only here on an HTTP path: this endpoint is the sandbox -> API callback,
     #    middleware-exempt, and authorized by possession of a live run_id (the
     #    capability), not by an operator auth context. The run_id is only a valid
     #    capability while the run is RUNNING — a missing/garbage/terminal run is
@@ -4705,7 +4717,7 @@ def _webhook_receipt_ttl_seconds() -> int:
 class WebhookDeliveryStore(Protocol):
     def claim(self, source: str, delivery_id: str) -> bool:
         """Atomically record (source, delivery_id). Return True if this is the
-        FIRST time it is seen (claim succeeds → process the webhook), False if it
+        FIRST time it is seen (claim succeeds -> process the webhook), False if it
         is a duplicate/redelivery (drop it). Implementations own their own TTL."""
         ...
 
@@ -5592,13 +5604,13 @@ def _workspace_agent_mcp_discovery() -> Dict[str, Any]:
 def _workspace_agent_mcp_setup_card() -> Dict[str, Any]:
     tools = [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()]
     recommended_prompt = (
-        "You are the Workeros Agent. Use Workeros MCP actions to inspect workers, "
+        "You are the Floom Agent. Use Floom MCP actions to inspect workers, "
         "runs, brain packs, connections, and secrets. Use ask_workspace_agent for "
         "broad delegation and direct tools for precise operations. Confirm before "
         "destructive actions such as deleting workers or secrets."
     )
     return {
-        "name": "Workeros",
+        "name": "Floom",
         "description": "Remote MCP setup for Langdock, Claude Code, Cursor, and other agent clients.",
         "server_url": "http://localhost:8000/api/mcp",
         "transport": "STREAMABLE_HTTP",
@@ -5612,17 +5624,17 @@ def _workspace_agent_mcp_setup_card() -> Dict[str, Any]:
             "token_configured": bool(_workspace_agent_mcp_tokens()),
         },
         "recommended_langdock_agent": {
-            "name": "Workeros Agent",
+            "name": "Floom Agent",
             "instructions": recommended_prompt,
         },
         "tools": tools,
         "checklist": [
-            "Create or copy a Workeros API token.",
+            "Create or copy a Floom API token.",
             "In Langdock Integrations, add an MCP integration.",
-            "Use the Workeros server URL and API key authentication.",
+            "Use the Floom server URL and API key authentication.",
             "Test the connection and save the discovered tools.",
-            "Create a Langdock custom agent named Workeros Agent.",
-            "Attach the Workeros MCP actions to that agent.",
+            "Create a Langdock custom agent named Floom Agent.",
+            "Attach the Floom MCP actions to that agent.",
             "Smoke test: list workers and summarize the latest failed runs.",
         ],
     }
@@ -5793,7 +5805,7 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         {
             "message": {
                 "type": "string",
-                "description": "The instruction or question for the Workeros workspace agent.",
+                "description": "The instruction or question for the Floom workspace agent.",
             },
             "conversation_id": {
                 "type": "string",
@@ -5806,14 +5818,14 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         {
             "name": _WORKSPACE_AGENT_MCP_TOOL_NAME,
             "description": (
-                "Ask the Workeros workspace agent to inspect or operate the workspace: "
+                "Ask the Floom workspace agent to inspect or operate the workspace: "
                 "workers, runs, approvals, brain packs, connections, and secret names."
             ),
             "inputSchema": workspace_schema,
         },
         {
             "name": "workers.list",
-            "description": "List Workeros workers.",
+            "description": "List Floom workers.",
             "inputSchema": _mcp_json_schema({
                 "include_system": {"type": "boolean", "default": False},
                 "include_archived": {"type": "boolean", "default": False},
@@ -5821,12 +5833,12 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         },
         {
             "name": "workers.get",
-            "description": "Get a Workeros worker by id.",
+            "description": "Get a Floom worker by id.",
             "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
         },
         {
             "name": "workers.create",
-            "description": "Create a Workeros worker from WorkerContract YAML and Python source.",
+            "description": "Create a Floom worker from WorkerContract YAML and Python source.",
             "inputSchema": _mcp_json_schema(
                 {
                     "worker_yml": {"type": "string", "description": worker_contract_yaml_description},
@@ -5851,7 +5863,7 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         },
         {
             "name": "workers.run",
-            "description": "Start a manual Workeros worker run.",
+            "description": "Start a manual Floom worker run.",
             "inputSchema": _mcp_json_schema({
                 "id": {"type": "string"},
                 "inputs": {"type": "object", "default": {}},
@@ -5860,7 +5872,7 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         },
         {
             "name": "runs.list",
-            "description": "List Workeros runs, optionally filtered by worker id or status.",
+            "description": "List Floom runs, optionally filtered by worker id or status.",
             "inputSchema": _mcp_json_schema({
                 "worker_id": {"type": "string"},
                 "status": {"type": "string"},
@@ -5871,12 +5883,12 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         },
         {
             "name": "runs.get",
-            "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.",
+            "description": "Get a Floom run by id, including logs, outputs, artifacts, and approval status.",
             "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
         },
         {
             "name": "runs.watch",
-            "description": "Poll a Workeros run until terminal status or timeout.",
+            "description": "Poll a Floom run until terminal status or timeout.",
             "inputSchema": _mcp_json_schema({
                 "id": {"type": "string"},
                 "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 30000, "default": 30000},
@@ -5917,7 +5929,7 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         },
         {
             "name": "contexts.list",
-            "description": "List Workeros brain packs.",
+            "description": "List Floom brain packs.",
             "inputSchema": _mcp_json_schema({}),
         },
         {
@@ -5969,9 +5981,9 @@ def _mcp_arg_str(arguments: Dict[str, Any], name: str) -> str:
     the empty string — the required-check then fires and the tool returns
     "required" even though the caller provided a valid value.  For the
     secrets.set ``value`` argument the key insight is:
-      - None / missing           → required error (caller omitted it)
-      - ""  (empty string)       → still invalid (blank secret is meaningless)
-      - "0", "false", 0, False   → valid; must be stringified and passed through
+      - None / missing           -> required error (caller omitted it)
+      - ""  (empty string)       -> still invalid (blank secret is meaningless)
+      - "0", "false", 0, False   -> valid; must be stringified and passed through
 
     This function converts the raw value to str BEFORE checking emptiness, so
     ``0`` becomes ``"0"`` (non-empty) and is accepted, while None and missing
@@ -6187,7 +6199,7 @@ def _mcp_call_contexts_read(arguments: Dict[str, Any], auth: AuthContext) -> Dic
             "size": target.stat().st_size,
             "mime_type": mime_type,
             "is_binary": True,
-            "note": "Binary brain-pack file. Use the Workeros HTTP API to download bytes.",
+            "note": "Binary brain-pack file. Use the Floom HTTP API to download bytes.",
         })
     return _mcp_call_result({
         "name": safe_name,
@@ -6217,7 +6229,7 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
         message = (
             f"Context file saved. WARNING: this file looks like it contains a live "
             f"credential ({patterns}). Brain packs are readable by anyone with workspace "
-            f"access — store secrets in Settings → Secrets, not in a Brain pack."
+            f"access -- store secrets in Settings -> Secrets, not in a Brain pack."
         )
     return _mcp_call_result(result, message)
 
@@ -6301,7 +6313,7 @@ def _workspace_agent_mcp_tool_definition() -> Dict[str, Any]:
     return {
         "name": _WORKSPACE_AGENT_MCP_TOOL_NAME,
         "description": (
-            "Ask the Workeros workspace agent to inspect or operate the workspace: "
+            "Ask the Floom workspace agent to inspect or operate the workspace: "
             "workers, runs, approvals, brain packs, connections, and secret names."
         ),
         "inputSchema": {
@@ -6309,7 +6321,7 @@ def _workspace_agent_mcp_tool_definition() -> Dict[str, Any]:
             "properties": {
                 "message": {
                     "type": "string",
-                    "description": "The instruction or question for the Workeros workspace agent.",
+                    "description": "The instruction or question for the Floom workspace agent.",
                 },
                 "conversation_id": {
                     "type": "string",
@@ -6371,11 +6383,11 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
 
 async def _workspace_agent_mcp_post(request: Request) -> Response:
     if not _workspace_agent_mcp_enabled():
-        raise HTTPException(status_code=503, detail="Workeros Remote MCP is disabled")
+        raise HTTPException(status_code=503, detail="Floom Remote MCP is disabled")
     static_tokens = _workspace_agent_mcp_tokens()
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if not static_tokens and deploy != "cloud":
-        raise HTTPException(status_code=503, detail="No Workeros MCP/API token is configured")
+        raise HTTPException(status_code=503, detail="No Floom MCP/API token is configured")
     # M-05: on CLOUD the static token must NOT short-circuit to the global
     # bootstrap admin context (no workspace binding => cross-tenant admin to any
     # holder of the single cloud-wide secret). Force cloud callers down the
@@ -6385,7 +6397,7 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
     else:
         cloud_ctx = await _workspace_agent_mcp_cloud_auth_context(request)
         if cloud_ctx is None:
-            raise HTTPException(status_code=401, detail="Invalid Workeros MCP token")
+            raise HTTPException(status_code=401, detail="Invalid Floom MCP token")
 
     body = await request.body()
     try:
@@ -6662,7 +6674,10 @@ async def webhook_trigger(
                         f"/workers/{worker_id}/webhook-secret/rotate first"
                     ),
                 )
-            sig_header = request.headers.get("X-Floom-Signature", "")
+            sig_header = (
+                request.headers.get("X-Floom-Signature", "")
+                or request.headers.get("X-Workeros-Signature", "")
+            )
             if not verify_signature(body, sig_header, secret_hash):
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
@@ -6798,7 +6813,7 @@ def rotate_webhook_secret(
 
 # ---------------------------------------------------------------------------
 # HTTP MCP server — JSON-RPC 2.0 over streamable HTTP
-# Exposes default WorkerOS management tools + custom workspace tools.
+# Exposes default Floom management tools + custom workspace tools.
 # OSS:   POST /mcp-tools/serve   (x-floom-secret auth)
 # Hosted: POST /mcp/{workspace_id} (PAT Bearer auth, added in a downstream host)
 # All default tools proxy to the existing REST API via httpx ASGITransport
@@ -6838,6 +6853,7 @@ _API_CALL_AUTH_HEADERS = frozenset({
     "x-api-key",
     "authorization",
     "cookie",
+    "x-floom-workspace",
     "x-workeros-workspace",
     # M-03: forward x-floom-user so the re-authenticated in-process sub-request
     # can resolve the acting user under WORKEROS_ENABLE_USER_HEADER_SCOPE.
@@ -6847,6 +6863,8 @@ _API_CALL_AUTH_HEADERS = frozenset({
 
 def _api_call_auth_headers(request: Request) -> dict[str, str]:
     auth_headers = {k.lower(): v for k, v in request.headers.items() if k.lower() in _API_CALL_AUTH_HEADERS}
+    if "x-floom-workspace" in auth_headers and "x-workeros-workspace" not in auth_headers:
+        auth_headers["x-workeros-workspace"] = auth_headers["x-floom-workspace"]
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy == "local" and "x-workeros-workspace" not in auth_headers:
         auth_headers["x-workeros-workspace"] = DEFAULT_WORKSPACE_ID
@@ -6874,12 +6892,12 @@ async def _api_call(
 
 _MCP_DEFAULT_TOOLS: List[dict] = [
     # --- workers ---
-    {"name": "workers.list", "description": "List Workeros workers.", "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "workers.get", "description": "Get a Workeros worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
-    {"name": "workers.create", "description": "Create a Workeros worker from WorkerContract YAML. For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md and a minimal run_py stub.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}}, "required": ["worker_yml", "run_py"]}},
+    {"name": "workers.list", "description": "List Floom workers.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workers.get", "description": "Get a Floom worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
+    {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md and a minimal run_py stub.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}}, "required": ["worker_yml", "run_py"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
-    {"name": "workers.delete", "description": "Delete a Workeros worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
-    {"name": "workers.run", "description": "Start a manual Workeros worker run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run."}, "trigger_source": {"type": "string", "default": "manual"}}, "required": ["id"]}},
+    {"name": "workers.delete", "description": "Delete a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
+    {"name": "workers.run", "description": "Start a manual Floom worker run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run."}, "trigger_source": {"type": "string", "default": "manual"}}, "required": ["id"]}},
     {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
     {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
     {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
@@ -6894,8 +6912,8 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "workers.alerts.create", "description": "Add an alert to a worker — fires on specified events via webhook or email.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "on": {"type": "array", "items": {"type": "string"}, "description": "Events to alert on, e.g. ['failed', 'approval_required']."}, "url": {"type": "string"}, "email_to": {"type": "array", "items": {"type": "string"}}}, "required": ["id", "on"]}},
     {"name": "workers.alerts.delete", "description": "Remove a worker alert by its ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "alert_id": {"type": "string"}}, "required": ["id", "alert_id"]}},
     # --- runs ---
-    {"name": "runs.list", "description": "List Workeros runs, optionally filtered by worker id.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "status": {"type": "string"}, "limit": {"type": "integer", "default": 50}, "offset": {"type": "integer", "default": 0}}}},
-    {"name": "runs.get", "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "runs.list", "description": "List Floom runs, optionally filtered by worker id.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "status": {"type": "string"}, "limit": {"type": "integer", "default": 50}, "offset": {"type": "integer", "default": 0}}}},
+    {"name": "runs.get", "description": "Get a Floom run by id, including logs, outputs, artifacts, and approval status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "runs.cancel", "description": "Cancel an in-progress run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "runs.replay", "description": "Replay a completed or failed run with the same inputs.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "run_id": {"type": "string"}}, "required": ["worker_id", "run_id"]}},
     {"name": "runs.watch", "description": "Poll a run until it reaches a terminal status. Blocks up to timeout_ms (capped at 30s — poll runs.get for longer waits).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 30000, "maximum": 30000}}, "required": ["id"]}},
@@ -6911,7 +6929,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "connections.status", "description": "Check the health and auth status of a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
     {"name": "connections.test", "description": "Run a live connectivity check on a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
     # --- contexts ---
-    {"name": "contexts.list", "description": "List Workeros context folders.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "contexts.list", "description": "List Floom context folders.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
     {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
@@ -6927,7 +6945,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "approvals.approve", "description": "Approve a pending run so it continues executing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
     {"name": "approvals.reject", "description": "Reject a pending run, stopping it from continuing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
     # --- workspace ---
-    {"name": "workspace.chat", "description": "Send a message to the Workeros workspace agent and receive a reply.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
+    {"name": "workspace.chat", "description": "Send a message to the Floom workspace agent and receive a reply.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
     {"name": "workspace.instructions.get", "description": "Read the current workspace agent instructions.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "workspace.instructions.set", "description": "Update the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
     {"name": "workspace.versions", "description": "List saved versions of the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
@@ -6938,7 +6956,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "system.info", "description": "Get platform version, deployment mode, and configuration flags.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "system.alerts", "description": "Get system-wide active alerts — worker failures, scheduler issues, connection errors.", "inputSchema": {"type": "object", "properties": {}}},
     # --- integrations ---
-    {"name": "integrations.catalog", "description": "Browse available integrations (apps, triggers, actions) supported by Workeros.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "integrations.catalog", "description": "Browse available integrations (apps, triggers, actions) supported by Floom.", "inputSchema": {"type": "object", "properties": {}}},
     # --- conversations ---
     {"name": "conversations.list", "description": "List past workspace agent conversations.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
     {"name": "conversations.get", "description": "Retrieve a full conversation history by ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
@@ -7496,7 +7514,7 @@ async def mcp_http_endpoint(
 ) -> JSONResponse:
     """MCP JSON-RPC 2.0 endpoint for /mcp-tools/serve.
 
-    RECONCILIATION (round-09 base ←→ main): main hardened the shared
+    RECONCILIATION (round-09 base <-> main): main hardened the shared
     ``_mcp_handle_request`` dispatcher to be JSON-RPC-2.0 spec-correct —
     a non-object body, an invalid batch item, and an oversized batch all
     return a Response *object* carrying error -32600 at HTTP 200 (transport

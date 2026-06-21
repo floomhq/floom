@@ -2,7 +2,7 @@
 
 The agent runtime treats a worker folder as a skill bundle. It loads the
 declared entrypoint (default: SKILL.md) as the system prompt, sends run inputs
-as a JSON user message, and lets the model call local Workeros tools plus
+as a JSON user message, and lets the model call local Floom tools plus
 OpenAI-hosted tools such as web search.
 """
 
@@ -1181,7 +1181,7 @@ class AgentDriver(SandboxDriver):
                 "type": "function",
                 "function": {
                     "name": "invoke_worker",
-                    "description": "Synchronously invoke another Workeros worker.",
+                    "description": "Synchronously invoke another Floom worker.",
                     "parameters": {
                         "type": "object",
                         "properties": {

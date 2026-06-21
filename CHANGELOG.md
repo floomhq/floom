@@ -11,7 +11,7 @@ No unreleased changes yet.
 
 ## [1.0.0] - 2026-06-19
 
-Initial source-available release of Workeros, the self-hosted runtime for AI
+Initial source-available release of Floom, the self-hosted runtime for AI
 workers. This public repository starts from a preserved public history after the preserved
 internal commits of development, hardening, and production testing. See
 [HISTORY.md](HISTORY.md) and [the v1.0.0 release notes](docs/releases/v1.0.0.md)
@@ -22,7 +22,7 @@ for provenance and launch context.
 - FastAPI backend for workers, runs, connections, approvals, contexts, users,
   tokens, and operational views.
 - Next.js web app for creating, running, monitoring, and sharing workers.
-- MCP and CLI package published as `@floomhq/workeros`.
+- MCP and CLI package published as `@floomhq/floom`.
 - E2B-sandboxed execution for script workers and agent workers.
 - Manifest-driven worker model with `schema_version: "0.3"`.
 - Script worker support through `run.py` and agent worker support through
@@ -66,5 +66,5 @@ for provenance and launch context.
 - E2B warm pools are available behind environment flags and should be sized
   conservatively because warm sandboxes are still running compute.
 
-[Unreleased]: https://github.com/floomhq/workeros/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/floomhq/workeros/releases/tag/v1.0.0
+[Unreleased]: https://github.com/floomhq/floom/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/floomhq/floom/releases/tag/v1.0.0

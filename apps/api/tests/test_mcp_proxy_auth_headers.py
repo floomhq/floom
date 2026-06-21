@@ -119,3 +119,24 @@ def test_api_call_keeps_default_workspace_header_on_local(monkeypatch, tmp_path)
     headers = main._api_call_auth_headers(outer)
 
     assert headers["x-workeros-workspace"] == main.DEFAULT_WORKSPACE_ID
+
+
+def test_api_call_normalizes_floom_workspace_header(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp-tools/serve",
+        "query_string": b"",
+        "headers": [
+            (b"x-api-key", b"key-123"),
+            (b"x-floom-workspace", b"ws_0123456789abcd"),
+        ],
+    }
+    outer = Request(scope)
+
+    headers = main._api_call_auth_headers(outer)
+
+    assert headers["x-floom-workspace"] == "ws_0123456789abcd"
+    assert headers["x-workeros-workspace"] == "ws_0123456789abcd"

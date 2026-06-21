@@ -1230,7 +1230,8 @@ function OpsInputsPanel({ w }: { w: WorkerSummary }) {
 // Each row fires on selected run terminal events (failed / completed) and
 // delivers to an email recipient list and/or an outbound webhook URL. Wired to
 // the real CRUD: GET/POST/DELETE /workers/{id}/alerts. Webhook POSTs are signed
-// (X-Workeros-Signature) and SSRF-pinned server-side; email goes via Resend.
+// (X-Floom-Signature and legacy X-Workeros-Signature during the rename window)
+// and SSRF-pinned server-side; email goes via Resend.
 const ALERT_EVENTS = ["failed", "completed"] as const;
 type AlertEvent = (typeof ALERT_EVENTS)[number];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -1284,9 +1285,9 @@ function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
       <AddAlertForm workerId={w.id} onCreated={() => void reload()} />
 
       <p style={{ ...muted, fontSize: 12.5 }}>
-        Webhook POSTs are signed with an <code>X-Workeros-Signature</code> HMAC header
-        and blocked from internal / metadata targets. Email delivery goes to workspace
-        members via Resend.
+        Webhook POSTs are signed with <code>X-Floom-Signature</code> and legacy{" "}
+        <code>X-Workeros-Signature</code> HMAC headers, and blocked from internal /
+        metadata targets. Email delivery goes to workspace members via Resend.
       </p>
     </div>
   );

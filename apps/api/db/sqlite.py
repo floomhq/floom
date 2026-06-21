@@ -172,8 +172,8 @@ def _legacy_source_relative_env_path() -> Path:
 
     THIS PATH IS THE N4-1 BUG. Because it is resolved relative to this source
     file, two processes serving the SAME shared DB but running from different
-    checkouts/deploy directories (e.g. ``/opt/workeros`` vs
-    ``/opt/workeros-live`` vs a ``/tmp`` worktree) resolve it to DIFFERENT
+    checkouts/deploy directories (e.g. ``/opt/floom`` vs
+    ``/opt/floom-live`` vs a ``/tmp`` worktree) resolve it to DIFFERENT
     files. A secret set by one process writes its value into that process's
     tree, while the DB row (anchored to the ABSOLUTE ``WORKEROS_DB``/``FLOOM_DB``
     path) is shared — so the secret reads back as "set" in the DB but its value

@@ -8,9 +8,27 @@
 
 set -Eeuo pipefail
 
-WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/workeros}"
+detect_default_root() {
+  if [[ -d /opt/floom || ! -d /opt/workeros ]]; then
+    echo "/opt/floom"
+  else
+    echo "/opt/workeros"
+  fi
+}
+
+detect_default_label() {
+  if [[ -n "${WORKEROS_AUTODEPLOY_LABEL:-}" ]]; then
+    echo "$WORKEROS_AUTODEPLOY_LABEL"
+  elif command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files --type=service 2>/dev/null | awk '{print $1}' | grep -qx "workeros-api.service"; then
+    echo "workeros-api"
+  else
+    echo "floom-api"
+  fi
+}
+
+WORKEROS_ROOT="${WORKEROS_ROOT:-$(detect_default_root)}"
 WORKEROS_BRANCH="${WORKEROS_BRANCH:-main}"
-SERVICE_LABEL="${WORKEROS_AUTODEPLOY_LABEL:-workeros-api}"
+SERVICE_LABEL="$(detect_default_label)"
 DEPLOY_CMD="${WORKEROS_DEPLOY_CMD:-$WORKEROS_ROOT/ops/deploy-api.sh}"
 ALERT_WEBHOOK="${WORKEROS_AUTODEPLOY_ALERT_WEBHOOK:-}"
 

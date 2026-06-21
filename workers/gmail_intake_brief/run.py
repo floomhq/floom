@@ -1,6 +1,6 @@
 """Gmail Intake Brief — E2B-native worker.
 
-Fetches recent emails via the Workeros Composio proxy and returns a markdown summary.
+Fetches recent emails via the Floom Composio proxy and returns a markdown summary.
 Reads inputs.json and secrets from .env.local (python-dotenv), connections.json.
 Writes result.json.
 
@@ -80,7 +80,7 @@ def main():
 
 
 def _fetch_emails_via_proxy(conn_id: str, query: str, max_results: int) -> list:
-    """Fetch emails via the Workeros Composio proxy endpoint.
+    """Fetch emails via the Floom Composio proxy endpoint.
 
     The proxy lives at POST /runs/{run_id}/composio-execute/GMAIL_FETCH_EMAILS
     and uses the server-side COMPOSIO_API_KEY. The sandbox doesn't need it.
@@ -97,7 +97,7 @@ def _fetch_emails_via_proxy(conn_id: str, query: str, max_results: int) -> list:
         },
     }
     try:
-        run_headers = {"X-Workeros-Run-Token": _RUN_TOKEN} if _RUN_TOKEN else {}
+        run_headers = {"X-Floom-Run-Token": _RUN_TOKEN} if _RUN_TOKEN else {}
         r = requests.post(url, json=body, headers=run_headers, timeout=30)
         r.raise_for_status()
         payload = r.json()

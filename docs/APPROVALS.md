@@ -1,6 +1,6 @@
 # Approval Model
 
-Workeros approvals are a human-in-the-loop pause, not an error state.
+Floom approvals are a human-in-the-loop pause, not an error state.
 
 ## When a Run Pauses
 

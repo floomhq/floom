@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 
 import auth
 from auth import AuthContext, get_auth_context, get_optional_auth_context
+from auth.local_workspaces import requested_local_workspace_id
 from core import hot_cache
 from core.approval_signing import try_approval_review_url
 from core.utils import _parse_iso8601, row_to_dict
@@ -223,10 +224,7 @@ def list_runs(
     if (before_created_at and not before_id) or (before_id and not before_created_at):
         raise HTTPException(status_code=400, detail="before_created_at and before_id must be supplied together")
 
-    workspace_key = (
-        request.headers.get("x-workeros-workspace")
-        or request.query_params.get("workspace_id")
-    )
+    workspace_key = requested_local_workspace_id(request)
     cache_key = (
         "runs",
         _hot_cache_scope(),
@@ -696,7 +694,7 @@ def download_run_bundle(
         archive.writestr(
             "README.txt",
             "This archive omits run inputs, logs, and internal transcripts. "
-            "Use the Workeros UI for redacted run history.\n",
+            "Use the Floom UI for redacted run history.\n",
         )
 
         primary_output = _extract_primary_output_file(output_payload)

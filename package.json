@@ -1,11 +1,11 @@
 {
-  "name": "workeros",
+  "name": "floom",
   "version": "1.0.0",
   "description": "The source-available, self-hosted runtime for AI workers. Sandboxed by default.",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
-    "url": "https://github.com/floomhq/workeros.git"
+    "url": "https://github.com/floomhq/floom.git"
   },
   "keywords": [
     "ai",

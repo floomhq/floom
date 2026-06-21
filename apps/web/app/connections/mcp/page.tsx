@@ -49,15 +49,15 @@ type McpConfigPayload = {
 };
 
 const MCP_INSTALL_TARGETS = [
-  { label: "Codex / Generic", target: "generic", command: "workeros mcp install --target generic" },
-  { label: "Claude", target: "claude", command: "workeros mcp install --target claude" },
-  { label: "Cursor", target: "cursor", command: "workeros mcp install --target cursor" },
-  { label: "VS Code", target: "vscode", command: "workeros mcp install --target vscode" },
-  { label: "Windsurf", target: "windsurf", command: "workeros mcp install --target windsurf" },
-  { label: "Continue", target: "continue", command: "workeros mcp install --target continue" },
+  { label: "Codex / Generic", target: "generic", command: "floom mcp install --target generic" },
+  { label: "Claude", target: "claude", command: "floom mcp install --target claude" },
+  { label: "Cursor", target: "cursor", command: "floom mcp install --target cursor" },
+  { label: "VS Code", target: "vscode", command: "floom mcp install --target vscode" },
+  { label: "Windsurf", target: "windsurf", command: "floom mcp install --target windsurf" },
+  { label: "Continue", target: "continue", command: "floom mcp install --target continue" },
 ] as const;
 
-const IMPORT_CONFIG_COMMAND = "workeros connections import-mcp-config ~/.claude/settings.json";
+const IMPORT_CONFIG_COMMAND = "floom connections import-mcp-config ~/.claude/settings.json";
 const DEFAULT_MCP_JSON = `{
   "label": "github",
   "transport": "streamable_http",

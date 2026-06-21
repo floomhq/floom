@@ -4,8 +4,8 @@ This is an example worker (is_example: true). Copy and customise it.
 
 Requirements:
   - COMPOSIO_API_KEY: Composio API key with WHATSAPP connected.
-  - WORKEROS_API_SECRET: Same secret used by the Workeros API.
-  - WORKEROS_API_BASE: Workeros API base URL (default: http://localhost:8000).
+  - WORKEROS_API_SECRET: Same secret used by the Floom API.
+  - WORKEROS_API_BASE: Floom API base URL (default: http://localhost:8000).
 """
 
 import json
@@ -39,7 +39,7 @@ def composio_execute(tool: str, arguments: dict, connected_account_id: str) -> d
 
 
 def get_whatsapp_connection_id() -> str | None:
-    """Get the active WhatsApp connection ID from Workeros."""
+    """Get the active WhatsApp connection ID from Floom."""
     req = urllib.request.Request(
         f"{API_BASE}/connections",
         headers={"x-floom-secret": API_SECRET},

@@ -179,6 +179,17 @@ def test_local_workspaces_list_create_and_select(client_and_db):
     assert scoped.json()["active_id"] == workspace_id
 
 
+def test_local_workspaces_accept_floom_workspace_header(client_and_db):
+    client, _db = client_and_db
+    created = client.post("/workspaces", json={"name": "Floom header"})
+    assert created.status_code == 200, created.text
+    workspace_id = created.json()["id"]
+
+    scoped = client.get("/workspaces", headers={"x-floom-workspace": workspace_id})
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["active_id"] == workspace_id
+
+
 def test_local_workspace_contexts_are_isolated(client_and_db):
     client, _db = client_and_db
     created = client.post("/workspaces", json={"name": "Isolated"})

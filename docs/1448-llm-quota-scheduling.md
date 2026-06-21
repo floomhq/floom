@@ -1,7 +1,7 @@
 # #1448 - LLM-rate-limit-aware run scheduling
 
 ## Problem
-WorkerOS had no coordination of the downstream LLM provider quota across
+Floom had no coordination of the downstream LLM provider quota across
 concurrent runs. Measured on ReviewPack (Vertex `gemini-3-flash-preview`): one
 search's judge burst (12 concurrent calls) = 12/12 OK, but two searches stacked
 (24 concurrent) = ~16/24 HTTP 429. The only existing limits were run-creation

@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
@@ -13,8 +13,8 @@ import {
   writeCredentials,
 } from "../dist/lib/credentials.js";
 import {
-  WorkerosApiClient,
-  WorkerosApiError,
+  FloomApiClient,
+  FloomApiError,
   createAuthenticatedClient,
   resolveLoginApiBase,
 } from "../dist/lib/api.js";
@@ -22,7 +22,7 @@ import { doctorCommand } from "../dist/commands/doctor.js";
 import { cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
 
 test("cloud login honors Retry-After headers on cli-exchange 429", () => {
-  const error = new WorkerosApiError(
+  const error = new FloomApiError(
     "rate limited",
     429,
     { detail: { retry_after: 60 } },
@@ -33,7 +33,7 @@ test("cloud login honors Retry-After headers on cli-exchange 429", () => {
 });
 
 test("cloud login falls back to structured retry_after body on cli-exchange 429", () => {
-  const error = new WorkerosApiError("rate limited", 429, {
+  const error = new FloomApiError("rate limited", 429, {
     detail: { retry_after: 42 },
   });
 
@@ -41,12 +41,12 @@ test("cloud login falls back to structured retry_after body on cli-exchange 429"
 });
 
 test("cloud login treats cli-exchange 429 without retry metadata as slow_down", () => {
-  const error = new WorkerosApiError("rate limited", 429, {});
+  const error = new FloomApiError("rate limited", 429, {});
 
   assert.equal(cloudRateLimitRetryMs(error, 2), 5_000);
 });
 
-test("cloud login defaults to hosted Workeros API", () => {
+test("cloud login defaults to hosted Floom API", () => {
   const originalBase = process.env.WORKEROS_API_BASE;
   const originalFloomBase = process.env.FLOOM_API_BASE;
   const originalCloud = process.env.WORKEROS_CLOUD;
@@ -447,11 +447,11 @@ test("oss client sends x-floom-secret and does NOT rewrite paths", async () => {
   });
 });
 
-test("WorkerosApiClient.authHeaders is callable from outside (used by SSE follow)", async () => {
+test("FloomApiClient.authHeaders is callable from outside (used by SSE follow)", async () => {
   await withTempHome(async () => {
     const supa = await startMockSupabase();
     try {
-      const client = new WorkerosApiClient(`http://127.0.0.1:9999`, {
+      const client = new FloomApiClient(`http://127.0.0.1:9999`, {
         api_base: `http://127.0.0.1:9999`,
         mode: "cloud",
         refresh_token: "rt-1",

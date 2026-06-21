@@ -2,7 +2,7 @@
 
 Uses requests directly (no heavy SDK) against Composio v3 API:
   - list_apps()              → known app slugs we support
-  - list_connections()       → active connected accounts for a Workeros user
+  - list_connections()       → active connected accounts for a Floom user
   - initiate_connection(app) → start OAuth flow, returns redirect_url + conn_id
   - check_status(conn_id)    → refresh connection status from Composio
   - get_entity_connection_id(app) → return composio_connection_id for the active connection
@@ -286,7 +286,7 @@ def list_toolkit_tools(slug: str, *, limit: int = 100) -> List[Dict[str, Any]]:
 
 
 def list_connections(*, user_id: str) -> List[Dict[str, Any]]:
-    """Return connected accounts for a Workeros user from Composio v3."""
+    """Return connected accounts for a Floom user from Composio v3."""
     data = _get("/connected_accounts", user_ids=user_id, limit=100)
     items = data.get("items") or []
     result: List[Dict[str, Any]] = []

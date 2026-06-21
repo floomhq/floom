@@ -1,0 +1,16 @@
+[Unit]
+Description=Floom API autodeploy from origin/main
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=WORKEROS_ROOT=/opt/floom
+Environment=WORKEROS_BRANCH=main
+Environment=WORKEROS_AUTODEPLOY_LABEL=floom-api
+Environment=WORKEROS_DEPLOY_CMD=/opt/floom/ops/deploy-api.sh
+EnvironmentFile=-/etc/floom/autodeploy.env
+ExecStart=/opt/floom/ops/autodeploy-api.sh
+StandardOutput=journal
+StandardError=journal
+

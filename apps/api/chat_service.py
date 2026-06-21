@@ -1,4 +1,4 @@
-﻿"""Workspace agent chat service — S37.
+"""Workspace agent chat service — S37.
 
 Implements POST /chat: a streaming SSE endpoint that routes user messages
 through the workspace-agent worker (system_worker: true) and persists
@@ -300,7 +300,7 @@ supplying the full run.py code yourself.
 
 **Trigger types** — valid values: `manual`, `schedule`, `webhook`, `event`. For
 "every N minutes" use `type: "schedule"` with `cron: "*/N * * * *"`. Never use
-`type: "cron"` or `type: "incoming_email"` — they don't exist in WorkerOS.
+`type: "cron"` or `type: "incoming_email"` — they don't exist in Floom.
 
 **Runner** — always `exec.runner: "e2b"`. The local runner was removed.
 
@@ -323,7 +323,7 @@ I re-read the worker with `workers__get` and show the actual saved
 DEFAULT_WORKSPACE_CUSTOM_INSTRUCTIONS = (
     "# Workspace Custom Instructions\n\n"
     "Add tenant-specific preferences, standing context, and operating rules here. "
-    "Emily's base identity is built into the Workeros engine and does not depend "
+    "Emily's base identity is built into the Floom engine and does not depend "
     "on this editable file."
 )
 
@@ -498,16 +498,16 @@ def strip_em_dashes(text: str) -> str:
     guarantee is unconditional.
 
     Replacement rules (safest readable substitution):
-      " — " (spaced em dash)  → ", "
-      "—"   (unspaced)        → ", "
-      " – " (spaced en dash)  → ", "
-      "–"   (unspaced)        → "-"
+      " — " (spaced em dash)  ? ", "
+      "—"   (unspaced)        ? ", "
+      " – " (spaced en dash)  ? ", "
+      "–"   (unspaced)        ? "-"
     """
     # Spaced variants first (more context, cleaner replacement)
-    text = text.replace(" — ", ", ")   # spaced em dash → comma-space
-    text = text.replace("—", ", ")     # bare em dash → comma-space
-    text = text.replace(" – ", ", ")   # spaced en dash → comma-space
-    text = text.replace("–", "-")      # bare en dash → hyphen
+    text = text.replace(" — ", ", ")   # spaced em dash ? comma-space
+    text = text.replace("—", ", ")     # bare em dash ? comma-space
+    text = text.replace(" – ", ", ")   # spaced en dash ? comma-space
+    text = text.replace("–", "-")      # bare en dash ? hyphen
     return text
 
 
@@ -1101,9 +1101,9 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
                 "- connections: list ALL app slugs the worker needs (e.g. [\"gmail\", \"googlecalendar\"])\n"
                 "  Declare every service mentioned. Empty list means the worker cannot call any external app.\n"
                 "INTENT MAPPING:\n"
-                "- 'ask me to approve' / 'needs approval' / 'HITL' → approvals: {required: true}\n"
-                "- 'use gmail / google calendar / slack / etc.' → add to connections list\n"
-                "- worker reads email / writes calendar / posts message → exec.mode: \"agent\""
+                "- 'ask me to approve' / 'needs approval' / 'HITL' ? approvals: {required: true}\n"
+                "- 'use gmail / google calendar / slack / etc.' ? add to connections list\n"
+                "- worker reads email / writes calendar / posts message ? exec.mode: \"agent\""
             ),
             {
                 "type": "object",
@@ -1247,7 +1247,7 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
             "mcp_tools__register",
             (
                 "Register a custom MCP tool backed by an existing worker. "
-                "The tool becomes callable through the Workeros MCP server."
+                "The tool becomes callable through the Floom MCP server."
             ),
             {
                 "type": "object",
@@ -1588,7 +1588,7 @@ def _workspace_agent_skill_for_intent(skill_md: str, *, include_authoring_rules:
     if include_authoring_rules:
         return skill_md
     return re.sub(
-        r"\n## Workeros worker\.yml format\n.*?(?=\n## Workspace-management tools\n)",
+        r"\n## Floom worker\.yml format\n.*?(?=\n## Workspace-management tools\n)",
         "\n",
         skill_md,
         flags=re.DOTALL,
@@ -1701,8 +1701,8 @@ ENVIRONMENT_NOTES: Dict[str, str] = {
         "When something needs the screen, give the exact link the tool returns."
     ),
     "web": (
-        "## Current environment: Workeros web app\n"
-        "You are in the Workeros web app. Rich markdown is fine; "
+        "## Current environment: Floom web app\n"
+        "You are in the Floom web app. Rich markdown is fine; "
         "tool results render as cards; longer structured answers are OK when asked. "
         "The person can see the dashboard alongside this chat."
     ),
@@ -2292,7 +2292,7 @@ async def stream_chat(
     conversation_token = _current_chat_conversation_id.set(conversation_id)
 
     try:
-        # Dial registered MCP servers (workspace-agent policy → require_approval=always).
+        # Dial registered MCP servers (workspace-agent policy ? require_approval=always).
         # SSRF + auth-header injection carry over from the shared module. A failed
         # MCP dial degrades gracefully: the assistant still answers with its other
         # tools rather than 500-ing the whole chat.

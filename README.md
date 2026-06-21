@@ -1,18 +1,18 @@
-# Workeros
+# Floom
 
-[![CI](https://github.com/floomhq/workeros/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/workeros/actions/workflows/ci.yml)
-[![License: Workeros Source Available](https://img.shields.io/badge/License-Workeros%20Source%20Available-blue.svg)](LICENSE)
+[![CI](https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/floom/actions/workflows/ci.yml)
+[![License: Floom Source Available](https://img.shields.io/badge/License-Floom%20Source%20Available-blue.svg)](LICENSE)
 
-Workeros is a source-available AI runtime for creating, running, and supervising
+Floom is a source-available AI runtime for creating, running, and supervising
 background AI workers. Sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
 
 New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
-short path from "why Workeros exists" to your first worker and a safe self-hosted
+short path from "why Floom exists" to your first worker and a safe self-hosted
 deployment checklist.
 
-Workeros is being released as a clean source-available v1.0 with its development
+Floom is being released as a clean source-available v1.0 with its development
 history preserved and private/internal artifacts filtered out. See
 [HISTORY.md](HISTORY.md) for the provenance story and
 [docs/releases/v1.0.0.md](docs/releases/v1.0.0.md) for release notes.
@@ -63,7 +63,7 @@ For common setup/runtime issues, see
 ```text
 apps/web      Next.js + TypeScript + Tailwind + shadcn/ui
 apps/api      FastAPI + SQLite + Pydantic
-apps/mcp      MCP server + CLI  (@floomhq/workeros)
+apps/mcp      MCP server + CLI  (@floomhq/floom)
 workers/      Worker folders (worker.yml + run.py or SKILL.md)
 data/         SQLite DB + run artifacts
 ```
@@ -87,7 +87,7 @@ runtime contract.
 
 ## Docs
 
-- [Getting started](docs/GETTING-STARTED.md) - why Workeros exists, first run,
+- [Getting started](docs/GETTING-STARTED.md) - why Floom exists, first run,
   first worker, and safe self-hosting checklist.
 - [Authoring workers](docs/AUTHORING.md) - full `worker.yml` schema, execution
   modes, secrets, connections, triggers, and approvals.
@@ -101,7 +101,7 @@ runtime contract.
   and provenance.
 - [Contributing](CONTRIBUTING.md) - local checks, first-contribution map, and PR
   expectations.
-- [Licensing](docs/LICENSING.md) - what the Workeros Source Available License
+- [Licensing](docs/LICENSING.md) - what the Floom Source Available License
   allows and what needs a commercial agreement.
 - [Third-party licenses](docs/THIRD-PARTY-LICENSES.md) - dependency inventory
   and SBOM release process.
@@ -136,9 +136,9 @@ privately rather than opening a public issue.
 
 ## License
 
-[Workeros Source Available License 1.0](LICENSE) (c) Workeros contributors.
-Workeros is free for internal business use, non-commercial use, personal use,
+[Floom Source Available License 1.0](LICENSE) (c) Floom contributors.
+Floom is free for internal business use, non-commercial use, personal use,
 building your own products or services, and consulting/integration work for
-permitted deployments. Offering Workeros itself as a hosted service, managed
+permitted deployments. Offering Floom itself as a hosted service, managed
 platform, white-label product, or competing commercial service requires a
 separate commercial agreement.

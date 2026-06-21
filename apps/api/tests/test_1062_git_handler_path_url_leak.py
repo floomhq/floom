@@ -30,9 +30,9 @@ if str(API_DIR) not in sys.path:
 # A realistic git stderr that leaks BOTH an fs path and a token-bearing URL.
 LEAKY_GIT_STDERR = (
     "git push failed: fatal: unable to access "
-    "'https://x-access-token:ghp_SECRETTOKEN1234567890@github.com/floomhq/workeros.git/': "
+    "'https://x-access-token:ghp_SECRETTOKEN1234567890@github.com/floomhq/floom.git/': "
     "The requested URL returned error: 403; "
-    "could not read from '/opt/workeros/var/workspaces/ws_abc/.git'"
+    "could not read from '/opt/floom/var/workspaces/ws_abc/.git'"
 )
 
 LEAK_MARKERS = ("/opt/", "ghp_", "x-access-token", "@github.com", "https://", "secrettoken", ".git'")
@@ -77,7 +77,7 @@ def test_git_safe_detail_classifies_not_found(main_mod):
     err = main._git_ops.GitOpsError(
         "git clone failed: remote: Repository not found. "
         "fatal: repository 'https://x-access-token:ghp_X@github.com/a/b.git/' not found; "
-        "/opt/workeros/var/x"
+        "/opt/floom/var/x"
     )
     msg = main._git_safe_http_detail(err, "clone")
     low = msg.lower()

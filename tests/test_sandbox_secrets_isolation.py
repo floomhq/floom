@@ -1,7 +1,7 @@
 """Regression test for the 2026-05-26 P0 secrets-leak finding.
 
 Audit 4 (security-edge) found that `get_secrets_for_worker()` unioned every
-key from `/etc/workeros/api.env` into the sandbox secrets.json,
+key from `/etc/floom/api.env` into the sandbox secrets.json,
 leaking FLOOM_SECRET, OPENAI_API_KEY, COMPOSIO_API_KEY,
 COMPOSIO_WEBHOOK_SIGNING_KEY, and E2B_API_KEY to every pure-script worker.
 

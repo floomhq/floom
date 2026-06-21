@@ -1,4 +1,4 @@
-﻿"""Composio + MCP connection routes.
+"""Composio + MCP connection routes.
 
 The connections surface: list / create (OAuth init + MCP), the OAuth callback,
 per-connection status / activity / account-info / peek / tools, deletion, the
@@ -394,7 +394,7 @@ def _refresh_connection_status_for_list(
 def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
     """Mask an account identity for any CROSS-USER / multi-tenant surface.
 
-    Workeros OS is single-tenant: the owner is the only principal and MUST see
+    Floom OS is single-tenant: the owner is the only principal and MUST see
     their own account identity (the GitHub login, the connected Google email).
     This helper is retained for a future multi-tenant / shared path where one
     user must NOT see another user's account identity — call it only there.

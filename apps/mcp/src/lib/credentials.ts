@@ -1,4 +1,4 @@
-﻿import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -20,7 +20,7 @@ export type StoredCredentials = {
   supabase_url?: string;
   // Hosted mode: Supabase anon key (needed for the /auth/v1/token refresh call).
   supabase_anon_key?: string;
-  // Currently-active workspace id (hosted or OSS). Sent as X-Workeros-Workspace.
+  // Currently-active workspace id (hosted or OSS). Sent as x-workeros-workspace.
   workspace_id?: string;
   // Human-readable workspace name (for `floom workspaces show`).
   workspace_name?: string;
@@ -46,6 +46,14 @@ function resolveHomeDir(): string {
 }
 
 export function credentialsPath(): string {
+  const home = resolveHomeDir();
+  if (!home) {
+    throw new Error("HOME is required to read CLI credentials");
+  }
+  return join(home, ".config", "floom", "credentials.json");
+}
+
+function legacyCredentialsPath(): string {
   const home = resolveHomeDir();
   if (!home) {
     throw new Error("HOME is required to read CLI credentials");
@@ -78,7 +86,7 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     };
   }
 
-  const path = credentialsPath();
+  const path = existsSync(credentialsPath()) ? credentialsPath() : legacyCredentialsPath();
   if (!existsSync(path)) {
     return null;
   }
@@ -137,12 +145,10 @@ export async function updateCredentials(
 }
 
 export async function clearCredentials(): Promise<boolean> {
-  const path = credentialsPath();
-  if (!existsSync(path)) {
-    return false;
-  }
-  await rm(path, { force: true });
-  return true;
+  const paths = [credentialsPath(), legacyCredentialsPath()];
+  const existing = paths.filter((path) => existsSync(path));
+  await Promise.all(existing.map((path) => rm(path, { force: true })));
+  return existing.length > 0;
 }
 
 export function maskSecret(secret: string): string {

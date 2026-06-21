@@ -22,11 +22,11 @@ def test_autodeploy_script_avoids_pull_and_checks_drift():
 
 
 def test_autodeploy_unit_is_versioned():
-    oss = (ROOT / "ops" / "workeros-api-autodeploy.service").read_text(encoding="utf-8")
+    oss = (ROOT / "ops" / "floom-api-autodeploy.service").read_text(encoding="utf-8")
 
-    assert "WORKEROS_ROOT=/opt/workeros" in oss
-    assert "WORKEROS_DEPLOY_CMD=/opt/workeros/ops/deploy-api.sh" in oss
-    assert "ExecStart=/opt/workeros/ops/autodeploy-api.sh" in oss
+    assert "WORKEROS_ROOT=/opt/floom" in oss
+    assert "WORKEROS_DEPLOY_CMD=/opt/floom/ops/deploy-api.sh" in oss
+    assert "ExecStart=/opt/floom/ops/autodeploy-api.sh" in oss
 
 
 def test_cloud_autodeploy_is_out_of_oss_scope():

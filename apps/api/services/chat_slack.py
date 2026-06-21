@@ -27,7 +27,7 @@ SLACK_API_BASE = "https://slack.com/api"
 # not-invited channel never crashes the tool call; Emily tells the operator
 # exactly how to grant access.
 _SLACK_SCOPE_DOC = (
-    "https://api.slack.com/apps -> your Workeros app -> OAuth & Permissions"
+    "https://api.slack.com/apps -> your Floom app -> OAuth & Permissions"
 )
 
 
@@ -87,7 +87,7 @@ def _slack_friendly_error(error: str) -> Dict[str, Any]:
             "message": (
                 "Channel reading isn't enabled yet. The workspace owner needs to add "
                 "the channel scopes (channels:read, channels:history, groups:read, "
-                "groups:history) to the Workeros Slack app and reinstall it "
+                "groups:history) to the Floom Slack app and reinstall it "
                 f"({_SLACK_SCOPE_DOC}). Once that's done I can read any channel "
                 "you've invited me to."
             ),

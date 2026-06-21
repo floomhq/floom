@@ -1,6 +1,6 @@
 # Agent Cookbook - Building & Deploying Workers
 
-For agents (Claude Code / Cursor / custom) installing the `@floomhq/workeros` MCP and producing real workers from prompts. This is the **read-this-first** recipe book.
+For agents (Claude Code / Cursor / custom) installing the `@floomhq/floom` MCP and producing real workers from prompts. This is the **read-this-first** recipe book.
 
 If you only have time for one doc, read this. If you want the full schema reference, see [AUTHORING.md](AUTHORING.md).
 
@@ -8,29 +8,30 @@ If you only have time for one doc, read this. If you want the full schema refere
 
 ## 0. Fresh-agent path
 
-Use this path when you have a blank shell, a Workeros secret, and a prompt to
+Use this path when you have a blank shell, a Floom secret, and a prompt to
 create or edit a worker.
 
 ### 0.1 Install + verify MCP
 
 The npm package exposes three binaries:
 
-- `workeros` - preferred CLI name in these docs.
-- `floom` — compatibility alias for older installs.
-- `workeros-mcp` - stdio MCP fallback binary for clients that cannot use HTTP MCP.
+- `floom` - preferred CLI name in these docs.
+- `workeros` - compatibility alias for older installs.
+- `floom-mcp` - stdio MCP fallback binary for clients that cannot use HTTP MCP.
+- `workeros-mcp` - compatibility alias for older MCP client configs.
 
-If a different local `floom` command exists, use `workeros`.
+If an older guide mentions `workeros`, use `floom` for new installs.
 
 ```bash
-npx -y @floomhq/workeros mcp install --target claude
+npx -y @floomhq/floom mcp install --target claude
 # OR
-npx -y @floomhq/workeros mcp install --target cursor
+npx -y @floomhq/floom mcp install --target cursor
 ```
 
 Set `WORKEROS_API_BASE` to your API URL before install; for local development
 that is usually `http://localhost:8000`. Set `WORKEROS_API_SECRET` to skip the
 secret prompt when your API is protected by `FLOOM_SECRET`. For older harnesses
-that need a local stdio process, configure `npx -y -p @floomhq/workeros workeros-mcp`.
+that need a local stdio process, configure `npx -y -p @floomhq/floom floom-mcp`.
 Verify:
 
 ```bash
@@ -42,30 +43,30 @@ workers.list
 For CLI use outside an MCP client:
 
 ```bash
-npm i -g @floomhq/workeros@latest
-workeros login
-workeros doctor
-workeros workers list
+npm i -g @floomhq/floom@latest
+floom login
+floom doctor
+floom workers list
 ```
 
 Hosted workspaces use the hosted login flow:
 
 ```bash
-workeros login --cloud
-workeros workspace list
-workeros workspace switch <workspace-name-or-id>
+floom login --cloud
+floom workspace list
+floom workspace switch <workspace-name-or-id>
 ```
 
-Workspace switching also works for self-hosted local workspaces. `workeros mcp list` /
-`workeros mcp switch <label>` switch the active MCP server the same way, and
-`workeros mcp test [label]` live-probes a server (defaults to the active one).
+Workspace switching also works for self-hosted local workspaces. `floom mcp list` /
+`floom mcp switch <label>` switch the active MCP server the same way, and
+`floom mcp test [label]` live-probes a server (defaults to the active one).
 `workspaces` and `use` remain as aliases.
 
-Credentials live in `~/.config/workeros/credentials.json`.
+Credentials live in `~/.config/floom/credentials.json`. Existing `~/.config/workeros/credentials.json` files are still read for compatibility.
 
 ### 0.2 Create, edit, deploy, and run from a local bundle
 
-For a local worker directory, the deploy command is `workeros workers push`.
+For a local worker directory, the deploy command is `floom workers push`.
 It creates the worker when the id is new and updates it when the id already
 exists on an API that supports in-place source updates.
 
@@ -74,15 +75,15 @@ mkdir -p workers/text-summarizer
 # write workers/text-summarizer/worker.yml
 # write workers/text-summarizer/run.py OR workers/text-summarizer/SKILL.md
 
-workeros workers validate workers/text-summarizer
-workeros workers push workers/text-summarizer
-workeros run text-summarizer --input text="Long text here..."
-workeros runs show <run_id> --json
+floom workers validate workers/text-summarizer
+floom workers push workers/text-summarizer
+floom run text-summarizer --input text="Long text here..."
+floom runs show <run_id> --json
 ```
 
 `workers validate` checks the local bundle shape before any network write. It
 also catches Composio-in-E2B mistakes such as shelling out to `composio execute`
-instead of using the Workeros proxy.
+instead of using the Floom proxy.
 
 When `workers push` reports that the API does not support in-place source
 updates, the local source is valid but the target API cannot overwrite that
@@ -98,7 +99,7 @@ workers.run({ id: "text-summarizer", inputs: { text: "Long text here..." } })
 runs.watch({ id: "<run_id>" })
 ```
 
-Use CLI `workeros workers push <dir>` for `SKILL.md` agent-mode bundles. The
+Use CLI `floom workers push <dir>` for `SKILL.md` agent-mode bundles. The
 MCP `workers.update` tool edits instance settings such as trigger, cron, saved
 input defaults, capabilities, and webhook secret rotation; it does not replace
 `run.py`, `SKILL.md`, or `worker.yml` source.
@@ -338,7 +339,7 @@ connections = json.loads(Path("connections.json").read_text(encoding="utf-8"))
 
 msg = inputs["event"]  # full Gmail message payload
 gmail_connection_id = connections["gmail"]
-# Use the Workeros API or Composio SDK with this connection id.
+# Use the Floom API or Composio SDK with this connection id.
 ...
 ```
 
@@ -446,13 +447,13 @@ Heuristics:
 ### 7.3 Deploy via CLI
 
 ```bash
-workeros workers validate workers/my-skill
-workeros workers push workers/my-skill
+floom workers validate workers/my-skill
+floom workers push workers/my-skill
 ```
 
 ### 7.4 Verify
 
-Smoke-test with `workeros run` or MCP `workers.run` + `runs.watch`. If the
+Smoke-test with `floom run` or MCP `workers.run` + `runs.watch`. If the
 skill referenced `~/.claude/skills/...` absolute paths, those will fail in the
 sandbox; patch to relative paths first.
 
@@ -489,7 +490,7 @@ workers.get({ id: "text-summarizer" })
 
 **Args:** `{ worker_yml, run_py }`
 - MCP creation currently accepts script-mode Python source. Use CLI
-  `workeros workers push <dir>` for `SKILL.md` agent-mode bundles.
+  `floom workers push <dir>` for `SKILL.md` agent-mode bundles.
 
 **Returns:** `{ worker: { id, ... } }`
 
@@ -599,7 +600,7 @@ connections:
       - GOOGLE_SEARCH_CONSOLE_LIST_SITEMAPS
 ```
 
-Run `workeros workers validate ./workers/<id>` before pushing. It catches E2B anti-patterns like `subprocess.run(["composio", "execute", ...])`, missing `connections:`, and tool slugs not listed in `allowed_tools`.
+Run `floom workers validate ./workers/<id>` before pushing. It catches E2B anti-patterns like `subprocess.run(["composio", "execute", ...])`, missing `connections:`, and tool slugs not listed in `allowed_tools`.
 
 ---
 
@@ -618,7 +619,7 @@ When an agent is asked "build me a worker that does X", produce:
 
 After writing, ALWAYS:
 
-- Call `workers.create` for script-mode MCP creation, or `workeros workers push`
+- Call `workers.create` for script-mode MCP creation, or `floom workers push`
   for local bundles and `SKILL.md` workers.
 - Call `workers.run` with `example_input` to smoke-test.
 - Call `runs.watch` and confirm terminal status === "succeeded".
@@ -627,7 +628,7 @@ After writing, ALWAYS:
 If smoke-test fails:
 - Read the logs with `runs.get`.
 - Patch settings with `workers.update`, or patch source locally and run
-  `workeros workers push <dir>`.
+  `floom workers push <dir>`.
 - Re-test.
 
 ---

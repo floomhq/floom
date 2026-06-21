@@ -156,7 +156,7 @@ def _write_worker_bundle_files(
         (target_dir / "SKILL.md").write_text(
             f"# {config.name}\n\n"
             "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
-            "Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+            "Current Floom execution uses `exec.command` from `worker.yml`.\n",
             encoding="utf-8",
         )
 
@@ -221,7 +221,7 @@ def _reject_raw_local_runner_on_create(worker_yml: str) -> None:
         raise HTTPException(
             status_code=400,
             detail=(
-                "exec.runner: local is not supported by the hosted Workeros API. "
+                "exec.runner: local is not supported by the hosted Floom API. "
                 "Set exec.runner: e2b for workers created through the API or MCP."
             ),
         )

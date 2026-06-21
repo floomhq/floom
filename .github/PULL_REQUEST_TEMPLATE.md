@@ -1,4 +1,4 @@
-<!-- Thanks for contributing to WorkerOS! -->
+<!-- Thanks for contributing to Floom! -->
 
 ## What & why
 

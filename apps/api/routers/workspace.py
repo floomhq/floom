@@ -913,7 +913,9 @@ async def put_workspace_base_persona(
     if not content.strip():
         raise HTTPException(status_code=400, detail="workspace base persona cannot be empty")
     set_workspace_base_persona(content)
-    source = "ai" if request.headers.get("x-workeros-run-token") else "user"
+    source = "ai" if (
+        request.headers.get("x-floom-run-token") or request.headers.get("x-workeros-run-token")
+    ) else "user"
     author_name, author_email = _git_author(auth)
     _git_commit_workspace_base_md(message=f"workspace base: update ({source})", author_name=author_name, author_email=author_email)
     return Response(status_code=204)
@@ -1066,7 +1068,9 @@ async def put_workspace(
     if not content.strip():
         raise HTTPException(status_code=400, detail="workspace.md content cannot be empty")
     set_workspace_md(content)
-    source = "ai" if request.headers.get("x-workeros-run-token") else "user"
+    source = "ai" if (
+        request.headers.get("x-floom-run-token") or request.headers.get("x-workeros-run-token")
+    ) else "user"
     author_name, author_email = _git_author(auth)
     _git_commit_workspace_md(message=f"workspace: update instructions ({source})", author_name=author_name, author_email=author_email)
     return Response(status_code=204)

@@ -38,4 +38,3 @@ def test_worker_author_registration_logs_missing_bundle_artifact():
     assert any("worker-author registration: entered" in message for _level, message in logs)
     assert any("worker-author produced no bundle.json" in message for _level, message in logs)
     assert any("exists=False" in message for _level, message in logs)
-

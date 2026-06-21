@@ -1,8 +1,8 @@
-# Workeros Product Spec
+# Floom Product Spec
 
 ## The OS for Background Workers
 
-Workeros lets users spawn background workers, give them secrets/tools, run them manually or through triggers, and observe every execution.
+Floom lets users spawn background workers, give them secrets/tools, run them manually or through triggers, and observe every execution.
 
 The core promise:
 
@@ -28,7 +28,7 @@ These workers may be:
 
 They need an operating layer.
 
-Workeros provides that layer:
+Floom provides that layer:
 
 - creation
 - execution
@@ -40,12 +40,12 @@ Workeros provides that layer:
 - approvals
 - observability
 
-Workeros is not a visual workflow builder.
-Workeros is not Zapier.
-Workeros is not n8n.
-Workeros is not a prompt playground.
+Floom is not a visual workflow builder.
+Floom is not Zapier.
+Floom is not n8n.
+Floom is not a prompt playground.
 
-Workeros is the OS for background workers.
+Floom is the OS for background workers.
 
 ---
 
@@ -68,7 +68,7 @@ The smallest magical loop:
 
 ```txt
 Drop worker folder into /workers
-→ Workeros discovers it
+→ Floom discovers it
 → UI generates a run form
 → user clicks Run
 → backend executes the worker
@@ -683,7 +683,7 @@ See `workers/weekly_update/` and `workers/csv_enricher/` in the repo for the ref
 
 # 24. What Makes This Pitchable
 
-The demo shows: real worker folder → Workeros discovers it → UI appears → fill a generated form → worker runs → logs appear → output appears → approval appears.
+The demo shows: real worker folder → Floom discovers it → UI appears → fill a generated form → worker runs → logs appear → output appears → approval appears.
 
 This proves: the abstraction, the runtime, the UI, the observability, the safety layer. Without overbuilding.
 
@@ -710,7 +710,7 @@ Everything else is optional.
 
 # 26. Final Product Sentence
 
-Workeros is the OS for background workers.
+Floom is the OS for background workers.
 
 It lets you spawn workers, run them manually or through triggers, give them secrets, and observe every run.
 
@@ -718,5 +718,5 @@ The initial release should make one thing feel obvious:
 
 ```txt
 Workers are becoming part of the company stack.
-Workeros is where they live, run, and get supervised.
+Floom is where they live, run, and get supervised.
 ```

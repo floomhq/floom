@@ -5,7 +5,7 @@ name: "worker-author"
 title: "Worker Author"
 description: "Generates a new worker bundle from a natural-language prompt. The first worker every operator gets."
 long_description: |
-  Turns a one-paragraph description of a job into a runnable Workeros worker bundle.
+  Turns a one-paragraph description of a job into a runnable Floom worker bundle.
   Outputs worker.yml + run.py/SKILL.md + a sample input. Either returns a draft
   for the operator to review, or creates the worker directly when mode=create.
 

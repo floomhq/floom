@@ -1,6 +1,6 @@
 # Getting started
 
-Workeros is a source-available runtime for AI workers: small, versioned worker
+Floom is a source-available runtime for AI workers: small, versioned worker
 bundles that can read inputs, use approved tools/connections, run in a sandbox,
 and leave behind logs, outputs, approvals, and history.
 
@@ -263,11 +263,11 @@ connections, read [AUTHORING.md](AUTHORING.md).
 ### CLI deploy loop
 
 ```bash
-npm i -g @floomhq/workeros
-workeros login
-workeros workers validate ./workers/<id>
-workeros workers push ./workers/<id>
-workeros run <id> --inputs-file inputs.json
+npm i -g @floomhq/floom
+floom login
+floom workers validate ./workers/<id>
+floom workers push ./workers/<id>
+floom run <id> --inputs-file inputs.json
 ```
 
 ### Example workers

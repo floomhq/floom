@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly Floom data snapshot
+Requires=floom-backup.service
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+Unit=floom-backup.service
+
+[Install]
+WantedBy=timers.target
