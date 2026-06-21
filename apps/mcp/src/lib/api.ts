@@ -31,6 +31,11 @@ type QueryValue = string | number | boolean | null | undefined;
 type RequestOptions = {
   query?: Record<string, QueryValue>;
   body?: unknown;
+  // Raw request body sent verbatim (no JSON.stringify). Takes precedence over
+  // `body`. Used to PUT file bytes (text or binary) to endpoints that write the
+  // raw payload, e.g. /contexts/{name}/files/{path}.
+  rawBody?: Uint8Array;
+  contentType?: string;
   headers?: Record<string, string>;
   auth?: boolean;
 };
@@ -230,7 +235,10 @@ export class FloomApiClient {
       Object.assign(headers, await this.authHeaders());
     }
     let body: BodyInit | undefined;
-    if (options.body !== undefined) {
+    if (options.rawBody !== undefined) {
+      headers["content-type"] = options.contentType || "application/octet-stream";
+      body = options.rawBody as unknown as BodyInit;
+    } else if (options.body !== undefined) {
       headers["content-type"] = "application/json";
       body = JSON.stringify(options.body);
     }

@@ -40,6 +40,14 @@ import {
   connectionsListCommand,
 } from "./commands/connections.js";
 import {
+  contextsCreateCommand,
+  contextsDeleteCommand,
+  contextsListCommand,
+  contextsPullCommand,
+  contextsPushCommand,
+  contextsShowCommand,
+} from "./commands/contexts.js";
+import {
   mcpInstallCommand,
   mcpListCommand,
   mcpSwitchCommand,
@@ -253,6 +261,49 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "floom"): Co
     .option("--json", "Print raw JSON")
     .action(async (path: string, options: { json?: boolean }) =>
       runAction(connectionsImportMcpConfigCommand(path, options)));
+
+  const contexts = program.command("contexts")
+    .alias("context")
+    .description("Manage knowledge packs / brain packs (provision contexts headlessly)");
+  contexts.command("list")
+    .description("List contexts your credentials can access")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(contextsListCommand(options)));
+  contexts.command("show")
+    .description("Show a context and its files")
+    .argument("<name>", "Context name")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { json?: boolean }) => runAction(contextsShowCommand(name, options)));
+  contexts.command("create")
+    .description("Create a context (brain pack)")
+    .argument("<name>", "Context name")
+    .option("--writeable", "Allow workers to write into this context")
+    .option("--no-sensitive", "Opt into git versioning (default: sensitive, no git history)")
+    .option("--category <category>", "Content-category tag")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { writeable?: boolean; sensitive?: boolean; category?: string; json?: boolean }) =>
+      runAction(contextsCreateCommand(name, options)));
+  contexts.command("push")
+    .description("Upload a local file into a context (text or binary)")
+    .argument("<name>", "Context name")
+    .argument("<path>", "Destination path inside the context")
+    .argument("<file>", "Local file to upload")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, path: string, file: string, options: { json?: boolean }) =>
+      runAction(contextsPushCommand(name, path, file, options)));
+  contexts.command("pull")
+    .description("Download a file from a context")
+    .argument("<name>", "Context name")
+    .argument("<path>", "File path inside the context")
+    .option("-o, --output <path>", "Local destination (defaults to the file's basename)")
+    .action(async (name: string, path: string, options: { output?: string }) =>
+      runAction(contextsPullCommand(name, path, options)));
+  contexts.command("delete")
+    .alias("rm")
+    .description("Delete a context")
+    .argument("<name>", "Context name")
+    .option("-y, --yes", "Skip confirmation")
+    .action(async (name: string, options: { yes?: boolean }) => runAction(contextsDeleteCommand(name, options)));
 
   const mcp = program.command("mcp").description("Manage MCP servers and client config");
   mcp.command("list")

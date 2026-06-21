@@ -5,9 +5,10 @@ _floom_completion() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  local commands="login logout whoami run workers workspaces workspace runs secrets connections mcp completion --help --version"
+  local commands="login logout whoami run workers workspaces workspace contexts context runs secrets connections mcp completion --help --version"
   local workers_sub="list show"
   local workspaces_sub="list create show switch use"
+  local contexts_sub="list show create push pull delete rm"
   local runs_sub="list show logs download approve reject cancel"
   local secrets_sub="list set delete"
   local connections_sub="list add import-mcp-config"
@@ -21,6 +22,7 @@ _floom_completion() {
   case "\${COMP_WORDS[1]}" in
     workers) COMPREPLY=( $(compgen -W "\${workers_sub}" -- "\${cur}") ) ;;
     workspaces|workspace) COMPREPLY=( $(compgen -W "\${workspaces_sub}" -- "\${cur}") ) ;;
+    contexts|context) COMPREPLY=( $(compgen -W "\${contexts_sub}" -- "\${cur}") ) ;;
     runs) COMPREPLY=( $(compgen -W "\${runs_sub}" -- "\${cur}") ) ;;
     secrets) COMPREPLY=( $(compgen -W "\${secrets_sub}" -- "\${cur}") ) ;;
     connections) COMPREPLY=( $(compgen -W "\${connections_sub}" -- "\${cur}") ) ;;
@@ -42,6 +44,7 @@ _floom() {
     'run:Run a worker'
     'workers:List or show workers'
     'workspaces:Manage workspaces'
+    'contexts:Manage knowledge packs / brain packs'
     'runs:List or inspect runs'
     'secrets:Manage secrets'
     'connections:Manage app and MCP connections'
@@ -55,9 +58,10 @@ compdef _floom floom
 }
 
 function fishCompletion(): string {
-  return `complete -c floom -f -a "login logout whoami run workers workspaces workspace runs secrets connections mcp completion"
+  return `complete -c floom -f -a "login logout whoami run workers workspaces workspace contexts context runs secrets connections mcp completion"
 complete -c floom -n "__fish_seen_subcommand_from workers" -a "list show"
 complete -c floom -n "__fish_seen_subcommand_from workspaces workspace" -a "list create show switch use"
+complete -c floom -n "__fish_seen_subcommand_from contexts context" -a "list show create push pull delete rm"
 complete -c floom -n "__fish_seen_subcommand_from runs" -a "list show logs download approve reject cancel"
 complete -c floom -n "__fish_seen_subcommand_from secrets" -a "list set delete"
 complete -c floom -n "__fish_seen_subcommand_from connections" -a "list add import-mcp-config"

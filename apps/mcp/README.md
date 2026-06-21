@@ -184,6 +184,21 @@ floom workers info <id>
 
 `workers push` uses `POST /workers` for new workers and `PUT /workers/{id}` for existing workers. If an older API returns 404/405 for source updates, upgrade the API before editing workers in place.
 
+## Context (brain pack) CLI flow
+
+Provision the knowledge packs a worker depends on without a browser, so a script/cron can stand up a workspace end-to-end:
+
+```bash
+floom contexts create crm-brain                       # new brain pack
+floom contexts push crm-brain docs/playbook.md ./playbook.md   # upload a file (text or binary)
+floom contexts list                                   # see all packs
+floom contexts show crm-brain                          # pack + file listing
+floom contexts pull crm-brain docs/playbook.md -o out.md
+floom contexts delete crm-brain --yes
+```
+
+`contexts create` accepts `--writeable` (let workers write into the pack), `--no-sensitive` (opt into git versioning; packs are sensitive/no-history by default), and `--category <tag>`. `contexts push` streams the local file bytes verbatim, so it works for markdown and binary alike.
+
 ## Tools
 
 > **For full worked examples per tool, end-to-end recipes (deploy a worker from prompt, port a Claude skill, schedule + webhook + composio triggers), and the agent draft contract, see [docs/AGENT-COOKBOOK.md](../../docs/AGENT-COOKBOOK.md).**
