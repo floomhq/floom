@@ -147,6 +147,25 @@ def test_definitive_failure_emits_connection_failed_once(stub):
     assert props["failure_status"] == "expired"
 
 
+def test_failed_status_emits_connection_failed_once(stub):
+    _run_callback("failed")
+    failed = _events(stub, "connection_failed")
+    assert len(failed) == 1
+    assert not _events(stub, "connection_added")
+    assert failed[0]["properties"]["failure_status"] == "failed"
+
+
+@pytest.mark.parametrize("pending_status", ["initiated", "unknown"])
+def test_pending_status_emits_nothing(stub, pending_status):
+    # Composio activates asynchronously: a freshly created row can still read
+    # "initiated" (or an unrecognized "unknown") at callback time. That is a
+    # pending connection, not a definitive failure, so it must emit neither
+    # connection_added nor connection_failed (no false funnel signal).
+    _run_callback(pending_status)
+    assert not _events(stub, "connection_added")
+    assert not _events(stub, "connection_failed")
+
+
 def test_unknown_remote_answer_emits_nothing(stub):
     # Composio unreachable -> status stays pending -> no false signal.
     _run_callback(None)

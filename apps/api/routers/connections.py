@@ -1271,9 +1271,13 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
         )
 
         # Analytics: capture the OAuth activation outcome once per callback
-        # resolution. ``active`` is an add; a definitive non-active status from
-        # the provider is a failure. A missing/unknown remote answer leaves the
-        # connection pending and emits nothing (no false signal). Fail-soft.
+        # resolution. ``active`` is an add; only a definitive failure status
+        # (``expired``/``failed``, matching the canonical failure handling
+        # below) is a failure. A still-pending status (``initiated``/
+        # ``unknown``) or a missing/``not_found`` remote answer leaves the
+        # connection pending and emits nothing — Composio activates
+        # asynchronously, so a freshly created row can still read pending at
+        # callback time and must not be mislabelled a failure. Fail-soft.
         if final_status == "active":
             _emit_connection_resolved(
                 event="connection_added",
@@ -1281,7 +1285,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
                 owner_id=str(existing["user_id"]),
                 provider=landing_app or existing.get("app_name"),
             )
-        elif remote_status and remote_status != "not_found":
+        elif remote_status in ("expired", "failed"):
             _emit_connection_resolved(
                 event="connection_failed",
                 connection_id=str(landing_id or existing["id"]),
