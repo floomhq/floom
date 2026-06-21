@@ -19,6 +19,7 @@ import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-st
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { GenerativeAvatar } from "@/components/GenerativeAvatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,43 +53,12 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 
 // #1305: the app is WHITE-LABELED — the workspace IS the brand. The mark must
 // be the WORKSPACE logo/avatar, never the Floom play-triangle.
-// DiceBear `shapes` avatar deterministically seeded by workspace name —
-// geometric, non-cartoonish, fits a serious B2B product.
-// Container uses var(--radius-button) (squircle), NOT a circle.
+// Generative avatar deterministically seeded by workspace name — squircle shape.
 function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
-  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
-  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      aria-hidden="true"
-      width={size}
-      height={size}
-      className="shrink-0 rounded-[var(--radius-button)] object-cover"
-      style={{ width: size, height: size }}
-    />
-  );
+  const seed = resolveWorkspaceName(name) || name || "workspace";
+  return <GenerativeAvatar seed={seed} shape="squircle" size={size} />;
 }
 
-// #1306: user profile avatar fallback when /me returns no OAuth photo.
-// DiceBear `glass` style deterministically seeded by the user's email/name:
-// a calm geometric mark (no cartoon faces), consistent with the workspace
-// mark's squircle, flat, no-border treatment.
-function UserDiceBearAvatar({ seed, size }: { seed: string; size: number }) {
-  const safeSeed = encodeURIComponent(seed || "user");
-  const src = `https://api.dicebear.com/9.x/glass/svg?seed=${safeSeed}&radius=0`;
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt="Profile avatar"
-      className="shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
-      style={{ width: size, height: size }}
-    />
-  );
-}
 
 /** Active workspace name, resolved once from the workspace list (shared shape
  *  with UserProfileFooter so the mark + footer stay in sync). */
@@ -652,24 +622,16 @@ export function UserProfileFooter({
           )}
           aria-label="Profile menu"
         >
-          {/* #1306 / M36: profile photo (Google/GitHub) when available, else
-              initials. Squared (rounded-square via the app radius token), no
-              border. */}
-          {photoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={photoUrl}
-              alt="Profile avatar"
-              className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            // #1306: no OAuth photo (OSS /me returns none): fall back to a
-            // DiceBear avatar deterministically seeded by the user's
-            // email/name, NOT bare initials. Squircle container, no border,
-            // matching the workspace mark approach.
-            <UserDiceBearAvatar seed={primary} size={28} />
-          )}
+          {/* #1306 / M36: profile photo (Google/GitHub) beats generated default.
+              GenerativeAvatar handles the override ladder: avatarUrl present
+              → real photo cropped to circle; absent → generative default. */}
+          <GenerativeAvatar
+            seed={primary}
+            shape="circle"
+            size={28}
+            avatarUrl={photoUrl}
+            alt="Profile avatar"
+          />
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
             <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>
