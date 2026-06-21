@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
@@ -242,14 +242,14 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
           separate full-page chat with its own header. */}
       {/* Global primary CTA: canonical Button (size lg = h-9) rendered as the
           create-worker Link. Same primary token + label everywhere. */}
-      <Button
-        size="lg"
-        className="w-full"
-        render={<Link href="/?create=1" onClick={() => onNavigate?.()} />}
+      <Link
+        href="/?create=1"
+        onClick={() => onNavigate?.()}
+        className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
-      </Button>
+      </Link>
       {/* #1315: differentiated grey background (var(--bg-2)) so the Search box
           reads as an input, not a plain nav link. kbd chips sit on the lighter
           card surface so they stay legible against the grey field. */}

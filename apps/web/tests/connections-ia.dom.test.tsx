@@ -14,6 +14,15 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
+const CONNECTED_FIXTURE = {
+  id: "conn_1",
+  app_name: "gmail",
+  status: "active",
+  account_label: "ops@example.com",
+  created_at: "2026-06-20T00:00:00Z",
+  updated_at: "2026-06-20T00:00:00Z",
+};
+
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
@@ -23,7 +32,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api", () => ({
   api: {
     workers: { list: vi.fn().mockResolvedValue([]) },
-    connections: { list: vi.fn().mockResolvedValue([]), delete: vi.fn(), test: vi.fn() },
+    connections: { list: vi.fn().mockResolvedValue([CONNECTED_FIXTURE]), delete: vi.fn(), test: vi.fn() },
     secrets: { list: vi.fn().mockResolvedValue([]) },
     members: { list: vi.fn().mockResolvedValue([]) },
   },
@@ -43,7 +52,9 @@ describe("Connections IA — renamed, no count chips, standard filters, Browse=A
     );
     render(
       <TestQueryProvider>
-        <ConnectionsCollection initialConnections={[]} />
+        <ConnectionsCollection
+          initialConnections={[CONNECTED_FIXTURE as never]}
+        />
       </TestQueryProvider>,
     );
 
@@ -77,7 +88,7 @@ describe("Connections IA — renamed, no count chips, standard filters, Browse=A
     fireEvent.click(filterToggle);
 
     // Type filters are present as standard tag chips.
-    expect(screen.getByRole("button", { name: /^connected$/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^connected$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^mcp$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^secrets$/i })).toBeInTheDocument();
 
