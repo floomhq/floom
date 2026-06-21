@@ -57,7 +57,7 @@ export function V3TemplateCard({
     <motion.div {...anim} transition={{ duration: 0.4, delay: Math.min(i * 0.05, 0.3), ease: EASE }}>
       <Link
         href={href ?? `/templates/${t.slug}`}
-        className="group flex h-full min-h-[262px] flex-col overflow-hidden rounded-[16px] border border-border-soft bg-card transition-colors hover:bg-secondary/40"
+        className="group flex h-full min-h-[262px] flex-col overflow-hidden rounded-[16px] bg-card transition-colors hover:bg-secondary/60"
       >
         <div className="p-5 pb-4">
           <div className="flex items-start justify-between gap-3">
@@ -75,7 +75,7 @@ export function V3TemplateCard({
           className="mx-5 mb-4 transition-transform duration-200 group-hover:-translate-y-0.5"
         />
 
-        <div className="mt-auto flex items-center justify-between border-t border-border-soft px-5 py-3">
+        <div className="mt-auto flex items-center justify-between px-5 py-3">
           <span className="flex items-center gap-2">
             {marks.map(({ tool, mark }) => (
               <span

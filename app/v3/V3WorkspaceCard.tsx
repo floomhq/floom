@@ -44,7 +44,7 @@ export function V3WorkspaceCard({ w, i = 0 }: { w: Workspace; i?: number }) {
     >
       <Link
         href={`/workspaces/${w.slug}`}
-        className="group flex h-full min-h-[300px] flex-col overflow-hidden rounded-[16px] border border-border-soft bg-card transition-colors hover:bg-secondary/40"
+        className="group flex h-full min-h-[300px] flex-col overflow-hidden rounded-[16px] bg-card transition-colors hover:bg-secondary/60"
       >
         <div className="p-5 pb-4">
           <div className="flex items-start justify-between gap-3">
@@ -85,7 +85,7 @@ export function V3WorkspaceCard({ w, i = 0 }: { w: Workspace; i?: number }) {
           })}
         </div>
 
-        <div className="mt-auto flex items-center justify-between border-t border-border-soft px-5 py-3">
+        <div className="mt-auto flex items-center justify-between px-5 py-3">
           <span className="font-mono text-[10.5px] text-muted-foreground">{workers.length} workers</span>
           <span className="text-[12px] font-medium" style={{ color: "var(--v3-accent)" }}>
             View workspace
