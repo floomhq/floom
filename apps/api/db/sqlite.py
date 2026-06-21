@@ -4430,6 +4430,31 @@ class SqliteAssetAccessRepository:
             (asset_id,),
         ).fetchone()
 
+    def asset_id_conflict(
+        self, *, asset_type: str, asset_id: str, workspace_id: str
+    ) -> bool:
+        """True when an access row for ``asset_id`` already exists in a DIFFERENT
+        workspace.
+
+        ``brain_packs.id`` (and the other asset tables' ``id``) is a GLOBAL
+        primary key, but pack folders are workspace-local
+        (``CONTEXTS_DIR/<workspace>/<name>``). So a destination name can be free
+        on this workspace's disk yet already taken by another workspace's row.
+        A rename onto such a name cannot re-key the source row — the ``UPDATE``
+        would violate the global PK — so the caller must reject it (409) before
+        touching the filesystem instead of corrupting the foreign workspace's
+        owner/visibility mirror.
+        """
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE id = ? AND workspace_id != ? LIMIT 1",
+                (asset_id, workspace_id),
+            ).fetchone()
+        return row is not None
+
     def ensure_brain_pack(
         self,
         *,
@@ -4681,7 +4706,11 @@ class SqliteAssetAccessRepository:
 
         Returns the moved row, or ``None`` when no source row exists in that
         workspace (the caller then materializes a fresh row). Never raises for a
-        missing source.
+        missing source. Raises ``ValueError`` when ``new_asset_id`` is already
+        held by a DIFFERENT workspace: ``id`` is a global PK, so re-keying onto
+        it would violate the constraint; rejecting protects the foreign row
+        (the route pre-checks this and 409s before any filesystem move, so this
+        is a backstop for direct callers).
         """
         table = _ASSET_TABLES.get(asset_type)
         if table is None:
@@ -4694,6 +4723,14 @@ class SqliteAssetAccessRepository:
             ).fetchone()
             if src is None:
                 return None
+            conflict = conn.execute(
+                f"SELECT 1 FROM {table} WHERE id = ? AND workspace_id != ? LIMIT 1",
+                (new_asset_id, workspace_id),
+            ).fetchone()
+            if conflict is not None:
+                raise ValueError(
+                    f"{asset_type} id {new_asset_id!r} already exists in another workspace"
+                )
             conn.execute(
                 f"DELETE FROM {table} WHERE id = ? AND workspace_id = ?",
                 (new_asset_id, workspace_id),

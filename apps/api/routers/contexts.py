@@ -549,6 +549,28 @@ def rename_context(
                 "referenced_by": referenced_by,
             },
         )
+    # `brain_packs.id` is a GLOBAL primary key while pack folders are
+    # workspace-local, so the destination name can collide with a DIFFERENT
+    # workspace's access row even though `new_root` is free on this workspace's
+    # disk. Re-keying onto it would violate the PK, and the fallback below would
+    # then ON CONFLICT(id) rewrite (corrupt) that workspace's owner/visibility
+    # mirror. Reject up front, before any filesystem move, so the rename stays
+    # all-or-nothing. Message mirrors the on-disk conflict above (no cross-
+    # workspace existence is leaked).
+    asset_access = getattr(repos, "asset_access", None)
+    if asset_access is not None and hasattr(asset_access, "asset_id_conflict"):
+        try:
+            cross_workspace_conflict = asset_access.asset_id_conflict(
+                asset_type="brain_pack",
+                asset_id=new_name,
+                workspace_id=pack_workspace_id,
+            )
+        except Exception:
+            cross_workspace_conflict = False
+        if cross_workspace_conflict:
+            raise HTTPException(
+                status_code=409, detail="A folder with that name already exists"
+            )
     # Read the source visibility before the move so the fallback path below can
     # carry it over (auto-named folders are private, but a shared pack must stay
     # shared).
@@ -567,7 +589,6 @@ def rename_context(
     # Scope the move to the pack's workspace: pack ids are workspace-local, so an
     # unscoped re-key would clobber a same-named pack's row in another workspace.
     owner_id = context_owner_id(new_name)
-    asset_access = getattr(repos, "asset_access", None)
     moved_row = None
     if asset_access is not None and hasattr(asset_access, "rename_asset"):
         try:

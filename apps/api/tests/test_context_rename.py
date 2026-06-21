@@ -204,6 +204,52 @@ def test_rename_blocks_on_other_owner_worker_in_workspace(client):
     assert client.get("/contexts/renamed-facts").status_code == 404
 
 
+def test_rename_into_other_workspace_id_is_rejected_and_does_not_corrupt(client):
+    """#1813 P1: ``brain_packs.id`` is a GLOBAL primary key but pack folders are
+    workspace-local, so a destination name free on this workspace's disk can
+    still collide with another workspace's access row.
+
+    Re-keying onto it would violate the PK and (via the materialize fallback's
+    ``ON CONFLICT(id)``) rewrite the foreign workspace's owner/visibility mirror.
+    The rename must be rejected (409) BEFORE any filesystem move, leaving both
+    the source folder and the foreign row untouched.
+    """
+    import os
+    import sqlite3
+
+    import db as db_mod
+
+    # A brain_packs row owned by a DIFFERENT workspace, keyed on the name the
+    # caller is about to rename onto.
+    repos = db_mod.get_repositories()
+    repos.asset_access.ensure_brain_pack(
+        pack_id="taken",
+        workspace_id="ws-other",
+        owner_id="other-user",
+        name="taken",
+        default_visibility="workspace",
+    )
+
+    # A fresh private folder in the caller's (local-default) workspace.
+    assert client.post("/contexts/draft", json={"writeable": True, "sensitive": False}).status_code in (200, 201)
+
+    resp = client.post("/contexts/draft/rename", json={"new_name": "taken"})
+    assert resp.status_code == 409, resp.text
+
+    # Source folder untouched (rename aborted before the filesystem move) and no
+    # folder materialized under the conflicting name in this workspace.
+    assert client.get("/contexts/draft").status_code == 200
+    assert client.get("/contexts/taken").status_code == 404
+
+    # The foreign workspace's mirror row is byte-for-byte intact.
+    with sqlite3.connect(os.environ["WORKEROS_DB"]) as conn:
+        row = conn.execute(
+            "SELECT workspace_id, owner_id, visibility FROM brain_packs WHERE id = ?",
+            ("taken",),
+        ).fetchone()
+    assert row == ("ws-other", "other-user", "workspace")
+
+
 def test_rename_to_existing_name_conflicts(client):
     assert client.post("/contexts/other", json={"writeable": True}).status_code in (200, 201)
     resp = client.post("/contexts/facts/rename", json={"new_name": "other"})
