@@ -150,7 +150,7 @@ export default function ConnectAppPage() {
               <ul className="mt-2 space-y-1 text-sm text-muted-foreground list-none">
                 <li>· Read your {providerName} data on your behalf</li>
                 <li>· Perform actions in {providerName} that your workers ask for</li>
-                <li>· Revoke access at any time from the Integrations page</li>
+                <li>· Revoke access at any time from the Connections page</li>
               </ul>
             </div>
 

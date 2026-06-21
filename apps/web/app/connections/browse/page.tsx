@@ -18,7 +18,6 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { HIDDEN_CHANNEL_SLUGS } from "@/components/connections/connection-data";
-import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import {
@@ -464,7 +463,17 @@ export default function ConnectionsBrowsePage() {
   const config: CollectionConfig<IntegrationCatalogItem> = {
     title: "Browse apps",
     subtitle: "Connect the apps your workers need to take action.",
-    headerSlot: <ConnectionsChips />,
+    // Back to the unified Connections list (Browse apps is reached from the
+    // Connections "Add" button, not a section tab).
+    headerSlot: (
+      <Link
+        href="/connections"
+        className="inline-flex items-center gap-1 text-[13px] text-[var(--ink-soft)] hover:text-ink"
+      >
+        <ChevronLeft className="size-3.5" aria-hidden="true" />
+        Connections
+      </Link>
+    ),
     items,
     loading,
     error: loadError,

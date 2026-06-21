@@ -176,13 +176,13 @@ type NavItem = {
 // Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is gone,
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
-// Integrations. (MCP is a pinned item above the profile footer, see below.)
+// Connections. (MCP is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
-  { href: "/connections", label: "Integrations", icon: Plug },
+  { href: "/connections", label: "Connections", icon: Plug },
 ];
 
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
