@@ -413,6 +413,21 @@ export const api = {
       remove: (id: string, feedbackId: string) =>
         fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
     },
+    // Per-worker alerts (email and/or outbound webhook on run terminal events).
+    // GET/POST/DELETE /workers/{id}/alerts — frontend-callable config surface for
+    // recipients + events + webhook URL (#1677). Webhook signing uses a
+    // server-side secret (X-Workeros-Signature); no client-supplied secret.
+    alerts: {
+      list: (id: string) =>
+        fetchJson<import("./types").WorkerAlert[]>(`/workers/${id}/alerts`),
+      create: (id: string, body: import("./types").WorkerAlertCreate) =>
+        fetchJson<import("./types").WorkerAlert>(`/workers/${id}/alerts`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+      remove: (id: string, alertId: string) =>
+        fetchJson<void>(`/workers/${id}/alerts/${alertId}`, { method: "DELETE" }),
+    },
   },
   runs: {
     list: async (params?: {
