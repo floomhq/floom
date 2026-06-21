@@ -367,7 +367,32 @@ def _repair_generated_worker_manifest(
             repaired["version"] = "0.1.0"
     if "version" in repaired and repaired["version"] is not None and not isinstance(repaired["version"], str):
         repaired["version"] = str(repaired["version"])
+    exec_block = repaired.get("exec")
+    if isinstance(exec_block, dict):
+        repaired_exec = dict(exec_block)
+        for key in ("inputs", "outputs"):
+            if key in repaired_exec:
+                repaired_exec[key] = _normalize_named_schema_list(repaired_exec[key])
+        repaired["exec"] = repaired_exec
     return repaired
+
+
+def _normalize_named_schema_list(value: Any) -> Any:
+    """Convert Gemini-style named schema maps to WorkerContract lists."""
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return value
+    normalized: List[Dict[str, Any]] = []
+    for name, spec in value.items():
+        item: Dict[str, Any] = {"name": str(name)}
+        if isinstance(spec, dict):
+            item.update(spec)
+            item["name"] = str(item.get("name") or name)
+        elif spec is not None:
+            item["type"] = str(spec)
+        normalized.append(item)
+    return normalized
 
 
 def _exec_block(manifest: Dict[str, Any]) -> Dict[str, Any]:
