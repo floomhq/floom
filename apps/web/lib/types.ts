@@ -655,7 +655,7 @@ export interface WorkspaceIssue {
 
 // #1807 explicit, opt-in conversion of actionable run feedback into an issue.
 export interface RunFeedbackIssueRequest {
-  feedback_text?: string | null;
+  feedback_text: string;
   rating?: string | null;
   title?: string | null;
   feedback_id?: string | null;
@@ -665,7 +665,6 @@ export interface RunFeedbackIssueResponse {
   issue_id: string;
   created: boolean;
   issue: WorkspaceIssue;
-  feedback?: RunFeedback | null;
 }
 
 export interface ApprovalRow {

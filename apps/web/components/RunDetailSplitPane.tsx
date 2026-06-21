@@ -62,57 +62,32 @@ type Props = {
  */
 export function TrackRunFeedbackIssue({ run }: { run: RunDetail }) {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<RunFeedback[] | null>(null);
   const [note, setNote] = useState("");
   const [title, setTitle] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [promotingId, setPromotingId] = useState<string | null>(null);
   const [createdIssueId, setCreatedIssueId] = useState<string | null>(null);
 
   const defaultTitle = `Run feedback: ${run.worker_name || run.worker_id}`;
-
-  useEffect(() => {
-    if (!open) return;
-    api.runs.feedback
-      .list(run.id)
-      .then(setItems)
-      .catch(() => setItems([]));
-  }, [open, run.id]);
 
   async function submit() {
     const feedback = note.trim();
     if (!feedback || submitting) return;
     setSubmitting(true);
     try {
-      const created = await api.runs.feedback.create(run.id, feedback);
-      setItems((prev) => [...(prev ?? []), created]);
-      toast.success("Feedback saved");
-      setNote("");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save feedback");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function promote(feedbackId: string) {
-    if (promotingId) return;
-    setPromotingId(feedbackId);
-    try {
       const resp = await api.runs.createFeedbackIssue(run.id, {
-        feedback_id: feedbackId,
+        feedback_text: feedback,
         title: title.trim() || null,
       });
       setCreatedIssueId(resp.issue_id);
-      if (resp.feedback) {
-        setItems((prev) => (prev ?? []).map((item) => (item.id === resp.feedback?.id ? resp.feedback : item)));
-      }
+      // V1: no Issues page yet, so confirm the id inline + via toast.
+      toast.success(`Created ${resp.issue_id}`);
+      setOpen(false);
+      setNote("");
       setTitle("");
-      toast.success(resp.created ? `Created ${resp.issue_id}` : `Already tracked as ${resp.issue_id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not create issue");
     } finally {
-      setPromotingId(null);
+      setSubmitting(false);
     }
   }
 
@@ -120,7 +95,7 @@ export function TrackRunFeedbackIssue({ run }: { run: RunDetail }) {
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Flag className="size-3.5 mr-1.5" />
-        Feedback
+        Track as issue
       </Button>
       {createdIssueId && (
         <span className="text-xs text-muted-foreground">
@@ -130,14 +105,14 @@ export function TrackRunFeedbackIssue({ run }: { run: RunDetail }) {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Run feedback</DialogTitle>
+            <DialogTitle>Track this run as an issue</DialogTitle>
             <DialogDescription>
-              Capture lightweight feedback, then mark specific items actionable as workspace issues.
+              Turn actionable feedback into a tracked workspace issue bound to this run.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="run-issue-title">Issue title override (optional)</Label>
+              <Label htmlFor="run-issue-title">Title (optional)</Label>
               <Input
                 id="run-issue-title"
                 value={title}
@@ -146,45 +121,22 @@ export function TrackRunFeedbackIssue({ run }: { run: RunDetail }) {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="run-issue-note">Feedback</Label>
+              <Label htmlFor="run-issue-note">What went wrong?</Label>
               <Textarea
                 id="run-issue-note"
                 value={note}
                 rows={4}
-                placeholder="What went wrong or what should change?"
+                placeholder="Describe the problem so a human or fixer worker can act on it."
                 onChange={(e) => setNote(e.target.value)}
               />
-              <Button onClick={submit} disabled={!note.trim() || submitting}>
-                {submitting ? "Saving..." : "Save feedback"}
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {items === null && <div className="text-sm text-muted-foreground">Loading feedback...</div>}
-              {items?.length === 0 && <div className="text-sm text-muted-foreground">No feedback yet.</div>}
-              {items?.map((item) => (
-                <div key={item.id} className="rounded-md border p-3 space-y-2">
-                  <div className="text-sm whitespace-pre-wrap">{item.content}</div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {item.issue_id ? `Tracked as ${item.issue_id}` : "Feedback only"}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={Boolean(item.issue_id) || promotingId === item.id}
-                      onClick={() => void promote(item.id)}
-                    >
-                      <Flag className="size-3.5 mr-1.5" />
-                      {item.issue_id ? "Issue created" : promotingId === item.id ? "Creating..." : "Create issue"}
-                    </Button>
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={submitting}>
-              Close
+              Cancel
+            </Button>
+            <Button onClick={submit} disabled={!note.trim() || submitting}>
+              {submitting ? "Creating…" : "Create issue"}
             </Button>
           </DialogFooter>
         </DialogContent>
