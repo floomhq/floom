@@ -3,7 +3,9 @@ import { rankWorkersForCommandPalette } from "@/lib/command-palette";
 import type { WorkerSummary } from "@/lib/types";
 
 function worker(id: string, name: string, description = ""): WorkerSummary {
-  return { id, name, description };
+  // WorkerSummary has required fields beyond id/name/description; the ranking
+  // function only reads these three, so cast to avoid exhaustive stub data.
+  return { id, name, description } as unknown as WorkerSummary;
 }
 
 describe("command palette worker ranking", () => {
