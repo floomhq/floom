@@ -1,0 +1,108 @@
+name: Deploy staging web to Vercel
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-workeros-staging
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-web-staging:
+    name: Deploy Workeros web staging
+    runs-on: [self-hosted, linux, x64, workeros-ci]
+    timeout-minutes: 20
+
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_WORKEROS_PROJECT_ID }}
+      STAGING_ALIAS: workeros-staging.vercel.app
+      FLOOM_API_BASE: https://workeros-api.floom.dev
+      WORKEROS_API_BASE: https://workeros-api.floom.dev
+      NEXT_PUBLIC_API_BASE: https://workeros-api.floom.dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Pin Vercel project link
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          mkdir -p .vercel
+          printf '{"projectId":"%s","orgId":"%s"}\n' \
+            "$VERCEL_PROJECT_ID" "$VERCEL_ORG_ID" > .vercel/project.json
+          cat .vercel/project.json
+
+      - name: Pull Vercel preview env for staging
+        working-directory: apps/web
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          npx --yes vercel@50.22.1 pull --yes --environment=preview \
+            --scope "$VERCEL_ORG_ID" --token "$VERCEL_TOKEN"
+
+      - name: Build staging from prod backend settings
+        working-directory: apps/web
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          timeout 15m npx --yes vercel@50.22.1 build \
+            --scope "$VERCEL_ORG_ID" --token "$VERCEL_TOKEN"
+
+      - name: Deploy preview build
+        working-directory: apps/web
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          timeout 10m npx --yes vercel@50.22.1 deploy --prebuilt --yes \
+            --scope "$VERCEL_ORG_ID" --token "$VERCEL_TOKEN" \
+            --env FLOOM_API_BASE="$FLOOM_API_BASE" \
+            --env WORKEROS_API_BASE="$WORKEROS_API_BASE" \
+            --env NEXT_PUBLIC_API_BASE="$NEXT_PUBLIC_API_BASE" \
+            | tee deploy-url.txt
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy-url.txt | tail -1)"
+          if [ -z "$DEPLOY_URL" ]; then
+            echo "::error::Could not parse a deploy URL from vercel output."
+            exit 1
+          fi
+          echo "DEPLOY_URL=$DEPLOY_URL" >> "$GITHUB_ENV"
+
+      - name: Alias staging URL
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          DEPLOY_ID="$(curl -sS \
+            "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${VERCEL_ORG_ID}" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')"
+          if [ -z "$DEPLOY_ID" ]; then
+            echo "::error::Could not resolve deploy id for $DEPLOY_URL."
+            exit 1
+          fi
+          RESP="$(curl -sS -X POST \
+            "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${VERCEL_ORG_ID}" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"alias\":\"${STAGING_ALIAS}\"}")"
+          echo "$RESP"
+          echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code")=="not_modified"; sys.exit(0 if ok else 1)'
+
+      - name: Smoke staging
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://${STAGING_ALIAS}/" || true)"
+          echo "https://${STAGING_ALIAS}/ -> $code"
+          test "$code" = "200" -o "$code" = "307" -o "$code" = "308" -o "$code" = "401"
