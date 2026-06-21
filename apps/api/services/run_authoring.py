@@ -270,6 +270,54 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
 
+def _force_script_runtime_for_run_code(worker_yml: str, log_fn: Callable[..., None]) -> str:
+    """Force generated code bundles onto the script runtime.
+
+    Gemini can emit a contradictory bundle: ``run_code`` is present, ``skill_md``
+    is null, but the YAML only has ``exec.command``. The contract parser then
+    defaults to agent/skill runtime and later tries to execute SKILL.md, while
+    the actual runnable file is run.py. Repair only the execution metadata.
+    """
+    try:
+        import yaml as pyyaml
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception:
+        return worker_yml
+    if not isinstance(raw, dict):
+        return worker_yml
+
+    exec_block = raw.get("exec")
+    if not isinstance(exec_block, dict):
+        exec_block = {}
+        raw["exec"] = exec_block
+
+    changed = False
+    desired = {
+        "runtime": "python311",
+        "entry": "run.py",
+        "runner": "e2b",
+        "command": "python run.py",
+    }
+    for key, value in desired.items():
+        current = str(exec_block.get(key) or "").strip()
+        if current != value:
+            exec_block[key] = value
+            changed = True
+
+    if str(exec_block.get("mode") or "").strip().lower() == "agent":
+        exec_block.pop("mode", None)
+        changed = True
+    if str(raw.get("entrypoint") or "").strip() == "SKILL.md":
+        raw.pop("entrypoint", None)
+        changed = True
+
+    if not changed:
+        return worker_yml
+    log_fn("Forced generated run.py bundle onto script runtime", level="warning")
+    import yaml as pyyaml
+    return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
+
+
 def _backfill_example_input(worker_yml: str, sample_input_json: Any, log_fn: Callable[..., None]) -> str:
     """Ensure the drafted worker.yml carries an ``example_input`` block so the
     "Fill with sample input" button is one-click runnable, even when the LLM
@@ -440,6 +488,10 @@ def _register_authored_worker(
         log_fn("worker-author bundle missing worker_yml — nothing to register", level="warning")
         return None
 
+    skill_md = bundle.get("skill_md")
+    run_code = bundle.get("run_code")
+    requirements_txt = bundle.get("requirements_txt")
+
     # Safety-net: the worker-author LLM validates the YAML with its own loose
     # check, which is weaker than the canonical WorkerContract schema enforced
     # at registration. The common drift is OPTIONAL metadata (use_cases must be
@@ -448,13 +500,11 @@ def _register_authored_worker(
     # lossless to behaviour (these fields are display metadata only).
     stage_at = time.perf_counter()
     worker_yml = _normalize_authored_worker_yml(worker_yml, log_fn)
+    if isinstance(run_code, str) and run_code.strip() and not (isinstance(skill_md, str) and skill_md.strip()):
+        worker_yml = _force_script_runtime_for_run_code(worker_yml, log_fn)
     # G5 FIX 4: guarantee a runnable sample even when the LLM omits example_input.
     worker_yml = _backfill_example_input(worker_yml, bundle.get("sample_input_json"), log_fn)
     log_fn(f"worker-author registration: normalized manifest in {time.perf_counter() - stage_at:.2f}s")
-
-    skill_md = bundle.get("skill_md")
-    run_code = bundle.get("run_code")
-    requirements_txt = bundle.get("requirements_txt")
 
     # A bundle with NEITHER agent-mode SKILL.md NOR script-mode run.py has nothing
     # executable. Registering it would backfill the placeholder run.py stub, which
