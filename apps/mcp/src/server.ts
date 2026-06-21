@@ -78,6 +78,11 @@ function authHeader(): Record<string, string> {
       throw new Error("WORKEROS_API_TOKEN or WORKEROS_API_SECRET is required");
     }
     headers["x-floom-secret"] = secret;
+    // Self-hosted engines with user-header scope require x-floom-user (OSS only).
+    const user = (process.env.WORKEROS_USER || process.env.FLOOM_USER || "").trim();
+    if (user) {
+      headers["x-floom-user"] = user;
+    }
   }
   const workspace = activeWorkspaceId();
   if (workspace) {
