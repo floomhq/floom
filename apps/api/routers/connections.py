@@ -920,7 +920,7 @@ def list_connections(
         for d in refreshed
         if (d.get("kind") or "composio") == "composio" and _is_live(d.get("status"))
     }
-    result = []
+    surviving: List[Dict[str, Any]] = []
     for d in refreshed:
         if (
             (d.get("kind") or "composio") == "composio"
@@ -928,7 +928,50 @@ def list_connections(
             and not _is_live(d.get("status"))
         ):
             continue
-        result.append(_public_connection_item(d))
+        surviving.append(d)
+
+    # #1727 — collapse exact-duplicate rows for the same account. Reconnect
+    # flows could insert multiple ACTIVE rows for one (app, account), so the
+    # list showed Gmail x2 / Google Calendar x3 for the same 'federico'. Dedupe
+    # by (app, kind, account-label, scopes): rows that are the same account AND
+    # the same grants collapse to one (keeping the live + most-recently-used),
+    # while rows with genuinely different scopes are preserved as distinct.
+    def _dedupe_key(d: Dict[str, Any]) -> tuple:
+        label = _normalize_owner_account_label(
+            d.get("display_name") or d.get("account_label")
+        )
+        label_norm = str(label or "").strip().lower()
+        # #1727 — only collapse rows that share a REAL account label. Unlabeled
+        # rows (no display_name/account_label) must each be preserved — same
+        # stance as the canonical reconnect logic (find_by_app_account returns
+        # None on a blank label, refusing to merge). Key blank-label rows on
+        # their stable row id (NUL-prefixed so it can't collide with a literal
+        # label) so they are never merged together.
+        identity = label_norm if label_norm else f"\x00id:{d.get('id')}"
+        return (
+            str(d.get("app_name") or "").lower(),
+            d.get("kind") or "composio",
+            identity,
+            tuple(sorted(str(s) for s in (d.get("scopes") or []))),
+        )
+
+    def _rank(d: Dict[str, Any]) -> tuple:
+        return (
+            1 if _is_live(d.get("status")) else 0,
+            str(d.get("last_used_at") or d.get("created_at") or ""),
+        )
+
+    best_by_key: Dict[tuple, Dict[str, Any]] = {}
+    order: List[tuple] = []
+    for d in surviving:
+        key = _dedupe_key(d)
+        if key not in best_by_key:
+            best_by_key[key] = d
+            order.append(key)
+        elif _rank(d) > _rank(best_by_key[key]):
+            best_by_key[key] = d
+
+    result = [_public_connection_item(best_by_key[key]) for key in order]
     _connection_list_cache_set(auth.user_id, result)
     return result
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { resolveUserLabel } from "@/lib/workspace/display-name";
 import { useConnections, useMembers, useSecrets, useWorkers } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
@@ -48,8 +49,10 @@ export function resolveOwner(
 ): string {
   if (!ownerId) return "Not set";
   const member = members.find((m) => m.user_id === ownerId);
-  if (member) return member.display_name || member.email || "My workspace";
-  // #1728: if the id looks like a UUID or workspace prefix, never show it raw
+  // #1728 — never surface a raw/truncated UUID or ws_-prefixed id as the Owner.
+  // resolveUserLabel skips UUID/blank member labels too; otherwise fall back to
+  // the friendly "My workspace" label (and guard a bare UUID / ws_ owner id).
+  if (member) return resolveUserLabel([member.display_name, member.email], "My workspace");
   if (OWNER_UUID_RE.test(ownerId) || OWNER_WS_PREFIX_RE.test(ownerId)) return "My workspace";
   return ownerId;
 }

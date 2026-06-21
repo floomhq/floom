@@ -168,7 +168,15 @@ def get_secrets_for_worker(
     # Only declared worker secrets are injected into the sandbox. Resolving every
     # DB secret in the workspace is slower for secret-heavy tenants and weakens
     # the least-privilege contract documented above.
+    #
+    # #1730 — declared secrets can live under EITHER the top-level/exec `secrets`
+    # field (folded into config.secrets) OR `capabilities.secrets`. config.secrets
+    # only carries the former, so a worker that declared `capabilities.secrets:
+    # [BUFFER_API_TOKEN]` had its secret silently dropped here and saw it as unset
+    # at runtime. Union both shapes (mirrors _worker_required_secret_names).
     names = set(config.secrets if config else [])
+    if config is not None and getattr(config, "capabilities", None) is not None:
+        names.update(config.capabilities.secrets or [])
     allowed_names = [name for name in names if name not in _PLATFORM_SECRET_NAMES]
     allowed_name_set = set(allowed_names)
     resolved = {

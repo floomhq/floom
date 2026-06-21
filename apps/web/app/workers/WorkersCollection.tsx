@@ -1677,8 +1677,8 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
   return (
     <form
       onSubmit={handleSubmit}
-      className="mt-4 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
-      style={{ maxWidth: 440 }} /* #1726: raised from 380→440 so "Describe the job you want done…" placeholder is not clipped */
+      className="mt-4 flex w-full items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
+      style={{ maxWidth: 480 }} /* #1726: w-full + raised cap (380→480) so the "Describe the job you want done…" placeholder is not clipped */
     >
       <input
         ref={inputRef}

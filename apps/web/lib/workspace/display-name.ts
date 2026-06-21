@@ -7,3 +7,24 @@ export function resolveWorkspaceName(name: string | null | undefined): string {
   if (UUID_RE.test(trimmed)) return "My workspace";
   return trimmed;
 }
+
+/** True when the value is a bare UUID (never a human-facing label). */
+export function isUuid(value: string | null | undefined): boolean {
+  return UUID_RE.test((value ?? "").trim());
+}
+
+/**
+ * #1728 — resolve a user-facing label from candidate fields, skipping empties
+ * and bare UUIDs so a raw user id never leaks into the UI (footer, connection
+ * Owner, etc.). Returns `fallback` when no real label is available.
+ */
+export function resolveUserLabel(
+  candidates: Array<string | null | undefined>,
+  fallback = "Local user",
+): string {
+  for (const candidate of candidates) {
+    const trimmed = (candidate ?? "").trim();
+    if (trimmed && !UUID_RE.test(trimmed)) return trimmed;
+  }
+  return fallback;
+}

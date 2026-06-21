@@ -19,7 +19,7 @@ import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-st
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import { capturePostHogEvent, resetPostHogUser } from "@/lib/posthog";
 import type { CurrentUser } from "@/lib/types";
-import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -617,9 +617,16 @@ export function UserProfileFooter({
     };
   }, []);
 
-  // Multi-member: prefer username, then email, then display_name
-  const primary = (user as (typeof user & { username?: string | null }) | null)?.username
-    || user?.email || user?.display_name || "Local user";
+  // Multi-member: prefer username, then email, then display_name.
+  // #1728 — skip bare-UUID values so a raw user id never shows in the footer.
+  const primary = resolveUserLabel(
+    [
+      (user as (typeof user & { username?: string | null }) | null)?.username,
+      user?.email,
+      user?.display_name,
+    ],
+    "Local user",
+  );
   const secondary = workspaceName;
   // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
   // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this
