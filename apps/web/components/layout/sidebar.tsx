@@ -462,6 +462,8 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             })}
             {/* Settings icon at bottom */}
             <div className="flex-1" />
+            {/* Alerts bell in icon-rail — opens upward/rightward via sidebar-footer align */}
+            <AlertsBell popoverAlign="sidebar-footer" />
             {/* MCP, opens the install popup modal (above Settings). */}
             <button
               type="button"
@@ -677,6 +679,8 @@ export function UserProfileFooter({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* Global alerts bell — desktop sidebar footer placement, opens upward */}
+      <AlertsBell popoverAlign="sidebar-footer" />
       <ThemeModeButton />
     </div>
   );

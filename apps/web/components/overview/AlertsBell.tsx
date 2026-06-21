@@ -148,9 +148,16 @@ interface AlertsBellProps {
    */
   items?: SystemOverviewAttentionItem[];
   onRefresh?: () => void;
+  /**
+   * Controls where the notification popover appears relative to the trigger.
+   * "top-right" (default) — opens below, right-aligned (mobile top bar).
+   * "sidebar-footer" — opens above the trigger, left-aligned, extending rightward
+   *   past the narrow sidebar (bottom-left placement in the desktop sidebar footer).
+   */
+  popoverAlign?: "top-right" | "sidebar-footer";
 }
 
-export function AlertsBell({ items: itemsProp, onRefresh }: AlertsBellProps) {
+export function AlertsBell({ items: itemsProp, onRefresh, popoverAlign = "top-right" }: AlertsBellProps) {
   const selfFetch = itemsProp === undefined;
   const { items: selfItems, reload: selfReload } = useSelfOverviewItems(selfFetch);
   const items = selfFetch ? selfItems : itemsProp;
@@ -305,7 +312,15 @@ export function AlertsBell({ items: itemsProp, onRefresh }: AlertsBellProps) {
           ref={panelRef}
           role="dialog"
           aria-label="Worker notifications"
-          className="absolute right-0 top-full z-50 mt-2 w-[380px] rounded-[var(--radius-card)] bg-[var(--paper)] shadow-[var(--shadow-pop)] outline-none"
+          className={cn(
+            "absolute z-50 w-[380px] rounded-[var(--radius-card)] bg-[var(--paper)] shadow-[var(--shadow-pop)] outline-none",
+            // "top-right" (default, mobile bar): opens below the trigger, right-aligned.
+            // "sidebar-footer": opens above the trigger (bottom of screen), left-aligned,
+            //   so the 380px panel extends rightward past the narrow sidebar.
+            popoverAlign === "sidebar-footer"
+              ? "bottom-full left-0 mb-2"
+              : "right-0 top-full mt-2",
+          )}
         >
           <div className="px-4 py-3">
             <p className="text-sm font-semibold text-[var(--ink)]">
