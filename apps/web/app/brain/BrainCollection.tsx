@@ -828,7 +828,13 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       {renameTarget && (
         <RenameFolderModal
           folder={renameTarget}
-          onRenamed={async () => {
+          onRenamed={async (newName) => {
+            // Drop the ContextDetail cached under the old name (and any stale
+            // entry parked under the new name from a prior folder) so reusing
+            // either name in this session refetches instead of rendering the
+            // wrong folder's files. #1813.
+            detailCache.delete(renameTarget.name);
+            detailCache.delete(newName);
             setRenameTarget(null);
             await refresh();
           }}
