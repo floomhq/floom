@@ -33,8 +33,40 @@ def _max_concurrent_runs() -> int:
 _execution_semaphore: Optional[threading.Semaphore] = None
 _semaphore_lock = threading.Lock()
 
+# --- Pluggable distributed limiter seam --------------------------------------
+# The in-process threading.Semaphore only bounds concurrency WITHIN one worker
+# process. When the API/executor is scaled horizontally (e.g. cloud runs N
+# Fargate/Railway worker tasks), each process would admit its own N runs and
+# collectively blow past E2B's hard sandbox cap. A deployment can inject a
+# DISTRIBUTED limiter (e.g. a Postgres-lease) that coordinates the slot budget
+# across all processes. The injected object must implement the same contract as
+# threading.Semaphore: ``acquire(blocking=False) -> bool`` and ``release()``.
+# Names: "runs" (the E2B-cap gate) and "llm_runs" (the provider-quota gate).
+# Unset (the default) = single-process semaphore, so OSS/single-node behavior is
+# unchanged. The cloud overlay registers a PG-lease limiter in startup, mirroring
+# how it injects Supabase repositories for the engine's repository Protocols.
+_RUN_LIMITERS: Dict[str, Any] = {}
+_run_limiters_lock = threading.Lock()
 
-def _get_semaphore() -> threading.Semaphore:
+
+def register_run_limiter(name: str, limiter: Any) -> None:
+    """Inject a distributed run-concurrency limiter for ``name`` ("runs" or
+    "llm_runs"). Must expose ``acquire(blocking=False) -> bool`` and
+    ``release()``. Overrides the in-process semaphore for that budget."""
+    with _run_limiters_lock:
+        _RUN_LIMITERS[name] = limiter
+
+
+def clear_run_limiters() -> None:
+    """Drop all injected limiters (revert to in-process semaphores). For tests."""
+    with _run_limiters_lock:
+        _RUN_LIMITERS.clear()
+
+
+def _get_semaphore():
+    injected = _RUN_LIMITERS.get("runs")
+    if injected is not None:
+        return injected
     global _execution_semaphore
     if _execution_semaphore is None:
         with _semaphore_lock:
@@ -46,6 +78,13 @@ def _get_semaphore() -> threading.Semaphore:
 def _semaphore_available_count() -> int:
     """Return an approximate count of free execution slots (best-effort)."""
     sem = _get_semaphore()
+    # An injected distributed limiter may expose its own free-slot count.
+    avail = getattr(sem, "available_count", None)
+    if callable(avail):
+        try:
+            return max(0, int(avail()))
+        except Exception:
+            return -1
     # Semaphore._value is CPython internal but stable across 3.8-3.12.
     try:
         return max(0, sem._value)  # type: ignore[attr-defined]
@@ -76,7 +115,10 @@ _llm_execution_semaphore: Optional[threading.Semaphore] = None
 _llm_semaphore_lock = threading.Lock()
 
 
-def _get_llm_semaphore() -> threading.Semaphore:
+def _get_llm_semaphore():
+    injected = _RUN_LIMITERS.get("llm_runs")
+    if injected is not None:
+        return injected
     global _llm_execution_semaphore
     if _llm_execution_semaphore is None:
         with _llm_semaphore_lock:
