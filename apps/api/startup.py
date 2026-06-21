@@ -260,6 +260,29 @@ def recover_cloud_runs_on_startup() -> int:
     return total_failed
 
 
+def _install_distributed_run_limiters() -> None:
+    """Install the PG-lease distributed concurrency limiters (gated).
+
+    When WORKEROS_RUN_LEASE_ENABLED is truthy, replace the engine's in-process
+    run/llm semaphores with Postgres-lease limiters so the E2B sandbox budget is
+    honored across horizontally-scaled executor tasks (see run_limiter_pg.py).
+    Unset = the engine keeps its in-process semaphores (single-task default).
+    Failure here is non-fatal: log and fall back to the in-process gate.
+    """
+    flag = (os.environ.get("WORKEROS_RUN_LEASE_ENABLED") or "").strip().lower()
+    if flag not in ("1", "true", "yes", "on"):
+        return
+    try:
+        from apps.api.run_limiter_pg import install_pg_run_limiters
+
+        install_pg_run_limiters()
+    except Exception:
+        logger.exception(
+            "Failed to install distributed run limiters; "
+            "falling back to the engine's in-process semaphores"
+        )
+
+
 def _override_worker_author_platform_secret() -> None:
     """Allow the first-party worker-author system worker to use platform OpenAI.
 
@@ -1275,6 +1298,7 @@ def register_cloud_components() -> None:
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
     _override_run_executor_workspace_context()
+    _install_distributed_run_limiters()
     # Run the real init_db() once so the engine's local SQLite DB has the
     # full schema. Several engine endpoints (draft_and_create_worker,
     # _persist_discovered_workers, etc.) bypass the Supabase repos and call
