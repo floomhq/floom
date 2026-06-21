@@ -63,7 +63,12 @@ from models import (
 )
 from routers.contexts import list_contexts
 from services.context_access import _contexts_git_prefix, _write_context_file
-from services.git_service import _git_author, _git_workspace, _workers_git_prefix
+from services.git_service import (
+    _WORKSPACE_TOOLS_FILENAME,
+    _git_author,
+    _git_workspace,
+    _workers_git_prefix,
+)
 from services import git_service as _git_service
 from services.worker_access import (
     _active_local_workspace_id,
@@ -86,6 +91,7 @@ from services.workspace_ops import (
 
 _WORKSPACE_INSTRUCTIONS_ASSET_TYPE = "workspace_instructions"
 _WORKSPACE_BASE_PERSONA_ASSET_TYPE = "workspace_base_persona"
+_WORKSPACE_TOOLS_ASSET_TYPE = "workspace_tools"
 _GITHUB_PAT_SECRET_NAMES = ("GITHUB_TOKEN", "GH_TOKEN", "GITHUB_PAT")
 _REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
@@ -948,7 +954,7 @@ def list_workspace_versions(
 @workspace_router.get("/workspace/changelog", response_model=List[ChangelogEntry])
 def workspace_changelog(
     limit: int = 50,
-    asset_types: str = "worker,context,workspace_instructions",
+    asset_types: str = "worker,context,workspace_instructions,workspace_base_persona,workspace_tools",
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[ChangelogEntry]:
@@ -1000,6 +1006,21 @@ def workspace_changelog(
             _collect(rel, "workspace_instructions", "default", "Workspace instructions")
         except Exception:
             logger.debug("changelog: workspace.md log failed", exc_info=True)
+    if _WORKSPACE_BASE_PERSONA_ASSET_TYPE in wanted:
+        try:
+            from chat_service import WORKSPACE_BASE_PERSONA_PATH
+            try:
+                rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
+            except ValueError:
+                rel = "workspace.base.md"
+            _collect(rel, _WORKSPACE_BASE_PERSONA_ASSET_TYPE, "default", "Base persona")
+        except Exception:
+            logger.debug("changelog: workspace.base.md log failed", exc_info=True)
+    if _WORKSPACE_TOOLS_ASSET_TYPE in wanted:
+        try:
+            _collect(_WORKSPACE_TOOLS_FILENAME, _WORKSPACE_TOOLS_ASSET_TYPE, "default", "Workspace tools")
+        except Exception:
+            logger.debug("changelog: workspace-tools.yml log failed", exc_info=True)
 
     entries.sort(key=lambda e: e.committed_at, reverse=True)
     return entries[:limit]

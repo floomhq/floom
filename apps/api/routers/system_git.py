@@ -64,6 +64,7 @@ def _github_api_safe_detail(exc: BaseException) -> str:
 
 class _GitStatus(BaseModel):
     connected: bool
+    versioning_disabled: bool = False
     github_username: Optional[str] = None
     repo_full_name: Optional[str] = None
     repo_url: Optional[str] = None
@@ -71,6 +72,16 @@ class _GitStatus(BaseModel):
     last_pushed_at: Optional[str] = None
     # Set after a fresh-install link when secrets were decrypted from .secrets.enc
     secrets_loaded: int = 0
+
+
+def _workspace_versioning_disabled() -> bool:
+    import git_ops as _git_ops
+
+    try:
+        return bool(_git_ops.is_engine_source_checkout(_git_workspace()))
+    except Exception:
+        logger.debug("Could not derive workspace versioning status", exc_info=True)
+        return False
 
 
 class _GitConnectRequest(BaseModel):
@@ -97,11 +108,13 @@ class _GitRepoItem(BaseModel):
 @system_git_router.get("/system/git", response_model=_GitStatus)
 def get_git_status(auth: AuthContext = Depends(get_auth_context)) -> _GitStatus:
     """Return current GitHub connection + linked repo status."""
+    versioning_disabled = _workspace_versioning_disabled()
     cfg = _git_cfg_get(auth.user_id)
     if not cfg or not cfg.get("repo_full_name"):
-        return _GitStatus(connected=False)
+        return _GitStatus(connected=False, versioning_disabled=versioning_disabled)
     return _GitStatus(
         connected=True,
+        versioning_disabled=versioning_disabled,
         github_username=cfg.get("github_username"),
         repo_full_name=cfg.get("repo_full_name"),
         repo_url=cfg.get("repo_url"),
@@ -247,6 +260,7 @@ def link_git_repo(
 
     return _GitStatus(
         connected=True,
+        versioning_disabled=_workspace_versioning_disabled(),
         github_username=cfg.get("github_username"),
         repo_full_name=full_name,
         repo_url=repo_url,
@@ -279,6 +293,7 @@ def push_git_workspace(auth: AuthContext = Depends(get_auth_context)) -> _GitSta
     _git_cfg_upsert(auth.user_id, last_pushed_at=pushed_at)
     return _GitStatus(
         connected=True,
+        versioning_disabled=_workspace_versioning_disabled(),
         github_username=cfg.get("github_username"),
         repo_full_name=cfg.get("repo_full_name"),
         repo_url=cfg.get("repo_url"),

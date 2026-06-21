@@ -2985,7 +2985,7 @@ class WorkspaceImportResponse(BaseModel):
 
 
 class ChangelogEntry(BaseModel):
-    asset_type: str  # "worker" | "context" | "workspace_instructions"
+    asset_type: str  # "worker" | "context" | workspace-level asset types
     asset_id: str
     asset_name: str
     sha: str
