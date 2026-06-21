@@ -834,7 +834,7 @@ function SettingsContent() {
       case "members":
         return <MembersSettingsPanel />;
       case "versions":
-        return <VersionHistorySettingsPanel />;
+        return <VersionHistorySettingsPanel canManageWorkspace={isAdmin} />;
       case "danger":
         return (
           <DangerSection
@@ -2425,7 +2425,7 @@ function MembersSettingsPanel() {
 // GitHub connect lives in Account · "Connect & automate", not here (MECE).
 type UndoScope = "instructions" | "base";
 
-function VersionHistorySettingsPanel() {
+function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [workspaceVersions, setWorkspaceVersions] = useState<VersionSummary[] | null>(null);
   const [baseVersions, setBaseVersions] = useState<VersionSummary[] | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -2488,23 +2488,31 @@ function VersionHistorySettingsPanel() {
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border [border-color:var(--bd-div)] px-4 py-3.5">
-        <div className="min-w-0">
-          <h2 className="text-sm font-medium">Download a copy</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Downloads your workers and knowledge as a zip. Secrets and connections are not included; you&apos;ll reconnect those after restoring.
-          </p>
-        </div>
-        <Button variant="outline" onClick={() => void handleDownload()} disabled={exporting}>
-          <Download className="size-4" />
-          {exporting ? "Preparing…" : "Download workspace"}
-        </Button>
-      </section>
+      {!canManageWorkspace ? (
+        <ReadOnlyNotice message="Backup and undo actions are hidden because this account cannot edit workspace settings. History is shown read-only." />
+      ) : null}
+
+      {canManageWorkspace ? (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border [border-color:var(--bd-div)] px-4 py-3.5">
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium">Download a copy</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Downloads your workers and knowledge as a zip. Secrets and connections are not included; you&apos;ll reconnect those after restoring.
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => void handleDownload()} disabled={exporting}>
+            <Download className="size-4" />
+            {exporting ? "Preparing…" : "Download workspace"}
+          </Button>
+        </section>
+      ) : null}
 
       <section className="space-y-1">
-        <h2 className="text-sm font-medium">Undo a change</h2>
+        <h2 className="text-sm font-medium">{canManageWorkspace ? "Undo a change" : "Change history"}</h2>
         <p className="text-xs text-muted-foreground">
-          Every time you save your workspace notes or base persona, a restore point is created. Undo brings that item back to how it was.
+          {canManageWorkspace
+            ? "Every time you save your workspace notes or base persona, a restore point is created. Undo brings that item back to how it was."
+            : "A restore point is created every time the workspace notes or base persona are saved."}
         </p>
       </section>
 
@@ -2512,12 +2520,14 @@ function VersionHistorySettingsPanel() {
         title="Workspace notes"
         versions={workspaceVersions}
         undoing={undoing}
+        canUndo={canManageWorkspace}
         onUndo={(version) => setPendingUndo({ scope: "instructions", version })}
       />
       <VersionList
         title="Base persona"
         versions={baseVersions}
         undoing={undoing}
+        canUndo={canManageWorkspace}
         onUndo={(version) => setPendingUndo({ scope: "base", version })}
       />
 
@@ -2555,11 +2565,13 @@ function VersionList({
   versions,
   onUndo,
   undoing,
+  canUndo,
 }: {
   title: string;
   versions: VersionSummary[] | null;
   onUndo: (version: VersionSummary) => void;
   undoing: boolean;
+  canUndo: boolean;
 }) {
   return (
     <section className="space-y-3">
@@ -2580,7 +2592,7 @@ function VersionList({
               </div>
               {index === 0 ? (
                 <Badge variant="outline">Current</Badge>
-              ) : (
+              ) : canUndo ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -2591,7 +2603,7 @@ function VersionList({
                   <RotateCcw className="size-3.5" />
                   Undo to here
                 </Button>
-              )}
+              ) : null}
             </div>
           ))}
         </div>
