@@ -1487,6 +1487,11 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
     blocked: set[str] = set()
     if not settings.get("connections_read"):
         blocked.add("connections__list")
+        # Listing workspace issues reads GitHub issue titles/bodies through the
+        # stored workspace PAT (a connection). Gate it with the other
+        # connection-backed reads so disabling connection reads doesn't still
+        # expose repository issue data to the agent.
+        blocked.add("workspace_issues__list")
     if not settings.get("connections_add"):
         blocked.add("connections__add_mcp")
     if not settings.get("connections_use"):

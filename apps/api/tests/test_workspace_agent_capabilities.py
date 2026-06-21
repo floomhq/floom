@@ -448,3 +448,18 @@ def test_workspace_issue_write_tools_gated_by_connections_use(chat_env):
         "workspace_issues__comment",
         "workspace_issues__close",
     } <= unlocked
+
+
+def test_workspace_issue_list_gated_by_connections_read(chat_env):
+    chat = chat_env["chat"]
+
+    # Listing reads GitHub issue data through the workspace PAT, so disabling
+    # connection reads must withhold it alongside connections__list.
+    names = _tool_names(
+        chat._workspace_tools(
+            "local-user",
+            {"connections_read": False, "connections_use": False, "brain_read": True},
+        )
+    )
+    assert "workspace_issues__list" not in names
+    assert "connections__list" not in names

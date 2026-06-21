@@ -322,6 +322,32 @@ def test_mutations_refuse_non_floom_issue(monkeypatch):
         wi.update_workspace_issue("u1", 9, state="closed")
 
 
+def test_list_includes_marker_only_and_excludes_unrelated(monkeypatch):
+    """Listing keeps floom-labelled and marker-only issues, drops the rest."""
+    _patch_floom_repo(monkeypatch)
+
+    marker = wi.build_metadata_marker("ws_test", "worker", "w1")
+    repo_issues = [
+        # floom label, no marker -> kept
+        {"number": 1, "title": "labelled", "body": "x", "state": "open",
+         "html_url": "u1", "labels": [{"name": "floom"}]},
+        # marker only, floom label stripped on GitHub -> still kept
+        {"number": 2, "title": "marker only", "body": f"y\n\n{marker}", "state": "open",
+         "html_url": "u2", "labels": [{"name": "bug"}]},
+        # neither -> excluded
+        {"number": 3, "title": "unrelated", "body": "z", "state": "open",
+         "html_url": "u3", "labels": [{"name": "bug"}]},
+    ]
+    monkeypatch.setattr(github_api, "list_issues", lambda *a, **k: list(repo_issues))
+
+    issues = wi.list_workspace_issues("u1")
+    assert sorted(i.github_issue_number for i in issues) == [1, 2]
+    # the marker-only issue still resolves its asset binding
+    marker_issue = next(i for i in issues if i.github_issue_number == 2)
+    assert marker_issue.asset_type == "worker"
+    assert marker_issue.asset_id == "w1"
+
+
 def test_mutations_allow_marker_only_issue(monkeypatch):
     """An issue with a marker but a stripped 'floom' label is still ours."""
     _patch_floom_repo(monkeypatch)

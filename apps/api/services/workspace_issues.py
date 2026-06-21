@@ -246,6 +246,22 @@ def resolve_connection(user_id: str) -> tuple[str, str]:
 # High-level operations (shared by the HTTP router and Emily's tools)
 # ---------------------------------------------------------------------------
 
+def _is_floom_managed(raw: Dict[str, Any]) -> bool:
+    """True if a raw GitHub issue is Floom-managed (``floom`` label or marker).
+
+    The marker is the canonical proof of a Floom issue; the label is the
+    GitHub-native fallback. Either is sufficient, so an issue whose ``floom``
+    label was removed on GitHub but still carries the marker stays in scope.
+    """
+    labels = [
+        (lab.get("name") if isinstance(lab, dict) else str(lab))
+        for lab in (raw.get("labels") or [])
+    ]
+    has_floom_label = any(str(lab) == "floom" for lab in labels)
+    has_marker = parse_metadata_marker(raw.get("body")) is not None
+    return has_floom_label or has_marker
+
+
 def list_workspace_issues(
     user_id: str,
     state: str = "all",
@@ -258,10 +274,13 @@ def list_workspace_issues(
 
     pat, repo = resolve_connection(user_id)
     workspace_id = _git_workspace_key(user_id)
-    # Only Floom-tracked issues by default; keeps the view scoped to the
-    # workspace loop rather than every issue in the repo.
-    raw = _gh.list_issues(pat, repo, state=state, labels=["floom"])
-    issues = [project_issue(item, workspace_id) for item in raw]
+    # Keep the view scoped to the Floom workspace loop rather than every issue
+    # in the repo. We don't restrict the GitHub query to labels=["floom"]:
+    # an issue whose label was stripped on GitHub but still carries the marker
+    # is ours (mutations already treat the marker as proof), so we fetch and
+    # filter on the same floom-label-or-marker rule mutations use.
+    raw = _gh.list_issues(pat, repo, state=state)
+    issues = [project_issue(item, workspace_id) for item in raw if _is_floom_managed(item)]
     if asset_type:
         issues = [i for i in issues if i.asset_type == asset_type]
     if asset_id:
@@ -309,13 +328,7 @@ def _load_floom_issue(pat: str, repo: str, number: int) -> Dict[str, Any]:
     import github_api as _gh
 
     raw = _gh.get_issue(pat, repo, int(number))
-    labels = [
-        (lab.get("name") if isinstance(lab, dict) else str(lab))
-        for lab in (raw.get("labels") or [])
-    ]
-    has_floom_label = any(str(lab) == "floom" for lab in labels)
-    has_marker = parse_metadata_marker(raw.get("body")) is not None
-    if not (has_floom_label or has_marker):
+    if not _is_floom_managed(raw):
         raise ValueError(
             f"Issue #{int(number)} is not a Floom workspace issue; refusing to modify it."
         )
