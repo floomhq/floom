@@ -153,7 +153,7 @@
   --emily-mark: #3661C7; /* #1713: matches --accent */
   --sel: #EEF3FE;
   --accent-soft: var(--sel);
-  --accent-line: rgba(62,111,224,.3);
+  --accent-line: rgba(54,97,199,.3); /* #1713: synced to new --accent #3661C7 (was old #3E6FE0 = 62,111,224) */
   --accent-hover-bg: var(--active-nav-bg);
   --solid: var(--primary);
   --solid-2: #2A2A2A;
@@ -262,12 +262,22 @@ html.dark {
   --ink-soft: oklch(0.75 0.015 286.067);
   --ink-mute: oklch(0.62 0.012 286.067);
   /* #1712: dark bg ~oklch(0.213). Original 0.42 was ~2.06:1 FAIL.
-     Tier order (light = closer to bg = less contrast in dark mode):
-     ink-soft(0.75) > ink-mute(0.62) > ink-faint must be < 0.62 to preserve
-     the lowest-contrast tier while still passing AA 4.5:1.
-     oklch(0.55) sits below mute(0.62), is lighter than original(0.42), and
-     clears AA on the dark bg. */
-  --ink-faint: oklch(0.55 0.012 286.067);
+     Tier order (lighter = closer to bg = less contrast in dark mode):
+     ink-soft(0.75) > ink-mute(0.62) > ink-faint, which must stay below
+     mute(0.62) to keep the lowest-contrast tier visually distinct.
+     Measured (oklch->sRGB, WCAG 2.x):
+       oklch(0.605) = #818189
+       - on --bg  (oklch 0.213, #191919): 4.54:1  -> passes AA for all text.
+       - on --bg-2(oklch 0.27,  #262626): 3.89:1  -> passes AA large-text
+         only; on --bg-2 it is used solely for input *placeholder* hint text
+         (inputs carry their own Label/aria-label), not body copy.
+     4.5:1 on --bg-2 is unreachable for this tier: even ink-mute(0.62) is
+     only 4.13:1 on --bg-2, so pushing faint there would collide with mute
+     and break the tier. 0.605 sits 0.015 below mute (#818189 vs #85858d,
+     distinct) and clears AA on --bg, the dominant surface where all faint
+     body text actually renders. Prior 0.55 (3.62:1 on --bg) did NOT pass AA;
+     the earlier "clears AA" note was wrong and is corrected here. */
+  --ink-faint: oklch(0.605 0.012 286.067);
   /* shadcn muted bg (bg-2 equivalent in dark) */
   --muted: var(--bg-2);
   --emerald: oklch(0.7 0.16 152);

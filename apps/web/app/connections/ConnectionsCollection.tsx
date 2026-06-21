@@ -1166,7 +1166,7 @@ export default function ConnectionsCollection({
     add: {
       label: "Add",
       panel: {
-        title: "Add an integration",
+        title: "Add a connection", /* #1707: unified terminology */
         render: () => (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 460 }}>
             <p style={pad}>Connect an app, register an MCP server, or store a secret.</p>
