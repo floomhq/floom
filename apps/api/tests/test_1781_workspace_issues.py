@@ -537,13 +537,17 @@ def test_import_skips_issue_files_with_invalid_frontmatter(monkeypatch, tmp_path
             "ISSUE-0011.md",
             b"---\nid: ISSUE-0011\nstatus: open\ntitle: bad timestamp\ncreated_at: 123\n---\n\nbody\n",
         ),
+        (
+            "ISSUE-0012.md",
+            b"---\nid: ISSUE-0012\nstatus: open\ntitle: bad asset type\nasset_type:\n  - worker\nasset_id: x\n---\n\nbody\n",
+        ),
     ]
 
     imported = issues.restore_issue_files(malformed_cases)
 
     assert imported == []
     listed = {i["id"] for i in issues.list_issues()}
-    assert all(f"ISSUE-{n:04d}" not in listed for n in range(4, 12))
+    assert all(f"ISSUE-{n:04d}" not in listed for n in range(4, 13))
     for name, _data in malformed_cases:
         assert not (workspace / ".floom" / "issues" / name).exists()
 
