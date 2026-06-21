@@ -67,3 +67,6 @@ CODEX_BRIEF.md
 .env.test
 tests/e2e/.auth/
 web/.vercel/
+
+# checked-in CI virtualenv removed from tracking (was 10,902 files / ~275MB)
+.ci-venv/
