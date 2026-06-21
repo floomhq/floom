@@ -14,6 +14,7 @@ rebuilds with fresh deps.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +25,26 @@ from core.config import _is_cloud_deploy
 from services.worker_access import _active_local_workspace_id
 
 workspaces_router = APIRouter()
+
+# #1745 — a bare UUID must NEVER surface as a human display_name (the Emily
+# greeting interpolates /me.display_name directly, so "Good morning,
+# 9b1a5065-..." leaked the raw user id). Emit a real label (email/username) only;
+# otherwise None so the client resolves its own fallback ("there"/"Local user").
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+
+
+def _human_display_name(*candidates: Optional[str], user_id: str) -> Optional[str]:
+    for candidate in candidates:
+        if (
+            isinstance(candidate, str)
+            and candidate.strip()
+            and candidate != user_id
+            and not _UUID_RE.match(candidate.strip())
+        ):
+            return candidate
+    return None
 
 
 class LocalWorkspaceCreateRequest(BaseModel):
@@ -82,7 +103,7 @@ def get_current_user(auth: AuthContext = Depends(get_auth_context)) -> CurrentUs
     return CurrentUserResponse(
         user_id=auth.user_id,
         email=auth.email,
-        display_name=auth.email or auth.username or auth.user_id,
+        display_name=_human_display_name(auth.email, auth.username, user_id=auth.user_id),
         workspace_id=_active_local_workspace_id(auth) if not _is_cloud_deploy() else None,
         scopes=list(auth.scopes or ()),
         role=auth.role,
