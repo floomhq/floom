@@ -531,6 +531,9 @@ def _valid_issue_md_bytes(data: bytes, expected_issue_id: str) -> bool:
         return False
     if not str(meta.get("title") or "").strip():
         return False
+    labels = meta.get("labels")
+    if labels is not None and not isinstance(labels, list):
+        return False
     try:
         _validate_asset_binding(meta.get("asset_type"), meta.get("asset_id"))
     except IssueError:
@@ -542,13 +545,27 @@ def _valid_issue_comments_bytes(data: bytes) -> bool:
     """True if imported comment-log bytes decode as UTF-8.
 
     ``_read_comments`` already tolerates non-JSON lines, so per-line JSON is not
-    required, but it reads the file as UTF-8 text — invalid UTF-8 here would
-    raise inside the listing endpoint.
+    required, but any line that does parse as JSON must have the object shape
+    accepted by the issue-detail response model.
     """
     try:
-        data.decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeDecodeError:
         return False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            return False
+        if not isinstance(parsed.get("id"), str) or not isinstance(
+            parsed.get("body"), str
+        ):
+            return False
     return True
 
 
