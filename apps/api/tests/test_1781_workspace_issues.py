@@ -529,13 +529,21 @@ def test_import_skips_issue_files_with_invalid_frontmatter(monkeypatch, tmp_path
             "ISSUE-0009.md",
             b"---\nid: ISSUE-0009\nstatus: open\ntitle: bad labels\nlabels: 123\n---\n\nbody\n",
         ),
+        (
+            "ISSUE-0010.md",
+            b"---\nid: ISSUE-0010\nstatus: open\ntitle: bad source\nsource:\n  nested: true\n---\n\nbody\n",
+        ),
+        (
+            "ISSUE-0011.md",
+            b"---\nid: ISSUE-0011\nstatus: open\ntitle: bad timestamp\ncreated_at: 123\n---\n\nbody\n",
+        ),
     ]
 
     imported = issues.restore_issue_files(malformed_cases)
 
     assert imported == []
     listed = {i["id"] for i in issues.list_issues()}
-    assert all(f"ISSUE-{n:04d}" not in listed for n in range(4, 10))
+    assert all(f"ISSUE-{n:04d}" not in listed for n in range(4, 12))
     for name, _data in malformed_cases:
         assert not (workspace / ".floom" / "issues" / name).exists()
 
@@ -586,5 +594,29 @@ def test_import_drops_comment_logs_with_invalid_json_object_shape(monkeypatch, t
     assert imported == ["ISSUE-0010"]
     assert not (workspace / ".floom" / "issues" / "ISSUE-0010.comments.ndjson").exists()
     fetched = issues.get_issue("ISSUE-0010")
+    assert fetched["comment_count"] == 0
+    assert fetched["comments"] == []
+
+
+def test_import_drops_comment_logs_with_invalid_optional_fields(monkeypatch, tmp_path):
+    workspace, workers_dir = _make_workspace(tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "dev")
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
+    _purge_api_modules()
+    issues = importlib.import_module("services.workspace_issues")
+
+    good_md = b"---\nid: ISSUE-0012\nstatus: open\ntitle: valid body\n---\n\nfine\n"
+    bad_comments = b'{"id":"cmt_x","body":"ok","created_by":123}\n'
+    imported = issues.restore_issue_files(
+        [("ISSUE-0012.md", good_md), ("ISSUE-0012.comments.ndjson", bad_comments)]
+    )
+
+    assert imported == ["ISSUE-0012"]
+    assert not (workspace / ".floom" / "issues" / "ISSUE-0012.comments.ndjson").exists()
+    fetched = issues.get_issue("ISSUE-0012")
     assert fetched["comment_count"] == 0
     assert fetched["comments"] == []
