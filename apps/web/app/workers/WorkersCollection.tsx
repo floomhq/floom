@@ -430,10 +430,52 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 }
 
 
+// #1679: the embedded per-worker Runs tab must source its rows from the SAME
+// query the global /runs surface uses — api.runs.list({ worker_id }) — NOT from
+// the worker-detail `recent_runs` field. The detail field is built backend-side
+// by runs.list_for_worker (scoped only by `w.owner_id`), whereas /runs is scoped
+// by `(actor_user_id OR owner_id)`; for a worker whose runs were triggered by a
+// non-owner actor the narrow query returns empty, so the tab showed "No runs yet"
+// while /runs showed the full history for the same worker. Using the proven
+// worker-scoped list query here makes the two surfaces agree.
+//
+// Module-level cache keyed by worker id so the (synchronously-rendered) tab badge
+// and this tab body read the SAME data — that shared source is what stops the
+// "Runs N" badge flipping 0↔1 across tab clicks.
+const workerRunsCache = new Map<string, RunSummary[]>();
+const WORKER_RUNS_LIMIT = 20;
+
+function useWorkerRuns(workerId: string): RunSummary[] | undefined {
+  const [runs, setRuns] = useState<RunSummary[] | undefined>(() =>
+    workerRunsCache.get(workerId),
+  );
+  useEffect(() => {
+    let alive = true;
+    // Serve the cache immediately, then refresh in the background so a return to
+    // the tab is instant and never blanks (mirrors the worker-detail cache).
+    const cached = workerRunsCache.get(workerId);
+    if (cached) setRuns(cached);
+    api.runs
+      .list({ worker_id: workerId, limit: WORKER_RUNS_LIMIT })
+      .then((rows) => {
+        workerRunsCache.set(workerId, rows);
+        if (alive) setRuns(rows);
+      })
+      // #1446: per-worker tab; log only (no toast per expanded worker).
+      .catch((err) => logError("Could not load runs for this worker.", err));
+    return () => {
+      alive = false;
+    };
+  }, [workerId]);
+  return runs;
+}
+
 // Runs: recent runs w/ durations, link to the full Runs surface.
 function RunsTab({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
-  const runs = d?.recent_runs ?? (w.last_run ? [w.last_run] : []);
+  const fetched = useWorkerRuns(w.id);
+  // Until the worker-scoped fetch resolves, fall back to the summary's last_run
+  // so the tab is never momentarily empty for a worker that has run.
+  const runs = fetched ?? (w.last_run ? [w.last_run] : []);
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 9 }}>
@@ -2009,9 +2051,13 @@ export default function WorkersCollection({
             return {
               key,
               label: key,
-              // #1251: badge matches the count listed in the Runs tab.
+              // #1251 / #1679: badge matches the count listed in the Runs tab.
+              // Both read the SAME worker-scoped runs cache (api.runs.list) so the
+              // badge can no longer disagree with the tab body or flip 0↔1: until
+              // that fetch resolves the badge stays on the summary's last_run
+              // fallback, then settles to the real worker-scoped count.
               count: key === "Runs"
-                ? (detailCache.get(w.id)?.recent_runs?.length
+                ? (workerRunsCache.get(w.id)?.length
                     ?? (w.last_run ? 1 : undefined))
                 : undefined,
               render: () => <Tab w={w} />,
