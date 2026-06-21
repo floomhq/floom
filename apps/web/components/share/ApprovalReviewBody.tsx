@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Paperclip } from "lucide-react";
 import { GenericOutput } from "@/components/generic-output";
 import { ApprovalActionItems, hasActionItems } from "@/components/share/ApprovalActionItems";
+import { PreviewMedia } from "@/components/share/PreviewMedia";
 import type { ApprovalRow } from "@/lib/types";
 
 /* ---- helpers --------------------------------------------------------------- */
@@ -111,6 +112,7 @@ function ProposedOutput({ approval }: { approval: ApprovalRow }) {
             ))}
           </div>
         )}
+        <PreviewMedia text={email.body} />
       </div>
     );
   }
@@ -132,6 +134,7 @@ function ProposedOutput({ approval }: { approval: ApprovalRow }) {
     const t = (approval.type ?? approval.preview_type ?? inferPreviewType(approval.preview)) as string;
     return (
       <div className="c-appr-proposed">
+        <PreviewMedia text={approval.preview} />
         <GenericOutput type={t} value={approval.preview} />
       </div>
     );
