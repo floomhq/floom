@@ -65,6 +65,7 @@ import {
   CheckCircle2,
   Code2,
   Copy,
+  Download,
   History,
   Info,
   KeyRound,
@@ -2417,54 +2418,180 @@ function MembersSettingsPanel() {
   );
 }
 
+// "Backups & history": the non-developer home for downloading a copy of the
+// workspace, and undo a recent change (restore points). Git vocabulary
+// (commit/SHA/branch) is deliberately kept out of the UI; the underlying
+// data is the same git-backed version history, surfaced in plain language.
+// GitHub connect lives in Account · "Connect & automate", not here (MECE).
+type UndoScope = "instructions" | "base";
+
 function VersionHistorySettingsPanel() {
   const [workspaceVersions, setWorkspaceVersions] = useState<VersionSummary[] | null>(null);
   const [baseVersions, setBaseVersions] = useState<VersionSummary[] | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [pendingUndo, setPendingUndo] = useState<{ scope: UndoScope; version: VersionSummary } | null>(null);
+  const [undoing, setUndoing] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const [workspace, base] = await Promise.allSettled([
+      api.system.listWorkspaceVersions(),
+      api.system.listWorkspaceBaseVersions(),
+    ]);
+    setWorkspaceVersions(workspace.status === "fulfilled" ? workspace.value : []);
+    setBaseVersions(base.status === "fulfilled" ? base.value : []);
+  }, []);
 
   useEffect(() => {
-    void (async () => {
-      const [workspace, base] = await Promise.allSettled([
-        api.system.listWorkspaceVersions(),
-        api.system.listWorkspaceBaseVersions(),
-      ]);
-      setWorkspaceVersions(workspace.status === "fulfilled" ? workspace.value : []);
-      setBaseVersions(base.status === "fulfilled" ? base.value : []);
-    })();
-  }, []);
+    void refresh();
+  }, [refresh]);
+
+  async function handleDownload() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.workspace.exportTemplate();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Workspace downloaded");
+    } catch (err) {
+      toast.error((err as Error).message || "Download failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function confirmUndo() {
+    if (!pendingUndo) return;
+    const { scope, version } = pendingUndo;
+    setPendingUndo(null);
+    setUndoing(true);
+    try {
+      if (scope === "instructions") {
+        await api.system.rollbackWorkspaceInstructions(version.id);
+      } else {
+        await api.system.rollbackWorkspaceBasePersona(version.id);
+      }
+      await refresh();
+      toast.success("Change undone");
+    } catch (err) {
+      toast.error((err as Error).message || "Undo failed");
+    } finally {
+      setUndoing(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <Alert>
-        <AlertTitle>Workspace changelog</AlertTitle>
-        <AlertDescription>
-          Version history for your workspace instructions and base persona.
-        </AlertDescription>
-      </Alert>
-      <VersionList title="Workspace notes" versions={workspaceVersions} />
-      <VersionList title="Base persona" versions={baseVersions} />
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border [border-color:var(--bd-div)] px-4 py-3.5">
+        <div className="min-w-0">
+          <h2 className="text-sm font-medium">Download a copy</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Downloads your workers and knowledge as a zip. Secrets and connections are not included; you&apos;ll reconnect those after restoring.
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => void handleDownload()} disabled={exporting}>
+          <Download className="size-4" />
+          {exporting ? "Preparing…" : "Download workspace"}
+        </Button>
+      </section>
+
+      <section className="space-y-1">
+        <h2 className="text-sm font-medium">Undo a change</h2>
+        <p className="text-xs text-muted-foreground">
+          Every time you save your workspace notes or base persona, a restore point is created. Undo brings that item back to how it was.
+        </p>
+      </section>
+
+      <VersionList
+        title="Workspace notes"
+        versions={workspaceVersions}
+        undoing={undoing}
+        onUndo={(version) => setPendingUndo({ scope: "instructions", version })}
+      />
+      <VersionList
+        title="Base persona"
+        versions={baseVersions}
+        undoing={undoing}
+        onUndo={(version) => setPendingUndo({ scope: "base", version })}
+      />
+
+      <Dialog open={!!pendingUndo} onOpenChange={(open) => { if (!open) setPendingUndo(null); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Undo to this restore point?</DialogTitle>
+          </DialogHeader>
+          {pendingUndo && (
+            <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5 text-sm space-y-1">
+              {pendingUndo.version.message && (
+                <p className="font-medium">{pendingUndo.version.message}</p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {pendingUndo.version.author ? `${pendingUndo.version.author} · ` : ""}
+                {new Date(pendingUndo.version.timestamp).toLocaleString()}
+              </p>
+              <p className="pt-1 text-xs text-muted-foreground">
+                Your current version is saved first, so you can undo this too.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPendingUndo(null)}>Cancel</Button>
+            <Button onClick={() => void confirmUndo()}>Undo to here</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function VersionList({ title, versions }: { title: string; versions: VersionSummary[] | null }) {
+function VersionList({
+  title,
+  versions,
+  onUndo,
+  undoing,
+}: {
+  title: string;
+  versions: VersionSummary[] | null;
+  onUndo: (version: VersionSummary) => void;
+  undoing: boolean;
+}) {
   return (
     <section className="space-y-3">
       <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
       {versions === null ? (
         <Skeleton className="h-24 w-full" />
       ) : versions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No commits yet.</p>
+        <p className="text-sm text-muted-foreground">No changes yet.</p>
       ) : (
         <div className="space-y-1">
           {versions.map((v, index) => (
             <div key={`${v.asset_type}-${v.id}-${index}`} className="flex items-center justify-between gap-3 [border-bottom:var(--bd-div)] py-2 text-sm last:[border-bottom:0]">
               <div className="min-w-0">
                 <p className="truncate font-medium">{v.message}</p>
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-mono">{v.sha}</span> · {v.author} · {new Date(v.timestamp).toLocaleString()}
+                <p className="text-xs text-muted-foreground" title={v.sha}>
+                  {v.author ? `${v.author} · ` : ""}{new Date(v.timestamp).toLocaleString()}
                 </p>
               </div>
-              {index === 0 ? <Badge variant="outline">Current</Badge> : null}
+              {index === 0 ? (
+                <Badge variant="outline">Current</Badge>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  disabled={undoing}
+                  onClick={() => onUndo(v)}
+                >
+                  <RotateCcw className="size-3.5" />
+                  Undo to here
+                </Button>
+              )}
             </div>
           ))}
         </div>
