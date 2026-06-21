@@ -4767,7 +4767,11 @@ class SqliteAssetAccessRepository:
 
         Returns the moved row, or ``None`` when no source row exists in that
         workspace (the caller then materializes a fresh row). Never raises for a
-        missing source.
+        missing source. Raises ``ValueError`` when ``new_asset_id`` is already
+        held by a DIFFERENT workspace: ``id`` is a global PK, so re-keying onto
+        it would violate the constraint; rejecting protects the foreign row
+        (the route pre-checks this and 409s before any filesystem move, so this
+        is a backstop for direct callers).
         """
         table = _ASSET_TABLES.get(asset_type)
         if table is None:
@@ -4780,6 +4784,14 @@ class SqliteAssetAccessRepository:
             ).fetchone()
             if src is None:
                 return None
+            conflict = conn.execute(
+                f"SELECT 1 FROM {table} WHERE id = ? AND workspace_id != ? LIMIT 1",
+                (new_asset_id, workspace_id),
+            ).fetchone()
+            if conflict is not None:
+                raise ValueError(
+                    f"{asset_type} id {new_asset_id!r} already exists in another workspace"
+                )
             conn.execute(
                 f"DELETE FROM {table} WHERE id = ? AND workspace_id = ?",
                 (new_asset_id, workspace_id),
