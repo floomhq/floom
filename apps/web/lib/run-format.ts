@@ -60,8 +60,11 @@ export function isInfraLogLine(message: string): boolean {
   if (!m) return false;
   // Sandbox provider chatter: "[e2b] ...", "[firecracker] ..."
   if (/^\[(e2b|firecracker|sandbox|runner)\]/i.test(m)) return true;
-  // Unsubstituted redaction placeholders leaking into the message
+  // Unsubstituted redaction placeholders leaking into the message. Two formats:
+  //   - square-bracket  [redacted-id]            (public_view log redactor)
+  //   - angle-bracket   <REDACTED:SECRET_NAME>   (#1703, scrub_secrets)
   if (/\[redacted-[a-z-]+\]/i.test(m)) return true;
+  if (/<REDACTED(?::[A-Z0-9_]+)?>/.test(m)) return true;
   // Low-level lifecycle noise that duplicates the timeline / metrics strip
   if (/^(Validating inputs|Loading secrets)$/i.test(m)) return true;
   return false;
@@ -90,7 +93,19 @@ const ERROR_CODE_LABELS: Record<string, string> = {
   invalid_input: "Invalid input",
   execution_failed: "Execution failed",
   sandbox_error: "Sandbox error",
+  e2b_sandbox_error: "Sandbox error",
 };
+
+// Calm headline for the sandbox-error code, mirroring the backend
+// _SANDBOX_HEADLINE in apps/api/services/public_view.py. Used when only a raw
+// `e2b_sandbox_error: <...>` string reaches the client (#1700).
+const SANDBOX_HEADLINE =
+  "The sandbox could not start or stay connected. Try again, then check the E2B configuration if it repeats.";
+
+// Low-level transport/library exception reprs, e.g. h2's
+// "<ConnectionTerminated error_code:1, last_stream_id:343, ...>". These must
+// never render verbatim to an operator (#1700).
+const LIBRARY_REPR = /<([A-Za-z_][A-Za-z0-9_]*)\b[^>]*>/g;
 
 function titleCaseToken(tok: string): string {
   // Known service slugs get a friendly capitalisation.
@@ -131,6 +146,11 @@ export function humanizeRunError(error: string | null | undefined): string {
   if (codeMatch) {
     const code = codeMatch[1].toLowerCase();
     const rest = codeMatch[2].trim();
+    // Sandbox errors carry raw transport-layer detail (h2 reprs, template ids).
+    // Never surface the detail; collapse to the calm headline (#1700).
+    if (code === "e2b_sandbox_error" || code === "sandbox_error") {
+      return SANDBOX_HEADLINE;
+    }
     const label = ERROR_CODE_LABELS[code];
     if (label) {
       const restHuman =
@@ -142,7 +162,10 @@ export function humanizeRunError(error: string | null | undefined): string {
     }
   }
 
-  return cleaned.length > 160 ? `${cleaned.slice(0, 157)}...` : cleaned;
+  // Defense-in-depth: strip any leftover raw library exception repr from the
+  // passthrough text so a "<ConnectionTerminated ...>" never reaches the banner.
+  const noRepr = cleaned.replace(LIBRARY_REPR, "$1").replace(/\s{2,}/g, " ").trim();
+  return noRepr.length > 160 ? `${noRepr.slice(0, 157)}...` : noRepr;
 }
 
 // ---------------------------------------------------------------------------

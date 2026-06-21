@@ -100,7 +100,12 @@ def _language_for_path(rel_path: str) -> str:
 
 
 def _should_ignore_worker_file(rel_path: str) -> bool:
-    """Return True if the file should be omitted from the worker's file listing."""
+    """Return True if the file should be omitted from the worker's file listing.
+
+    Excludes build/cache cruft, backups, AND credential/secret-bearing files
+    (#1681) so files like ``vertex-wif-cred.json`` or ``.env`` never surface in
+    the worker Source file tree (or its content endpoint).
+    """
     parts = Path(rel_path).parts
     for part in parts:
         if part in _WORKER_FILE_IGNORE:
@@ -109,6 +114,10 @@ def _should_ignore_worker_file(rel_path: str) -> bool:
             return True
         if ".bak" in part:
             return True
+    # Never list credential/secret-bearing files in the file browser. Reuses the
+    # export-side secret detector so listing and export stay in lockstep.
+    if _is_secret_bearing_export_path(rel_path):
+        return True
     return False
 
 
@@ -758,7 +767,8 @@ _WORKSPACE_EXPORT_SECRET_BASENAMES = frozenset({
 
 
 def _is_secret_bearing_export_path(rel: str) -> bool:
-    """True if a worker-dir file may carry secret values (excluded from export)."""
+    """True if a worker-dir file may carry secret values (excluded from export
+    AND from the worker Source file tree — see ``_should_ignore_worker_file``)."""
     base = rel.rsplit("/", 1)[-1].lower()
     if base in _WORKSPACE_EXPORT_SECRET_BASENAMES:
         return True
@@ -766,8 +776,29 @@ def _is_secret_bearing_export_path(rel: str) -> bool:
     if base == ".env" or base.startswith(".env.") or base.endswith(".env"):
         return True
     # Private keys / certs.
-    if base.endswith((".pem", ".key", ".p12", ".pfx")):
+    if base.endswith((".pem", ".key", ".p12", ".pfx", ".pkcs12", ".p8", ".der", ".crt", ".cer", ".ppk")):
         return True
+    # Cloud service-account / workload-identity credential JSON, e.g.
+    # vertex-wif-cred.json, gcp-service-account.json, my-sa.json (#1681). These
+    # do not match the fixed "credentials.json" basename, so match by delimited
+    # token. Tokens are split on - and _ so "results.json" / "package.json" /
+    # "my-wifi.json" are NOT matched (only whole-token "wif"/"sa"/"cred"/...).
+    if base.endswith(".json"):
+        stem = base[: -len(".json")]
+        tokens = set(re.split(r"[-_]+", stem))
+        credential_tokens = {
+            "cred",
+            "creds",
+            "credential",
+            "credentials",
+            "sa",
+            "serviceaccount",
+            "wif",
+        }
+        if tokens & credential_tokens:
+            return True
+        if "service-account" in stem or "service_account" in stem or "serviceaccount" in stem:
+            return True
     return False
 
 

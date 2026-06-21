@@ -15,7 +15,7 @@ import Papa from "papaparse";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { stripCitationTokens } from "@/lib/strip-citations";
+import { sanitizeOutputText, sanitizeJsonValue } from "@/lib/strip-citations";
 import { sanitizeHref } from "@/lib/safe-url";
 
 export type GenericOutputType = "markdown" | "json" | "csv" | "text" | "file" | string;
@@ -87,7 +87,7 @@ function CsvTable({ value }: { value: string }) {
           <TableRow>
             {header.map((h, i) => (
               <TableHead key={i} className="text-xs font-medium">
-                {h}
+                {sanitizeOutputText(h)}
               </TableHead>
             ))}
           </TableRow>
@@ -97,7 +97,7 @@ function CsvTable({ value }: { value: string }) {
             <TableRow key={ri}>
               {row.map((cell, ci) => (
                 <TableCell key={ci} className="text-xs">
-                  {cell}
+                  {sanitizeOutputText(cell)}
                 </TableCell>
               ))}
             </TableRow>
@@ -112,9 +112,11 @@ function JsonCode({ value }: { value: unknown }) {
   let formatted: string;
   try {
     const parsed = typeof value === "string" ? JSON.parse(value) : value;
-    formatted = JSON.stringify(parsed as Record<string, unknown>, null, 2);
+    // Deep-sanitize so internal <REDACTED:...> markers / citation tokens never
+    // render in the raw JSON block (#1703).
+    formatted = JSON.stringify(sanitizeJsonValue(parsed) as Record<string, unknown>, null, 2);
   } catch {
-    formatted = String(value);
+    formatted = sanitizeOutputText(String(value));
   }
   return (
     <pre className="text-xs bg-muted p-3 rounded-[var(--radius-button)] overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
@@ -137,7 +139,7 @@ function CellValue({ value }: { value: unknown }) {
   if (value == null || value === "") return <span className="text-muted-foreground">—</span>;
   if (isScalar(value)) {
     const text = typeof value === "boolean" ? (value ? "Yes" : "No") : String(value);
-    return <span className="whitespace-pre-wrap break-words">{stripCitationTokens(text)}</span>;
+    return <span className="whitespace-pre-wrap break-words">{sanitizeOutputText(text)}</span>;
   }
   // Nested object/array inside a cell: keep it compact and non-disruptive.
   return (
@@ -255,7 +257,7 @@ function JsonView({ value }: { value: unknown }) {
       return (
         <ul className="list-disc space-y-1 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 pl-7 text-sm">
           {structured.map((item, i) => (
-            <li key={i} className="whitespace-pre-wrap break-words">{stripCitationTokens(String(item))}</li>
+            <li key={i} className="whitespace-pre-wrap break-words">{sanitizeOutputText(String(item))}</li>
           ))}
         </ul>
       );
@@ -287,7 +289,7 @@ export function GenericOutput({
   }
 
   if (type === "markdown") {
-    const clean = stripCitationTokens(String(value));
+    const clean = sanitizeOutputText(String(value));
     return (
       <div className={`prose prose-sm max-w-none text-foreground ${className ?? ""}`}>
         <ReactMarkdown
@@ -316,12 +318,12 @@ export function GenericOutput({
   if (type === "file") {
     return (
       <div className={`bg-muted p-3 rounded-[var(--radius-button)] text-sm text-muted-foreground ${className ?? ""}`}>
-        <span className="font-mono text-xs">{String(value)}</span>
+        <span className="font-mono text-xs">{sanitizeOutputText(String(value))}</span>
       </div>
     );
   }
   // Default: plain text.
-  const clean = stripCitationTokens(String(value));
+  const clean = sanitizeOutputText(String(value));
   return (
     <div className={`bg-muted p-3 rounded-[var(--radius-button)] text-sm whitespace-pre-wrap font-mono leading-relaxed ${className ?? ""}`}>
       {clean}

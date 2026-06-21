@@ -1836,6 +1836,12 @@ export default function WorkersCollection({
     resolveMissing: async (id) => {
       try {
         const d = await api.workers.get(id);
+        // #1701: guard against a non-throwing phantom (null/empty body) so a
+        // dead link fires the not-found toast instead of silently opening an
+        // empty detail panel. NOTE: we deliberately do NOT require d.id === id —
+        // a worker id alias resolves to a different canonical id (#1558), which
+        // is a legitimate hit, not a miss.
+        if (!d || !d.id) return null;
         detailCache.set(d.id, d); // warm the detail-pane cache too
         return detailToSummary(d);
       } catch {

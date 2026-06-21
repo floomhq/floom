@@ -31,7 +31,7 @@ from services.worker_registry_ops import (
     _git_commit_worker,
     _persist_discovered_workers,
 )
-from services.worker_serialize import _build_worker_detail
+from services.worker_serialize import _build_worker_detail, _should_ignore_worker_file
 
 logger = logging.getLogger("floom.api")
 
@@ -85,9 +85,13 @@ def get_worker_version(
         raise HTTPException(status_code=404, detail="Version not found or worker had no files at this commit")
     files = []
     for fp in file_paths:
+        rel = fp[len(f"{prefix}/{worker_id}/"):]
+        # #1681: never surface credential/secret-bearing files (vertex-wif-cred.json,
+        # .env, *.pem, ...) or build cruft in the version-history file tree.
+        if _should_ignore_worker_file(rel):
+            continue
         content = _git_ops.get_file_at_sha(workspace, sha, fp)
         if content is not None:
-            rel = fp[len(f"{prefix}/{worker_id}/"):]
             files.append({"path": rel, "content": content})
     return {"files": files}
 

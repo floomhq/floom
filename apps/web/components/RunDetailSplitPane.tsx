@@ -25,7 +25,7 @@ import {
   exportSuccessState,
   exportStateText,
 } from "@/lib/run-format";
-import { stripCitationTokens } from "@/lib/strip-citations";
+import { sanitizeOutputText } from "@/lib/strip-citations";
 import { getToolCardTitle } from "@/lib/useChatStream";
 import type { LogEntry, RunDetail, RunPart, TranscriptRow, ToolCallEntry, ApprovalEntry } from "@/lib/types";
 
@@ -361,7 +361,7 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
     if (run.status === "failed") {
       return (
         <div className="space-y-5">
-          <StackTrace error={run.error || "Run failed"} />
+          <StackTrace error={humanizeRunError(run.error) || "Run failed"} />
           <RecentLogsPreview run={run} />
         </div>
       );
@@ -405,7 +405,7 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
                 {part.type === "reasoning" ? "Reasoning" : "Text"}
               </p>
               <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                {stripCitationTokens(part.text)}
+                {sanitizeOutputText(part.text)}
               </p>
             </div>
           );
@@ -442,14 +442,14 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
           return (
             <StackTrace
               key={`finish-${index}`}
-              error={run.error || humanizeRunError(part.error) || "Run failed"}
+              error={humanizeRunError(run.error) || humanizeRunError(part.error) || "Run failed"}
             />
           );
         }
         return null;
       })}
       {showTrailingError && (
-        <StackTrace error={run.error || "This run failed. Check the logs for details."} />
+        <StackTrace error={humanizeRunError(run.error) || "This run failed. Check the logs for details."} />
       )}
     </div>
   );
@@ -651,7 +651,7 @@ function OutputView({ run }: { run: RunDetail }) {
   const hasSchema = run.output_schema && run.output_schema.length > 0;
   const hasRaw = Object.keys(run.output || {}).length > 0;
   if (run.status === "failed") {
-    return <StackTrace error={run.error} />;
+    return <StackTrace error={humanizeRunError(run.error)} />;
   }
   if (hasSchema) {
     return (
@@ -966,7 +966,7 @@ function buildTimeline(run: RunDetail, parts: RunPart[]): TimelineItem[] {
       // surface 6px from the calm Error banner — it must show the SAME
       // humanized headline (`run.error`), never the raw `part.error`
       // ("Event loop is closed"). Raw stays in the Raw tab.
-      const failureDetail = run.error || humanizeRunError(part.error) || undefined;
+      const failureDetail = humanizeRunError(run.error) || humanizeRunError(part.error) || undefined;
       rows.push({
         label: isCompleted ? "Completed" : isPending ? "Awaiting approval" : "Failed",
         detail: isPending ? "Waiting for your decision" : isCompleted ? undefined : failureDetail,
