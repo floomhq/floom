@@ -3180,6 +3180,7 @@ class DraftAndCreateResponse(BaseModel):
 
 class WorkerListSummary(WorkerSummary):
     created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -3239,4 +3240,3 @@ class WorkspaceIssueUpdateRequest(BaseModel):
 
 class WorkspaceIssueCommentRequest(BaseModel):
     body: str = Field(..., min_length=1, max_length=20000)
-    updated_at: Optional[str] = None
