@@ -522,6 +522,26 @@ export const api = {
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
       }),
+    feedback: {
+      list: (id: string) =>
+        fetchJson<import("./types").RunFeedback[]>(`/runs/${encodeURIComponent(id)}/feedback`),
+      create: (id: string, content: string, rating?: string | null) =>
+        fetchJson<import("./types").RunFeedback>(`/runs/${encodeURIComponent(id)}/feedback`, {
+          method: "POST",
+          body: JSON.stringify({ content, rating: rating ?? null }),
+        }),
+    },
+    // #1807: explicitly convert one actionable run feedback item into a
+    // git-backed workspace issue bound to the run. Opt-in only — normal
+    // feedback never hits this path.
+    createFeedbackIssue: (
+      id: string,
+      payload: import("./types").RunFeedbackIssueRequest,
+    ) =>
+      fetchJson<import("./types").RunFeedbackIssueResponse>(
+        `/runs/${encodeURIComponent(id)}/feedback/issue`,
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
     approve: async (
       id: string,
       editedOutput?: Record<string, unknown>,

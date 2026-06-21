@@ -761,3 +761,26 @@ class FeedbackRepository(Protocol):
     def get(self, *, feedback_id: str) -> RowDict | None: ...
 
     def delete(self, *, feedback_id: str, worker_id: str) -> bool: ...
+
+
+class RunFeedbackRepository(Protocol):
+    """Lightweight per-run feedback comments that can be promoted to issues."""
+
+    def add(
+        self,
+        *,
+        feedback_id: str,
+        run_id: str,
+        worker_id: str,
+        author_id: str,
+        author_name: str | None,
+        content: str,
+        rating: str | None,
+        created_at: str,
+    ) -> RowDict: ...
+
+    def list(self, *, run_id: str) -> list[RowDict]: ...
+
+    def get(self, *, feedback_id: str) -> RowDict | None: ...
+
+    def mark_issue_created(self, *, feedback_id: str, issue_id: str) -> RowDict | None: ...

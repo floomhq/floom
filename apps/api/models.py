@@ -3241,3 +3241,51 @@ class WorkspaceIssueUpdateRequest(BaseModel):
 
 class WorkspaceIssueCommentRequest(BaseModel):
     body: str = Field(..., min_length=1, max_length=20000)
+
+
+# ---------------------------------------------------------------------------
+# Run feedback -> workspace issue (#1807)
+# ---------------------------------------------------------------------------
+# Run feedback stays a lightweight quality signal. This is the explicit, opt-in
+# bridge that turns one actionable feedback item into a git-backed workspace
+# issue (#1781) bound to the run (asset_type=run, asset_id=<run_id>).
+
+class RunFeedback(BaseModel):
+    """A lightweight feedback note left on a specific run."""
+
+    id: str
+    run_id: str
+    worker_id: str
+    author_id: str
+    author_name: Optional[str] = None
+    content: str
+    rating: Optional[str] = None
+    issue_id: Optional[str] = None
+    created_at: str
+
+
+class RunFeedbackCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+    rating: Optional[str] = Field(None, max_length=120)
+
+
+class RunFeedbackIssueRequest(BaseModel):
+    """Convert an actionable run feedback item into a tracked workspace issue."""
+
+    # Required for legacy direct-create callers; optional when feedback_id points
+    # at a stored run-feedback row.
+    feedback_text: Optional[str] = Field(None, min_length=1, max_length=10000)
+    # Free-form thumb/rating value as the UI captured it (e.g. "down", "up", "2").
+    rating: Optional[str] = Field(None, max_length=120)
+    # Optional operator-supplied title; defaulted from worker/run when omitted.
+    title: Optional[str] = Field(None, max_length=300)
+    # Stable client feedback id; when present a second submit for the same id
+    # returns the existing issue instead of creating a duplicate.
+    feedback_id: Optional[str] = Field(None, max_length=200)
+
+
+class RunFeedbackIssueResponse(BaseModel):
+    issue_id: str
+    created: bool
+    issue: WorkspaceIssueOut
+    feedback: Optional[RunFeedback] = None
