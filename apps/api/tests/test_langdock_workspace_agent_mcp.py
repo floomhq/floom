@@ -278,6 +278,59 @@ def test_langdock_mcp_tool_call_forwards_to_workspace_agent(monkeypatch, tmp_pat
     assert body["result"]["isError"] is False
 
 
+def test_langdock_mcp_tool_call_forwards_source_mcp(monkeypatch, tmp_path):
+    # Regression for #524 gap #1: MCP callers must reach Emily with source="mcp"
+    # (terse MCP environment note), not the default web onboarding prose.
+    # The wrapper _collect_workspace_agent_reply_for_langdock is what sets
+    # source="mcp"; stub the layer *below* it so that wiring is actually
+    # exercised instead of stubbed away.
+    main = _load_api(monkeypatch, tmp_path)
+    calls = []
+
+    async def fake_collect_for_slack(
+        *, message, user_id, conversation_id, source="slack", system_suffix=""
+    ):
+        calls.append((message, user_id, conversation_id, source, system_suffix))
+        return "workspace agent answer"
+
+    monkeypatch.setattr(
+        main, "_collect_workspace_agent_reply_for_slack", fake_collect_for_slack
+    )
+
+    payload = _rpc(
+        "tools/call",
+        request_id="call-mcp-source",
+        params={
+            "name": "ask_workspace_agent",
+            "arguments": {
+                "message": "Summarize failed worker runs",
+                "conversation_id": "chat 123",
+            },
+        },
+    )
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/mcp",
+            data=json.dumps(payload),
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200, response.text
+    assert calls == [
+        (
+            "Summarize failed worker runs",
+            "mcp-test-user",
+            "langdock:chat_123",
+            "mcp",
+            "",
+        )
+    ]
+    body = response.json()
+    assert body["id"] == "call-mcp-source"
+    assert body["result"]["isError"] is False
+
+
 def test_langdock_mcp_returns_tool_error_for_unknown_tool(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     payload = _rpc(
