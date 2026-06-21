@@ -931,6 +931,7 @@ export interface WorkspaceAgentInfo {
 export interface WorkspaceImportResult {
   workers_imported: string[];
   contexts_imported: string[];
+  issues_imported: string[];
   skipped: { type: string; id: string; reason: string }[];
   id_remaps: Record<string, string>;
   required_secrets: string[];
