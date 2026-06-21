@@ -1,8 +1,8 @@
-# FL28: Full Worker Setup and Emily Verification (UI, MCP, WhatsApp, Slack)
+# FL28: Blocked State and Verification Planning for Issue #524
 
-## PR Status: BLOCKED & NON-CLOSING
+## PR Status: BLOCKED & NON-CLOSING (DOCUMENTATION ONLY)
 
-> **CRITICAL NOTE:** This PR is explicitly **non-closing** for issue #524. The actual code fix for issue #524 cannot be inferred from the available context, and this PR is currently in a **BLOCKED** state pending further requirements and concrete code changes. No code changes have been implemented in this PR.
+> **CRITICAL NOTE:** This PR is explicitly **non-closing** and does **not** resolve issue #524. The actual code fix for issue #524 cannot be inferred from the available context. This PR is currently in a **BLOCKED** state pending further requirements and concrete code changes. No code changes have been implemented in this PR.
 >
 > **Note on PR Title/Description:** The PR title ("Fix issue #524") and description are automated/system-generated and cannot be modified by the autonomous fixer loop. This PR is intended solely as a documentation-only record of the blocked state and verification planning.
 
@@ -10,15 +10,15 @@
 
 - **Reason for Blocked State:** The specific functional requirements, bug reports, or code changes required to resolve issue #524 are not present in the available context.
 - **Action Required:** Maintainers or authors must provide the actual code changes or detailed specifications of the defect in issue #524.
-- **Verification Status:** All channels are currently **unverified** and marked as **Pending Verification** because no code changes have been introduced. No verification claims are being made.
+- **Verification Status:** All channels are currently **unverified** and marked as **Pending Verification** because no code changes have been introduced. **No verification claims are being made in this PR.**
 
-## Verification Requirements (Post-Fix)
+## Concrete Evidence Requirements (Post-Fix)
 
-Once the code changes are provided, the following concrete evidence must be produced to verify the fix across all channels:
+Once the code changes are provided in a future PR, the following concrete evidence must be produced and attached to verify the fix across all channels before merging:
 
 ### 1. UI Channel
 - **Required Evidence:**
-  - CI execution logs for DOM tests in `apps/web/tests/new-worker-emily-902.dom.test.tsx` and `apps/web/tests/new-worker-emily-chat-only.dom.test.tsx`.
+  - Concrete CI execution logs for DOM tests in `apps/web/tests/new-worker-emily-902.dom.test.tsx` and `apps/web/tests/new-worker-emily-chat-only.dom.test.tsx`.
   - Test run outputs for chat streaming and scroll lock verified by `apps/web/tests/fl-scroll-lock.test.ts`.
 
 ### 2. WhatsApp Channel
