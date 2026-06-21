@@ -499,6 +499,43 @@ def test_import_skips_malformed_issue_bytes(monkeypatch, tmp_path):
     assert "ISSUE-0002" not in listed
 
 
+def test_import_skips_issue_files_with_invalid_frontmatter(monkeypatch, tmp_path):
+    workspace, workers_dir = _make_workspace(tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "dev")
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
+    _purge_api_modules()
+    issues = importlib.import_module("services.workspace_issues")
+
+    malformed_cases = [
+        ("ISSUE-0004.md", b"body without frontmatter\n"),
+        (
+            "ISSUE-0005.md",
+            b"---\nid: ISSUE-9999\nstatus: open\ntitle: wrong id\n---\n\nbody\n",
+        ),
+        (
+            "ISSUE-0006.md",
+            b"---\nid: ISSUE-0006\nstatus: pending\ntitle: bad status\n---\n\nbody\n",
+        ),
+        ("ISSUE-0007.md", b"---\nid: ISSUE-0007\nstatus: open\n---\n\nbody\n"),
+        (
+            "ISSUE-0008.md",
+            b"---\nid: ISSUE-0008\nstatus: open\ntitle: bad asset\nasset_type: worker\n---\n\nbody\n",
+        ),
+    ]
+
+    imported = issues.restore_issue_files(malformed_cases)
+
+    assert imported == []
+    listed = {i["id"] for i in issues.list_issues()}
+    assert all(f"ISSUE-{n:04d}" not in listed for n in range(4, 9))
+    for name, _data in malformed_cases:
+        assert not (workspace / ".floom" / "issues" / name).exists()
+
+
 def test_import_keeps_md_but_drops_invalid_comment_log(monkeypatch, tmp_path):
     workspace, workers_dir = _make_workspace(tmp_path)
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
