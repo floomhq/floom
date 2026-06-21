@@ -81,3 +81,86 @@ def test_valid_yaml_unchanged(run_service):
     result = _norm(run_service, yml)
     assert result["schema_version"] == "0.3"
     assert result["version"] == "2.5.1"  # not clobbered
+
+
+# --- exec.inputs/outputs emitted as a MAPPING instead of a LIST -------------
+# The generator (esp. Gemini) intermittently emits exec.inputs/exec.outputs as
+# a dict keyed by field name; WorkerContract rejects it with
+# "Input should be a valid list" (list_type) and dead-ends create-from-prompt.
+# _normalize_authored_worker_yml now coerces the mapping into the list form.
+
+def test_exec_inputs_dict_coerced_to_list(run_service):
+    yml = (
+        'schema_version: "0.3"\n'
+        'name: "upper"\n'
+        'title: "Uppercase"\n'
+        'description: "uppercases text"\n'
+        'version: "0.1.0"\n'
+        "exec:\n"
+        "  inputs:\n"
+        "    text:\n"
+        "      type: string\n"
+        "  outputs:\n"
+        "    uppercased:\n"
+        "      type: string\n"
+    )
+    result = _norm(run_service, yml)
+    assert isinstance(result["exec"]["inputs"], list)
+    assert isinstance(result["exec"]["outputs"], list)
+    assert result["exec"]["inputs"][0]["name"] == "text"
+    assert result["exec"]["inputs"][0]["type"] == "string"
+    assert result["exec"]["outputs"][0]["name"] == "uppercased"
+
+
+def test_exec_io_string_shorthand_coerced(run_service):
+    # name -> bare type string shorthand, e.g. {text: string}
+    yml = (
+        'schema_version: "0.3"\n'
+        'name: "upper"\n'
+        'title: "Uppercase"\n'
+        'description: "uppercases text"\n'
+        'version: "0.1.0"\n'
+        "exec:\n"
+        "  inputs:\n"
+        "    text: string\n"
+        "  outputs:\n"
+        "    uppercased: string\n"
+    )
+    result = _norm(run_service, yml)
+    assert isinstance(result["exec"]["inputs"], list)
+    inp = result["exec"]["inputs"][0]
+    assert inp["name"] == "text" and inp["type"] == "string"
+
+
+def test_toplevel_inputs_dict_coerced_to_list(run_service):
+    yml = (
+        'schema_version: "0.3"\n'
+        'name: "upper"\n'
+        'title: "Uppercase"\n'
+        'description: "uppercases text"\n'
+        'version: "0.1.0"\n'
+        "inputs:\n"
+        "  text:\n"
+        "    type: string\n"
+    )
+    result = _norm(run_service, yml)
+    assert isinstance(result["inputs"], list)
+    assert result["inputs"][0]["name"] == "text"
+
+
+def test_exec_io_already_list_unchanged(run_service):
+    yml = (
+        'schema_version: "0.3"\n'
+        'name: "upper"\n'
+        'title: "Uppercase"\n'
+        'description: "uppercases text"\n'
+        'version: "0.1.0"\n'
+        "exec:\n"
+        "  inputs:\n"
+        "    - name: text\n"
+        "      kind: scalar\n"
+        "      type: string\n"
+    )
+    result = _norm(run_service, yml)
+    assert isinstance(result["exec"]["inputs"], list)
+    assert result["exec"]["inputs"][0]["name"] == "text"

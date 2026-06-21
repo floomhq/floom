@@ -227,14 +227,40 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
                 touched = True
         return touched
 
+    def _coerce_to_list(block: Any, key: str) -> bool:
+        """The generator intermittently emits inputs/outputs as a MAPPING keyed
+        by field name (``inputs: {text: {type: string}}``) instead of the
+        schema-required LIST (``inputs: [{name: text, type: string}]``).
+        WorkerContract then hard-rejects with ``Input should be a valid list``
+        (type list_type) and dead-ends the create flow (worker_creation_failed=
+        true, no worker added). Coerce a name->spec mapping into the list form —
+        injecting ``name`` from the key, and treating a bare string value as a
+        scalar ``type`` shorthand — so the kind/type normalization below +
+        registration succeed. Lossless: only restructures, never drops a field."""
+        if not isinstance(block, dict) or not isinstance(block.get(key), dict):
+            return False
+        coerced = []
+        for name, spec in block[key].items():
+            if isinstance(spec, dict):
+                item = {"name": name, **spec}
+            elif isinstance(spec, str):
+                item = {"name": name, "type": spec}
+            else:
+                item = {"name": name}
+            coerced.append(item)
+        block[key] = coerced
+        return True
+
     for block, key in ((raw, "inputs"), (raw, "outputs")):
-        if _fix_fields(block.get(key)):
+        coerced = _coerce_to_list(block, key)
+        if _fix_fields(block.get(key)) or coerced:
             changed = True
             log_fn(f"Normalized generated {key} kind/type so the worker registers", level="info")
     exec_block = raw.get("exec")
     if isinstance(exec_block, dict):
         for key in ("inputs", "outputs"):
-            if _fix_fields(exec_block.get(key)):
+            coerced = _coerce_to_list(exec_block, key)
+            if _fix_fields(exec_block.get(key)) or coerced:
                 changed = True
                 log_fn(f"Normalized generated {key} kind/type so the worker registers", level="info")
 
