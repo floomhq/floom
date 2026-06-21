@@ -1123,6 +1123,49 @@ def create_mcp_connection(
     return _public_connection_item(item)
 
 
+def _emit_connection_resolved(
+    *,
+    event: str,
+    connection_id: str,
+    owner_id: Optional[str],
+    provider: Optional[str],
+    failure_status: Optional[str] = None,
+) -> None:
+    """Emit connection_added / connection_failed when an OAuth connection
+    resolves at the callback chokepoint.
+
+    The OAuth callback is the single point where a pending connection
+    transitions to active (added) or to a definitive non-active outcome
+    (failed), so emitting here captures every resolution exactly once without
+    the per-entrypoint double-emit risk of instrumenting each route.
+
+    Metadata only — counts/ids/the provider slug, never the external account
+    handle, any token, or PII. No-op when analytics is disabled; never raises.
+    """
+    try:
+        from services import analytics_posthog
+        from db import derive_workspace_id
+    except Exception:  # pragma: no cover - analytics module import guard
+        return
+    if not analytics_posthog.is_enabled():
+        return
+    try:
+        props: Dict[str, Any] = {
+            "connection_id": connection_id or None,
+            "provider": (provider or "").strip().lower() or None,
+        }
+        if event == "connection_failed":
+            props["failure_status"] = (failure_status or "").strip().lower() or None
+        analytics_posthog.capture_event(
+            distinct_id=owner_id or "",
+            event=event,
+            properties=props,
+            groups={"workspace": derive_workspace_id(owner_id)},
+        )
+    except Exception:  # pragma: no cover - belt-and-suspenders
+        logger.debug("PostHog %s emit failed for %s", event, connection_id, exc_info=True)
+
+
 @connections_router.get("/connections/callback")
 def connections_callback(request: Request, connection_id: str = "", status: str = "", state: str = ""):
     """OAuth callback landing — Composio redirects here after user authorizes.
@@ -1226,6 +1269,30 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
             final_status=final_status,
             now=now,
         )
+
+        # Analytics: capture the OAuth activation outcome once per callback
+        # resolution. ``active`` is an add; only a definitive failure status
+        # (``expired``/``failed``, matching the canonical failure handling
+        # below) is a failure. A still-pending status (``initiated``/
+        # ``unknown``) or a missing/``not_found`` remote answer leaves the
+        # connection pending and emits nothing — Composio activates
+        # asynchronously, so a freshly created row can still read pending at
+        # callback time and must not be mislabelled a failure. Fail-soft.
+        if final_status == "active":
+            _emit_connection_resolved(
+                event="connection_added",
+                connection_id=str(landing_id or existing["id"]),
+                owner_id=str(existing["user_id"]),
+                provider=landing_app or existing.get("app_name"),
+            )
+        elif remote_status in ("expired", "failed"):
+            _emit_connection_resolved(
+                event="connection_failed",
+                connection_id=str(landing_id or existing["id"]),
+                owner_id=str(existing["user_id"]),
+                provider=landing_app or existing.get("app_name"),
+                failure_status=final_status,
+            )
 
     # Invalidate the connections list cache for the owner so the next list
     # request reflects the updated OAuth status.

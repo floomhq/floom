@@ -130,6 +130,27 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
         },
         "optional_props": set(),
     },
+    # --- connections (server, routers.connections._emit_connection_resolved) -
+    # OAuth activation outcome, emitted once per callback resolution.
+    "connection_added": {
+        "emitter": EMITTER_SERVER,
+        "surface": "routers.connections._emit_connection_resolved",
+        "required_props": {
+            "connection_id",
+            "provider",
+        },
+        "optional_props": set(),
+    },
+    "connection_failed": {
+        "emitter": EMITTER_SERVER,
+        "surface": "routers.connections._emit_connection_resolved",
+        "required_props": {
+            "connection_id",
+            "provider",
+            "failure_status",
+        },
+        "optional_props": set(),
+    },
     # --- approvals (server, run_service._emit_approval_requested) ------------
     "approval_requested": {
         "emitter": EMITTER_SERVER,
