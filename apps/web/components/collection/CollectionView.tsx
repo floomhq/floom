@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, LayoutGrid, List as ListIcon, Plus, ChevronsRight, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   type CollectionConfig,
   type CollectionState,
@@ -249,26 +252,15 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   );
 
   const viewToggle = gridEnabled && !isOpen && (
-    <div className="c-vtog" role="group" aria-label="View mode">
-      <button
-        type="button"
-        aria-label="Grid view"
-        aria-pressed={state.view === "grid"}
-        className={state.view === "grid" ? "on" : ""}
-        onClick={() => setView("grid")}
-      >
-        <LayoutGrid size={15} />
-      </button>
-      <button
-        type="button"
-        aria-label="List view"
-        aria-pressed={state.view === "list"}
-        className={state.view === "list" ? "on" : ""}
-        onClick={() => setView("list")}
-      >
-        <ListIcon size={15} />
-      </button>
-    </div>
+    <SegmentedControl<ViewMode>
+      ariaLabel="View mode"
+      value={state.view}
+      onChange={setView}
+      options={[
+        { value: "grid", label: "Grid view", icon: <LayoutGrid />, iconOnly: true },
+        { value: "list", label: "List view", icon: <ListIcon />, iconOnly: true },
+      ]}
+    />
   );
 
   const searchBox = (compact?: boolean) => (
@@ -285,9 +277,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   );
 
   const addButton = config.add && (
-    <button
-      type="button"
-      className="c-addbtn"
+    <Button
       onClick={() => {
         if (config.add!.panel) {
           patch({ sel: null, tab: null });
@@ -298,8 +288,8 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
         }
       }}
     >
-      <Plus size={14} /> {config.add.label}
-    </button>
+      <Plus /> {config.add.label}
+    </Button>
   );
 
   // Opens the +Add panel (or runs onSelect) — shared by the toolbar add button
@@ -341,71 +331,36 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           {from}–{to} of {filtered.length}
         </span>
         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <button
-            type="button"
-            aria-label="Previous page"
+          <IconButton
+            icon={<ChevronLeft />}
+            label="Previous page"
+            tooltip={null}
+            variant="outline"
+            size="icon-sm"
             disabled={safePage === 0}
             onClick={() => setPage((p) => Math.max(0, p - 1))}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "4px 8px",
-              borderRadius: "var(--radius-button)",
-              border: "var(--bd-card)",
-              background: "var(--bg-2)",
-              color: safePage === 0 ? "var(--muted-foreground)" : "var(--foreground)",
-              opacity: safePage === 0 ? 0.4 : 1,
-              cursor: safePage === 0 ? "default" : "pointer",
-              fontSize: 12,
-            }}
-          >
-            <ChevronLeft size={13} />
-          </button>
+          />
           {Array.from({ length: totalPages }).map((_, i) => (
-            <button
+            <Button
               key={i}
-              type="button"
+              variant={i === safePage ? "default" : "outline"}
+              size="icon-sm"
               aria-label={`Page ${i + 1}`}
               aria-current={i === safePage ? "page" : undefined}
               onClick={() => setPage(i)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minWidth: 28,
-                padding: "4px 6px",
-                borderRadius: "var(--radius-button)",
-                border: "var(--bd-card)",
-                background: i === safePage ? "var(--foreground)" : "var(--bg-2)",
-                color: i === safePage ? "var(--bg-1, var(--background))" : "var(--foreground)",
-                fontWeight: i === safePage ? 600 : 400,
-                cursor: "pointer",
-                fontSize: 12,
-              }}
             >
               {i + 1}
-            </button>
+            </Button>
           ))}
-          <button
-            type="button"
-            aria-label="Next page"
+          <IconButton
+            icon={<ChevronRight />}
+            label="Next page"
+            tooltip={null}
+            variant="outline"
+            size="icon-sm"
             disabled={safePage >= totalPages - 1}
             onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "4px 8px",
-              borderRadius: "var(--radius-button)",
-              border: "var(--bd-card)",
-              background: "var(--bg-2)",
-              color: safePage >= totalPages - 1 ? "var(--muted-foreground)" : "var(--foreground)",
-              opacity: safePage >= totalPages - 1 ? 0.4 : 1,
-              cursor: safePage >= totalPages - 1 ? "default" : "pointer",
-              fontSize: 12,
-            }}
-          >
-            <ChevronRight size={13} />
-          </button>
+          />
         </div>
       </div>
     );
@@ -503,14 +458,11 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
         <div className={`c-body c-split ${listCollapsed ? "lc" : ""}`} style={{ marginTop: 14 }}>
           <div className="c-listcol">
             <div className="c-sliver">
-              <button
-                type="button"
-                aria-label="Expand list"
+              <IconButton
+                icon={<ChevronsRight />}
+                label="Expand list"
                 onClick={() => setListCollapsed(false)}
-                style={{ color: "var(--muted-foreground)" }}
-              >
-                <ChevronsRight size={16} />
-              </button>
+              />
             </div>
             <div className="c-splitbar">{searchBox(true)}</div>
             <div className="lcin">
@@ -528,9 +480,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
                     </div>
                   </div>
                   <div className="c-dh-act">
-                    <button type="button" className="x" aria-label="Close detail" onClick={close}>
-                      <X size={16} />
-                    </button>
+                    <IconButton icon={<X />} label="Close detail" onClick={close} />
                   </div>
                 </div>
                 <div className="c-dbody">{config.add.panel.render(close)}</div>

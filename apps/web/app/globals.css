@@ -113,7 +113,7 @@
   --border-soft: rgba(20,23,26,0.05);
   --primary: #16171A;
   --primary-text: #FFFFFF;
-  --warning: #E5533D;
+  --warning: #C98A1A; /* amber — Floom DS: red is NOT a Floom color. Feeds --negative/--destructive/Failed status. */
   --success: #2F8F5B;
   --pending: #6B7280;
   --info: #3E6FE0; /* "running"/in-progress accent (SPEC §4) */
@@ -327,7 +327,8 @@ html.dark {
   --secondary-foreground: var(--ink);
   --muted-foreground: var(--ink-soft);
   --accent-foreground: var(--ink);
-  --destructive: oklch(0.704 0.191 22.216);
+  /* dedupe: dark --destructive must read the same amber token as light (was hardcoded red oklch). */
+  --destructive: var(--warning);
   --border: var(--line);
   --input: var(--line-strong);
   --ring: var(--accent-line);
@@ -860,9 +861,11 @@ html.dark .grain {
 .c-gcard { border:var(--bd-card); background:var(--grid-card-bg,var(--bg-card)); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:148px; cursor:pointer; position:relative; box-shadow:none; text-align:left; transition:background .12s; }
 .c-gcard:hover { background:var(--bg-2); }
 .c-gcard.sel { background:var(--accent-soft); box-shadow:none; }
-.c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
-.c-gcard:hover .star { opacity:1; }
-.c-gcard .star.on { opacity:1; color:var(--accent); }
+/* Card star is now an IconButton (.star-btn). Card context owns only the
+   hover-reveal + starred-accent; button chrome comes from the primitive. */
+.c-gcard .star-btn { opacity:0; transition:opacity .12s; }
+.c-gcard:hover .star-btn { opacity:1; }
+.c-gcard .star-btn.on { opacity:1; color:var(--accent); }
 /* D-05: reserve space at top-right for the absolute star/lock cluster so a long
    worker name never collides with the star button. */
 .c-gtop { display:flex; align-items:center; gap:11px; padding-right:26px; min-width:0; }
