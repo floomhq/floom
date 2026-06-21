@@ -3250,10 +3250,31 @@ class WorkspaceIssueCommentRequest(BaseModel):
 # bridge that turns one actionable feedback item into a git-backed workspace
 # issue (#1781) bound to the run (asset_type=run, asset_id=<run_id>).
 
+class RunFeedback(BaseModel):
+    """A lightweight feedback note left on a specific run."""
+
+    id: str
+    run_id: str
+    worker_id: str
+    author_id: str
+    author_name: Optional[str] = None
+    content: str
+    rating: Optional[str] = None
+    issue_id: Optional[str] = None
+    created_at: str
+
+
+class RunFeedbackCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+    rating: Optional[str] = Field(None, max_length=120)
+
+
 class RunFeedbackIssueRequest(BaseModel):
     """Convert an actionable run feedback item into a tracked workspace issue."""
 
-    feedback_text: str = Field(..., min_length=1, max_length=10000)
+    # Required for legacy direct-create callers; optional when feedback_id points
+    # at a stored run-feedback row.
+    feedback_text: Optional[str] = Field(None, min_length=1, max_length=10000)
     # Free-form thumb/rating value as the UI captured it (e.g. "down", "up", "2").
     rating: Optional[str] = Field(None, max_length=120)
     # Optional operator-supplied title; defaulted from worker/run when omitted.
@@ -3267,3 +3288,4 @@ class RunFeedbackIssueResponse(BaseModel):
     issue_id: str
     created: bool
     issue: WorkspaceIssueOut
+    feedback: Optional[RunFeedback] = None

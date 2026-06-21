@@ -7,6 +7,7 @@ bound to the run. Covered here with no network:
   - the issue is discoverable via GET /workspace/issues?asset_type=run&asset_id=
   - the body carries enough context (feedback text, rating, run id, worker id)
   - a stable feedback_id dedups: a second submit returns the same issue (200)
+  - stored run feedback can be promoted to exactly one workspace issue
   - feedback for a run the caller cannot see returns 404
 """
 
@@ -157,11 +158,54 @@ def test_created_issue_is_visible_via_workspace_issues(monkeypatch, tmp_path):
     assert created["issue_id"] in ids
 
 
+def test_run_feedback_can_be_promoted_to_issue(monkeypatch, tmp_path):
+    workspace, workers_dir = _make_workspace(tmp_path)
+    client, db = _install_app(monkeypatch, tmp_path, workers_dir=workers_dir, workspace_dir=workspace)
+    _seed_run(db, run_id="run_feedback")
+
+    feedback = client.post(
+        "/runs/run_feedback/feedback",
+        json={"content": "Wrong inbox thread was summarised.", "rating": "down"},
+    )
+    assert feedback.status_code == 201, feedback.text
+    feedback_id = feedback.json()["id"]
+
+    listed_feedback = client.get("/runs/run_feedback/feedback")
+    assert listed_feedback.status_code == 200, listed_feedback.text
+    assert listed_feedback.json()[0]["content"] == "Wrong inbox thread was summarised."
+    assert listed_feedback.json()[0]["issue_id"] is None
+
+    promoted = client.post(
+        "/runs/run_feedback/feedback/issue",
+        json={"feedback_id": feedback_id},
+    )
+    assert promoted.status_code == 201, promoted.text
+    payload = promoted.json()
+    assert payload["created"] is True
+    assert payload["feedback"]["id"] == feedback_id
+    assert payload["feedback"]["issue_id"] == payload["issue_id"]
+    assert payload["issue"]["asset_type"] == "run"
+    assert payload["issue"]["asset_id"] == "run_feedback"
+    assert "Wrong inbox thread was summarised." in payload["issue"]["body"]
+    assert "down" in payload["issue"]["body"]
+
+    promoted_again = client.post(
+        "/runs/run_feedback/feedback/issue",
+        json={"feedback_id": feedback_id},
+    )
+    assert promoted_again.status_code == 200, promoted_again.text
+    assert promoted_again.json()["created"] is False
+    assert promoted_again.json()["issue_id"] == payload["issue_id"]
+
+
 def test_normal_feedback_does_not_create_issue(monkeypatch, tmp_path):
     # The bridge is opt-in: no issue exists until the endpoint is called.
     workspace, workers_dir = _make_workspace(tmp_path)
     client, db = _install_app(monkeypatch, tmp_path, workers_dir=workers_dir, workspace_dir=workspace)
     _seed_run(db, run_id="run_quiet")
+
+    feedback = client.post("/runs/run_quiet/feedback", json={"content": "Needs better summary."})
+    assert feedback.status_code == 201, feedback.text
 
     listed = client.get(
         "/workspace/issues", params={"asset_type": "run", "asset_id": "run_quiet"}

@@ -21,6 +21,7 @@ import logging
 import mimetypes
 import os
 import time
+import uuid as _uuid_mod
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -50,6 +51,8 @@ from models import (
     LogEntry,
     OutputField,
     RunDetail,
+    RunFeedback,
+    RunFeedbackCreateRequest,
     RunFeedbackIssueRequest,
     RunFeedbackIssueResponse,
     RunStatus,
@@ -601,6 +604,20 @@ def cancel_run(
 RUN_FEEDBACK_ISSUE_LABEL = "run-feedback"
 
 
+def _run_feedback_to_model(row: Dict[str, Any]) -> RunFeedback:
+    return RunFeedback(
+        id=str(row["id"]),
+        run_id=str(row["run_id"]),
+        worker_id=str(row["worker_id"]),
+        author_id=str(row["author_id"]),
+        author_name=row.get("author_name"),
+        content=str(row["content"]),
+        rating=row.get("rating"),
+        issue_id=row.get("issue_id"),
+        created_at=str(row["created_at"]),
+    )
+
+
 def _run_feedback_issue_title(worker_label: str, run_id: str, feedback_text: str) -> str:
     """Default issue title derived from feedback, falling back to worker/run."""
     snippet = " ".join((feedback_text or "").split())[:80].strip()
@@ -638,6 +655,57 @@ def _run_feedback_issue_body(
     return "\n".join(lines)
 
 
+@runs_router.get("/runs/{run_id}/feedback", response_model=List[RunFeedback])
+def list_run_feedback(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[RunFeedback]:
+    """List lightweight feedback notes for a visible run."""
+    if _get_visible_run(run_id, user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if repos.run_feedback is None:
+        return []
+    return [_run_feedback_to_model(row_to_dict(r)) for r in repos.run_feedback.list(run_id=run_id)]
+
+
+@runs_router.post("/runs/{run_id}/feedback", response_model=RunFeedback, status_code=201)
+def create_run_feedback(
+    run_id: str,
+    payload: RunFeedbackCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> RunFeedback:
+    """Leave a lightweight feedback note on a visible run.
+
+    This is intentionally separate from issue creation: feedback is the quality
+    signal, and the `/issue` promotion endpoint is the explicit actionable step.
+    """
+    from db import now_iso
+
+    run = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if repos.run_feedback is None:
+        raise HTTPException(status_code=503, detail="run feedback not available")
+
+    data = row_to_dict(run)
+    content = payload.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Feedback content is required.")
+    row = repos.run_feedback.add(
+        feedback_id=f"rfb_{_uuid_mod.uuid4().hex[:12]}",
+        run_id=run_id,
+        worker_id=str(data.get("worker_id") or ""),
+        author_id=auth.user_id,
+        author_name=auth.username or auth.email,
+        content=content,
+        rating=(payload.rating or "").strip() or None,
+        created_at=now_iso(),
+    )
+    return _run_feedback_to_model(row_to_dict(row))
+
+
 @runs_router.post(
     "/runs/{run_id}/feedback/issue",
     response_model=RunFeedbackIssueResponse,
@@ -671,12 +739,40 @@ def create_run_feedback_issue(
     run = row_to_dict(run)
     worker_id = str(run.get("worker_id") or "")
     worker_label = str(run.get("worker_name") or worker_id or "")
+    stored_feedback = None
+    feedback_id = (payload.feedback_id or "").strip()
+    if feedback_id:
+        if repos.run_feedback is None:
+            if not (payload.feedback_text or "").strip():
+                raise HTTPException(status_code=503, detail="run feedback not available")
+        else:
+            stored_feedback = repos.run_feedback.get(feedback_id=feedback_id)
+            if (
+                stored_feedback is None
+                or str(stored_feedback.get("run_id") or "") != run_id
+                or str(stored_feedback.get("worker_id") or "") != worker_id
+            ):
+                if not (payload.feedback_text or "").strip():
+                    raise HTTPException(status_code=404, detail="Run feedback not found")
+                stored_feedback = None
+            if stored_feedback is not None and stored_feedback.get("issue_id"):
+                try:
+                    existing_issue = _issues.get_issue(str(stored_feedback["issue_id"]))
+                except Exception:
+                    existing_issue = None
+                if existing_issue:
+                    response.status_code = 200
+                    return RunFeedbackIssueResponse(
+                        issue_id=str(existing_issue["id"]),
+                        created=False,
+                        issue=WorkspaceIssueOut(**existing_issue),
+                        feedback=_run_feedback_to_model(row_to_dict(stored_feedback)),
+                )
 
     # Dedup: a stable feedback id is recorded as a ``feedback:<id>`` label so a
     # repeated submit for the same item returns the first issue rather than
     # piling up duplicates. Best-effort (a narrow create/create race could still
     # double-write); acceptable for V1 "accidental duplicate" prevention.
-    feedback_id = (payload.feedback_id or "").strip()
     dedup_label = f"feedback:{feedback_id}" if feedback_id else None
     if dedup_label:
         try:
@@ -692,18 +788,31 @@ def create_run_feedback_issue(
                 issue_id=str(issue["id"]),
                 created=False,
                 issue=WorkspaceIssueOut(**issue),
+                feedback=_run_feedback_to_model(row_to_dict(stored_feedback)) if stored_feedback else None,
             )
 
+    feedback_text = (
+        str(stored_feedback.get("content") or "").strip()
+        if stored_feedback is not None
+        else (payload.feedback_text or "").strip()
+    )
+    if not feedback_text:
+        raise HTTPException(status_code=400, detail="feedback_text or feedback_id is required")
+    rating = (
+        str(stored_feedback.get("rating") or "").strip() or None
+        if stored_feedback is not None
+        else payload.rating
+    )
     title = (payload.title or "").strip() or _run_feedback_issue_title(
-        worker_label, run_id, payload.feedback_text
+        worker_label, run_id, feedback_text
     )
     labels = [RUN_FEEDBACK_ISSUE_LABEL]
     if dedup_label:
         labels.append(dedup_label)
 
     body = _run_feedback_issue_body(
-        feedback_text=payload.feedback_text,
-        rating=payload.rating,
+        feedback_text=feedback_text,
+        rating=rating,
         run_id=run_id,
         worker_id=worker_id,
         worker_label=worker_label,
@@ -727,10 +836,17 @@ def create_run_feedback_issue(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     logger.info("Created workspace issue %s from run feedback on %s", issue.get("id"), run_id)
+    updated_feedback = None
+    if stored_feedback is not None and repos.run_feedback is not None:
+        updated_feedback = repos.run_feedback.mark_issue_created(
+            feedback_id=feedback_id,
+            issue_id=str(issue["id"]),
+        )
     return RunFeedbackIssueResponse(
         issue_id=str(issue["id"]),
         created=True,
         issue=WorkspaceIssueOut(**issue),
+        feedback=_run_feedback_to_model(row_to_dict(updated_feedback)) if updated_feedback else None,
     )
 
 

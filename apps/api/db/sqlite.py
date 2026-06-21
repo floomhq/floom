@@ -4077,6 +4077,59 @@ class SqliteFeedbackRepository:
         return cursor.rowcount > 0
 
 
+class SqliteRunFeedbackRepository:
+    """SQLite implementation of per-run feedback comments (#1807)."""
+
+    _cols = "id, run_id, worker_id, author_id, author_name, content, rating, issue_id, created_at"
+
+    def add(
+        self,
+        *,
+        feedback_id: str,
+        run_id: str,
+        worker_id: str,
+        author_id: str,
+        author_name: str | None,
+        content: str,
+        rating: str | None,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_feedback
+                    (id, run_id, worker_id, author_id, author_name, content, rating, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (feedback_id, run_id, worker_id, author_id, author_name, content, rating, created_at),
+            )
+        return self.get(feedback_id=feedback_id) or {}
+
+    def list(self, *, run_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"SELECT {self._cols} FROM run_feedback WHERE run_id = ? ORDER BY created_at",
+                (run_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def get(self, *, feedback_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT {self._cols} FROM run_feedback WHERE id = ?",
+                (feedback_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def mark_issue_created(self, *, feedback_id: str, issue_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE run_feedback SET issue_id = ? WHERE id = ?",
+                (issue_id, feedback_id),
+            )
+        return self.get(feedback_id=feedback_id)
+
+
 class SqliteMcpToolRepository:
     _cols = "id, user_id, name, description, input_schema, worker_id, created_at, updated_at"
 

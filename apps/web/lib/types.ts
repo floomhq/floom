@@ -413,6 +413,18 @@ export interface WorkerFeedback {
   created_at: string;
 }
 
+export interface RunFeedback {
+  id: string;
+  run_id: string;
+  worker_id: string;
+  author_id: string;
+  author_name?: string | null;
+  content: string;
+  rating?: string | null;
+  issue_id?: string | null;
+  created_at: string;
+}
+
 // A registered per-worker alert (email and/or outbound webhook) fired on run
 // terminal events. Maps to GET/POST/DELETE /workers/{id}/alerts.
 export interface WorkerAlert {
@@ -643,7 +655,7 @@ export interface WorkspaceIssue {
 
 // #1807 explicit, opt-in conversion of actionable run feedback into an issue.
 export interface RunFeedbackIssueRequest {
-  feedback_text: string;
+  feedback_text?: string | null;
   rating?: string | null;
   title?: string | null;
   feedback_id?: string | null;
@@ -653,6 +665,7 @@ export interface RunFeedbackIssueResponse {
   issue_id: string;
   created: boolean;
   issue: WorkspaceIssue;
+  feedback?: RunFeedback | null;
 }
 
 export interface ApprovalRow {
