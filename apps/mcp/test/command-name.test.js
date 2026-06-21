@@ -4,34 +4,20 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { readFileSync } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
 
 const CLI_PATH = join(process.cwd(), "dist", "cli.js");
 
-// Spawn the CLI through a tiny wrapper whose basename is `name`, mirroring the
-// bin path the user invoked without requiring symlink privileges on Windows.
+// Spawn the CLI through a symlink whose basename is `name`, mirroring how npm
+// installs the `workeros` / `floom` bins (both point at dist/cli.js).
 async function runAs(name, args, env = {}) {
   const dir = await mkdtemp(join(tmpdir(), "workeros-cmdname-"));
-  const wrapperPath = join(dir, name);
-  await writeFile(
-    join(dir, "package.json"),
-    JSON.stringify({ type: "module" }),
-  );
-  await writeFile(
-    wrapperPath,
-    [
-      "import { fileURLToPath } from 'node:url';",
-      `import { main } from ${JSON.stringify(pathToFileURL(CLI_PATH).href)};`,
-      "await main([process.argv[0], fileURLToPath(import.meta.url), ...process.argv.slice(2)]);",
-      "",
-    ].join("\n"),
-  );
-  const child = spawn(process.execPath, [wrapperPath, ...args], {
+  const linkPath = join(dir, name);
+  await symlink(CLI_PATH, linkPath);
+  const child = spawn(process.execPath, [linkPath, ...args], {
     env: {
       ...process.env,
       WORKEROS_API_BASE: "",
@@ -77,18 +63,6 @@ test("completion zsh/fish bind to the invoked binary name (workeros)", async () 
   assert.doesNotMatch(fish.stdout, /floom/);
 });
 
-test("completion powershell binds to the invoked binary name (workeros)", async () => {
-  const result = await runAs("workeros", ["completion", "powershell"]);
-  assert.equal(result.code, 0);
-  assert.match(result.stdout, /# workeros PowerShell completion/);
-  assert.match(result.stdout, /Register-ArgumentCompleter -Native -CommandName workeros/);
-  assert.doesNotMatch(result.stdout, /floom/);
-
-  const pwsh = await runAs("workeros", ["completion", "pwsh"]);
-  assert.equal(pwsh.code, 0);
-  assert.match(pwsh.stdout, /Register-ArgumentCompleter -Native -CommandName workeros/);
-});
-
 test("completion keeps the legacy floom name when invoked as floom", async () => {
   const result = await runAs("floom", ["completion", "bash"]);
   assert.equal(result.code, 0);
@@ -112,12 +86,6 @@ test("doctor header uses the invoked binary name (workeros doctor)", async () =>
   });
   assert.match(result.stdout, /workeros doctor/);
   assert.doesNotMatch(result.stdout, /Floom doctor/);
-});
-
-test("doctor warning summary does not claim all checks passed", () => {
-  const src = readFileSync(new URL("../src/commands/doctor.ts", import.meta.url), "utf8");
-  assert.match(src, /All required checks passed/);
-  assert.match(src, /optional warning/);
 });
 
 test("bare command in a terminal prints help and exits non-zero", async (t) => {

@@ -63,42 +63,23 @@ compdef _${name} ${name}
 }
 
 function fishCompletion(name: string): string {
-  return `complete -c ${name} -f -a "login logout whoami auth run workers workspaces workspace runs secrets connections contexts context mcp completion"
-complete -c ${name} -n "__fish_seen_subcommand_from auth" -a "list login switch status logout"
+  return `complete -c ${name} -f -a "login logout whoami run workers workspaces workspace runs secrets connections mcp completion"
 complete -c ${name} -n "__fish_seen_subcommand_from workers" -a "list show"
 complete -c ${name} -n "__fish_seen_subcommand_from workspaces workspace" -a "list create show switch use"
 complete -c ${name} -n "__fish_seen_subcommand_from runs" -a "list show logs download approve reject cancel"
 complete -c ${name} -n "__fish_seen_subcommand_from secrets" -a "list set delete"
 complete -c ${name} -n "__fish_seen_subcommand_from connections" -a "list add import-mcp-config"
-complete -c ${name} -n "__fish_seen_subcommand_from contexts context" -a "list create read write upload delete delete-file versions rollback"
 complete -c ${name} -n "__fish_seen_subcommand_from mcp" -a "list switch test add install uninstall"
 `;
 }
 
-function powershellCompletion(name: string): string {
-  return `# ${name} PowerShell completion
-Register-ArgumentCompleter -Native -CommandName ${name} -ScriptBlock {
-  param($wordToComplete, $commandAst, $cursorPosition)
-  $commands = @('login','logout','whoami','auth','run','workers','workspaces','workspace','runs','secrets','connections','contexts','context','mcp','completion')
-  $subcommands = @{
-    auth = @('list','login','switch','status','logout')
-    workers = @('list','show','info','validate','push','delete','rm','disable','enable','run')
-    workspaces = @('list','create','show','switch','use')
-    workspace = @('list','create','show','switch','use')
-    runs = @('list','show','logs','download','approve','reject','cancel')
-    secrets = @('list','set','delete')
-    connections = @('list','add','import-mcp-config')
-    contexts = @('list','create','read','write','upload','delete','delete-file','versions','rollback')
-    context = @('list','create','read','write','upload','delete','delete-file','versions','rollback')
-    mcp = @('list','switch','test','add','install','uninstall')
-  }
-  $tokens = $commandAst.CommandElements | ForEach-Object { $_.Extent.Text }
-  $choices = if ($tokens.Count -ge 2 -and $subcommands.ContainsKey($tokens[1])) { $subcommands[$tokens[1]] } else { $commands }
-  $choices | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
-    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
-  }
-}
-`;
+export function completionScriptFor(
+  shell: "bash" | "zsh" | "fish",
+  name: string = getCommandName(),
+): string {
+  if (shell === "bash") return bashCompletion(name);
+  if (shell === "zsh") return zshCompletion(name);
+  return fishCompletion(name);
 }
 
 export type CompletionShell = "bash" | "zsh" | "fish" | "powershell" | "pwsh";
