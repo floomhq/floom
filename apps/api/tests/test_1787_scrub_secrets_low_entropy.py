@@ -63,6 +63,22 @@ def test_word_boundary_value_does_not_mangle_substrings():
     assert result == "automatic <REDACTED:SCRAPER_TAG> pilot"
 
 
+def test_punctuation_bounded_short_secret_still_redacted():
+    # Non-credential name, short value with punctuation edges: \b...\b would
+    # not match, leaking the value. Adaptive boundary must still redact it.
+    secrets = {"SALT": "$abc$"}
+    result = scrub_secrets("salt $abc$ done", secrets)
+    assert "$abc$" not in result
+    assert "<REDACTED:SALT>" in result
+
+
+def test_numeric_config_value_not_blind_replaced():
+    # Mis-declared numeric config cap: must not corrupt legitimate numbers.
+    secrets = {"REQUEST_TIMEOUT": "3000"}
+    result = scrub_secrets("waited 3000 ms for 3000 items", secrets)
+    assert result == "waited 3000 ms for 3000 items"
+
+
 def test_persisted_output_dict_value_quality_gate():
     secrets = {
         "EXTERNAL_APIFY_PROFILE_SCRAPER_MODE": "Full",

@@ -569,9 +569,10 @@ _CONFIG_NAME_RE = re.compile(
     r"_PATH$|_URL$)"
 )
 
-# A short, single, common-word-shaped value (pure alpha, no entropy). These get
-# globally substring-replaced under the old code, mangling unrelated text.
-_LOW_ENTROPY_WORD_RE = re.compile(r"[A-Za-z]+")
+# A short, single, common-word/number-shaped value (alphanumeric, no symbols,
+# low entropy). These get globally substring-replaced under the old code,
+# mangling unrelated text (e.g. a title "Full" or a standalone number "3000").
+_LOW_ENTROPY_WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
 
 def _shannon_entropy(value: str) -> float:
@@ -607,8 +608,28 @@ def _value_is_credential_shaped(value: str) -> bool:
 
 
 def _is_low_entropy_word(value: str) -> bool:
-    """True for a short, plain word/number unlikely to be a secret."""
+    """True for a short, plain word/number (no symbols) unlikely to be a
+    secret -- covers both dictionary words ("Full") and numeric config caps
+    ("3000")."""
     return len(value) < 8 and bool(_LOW_ENTROPY_WORD_RE.fullmatch(value))
+
+
+def _word_char(char: str) -> bool:
+    return char.isalnum() or char == "_"
+
+
+def _redact_on_boundary(text: str, value: str, replacement: str) -> str:
+    """Substring-replace ``value`` only when it appears as a standalone token,
+    so it cannot mangle unrelated substrings of legitimate output.
+
+    A plain ``\\b...\\b`` fails when the value begins or ends with a non-word
+    character (e.g. ``$abc$``), which would silently leak such a configured
+    secret. We therefore assert a word boundary only on the edges that are
+    word characters; punctuation edges are already self-delimiting.
+    """
+    left = r"(?<!\w)" if value and _word_char(value[0]) else ""
+    right = r"(?!\w)" if value and _word_char(value[-1]) else ""
+    return re.sub(rf"{left}{re.escape(value)}{right}", replacement, text)
 
 
 def scrub_secrets(text: str, secrets: Dict[str, str]) -> str:
@@ -638,11 +659,9 @@ def scrub_secrets(text: str, secrets: Dict[str, str]) -> str:
                 name,
             )
             continue
-        # Tier 2: redact short/ambiguous values, but only on word boundaries so
-        # they cannot mangle unrelated substrings of legitimate output.
-        text = re.sub(
-            rf"\b{re.escape(value)}\b", f"<REDACTED:{name}>", text
-        )
+        # Tier 2: redact short/ambiguous values, but only as standalone tokens
+        # so they cannot mangle unrelated substrings of legitimate output.
+        text = _redact_on_boundary(text, value, f"<REDACTED:{name}>")
     for pattern in SECRET_PATTERNS:
         text = pattern.sub("<REDACTED>", text)
     return text
