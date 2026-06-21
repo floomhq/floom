@@ -859,7 +859,13 @@ function ReviewContent() {
       <div className="flex items-center justify-between [border-bottom:var(--bd-div)] px-6 py-3.5">
         <div className="flex items-center gap-2.5">
           <FloomMark size={18} />
-          <span className="text-sm font-medium text-[var(--ink)]">Approval request</span>
+          {/* External reviewers (signed-link) read this as a recruiter reviewing a
+              shortlist, not an operator approving a worker action: show the
+              approval's human label as the title, and never the generic
+              "Approval request" / worker chrome. Internal owner view unchanged. */}
+          <span className="text-sm font-medium text-[var(--ink)]">
+            {isSignedLink ? (approval?.label?.trim() || "Review") : "Approval request"}
+          </span>
         </div>
         {isSignedLink ? (
           <span className="rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2.5 py-0.5 text-xs text-[var(--ink-soft)]">
@@ -906,6 +912,7 @@ function ReviewContent() {
           <ApprovalReviewBody
             approval={approval}
             actionLine={approvalActionLine(approval.label, decisionInput)}
+            hideInternals={isSignedLink}
             index={index}
             total={rows.length}
             onPrev={() => setIndex((i) => Math.max(0, i - 1))}

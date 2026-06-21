@@ -215,6 +215,13 @@ export interface ApprovalReviewBodyProps {
   approval: ApprovalRow;
   /** Plain-language action line (composed by the caller via approvalActionLine). */
   actionLine: string;
+  /**
+   * Hide worker/run internals (worker name + id, run id, "by worker X").
+   * Set on the external signed-link reviewer view so it reads like a recruiter
+   * reviewing a shortlist, not an operator approving a worker action. Defaults
+   * to false so the internal owner view is unchanged.
+   */
+  hideInternals?: boolean;
   /** Pager position over sibling approvals (one link, several items). */
   index: number;
   total: number;
@@ -244,6 +251,7 @@ export interface ApprovalReviewBodyProps {
 export function ApprovalReviewBody({
   approval,
   actionLine,
+  hideInternals = false,
   index,
   total,
   onPrev,
@@ -268,7 +276,7 @@ export function ApprovalReviewBody({
   return (
     <div style={{ maxWidth: 820, margin: "0 auto" }}>
       <Pager
-        worker={worker}
+        worker={hideInternals ? "" : worker}
         index={index}
         total={total}
         onPrev={onPrev}
@@ -286,7 +294,13 @@ export function ApprovalReviewBody({
         </div>
         <h2 className="c-appr-title">{actionLine}</h2>
         <p className="c-appr-meta">
-          Requested {formatRelative(approval.created_at)} by worker <b>{worker}</b>
+          Requested {formatRelative(approval.created_at)}
+          {!hideInternals && (
+            <>
+              {" by worker "}
+              <b>{worker}</b>
+            </>
+          )}
           {cost && (
             <>
               {" · "}
@@ -322,10 +336,14 @@ export function ApprovalReviewBody({
           )}
 
           <dl className="c-appr-kv">
-            <dt>Worker</dt>
-            <dd>{workerLink ?? worker}</dd>
-            <dt>Run</dt>
-            <dd>{runLink ?? `#${approval.run_id}`}</dd>
+            {!hideInternals && (
+              <>
+                <dt>Worker</dt>
+                <dd>{workerLink ?? worker}</dd>
+                <dt>Run</dt>
+                <dd>{runLink ?? `#${approval.run_id}`}</dd>
+              </>
+            )}
             <dt>Why</dt>
             <dd>{approval.label?.trim() ? approval.label : actionLine}</dd>
             {expiry && (
