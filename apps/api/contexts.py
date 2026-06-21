@@ -332,7 +332,7 @@ def _relative_posix_path(path: Path, root: Path) -> str:
     return Path(os.path.relpath(str(path), str(root))).as_posix()
 
 
-def context_dir(name: str) -> Path:
+def context_dir(name: str, *, hydrate: bool = True) -> Path:
     safe_name = validate_context_name(name)
     root = current_contexts_root()
     target = (root / safe_name).resolve()
@@ -343,8 +343,13 @@ def context_dir(name: str) -> Path:
     # Supabase Storage before returning the path.  This is a no-op in OSS /
     # single-tenant mode (_hydration_hook is None) and a no-op whenever the
     # directory is already populated (idempotency guard is inside the hook).
+    #
+    # hydrate=False suppresses the hook so a caller that only needs the path
+    # string (e.g. staging a rename's removed-source path in git) never
+    # re-materializes a deliberately-moved/absent pack from remote storage
+    # (#1813).
     hook = _hydration_hook
-    if hook is not None and (not target.exists() or not any(target.iterdir())):
+    if hydrate and hook is not None and (not target.exists() or not any(target.iterdir())):
         try:
             hook(_current_scope(), safe_name, target)
         except Exception:

@@ -620,13 +620,16 @@ def _contexts_git_prefix() -> str:
         return "contexts"
 
 
-def _context_git_path(name: str, rel_path: Optional[str] = None) -> str:
+def _context_git_path(name: str, rel_path: Optional[str] = None, *, hydrate: bool = True) -> str:
     from services.worker_registry_ops import _git_join
     from services.git_service import _git_workspace
     from contexts import context_dir
 
     try:
-        base = context_dir(name).relative_to(_git_workspace()).as_posix()
+        # hydrate=False keeps this purely path-resolving: the relative git path
+        # is the same whether or not the dir is on disk, so callers staging a
+        # removed/moved source path must NOT trigger cloud rehydration (#1813).
+        base = context_dir(name, hydrate=hydrate).relative_to(_git_workspace()).as_posix()
         return _git_join(base, rel_path or "")
     except Exception:
         return _git_join(_contexts_git_prefix(), name, rel_path or "")
@@ -681,7 +684,10 @@ def _git_commit_context_rename(
         workspace = _git_workspace()
         with _git_ops_lock:
             _ensure_git_workspace_ready(workspace)
-            old_rel = _context_git_path(old_name)
+            # The source dir has already been moved away; resolve its git path
+            # WITHOUT hydration so a hosted hook can't rematerialize the old pack
+            # (which would leave the old folder behind + stage the wrong state).
+            old_rel = _context_git_path(old_name, hydrate=False)
             new_rel = _context_git_path(new_name)
             _git_ops.commit_paths(workspace, [old_rel, new_rel], message, author_name, author_email)
             _git_ops.push_background(workspace)
