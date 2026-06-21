@@ -625,6 +625,36 @@ export interface ActionResponse {
   run_id?: string;
 }
 
+// #1781 git-backed workspace issue (subset surfaced to the run feedback flow).
+export interface WorkspaceIssue {
+  id: string;
+  status: string;
+  title: string;
+  body: string;
+  asset_type?: string | null;
+  asset_id?: string | null;
+  source?: string | null;
+  labels: string[];
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  comment_count: number;
+}
+
+// #1807 explicit, opt-in conversion of actionable run feedback into an issue.
+export interface RunFeedbackIssueRequest {
+  feedback_text: string;
+  rating?: string | null;
+  title?: string | null;
+  feedback_id?: string | null;
+}
+
+export interface RunFeedbackIssueResponse {
+  issue_id: string;
+  created: boolean;
+  issue: WorkspaceIssue;
+}
+
 export interface ApprovalRow {
   id: string;
   run_id: string;

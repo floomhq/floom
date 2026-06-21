@@ -50,8 +50,11 @@ from models import (
     LogEntry,
     OutputField,
     RunDetail,
+    RunFeedbackIssueRequest,
+    RunFeedbackIssueResponse,
     RunStatus,
     RunSummary,
+    WorkspaceIssueOut,
 )
 from services.public_view import (
     _collapse_stderr_code_echo_rows,
@@ -585,6 +588,150 @@ def cancel_run(
     )
     logger.info("Cancelled running run %s", run_id)
     return ActionResponse(status="cancelled", run_id=run_id)
+
+
+# ---------------------------------------------------------------------------
+# #1807 — turn actionable run feedback into a git-backed workspace issue
+# ---------------------------------------------------------------------------
+# Run feedback itself stays a lightweight quality signal. This endpoint is the
+# explicit, opt-in bridge: it does NOT alter feedback behaviour, it only creates
+# one workspace issue (#1781) bound to the run so actionable feedback becomes
+# tracked work surfaced through GET /workspace/issues?asset_type=run&asset_id=.
+
+RUN_FEEDBACK_ISSUE_LABEL = "run-feedback"
+
+
+def _run_feedback_issue_title(worker_label: str, run_id: str, feedback_text: str) -> str:
+    """Default issue title derived from feedback, falling back to worker/run."""
+    snippet = " ".join((feedback_text or "").split())[:80].strip()
+    if snippet:
+        base = f"Run feedback: {snippet}"
+    elif worker_label:
+        base = f"Run feedback: {worker_label}"
+    else:
+        base = f"Run feedback: {run_id}"
+    return base[:300]
+
+
+def _run_feedback_issue_body(
+    *,
+    feedback_text: str,
+    rating: Optional[str],
+    run_id: str,
+    worker_id: str,
+    worker_label: str,
+    reported_at: str,
+) -> str:
+    rating_line = (rating or "").strip() or "(none)"
+    worker_line = f"{worker_label} (`{worker_id}`)" if worker_label and worker_label != worker_id else f"`{worker_id}`"
+    lines = [
+        "Actionable run feedback flagged for follow-up.",
+        "",
+        f"- Run: `{run_id}`",
+        f"- Worker: {worker_line}",
+        f"- Rating: {rating_line}",
+        f"- Reported: {reported_at}",
+        "",
+        "## Feedback",
+        feedback_text.strip(),
+    ]
+    return "\n".join(lines)
+
+
+@runs_router.post(
+    "/runs/{run_id}/feedback/issue",
+    response_model=RunFeedbackIssueResponse,
+    status_code=201,
+)
+def create_run_feedback_issue(
+    run_id: str,
+    payload: RunFeedbackIssueRequest,
+    response: Response,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> RunFeedbackIssueResponse:
+    """Explicitly convert one actionable run feedback item into a workspace issue.
+
+    Opt-in only: normal feedback never reaches this path. The created issue is
+    bound to the run (asset_type=run, asset_id=run_id, source=run_feedback) and
+    carries the ``run-feedback`` label. When the caller supplies a stable
+    ``feedback_id`` an existing issue for that feedback item is returned instead
+    of creating a duplicate (200 rather than 201).
+
+    404 if the run is not visible to the caller.
+    """
+    from db import now_iso
+    from services import workspace_issues as _issues
+    from services.git_service import _git_author
+
+    run = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run = row_to_dict(run)
+    worker_id = str(run.get("worker_id") or "")
+    worker_label = str(run.get("worker_name") or worker_id or "")
+
+    # Dedup: a stable feedback id is recorded as a ``feedback:<id>`` label so a
+    # repeated submit for the same item returns the first issue rather than
+    # piling up duplicates. Best-effort (a narrow create/create race could still
+    # double-write); acceptable for V1 "accidental duplicate" prevention.
+    feedback_id = (payload.feedback_id or "").strip()
+    dedup_label = f"feedback:{feedback_id}" if feedback_id else None
+    if dedup_label:
+        try:
+            existing = _issues.list_issues(
+                asset_type="run", asset_id=run_id, label=dedup_label
+            )
+        except _issues.IssueError:
+            existing = []
+        if existing:
+            issue = existing[0]
+            response.status_code = 200
+            return RunFeedbackIssueResponse(
+                issue_id=str(issue["id"]),
+                created=False,
+                issue=WorkspaceIssueOut(**issue),
+            )
+
+    title = (payload.title or "").strip() or _run_feedback_issue_title(
+        worker_label, run_id, payload.feedback_text
+    )
+    labels = [RUN_FEEDBACK_ISSUE_LABEL]
+    if dedup_label:
+        labels.append(dedup_label)
+
+    body = _run_feedback_issue_body(
+        feedback_text=payload.feedback_text,
+        rating=payload.rating,
+        run_id=run_id,
+        worker_id=worker_id,
+        worker_label=worker_label,
+        reported_at=now_iso(),
+    )
+
+    author_name, author_email = _git_author(auth)
+    try:
+        issue = _issues.create_issue(
+            title=title,
+            body=body,
+            asset_type="run",
+            asset_id=run_id,
+            source="run_feedback",
+            labels=labels,
+            created_by=auth.user_id,
+            author_name=author_name,
+            author_email=author_email,
+        )
+    except _issues.IssueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    logger.info("Created workspace issue %s from run feedback on %s", issue.get("id"), run_id)
+    return RunFeedbackIssueResponse(
+        issue_id=str(issue["id"]),
+        created=True,
+        issue=WorkspaceIssueOut(**issue),
+    )
 
 
 # ---------------------------------------------------------------------------

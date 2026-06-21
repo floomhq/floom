@@ -2,10 +2,21 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Copy, Check, Download, FileText, Pencil, RotateCcw, Square } from "lucide-react";
+import { Copy, Check, Download, FileText, Flag, Pencil, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RunStatusBadge, RunStatusGlyph } from "@/components/RunStatus";
 import { Tool } from "@/components/ai-elements/tool";
@@ -43,6 +54,96 @@ type Props = {
   onReplay?: () => void;
   onCancel?: () => void;
 };
+
+/**
+ * #1807: explicit, opt-in control that turns actionable run feedback into a
+ * git-backed workspace issue (#1781) bound to this run. Lightweight feedback is
+ * unchanged; this only fires when the operator chooses to track the run.
+ */
+export function TrackRunFeedbackIssue({ run }: { run: RunDetail }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [title, setTitle] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [createdIssueId, setCreatedIssueId] = useState<string | null>(null);
+
+  const defaultTitle = `Run feedback: ${run.worker_name || run.worker_id}`;
+
+  async function submit() {
+    const feedback = note.trim();
+    if (!feedback || submitting) return;
+    setSubmitting(true);
+    try {
+      const resp = await api.runs.createFeedbackIssue(run.id, {
+        feedback_text: feedback,
+        title: title.trim() || null,
+      });
+      setCreatedIssueId(resp.issue_id);
+      // V1: no Issues page yet, so confirm the id inline + via toast.
+      toast.success(`Created ${resp.issue_id}`);
+      setOpen(false);
+      setNote("");
+      setTitle("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not create issue");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Flag className="size-3.5 mr-1.5" />
+        Track as issue
+      </Button>
+      {createdIssueId && (
+        <span className="text-xs text-muted-foreground">
+          Created <code className="font-mono">{createdIssueId}</code>
+        </span>
+      )}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Track this run as an issue</DialogTitle>
+            <DialogDescription>
+              Turn actionable feedback into a tracked workspace issue bound to this run.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="run-issue-title">Title (optional)</Label>
+              <Input
+                id="run-issue-title"
+                value={title}
+                placeholder={defaultTitle}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="run-issue-note">What went wrong?</Label>
+              <Textarea
+                id="run-issue-note"
+                value={note}
+                rows={4}
+                placeholder="Describe the problem so a human or fixer worker can act on it."
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button onClick={submit} disabled={!note.trim() || submitting}>
+              {submitting ? "Creating…" : "Create issue"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 export function RunDetailSplitPane({
   run,
@@ -161,6 +262,7 @@ export function RunDetailSplitPane({
               Download
             </Button>
           </a>
+          <TrackRunFeedbackIssue run={run} />
           {isActive && (
             <Button variant="outline" size="sm" onClick={onCancel}>
               <Square className="size-3.5 mr-1.5" />
