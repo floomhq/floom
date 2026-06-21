@@ -599,7 +599,29 @@ def rename_context(
                 workspace_id=pack_workspace_id,
             )
         except Exception:
-            logger.debug("rename_asset failed for %s -> %s", safe_name, new_name, exc_info=True)
+            # A RAISED error here is not the benign "no source row" signal -- that
+            # is a None RETURN. It means the re-key itself failed, e.g. the
+            # destination id is held by another workspace (the global `id` PK can't
+            # be re-keyed onto it) and the precheck raced, or a repo ships
+            # rename_asset without asset_id_conflict. Falling through to
+            # `_ensure_brain_pack_row` would ON CONFLICT(id) rewrite (corrupt) that
+            # foreign workspace's owner/visibility row. Roll the filesystem +
+            # metadata move back so the rename stays all-or-nothing, then reject.
+            logger.warning(
+                "rename_asset failed for %s -> %s; rolling back rename",
+                safe_name, new_name, exc_info=True,
+            )
+            try:
+                new_root.rename(context_dir(safe_name))
+                rename_context_metadata(new_name, safe_name)
+            except Exception:
+                logger.error(
+                    "failed to roll back context rename %s -> %s",
+                    safe_name, new_name, exc_info=True,
+                )
+            raise HTTPException(
+                status_code=409, detail="A folder with that name already exists"
+            )
     if moved_row is None and owner_id:
         # No source row to move (or a repo without rename_asset): materialize a
         # fresh row and rewrite its visibility to the source value, INCLUDING
