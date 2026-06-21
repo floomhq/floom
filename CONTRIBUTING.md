@@ -152,7 +152,7 @@ For common local setup and runtime issues, check
 
 By contributing, you certify the Developer Certificate of Origin 1.1 statement
 for your contribution and agree that your contributions will be licensed under
-the [Sustainable Use License 1.0](LICENSE) that covers this project.
+the [Floom Source Available License 1.0](LICENSE) that covers this project.
 
 Include this trailer on every commit:
 

@@ -3,7 +3,7 @@
 Floom exposes a native Slack Events API receiver at:
 
 - Self-hosted: `https://localhost:8000/slack/events`
-- Remote/self-hosted: `https://api.floom.example.com/slack/events`
+- Remote/self-hosted: `https://api.your-domain.example/slack/events`
 
 ## Required Env
 

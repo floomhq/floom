@@ -8,7 +8,7 @@ staged as a brain pack. Companion references: `docs/slack-events.md`
 `docs/slack-app-manifest.example.yml` (app manifest).
 
 Applies to self-hosted Floom (`https://localhost:8000`) and hosted Floom
-(`https://api.floom.example.com`); substitute your API base below.
+(`https://api.your-domain.example`); substitute your API base below.
 
 ---
 
