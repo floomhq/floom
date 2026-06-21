@@ -673,6 +673,36 @@ export const api = {
       return res.json() as Promise<import("@/lib/types").ApprovalUploadResponse>;
     },
   },
+  // ReviewPack Review Pack (demo-client pilot) - public, no Workeros login.
+  // The token in the path is the share secret; the pack password gates reads.
+  review: {
+    publicGet: (token: string, password?: string, reviewerToken?: string) => {
+      const headers = new Headers();
+      if (password) headers.set("x-review-pack-password", password);
+      if (reviewerToken) headers.set("x-review-pack-reviewer-token", reviewerToken);
+      return fetchJson<import("@/lib/types").ReviewPackPublicResponse>(
+        `/review/public/${encodeURIComponent(token)}`,
+        { headers },
+      );
+    },
+    publicMyVotes: (token: string, reviewerToken: string, password?: string) => {
+      const headers = new Headers({ "x-review-pack-reviewer-token": reviewerToken });
+      if (password) headers.set("x-review-pack-password", password);
+      return fetchJson<import("@/lib/types").ReviewPackFeedbackResponse>(
+        `/review/public/${encodeURIComponent(token)}/feedback`,
+        { headers },
+      );
+    },
+    publicFeedback: (token: string, reviewerToken: string, input: import("@/lib/types").ReviewPackFeedbackInput) =>
+      fetchJson<import("@/lib/types").ReviewPackVoteResponse>(
+        `/review/public/${encodeURIComponent(token)}/feedback`,
+        {
+          method: "POST",
+          headers: { "x-review-pack-reviewer-token": reviewerToken },
+          body: JSON.stringify(input),
+        },
+      ),
+  },
   secrets: {
     list: () => fetchJson<import("@/lib/types").SecretItem[]>("/secrets"),
     upsert: (name: string, value: string) =>
