@@ -143,3 +143,29 @@ def test_owned_example_still_shown(tmp_path, monkeypatch):
     ids = {w["id"] for w in res["workers"]}
     assert ids == {"my-worker", "my-research_brief"}, ids
     assert res["count"] == 2
+
+
+def test_local_duplicate_workspace_scoped_user_falls_back_to_base_owner(tmp_path, monkeypatch):
+    """A duplicated local workspace scopes chat auth to ``base__ws_*``.
+
+    The dashboard grid still surfaces the base user's local workers for that
+    duplicate workspace. Emily must use the same base-owner fallback; otherwise
+    it reports "0 workers" while the grid shows the copied workspace's workers.
+    """
+    db = tmp_path / "duplicate-workspace.db"
+    _dbmod, cs = _load_modules(monkeypatch, db)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+
+    c = sqlite3.connect(db)
+    _user(c, "qwe", "member")
+    _sv(c, "sv-base", {"title": "Base worker"})
+    _worker(c, "base-worker", "sv-base", "qwe", "local-default", "private")
+    c.commit()
+    c.close()
+
+    scoped_user = "qwe__ws_1234567890abcd"
+    res = cs._tool_workers_list_all({}, scoped_user)
+    ids = {w["id"] for w in res["workers"]}
+
+    assert ids == {"base-worker"}, ids
+    assert res["count"] == 1
