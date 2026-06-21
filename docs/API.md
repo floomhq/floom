@@ -51,6 +51,20 @@ the generated OpenAPI docs.
 | `/connections/{id}/peek` | GET | Privacy-conscious preview for supported connections |
 | `/connections/secrets` | GET | List secret metadata |
 
+### Workspace issues
+
+Git-backed operating record stored under `.floom/issues/` in the workspace git repo
+(no GitHub Issues, no provider sync, no database table). See
+[git-workspace.md](git-workspace.md).
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/workspace/issues` | GET | List issues; filter by `status`, `label`, `asset_type`, `asset_id` |
+| `/workspace/issues/{id}` | GET | Issue detail with comments |
+| `/workspace/issues` | POST | Create an issue (optionally bound to a worker/context/run) |
+| `/workspace/issues/{id}` | PATCH | Update title/body/status/labels/asset binding |
+| `/workspace/issues/{id}/comments` | POST | Append a comment |
+
 ### Auth and system
 
 | Endpoint | Method | Description |

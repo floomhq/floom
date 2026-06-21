@@ -3180,4 +3180,63 @@ class DraftAndCreateResponse(BaseModel):
 
 class WorkerListSummary(WorkerSummary):
     created_at: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Workspace issues (git-backed, stored under .floom/issues/) — #1781
+# asset_type is left as a plain string (not a Literal) so the schema stays open
+# for connection/approval/mcp bindings beyond the worker/context/run MVP set.
+# ---------------------------------------------------------------------------
+
+class WorkspaceIssueComment(BaseModel):
+    id: str
+    body: str
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class WorkspaceIssueOut(BaseModel):
+    id: str
+    status: str = "open"
+    title: str
+    body: str = ""
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    source: Optional[str] = None
+    labels: List[str] = []
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    comment_count: int = 0
+
+
+class WorkspaceIssueDetail(WorkspaceIssueOut):
+    comments: List[WorkspaceIssueComment] = []
+
+
+class WorkspaceIssuesResponse(BaseModel):
+    issues: List[WorkspaceIssueOut]
+
+
+class WorkspaceIssueCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    body: str = ""
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    source: Optional[str] = None
+    labels: List[str] = []
+
+
+class WorkspaceIssueUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    status: Optional[Literal["open", "closed"]] = None
+    labels: Optional[List[str]] = None
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    clear_asset: bool = False
+
+
+class WorkspaceIssueCommentRequest(BaseModel):
+    body: str = Field(..., min_length=1, max_length=20000)
     updated_at: Optional[str] = None

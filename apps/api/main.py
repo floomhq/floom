@@ -5333,6 +5333,10 @@ app.include_router(review_pack_router)
 from routers.workspace import workspace_router
 app.include_router(workspace_router)
 
+# Git-backed workspace issues (#1781): .floom/issues/ in the workspace git repo.
+from routers.workspace_issues import workspace_issues_router
+app.include_router(workspace_issues_router)
+
 # Auth + users route group (setup/login/logout/magic/me, user CRUD, PAT tokens).
 from routers.auth import auth_router
 app.include_router(auth_router)
