@@ -51,6 +51,17 @@ _GIT_REQUIRED = pytest.mark.skipif(
 )
 
 
+def _head_tree_paths(repo: Path) -> set[str]:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=5,
+    )
+    return {line for line in result.stdout.splitlines() if line}
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: git_ops module
 # ---------------------------------------------------------------------------
@@ -82,6 +93,22 @@ class TestGitOps:
         import git_ops
         git_ops.ensure_repo(tmp_path)
         assert (tmp_path / ".gitignore").exists()
+
+    def test_ensure_repo_initial_commit_filters_secret_bearing_files(self, tmp_path: Path) -> None:
+        import git_ops
+
+        (tmp_path / "safe.txt").write_text("safe", encoding="utf-8")
+        (tmp_path / ".secrets.enc").write_text("encrypted", encoding="utf-8")
+        (tmp_path / "gcp-service-account.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "id_rsa").write_text("private key", encoding="utf-8")
+
+        git_ops.ensure_repo(tmp_path)
+
+        tree = _head_tree_paths(tmp_path)
+        assert "safe.txt" in tree
+        assert ".secrets.enc" not in tree
+        assert "gcp-service-account.json" not in tree
+        assert "id_rsa" not in tree
 
     def test_commit_paths_returns_sha(self, workspace: Path) -> None:
         import git_ops
@@ -182,6 +209,46 @@ class TestGitOps:
         files = git_ops.list_files_at_sha(workspace, sha, "workers/my-worker")
         assert "workers/my-worker/worker.yml" in files
         assert "workers/my-worker/run.py" in files
+
+    def test_commit_paths_directory_filters_secret_bearing_worker_files(self, workspace: Path) -> None:
+        import git_ops
+
+        worker_dir = workspace / "workers" / "secret-worker"
+        worker_dir.mkdir(parents=True)
+        (worker_dir / "worker.yml").write_text("id: secret-worker\n", encoding="utf-8")
+        (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+        (worker_dir / "credentials.json").write_text("{}", encoding="utf-8")
+
+        sha = git_ops.commit_paths(workspace, ["workers/secret-worker"], "add worker")
+
+        assert sha is not None
+        tree = _head_tree_paths(workspace)
+        assert "workers/secret-worker/worker.yml" in tree
+        assert "workers/secret-worker/run.py" in tree
+        assert "workers/secret-worker/credentials.json" not in tree
+
+    def test_push_with_github_token_refuses_tracked_secret_bearing_files(self, workspace: Path) -> None:
+        import git_ops
+
+        secret_path = workspace / ".secrets.enc"
+        secret_path.write_text("encrypted", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(workspace), "add", "--", ".secrets.enc"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        subprocess.run(
+            ["git", "-C", str(workspace), "commit", "-m", "force tracked secret"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        with pytest.raises(git_ops.GitOpsError, match="Refusing to push"):
+            git_ops.push_with_github_token(workspace, "ghp_test")
 
     def test_checkout_path_restores_file(self, workspace: Path) -> None:
         import git_ops

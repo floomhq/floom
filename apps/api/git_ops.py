@@ -22,7 +22,9 @@ import tempfile
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
+
+from services.secret_paths import is_secret_bearing_export_path
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +136,120 @@ def _git(
     return result
 
 
+def _repo_relative_path(repo: Path, path: str) -> str:
+    """Return a normalized repo-relative path for a caller-supplied pathspec."""
+    raw = str(path or ".").replace("\\", "/")
+    repo_root = Path(repo).resolve()
+    candidate = Path(raw)
+    abs_path = candidate.resolve() if candidate.is_absolute() else (repo_root / raw).resolve()
+    try:
+        rel = abs_path.relative_to(repo_root)
+    except ValueError as exc:
+        raise GitOpsError(f"Refusing to stage path outside workspace: {path}") from exc
+    rel_posix = rel.as_posix()
+    return "." if rel_posix == "." else rel_posix.strip("/")
+
+
+def _is_secret_bearing_git_path(rel: str) -> bool:
+    normalized = str(rel or "").replace("\\", "/").strip("/")
+    return normalized == ".git" or is_secret_bearing_export_path(normalized)
+
+
+def _tracked_paths_under(repo: Path, rel: str) -> list[str]:
+    result = _git(["ls-files", "-z", "--", rel], repo, check=False)
+    if result.returncode != 0 or not result.stdout:
+        return []
+    return [p for p in result.stdout.split("\0") if p]
+
+
+def _iter_worktree_files(repo: Path, root: Path) -> Iterable[str]:
+    repo_root = Path(repo).resolve()
+    for current, dirnames, filenames in os.walk(root):
+        current_path = Path(current)
+        kept_dirs: list[str] = []
+        for dirname in sorted(dirnames):
+            child = current_path / dirname
+            rel = child.relative_to(repo_root).as_posix()
+            if _is_secret_bearing_git_path(rel):
+                continue
+            if child.is_symlink():
+                yield rel
+                continue
+            kept_dirs.append(dirname)
+        dirnames[:] = kept_dirs
+
+        for filename in sorted(filenames):
+            child = current_path / filename
+            rel = child.relative_to(repo_root).as_posix()
+            if not _is_secret_bearing_git_path(rel):
+                yield rel
+
+
+def _stageable_paths(repo: Path, paths: Iterable[str]) -> list[str]:
+    repo_root = Path(repo).resolve()
+    stageable: set[str] = set()
+
+    for raw_path in paths:
+        rel = _repo_relative_path(repo_root, raw_path)
+        if _is_secret_bearing_git_path(rel):
+            continue
+
+        abs_path = repo_root if rel == "." else repo_root / rel
+        if abs_path.is_dir() and not abs_path.is_symlink():
+            for file_rel in _iter_worktree_files(repo_root, abs_path):
+                if not _is_secret_bearing_git_path(file_rel):
+                    stageable.add(file_rel)
+            for tracked_rel in _tracked_paths_under(repo_root, rel):
+                if (
+                    not _is_secret_bearing_git_path(tracked_rel)
+                    and not (repo_root / tracked_rel).exists()
+                ):
+                    stageable.add(tracked_rel)
+        elif abs_path.exists() or abs_path.is_symlink():
+            stageable.add(rel)
+        else:
+            tracked = _tracked_paths_under(repo_root, rel)
+            for tracked_rel in tracked:
+                if (
+                    not _is_secret_bearing_git_path(tracked_rel)
+                    and not (repo_root / tracked_rel).exists()
+                ):
+                    stageable.add(tracked_rel)
+
+    return sorted(stageable)
+
+
+def _stage_filtered(repo: Path, paths: Iterable[str]) -> list[str]:
+    """Stage only non-secret-bearing files for the requested paths."""
+    stageable = _stageable_paths(repo, paths)
+    for idx in range(0, len(stageable), 100):
+        _git(["add", "--", *stageable[idx : idx + 100]], repo)
+    return stageable
+
+
+def _tracked_secret_bearing_paths(repo: Path) -> list[str]:
+    result = _git(["ls-files", "-z"], repo, check=False)
+    if result.returncode != 0 or not result.stdout:
+        return []
+    return sorted(
+        path for path in result.stdout.split("\0")
+        if path and _is_secret_bearing_git_path(path)
+    )
+
+
+def _assert_no_tracked_secret_bearing_paths(repo: Path) -> None:
+    denied = _tracked_secret_bearing_paths(repo)
+    if not denied:
+        return
+    preview = ", ".join(denied[:5])
+    if len(denied) > 5:
+        preview += f", and {len(denied) - 5} more"
+    raise GitOpsError(
+        "Refusing to push: git already tracks secret-bearing workspace paths "
+        f"({preview}). Remove them from the repository before pushing."
+    )
+
+
 @contextmanager
 def _github_token_env(token: str, username: str = "x-access-token"):
     """Yield git env that answers HTTPS auth prompts without tokenized URLs."""
@@ -224,7 +340,7 @@ def ensure_repo(workspace_dir: Path) -> bool:
 
     status = _git(["status", "--porcelain"], workspace_dir, check=False)
     if status.stdout.strip():
-        _git(["add", "-A"], workspace_dir)
+        _stage_filtered(workspace_dir, ["."])
         _git(
             [
                 "commit",
@@ -254,8 +370,7 @@ def commit_paths(
     """
     if _block_engine_source_versioning(workspace_dir):
         return None
-    for rel in rel_paths:
-        _git(["add", "--", rel], workspace_dir)
+    _stage_filtered(workspace_dir, rel_paths)
 
     result = _git(
         [
@@ -420,11 +535,13 @@ def configure_remote(workspace_dir: Path, remote_url: str) -> None:
 
 def push(workspace_dir: Path) -> None:
     """Push HEAD to origin."""
+    _assert_no_tracked_secret_bearing_paths(workspace_dir)
     _git(["push", "-u", "origin", "HEAD"], workspace_dir, timeout=60)
 
 
 def push_with_github_token(workspace_dir: Path, token: str) -> None:
     """Push HEAD to origin using a transient GitHub token, never a token URL."""
+    _assert_no_tracked_secret_bearing_paths(workspace_dir)
     with _github_token_env(token) as env:
         _git(["push", "-u", "origin", "HEAD"], workspace_dir, timeout=60, env=env)
 
@@ -444,6 +561,7 @@ def push_background(workspace_dir: Path) -> None:
             has_remote = _git(["remote", "get-url", "origin"], workspace_dir, check=False)
             if has_remote.returncode != 0:
                 return
+            _assert_no_tracked_secret_bearing_paths(workspace_dir)
             _git(["push", "-u", "origin", "HEAD"], workspace_dir, check=False, timeout=60)
         except Exception as exc:
             logger.debug("Background git push failed (non-fatal): %s", exc)
