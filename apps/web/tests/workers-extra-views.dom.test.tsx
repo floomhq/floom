@@ -50,6 +50,24 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+describe("WorkersEmptyPrompt a11y (#1711)", () => {
+  it("zero-state form wrapper carries focus-within ring classes for keyboard visibility", async () => {
+    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
+    render(<WorkersCollection initialWorkers={[]} />, { wrapper: createWrapper() });
+    // With no workers the empty-state form is rendered.
+    const input = await screen.findByPlaceholderText(/Describe the job you want done/i);
+    const form = input.closest("form");
+    expect(form).not.toBeNull();
+    // #1711: a visible focus ring must appear on the wrapper when the input is
+    // focused; guard against regression by asserting the token classes are present.
+    expect(form!.className).toContain("focus-within:ring-2");
+    expect(form!.className).toContain("focus-within:ring-[var(--ring)]");
+    expect(form!.className).toContain("focus-within:ring-offset-0");
+    // The inner input keeps outline-none (ring lives on the wrapper, not the input).
+    expect(input.className).toContain("outline-none");
+  });
+});
+
 describe("WorkersCollection extra views (#1006)", () => {
   it("renders no view switcher when no extra views are supplied (OSS)", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
