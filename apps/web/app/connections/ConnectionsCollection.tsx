@@ -842,7 +842,7 @@ export default function ConnectionsCollection({
         { value: "error", label: "error" },
       ],
     },
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
       headers: ["Connects to", "Type", "Detail", "Status", ""],
