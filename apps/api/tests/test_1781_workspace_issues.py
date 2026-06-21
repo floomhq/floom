@@ -525,13 +525,17 @@ def test_import_skips_issue_files_with_invalid_frontmatter(monkeypatch, tmp_path
             "ISSUE-0008.md",
             b"---\nid: ISSUE-0008\nstatus: open\ntitle: bad asset\nasset_type: worker\n---\n\nbody\n",
         ),
+        (
+            "ISSUE-0009.md",
+            b"---\nid: ISSUE-0009\nstatus: open\ntitle: bad labels\nlabels: 123\n---\n\nbody\n",
+        ),
     ]
 
     imported = issues.restore_issue_files(malformed_cases)
 
     assert imported == []
     listed = {i["id"] for i in issues.list_issues()}
-    assert all(f"ISSUE-{n:04d}" not in listed for n in range(4, 9))
+    assert all(f"ISSUE-{n:04d}" not in listed for n in range(4, 10))
     for name, _data in malformed_cases:
         assert not (workspace / ".floom" / "issues" / name).exists()
 
@@ -560,3 +564,27 @@ def test_import_keeps_md_but_drops_invalid_comment_log(monkeypatch, tmp_path):
     fetched = issues.get_issue("ISSUE-0003")
     assert fetched["title"] == "valid body"
     assert fetched["comment_count"] == 0
+
+
+def test_import_drops_comment_logs_with_invalid_json_object_shape(monkeypatch, tmp_path):
+    workspace, workers_dir = _make_workspace(tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "dev")
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
+    _purge_api_modules()
+    issues = importlib.import_module("services.workspace_issues")
+
+    good_md = b"---\nid: ISSUE-0010\nstatus: open\ntitle: valid body\n---\n\nfine\n"
+    bad_comments = b'[]\n{"id":"cmt_x"}\n'
+    imported = issues.restore_issue_files(
+        [("ISSUE-0010.md", good_md), ("ISSUE-0010.comments.ndjson", bad_comments)]
+    )
+
+    assert imported == ["ISSUE-0010"]
+    assert not (workspace / ".floom" / "issues" / "ISSUE-0010.comments.ndjson").exists()
+    fetched = issues.get_issue("ISSUE-0010")
+    assert fetched["comment_count"] == 0
+    assert fetched["comments"] == []
