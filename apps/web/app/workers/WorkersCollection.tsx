@@ -1394,18 +1394,24 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
 function CustomizeTabsMenu({
   workerId,
   pinned,
+  activeTab,
   onToggle,
   onSelectTab,
 }: {
   workerId: string;
   pinned: Set<WorkerDetailTab>;
+  /** The currently active detail-tab key (drives the single, mutually-exclusive checkmark). */
+  activeTab?: string;
   onToggle: (key: WorkerDetailTab) => void;
   onSelectTab: (workerId: string, key: WorkerDetailTab) => void;
 }) {
   // R9: the advanced group is a clearly-visible affordance ON the primary tab
-  // row (an "Advanced ▾" button) — not a header-overflow control. Selecting an
-  // item pins that tab onto the row AND opens it. The chevron + label read as a
-  // tab group, so Source/Versions/Brain/Tools are obviously reachable.
+  // row (an "Advanced ▾" button) — not a header-overflow control. The menu is a
+  // VIEW SWITCHER: the checkmark marks the currently ACTIVE advanced view, so it
+  // is mutually exclusive (at most one, #1680 — previously it showed the pinned
+  // SET, lighting up Source AND Versions at once). Picking an item opens it (and
+  // pins it onto the row if it was not already pinned); re-picking the active
+  // tab unpins it (the only unpin affordance), falling back to the base tabs.
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -1422,22 +1428,33 @@ function CustomizeTabsMenu({
             label + items in DropdownMenuGroup. */}
         <DropdownMenuGroup>
           <DropdownMenuLabel>Advanced tabs</DropdownMenuLabel>
-          {ADVANCED_DETAIL_TABS.map((key) => (
-            <DropdownMenuCheckboxItem
-              key={key}
-              checked={pinned.has(key)}
-              // base-ui fires onClick before state churn; closeOnClick stays open so
-              // the user can pin several tabs without reopening the menu.
-              closeOnClick={false}
-              onCheckedChange={(checked) => {
-                onToggle(key);
-                // Pinning selects the tab so the user lands on what they just added.
-                if (checked) onSelectTab(workerId, key);
-              }}
-            >
-              {key}
-            </DropdownMenuCheckboxItem>
-          ))}
+          {ADVANCED_DETAIL_TABS.map((key) => {
+            const isActive = activeTab === key;
+            return (
+              <DropdownMenuCheckboxItem
+                key={key}
+                // Checkmark = ACTIVE view, not the pinned set → exactly one (or
+                // none) is ever checked.
+                checked={isActive}
+                // base-ui fires onClick before state churn; closeOnClick stays open so
+                // the user can pin several tabs without reopening the menu.
+                closeOnClick={false}
+                onCheckedChange={() => {
+                  if (isActive) {
+                    // Re-picking the active advanced tab removes its pin (the
+                    // only unpin path); the view falls back to the first tab.
+                    if (pinned.has(key)) onToggle(key);
+                    return;
+                  }
+                  // Open the view; pin it onto the row first if it is not there yet.
+                  if (!pinned.has(key)) onToggle(key);
+                  onSelectTab(workerId, key);
+                }}
+              >
+                {key}
+              </DropdownMenuCheckboxItem>
+            );
+          })}
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -1933,7 +1950,7 @@ export default function WorkersCollection({
         quickActions: [],
       };
     },
-    detail: (w) => {
+    detail: (w, activeTab) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
         <>
@@ -2008,6 +2025,7 @@ export default function WorkersCollection({
           <CustomizeTabsMenu
             workerId={w.id}
             pinned={pinnedTabs}
+            activeTab={activeTab}
             onToggle={togglePinnedTab}
             onSelectTab={selectWorkerTab}
           />

@@ -42,6 +42,21 @@ function CollectionInner<T>({ config }: { config: CollectionConfig<T> }) {
     return () => window.removeEventListener("popstate", onPop);
   }, [defaultView]);
 
+  // Next-router navigations (router.push/replace from anywhere — e.g. the worker
+  // "View as YAML →" link and the Advanced view switcher, #1680) update
+  // useSearchParams but NOT our local state, which previously needed a second
+  // click to take effect. Re-seed from useSearchParams whenever it changes.
+  // In-component edits (search/tag/tab clicks) commit via window.history
+  // replaceState, which does NOT touch useSearchParams, so this never fights the
+  // local state or loops; it only reacts to genuine router navigations.
+  const searchKey = searchParams.toString();
+  useEffect(() => {
+    const next = parseCollectionState(new URLSearchParams(searchKey), defaultView);
+    setState((prev) =>
+      serializeCollectionState(prev, defaultView).toString() === searchKey ? prev : next,
+    );
+  }, [searchKey, defaultView]);
+
   const onChange = useCallback(
     (next: CollectionState) => {
       const prev = stateRef.current;
