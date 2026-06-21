@@ -1678,7 +1678,7 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
     <form
       onSubmit={handleSubmit}
       className="mt-4 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
-      style={{ maxWidth: 380 }}
+      style={{ maxWidth: 440 }} /* #1726: raised from 380→440 so "Describe the job you want done…" placeholder is not clipped */
     >
       <input
         ref={inputRef}
@@ -1693,7 +1693,7 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
         type="submit"
         disabled={!value.trim()}
         className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
-        aria-label="Create worker"
+        aria-label="Hire worker" /* #1706: canonical create-worker label */
       >
         <ArrowRight className="size-3.5" />
       </button>
@@ -2016,7 +2016,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "Add", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed
+    add: { label: "Hire worker", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed; #1706: canonical "Hire worker"
     states: {
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {

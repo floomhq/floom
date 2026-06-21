@@ -379,7 +379,7 @@ export function WorkspaceTokensPanel() {
           {createdToken && (
             <Alert>
               <CheckCircle2 className="size-4" />
-              <AlertTitle>Workspace token created</AlertTitle>
+              <AlertTitle>Workspace access key created</AlertTitle>
               <AlertDescription>
                 <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
                   <span className="flex-1 break-all">{createdToken}</span>
@@ -1173,7 +1173,7 @@ function PersonalTokensSection({ accountName, workspaceName }: { accountName?: s
       <ScopeCrossLink
         title="These are yours, not the workspace's."
         body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
-        linkLabel={`Workspace · ${workspaceName} → Workspace token`}
+        linkLabel={`Workspace · ${workspaceName} → Access key`}
         targetSel="workspace_token"
       />
     </div>
@@ -1202,7 +1202,7 @@ function ConnectSection() {
             in the <code className="font-mono">x-floom-secret</code> header: a{" "}
             <span className="font-medium text-foreground">personal access token</span>{" "}
             (Account scope) or the{" "}
-            <span className="font-medium text-foreground">workspace token</span>{" "}
+            <span className="font-medium text-foreground">workspace access key</span>{" "}
             (Workspace scope, admin only).
           </p>
         </div>

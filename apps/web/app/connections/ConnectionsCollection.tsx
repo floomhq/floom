@@ -35,16 +35,23 @@ import {
 // #1233: Resolve owner_id to display name / email.
 // Works client-side from the workspace members list fetched on load.
 // If backend later populates owner_display_name on ConnectionItem, prefer that.
+// #1728: never render a raw UUID — if no member match, fall back to "My workspace"
+//        instead of exposing the internal ID to the operator.
 // ---------------------------------------------------------------------------
-function resolveOwner(
+const OWNER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const OWNER_WS_PREFIX_RE = /^ws_/;
+
+// Exported for unit testing (#1728 UUID-masking guarantee).
+export function resolveOwner(
   ownerId: string | null | undefined,
   members: WorkspaceMember[],
 ): string {
   if (!ownerId) return "Not set";
   const member = members.find((m) => m.user_id === ownerId);
-  if (member) return member.display_name || member.email || ownerId;
-  // Fallback: truncate UUID so it's friendlier than the full 36-char string
-  return ownerId.length > 8 ? `${ownerId.slice(0, 8)}...` : ownerId;
+  if (member) return member.display_name || member.email || "My workspace";
+  // #1728: if the id looks like a UUID or workspace prefix, never show it raw
+  if (OWNER_UUID_RE.test(ownerId) || OWNER_WS_PREFIX_RE.test(ownerId)) return "My workspace";
+  return ownerId;
 }
 
 // ---------------------------------------------------------------------------
@@ -735,9 +742,9 @@ export default function ConnectionsCollection({
   const loading = firstLoadPending && !timedOut;
   const error =
     timedOut && !hasCachedData
-      ? "Could not load integrations. Check your connection and try again."
+      ? "Could not load connections. Check your connection and try again."
       : connectionsQuery.isError && !connectionsQuery.data
-        ? "Could not load integrations. Check your connection and try again."
+        ? "Could not load connections. Check your connection and try again."
         : null;
   // Pinned advanced connection tabs (per-session): the "Advanced ▾" group on the
   // tab row pins/opens secondary tabs (Recent emails, Config). Mirrors the
@@ -811,7 +818,7 @@ export default function ConnectionsCollection({
   };
 
   const config: CollectionConfig<UnifiedConn> = {
-    title: "Integrations",
+    title: "Connections", /* #1707: unified terminology */
     subtitle: "Apps, MCP servers and secrets your workers can use.",
     headerSlot: <ConnectionsChips />,
     items,
@@ -1009,7 +1016,7 @@ export default function ConnectionsCollection({
                     </span>,
                   ],
                   ["Transport", c.mcp_transport || "—"],
-                  ["Auth secret", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
+                  ["Access key", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
                   ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
                   ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
                   ["Last used", formatLastUsed(c)],
@@ -1188,7 +1195,7 @@ export default function ConnectionsCollection({
     },
     states: {
       empty: {
-        title: "No integrations yet",
+        title: "No connections yet", /* #1707: unified terminology; primary empty state = "yet" */
         help: "Connect an app, add an MCP server, or store a secret your workers can use.",
       },
       errorRetry: () => {

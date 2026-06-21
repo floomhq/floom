@@ -66,7 +66,7 @@ const CLI_COMMANDS: { name: string; description: string }[] = [
   { name: "workeros runs list", description: "List runs, filterable by worker or status." },
   { name: "workeros runs show <id>", description: "Show run details." },
   { name: "workeros runs logs <id>", description: "Show or follow run logs." },
-  { name: "workeros runs download <id>", description: "Download a run's bundle archive." },
+  { name: "workeros runs download <id>", description: "Download run files." },
   { name: "workeros secrets list", description: "List secret names." },
   { name: "workeros secrets set <key>", description: "Set a secret value." },
   { name: "workeros secrets delete <key>", description: "Delete a secret." },

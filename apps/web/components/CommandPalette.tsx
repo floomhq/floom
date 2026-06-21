@@ -151,7 +151,7 @@ export function CommandPalette() {
             onSelect={() => go("/?create=1")}
           >
             <Plus />
-            New worker
+            Hire worker {/* #1706: canonical create-worker label */}
           </CommandItem>
           <CommandItem
             value="action reload workers rescan refresh"

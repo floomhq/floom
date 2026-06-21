@@ -182,7 +182,7 @@ const nav: NavItem[] = [
   { href: "/library", label: "Library", icon: Library },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
-  { href: "/connections", label: "Integrations", icon: Plug },
+  { href: "/connections", label: "Connections", icon: Plug } /* #1707: unified terminology */,
 ];
 
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
@@ -275,7 +275,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
         className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-text)] transition-colors duration-150 hover:opacity-90"
       >
         <Plus className="w-4 h-4" />
-        <span>New worker</span>
+        <span>Hire worker</span> {/* #1706: canonical create-worker CTA */}
       </Link>
       {/* #1315: differentiated grey background (var(--bg-2)) so the Search box
           reads as an input, not a plain nav link. kbd chips sit on the lighter
@@ -584,7 +584,7 @@ export function UserProfileFooter({
 }: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
-  const [workspaceName, setWorkspaceName] = useState("Floom workspace");
+  const [workspaceName, setWorkspaceName] = useState("My workspace"); /* #1709/#1728: canonical fallback */
 
   useEffect(() => {
     let active = true;
@@ -609,7 +609,7 @@ export function UserProfileFooter({
         if (active && current) setWorkspaceName(resolveWorkspaceName(current.name));
       })
       .catch(() => {
-        if (active) setWorkspaceName("Floom workspace");
+        if (active) setWorkspaceName("My workspace"); /* #1709/#1728: canonical fallback, never "Floom workspace" */
       });
     return () => {
       active = false;

@@ -27,16 +27,18 @@ export function TagBar({ families, active, onToggle, onClear }: TagBarProps) {
   const renderedFamilies = TAG_FAMILY_ORDER.filter((f) => (families[f]?.length ?? 0) > 0);
   if (renderedFamilies.length === 0) return null;
 
+  // #1709: unified to "Add filter" (singular) for both visible label and aria-label
   return (
-    <div className="c-filterbar" role="group" aria-label="Filters">
+    <div className="c-filterbar" role="group" aria-label="Add filter">
       <button
         type="button"
         className={`c-tag c-filter-toggle ${open || anyOn ? "on" : ""}`}
         aria-expanded={open}
+        aria-label="Add filter"
         onClick={() => setOpen((value) => !value)}
       >
         <Filter className="size-3" aria-hidden="true" />
-        filters
+        Add filter
         {activeCount > 0 && <span className="ct">{activeCount}</span>}
       </button>
       {open && (

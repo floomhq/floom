@@ -95,10 +95,10 @@ describe("#902 New worker → consistent Emily empty state", () => {
     ).toBeInTheDocument();
   });
 
-  it("sidebar has the New worker button routing to the home create flow", () => {
+  it("sidebar has the Hire worker button routing to the home create flow", () => {
     const sidebar = src("components/layout/sidebar.tsx");
     expect(sidebar).toContain('href="/?create=1"');
-    expect(sidebar).toContain("New worker");
+    expect(sidebar).toContain("Hire worker"); /* #1706: canonical "Hire worker" */
   });
 
   it("/workers/new is a redirect, not a form; all create entry points use the home create flow", () => {
