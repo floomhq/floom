@@ -13,6 +13,7 @@ Covers the acceptance criteria end-to-end with no network:
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 import sys
 import types
@@ -349,3 +350,119 @@ def test_concurrent_close_and_comment_do_not_lose_updates(monkeypatch, tmp_path)
     # Regardless of interleaving, the close is never lost and the comment lands.
     assert final["status"] == "closed"
     assert final["comment_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Regression: workspace template export/import preserves issues (#1781 review)
+#
+# The curated /workspace/export zip + /workspace/import restore are an allow-list,
+# not a raw git copy. Without explicit bundling, issues are silently dropped on
+# this documented round trip even though they live in git.
+# ---------------------------------------------------------------------------
+
+def test_export_bundle_includes_issue_files(monkeypatch, tmp_path):
+    import io
+    import zipfile
+
+    workspace, workers_dir = _make_workspace(tmp_path)
+    client, _main = _install_app(monkeypatch, tmp_path, workers_dir=workers_dir, workspace_dir=workspace)
+
+    created = client.post("/workspace/issues", json={"title": "exported issue"}).json()
+    issue_id = created["id"]
+    client.post(f"/workspace/issues/{issue_id}/comments", json={"body": "a comment"})
+
+    resp = client.get("/workspace/export")
+    assert resp.status_code == 200, resp.text
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = set(zf.namelist())
+    assert f"issues/{issue_id}.md" in names
+    assert f"issues/{issue_id}.comments.ndjson" in names
+    # Manifest reflects the issue count.
+    manifest = json.loads(zf.read("workspace.json").decode("utf-8"))
+    assert manifest["counts"]["issues"] == 1
+
+
+def test_public_share_link_template_excludes_issues(monkeypatch, tmp_path):
+    """Issues are an operating record — keep them out of the PUBLIC share link.
+
+    The signed /workspace/template/{token} bundle is a reusable scaffold for
+    other users; only the owner's authenticated export carries issues.
+    """
+    import io
+    import zipfile
+
+    workspace, workers_dir = _make_workspace(tmp_path)
+    client, _main = _install_app(monkeypatch, tmp_path, workers_dir=workers_dir, workspace_dir=workspace)
+
+    client.post("/workspace/issues", json={"title": "private operating note"})
+
+    from services.workspace_ops import _workspace_share_token
+
+    owner = "local-user"
+    token = _workspace_share_token(owner)
+    resp = client.get(f"/workspace/template/{token}", params={"owner": owner})
+    assert resp.status_code == 200, resp.text
+    names = set(zipfile.ZipFile(io.BytesIO(resp.content)).namelist())
+    assert not any(n.startswith("issues/") for n in names)
+
+
+def test_export_import_round_trip_preserves_issues(monkeypatch, tmp_path):
+    # ---- source workspace: create an issue + comment, then export ----
+    src_ws, src_workers = _make_workspace(tmp_path / "src")
+    src_client, _ = _install_app(
+        monkeypatch, tmp_path / "src", workers_dir=src_workers, workspace_dir=src_ws
+    )
+    created = src_client.post(
+        "/workspace/issues",
+        json={"title": "ship the fix", "labels": ["needs-attention"], "asset_type": "run", "asset_id": "run_123"},
+    ).json()
+    issue_id = created["id"]
+    src_client.post(f"/workspace/issues/{issue_id}/comments", json={"body": "carried over"})
+    bundle = src_client.get("/workspace/export").content
+
+    # ---- fresh destination workspace: import the bundle ----
+    dst_ws, dst_workers = _make_workspace(tmp_path / "dst")
+    dst_client, _ = _install_app(
+        monkeypatch, tmp_path / "dst", workers_dir=dst_workers, workspace_dir=dst_ws
+    )
+    resp = dst_client.post(
+        "/workspace/import",
+        files={"bundle": ("workspace.zip", bundle, "application/zip")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert issue_id in resp.json()["issues_imported"]
+
+    # The restored issue file is on disk and committed in the destination repo.
+    md_path = dst_ws / ".floom" / "issues" / f"{issue_id}.md"
+    assert md_path.is_file()
+    assert _git_tracked(dst_ws, f".floom/issues/{issue_id}.md")
+
+    # And it is a first-class issue again: listable, with its comment preserved.
+    fetched = dst_client.get(f"/workspace/issues/{issue_id}").json()
+    assert fetched["title"] == "ship the fix"
+    assert fetched["asset_type"] == "run"
+    assert fetched["asset_id"] == "run_123"
+    assert fetched["comment_count"] == 1
+    assert fetched["comments"][0]["body"] == "carried over"
+
+
+def test_import_never_clobbers_existing_issue(monkeypatch, tmp_path):
+    workspace, workers_dir = _make_workspace(tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "dev")
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
+    _purge_api_modules()
+    issues = importlib.import_module("services.workspace_issues")
+
+    existing = issues.create_issue(title="keep me", created_by="user_x")
+    issue_id = existing["id"]
+
+    # An incoming bundle file claims the same id but different content.
+    incoming_md = b"---\nid: " + issue_id.encode() + b"\nstatus: open\ntitle: imposter\n---\n\nbody\n"
+    imported = issues.restore_issue_files([(f"{issue_id}.md", incoming_md)])
+
+    assert imported == []  # collision -> skipped, never clobbered
+    assert issues.get_issue(issue_id)["title"] == "keep me"

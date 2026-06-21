@@ -739,10 +739,7 @@ async def import_workspace(
     if issue_files:
         try:
             from services.workspace_issues import restore_issue_files
-            issues_imported = restore_issue_files(
-                issue_files,
-                asset_id_remaps=id_remaps,
-            )
+            issues_imported = restore_issue_files(issue_files)
         except Exception as exc:  # never fail the whole import over issues
             skipped.append({"type": "issues", "id": "*", "reason": str(exc)})
 
