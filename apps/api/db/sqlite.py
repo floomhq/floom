@@ -4744,7 +4744,7 @@ class SqliteAssetAccessRepository:
         )
 
     def rename_asset(
-        self, *, asset_type: str, old_asset_id: str, new_asset_id: str, workspace_id: str
+        self, *, asset_type: str, old_asset_id: str, new_asset_id: str
     ) -> dict[str, Any] | None:
         """Re-key an asset's access row from ``old_asset_id`` to ``new_asset_id``.
 
@@ -4758,20 +4758,8 @@ class SqliteAssetAccessRepository:
         place — visibility/owner/workspace ride along on the same row. ``name``
         tracks the id for packs, so it is rewritten to ``new_asset_id`` too.
 
-        Every statement is scoped to ``workspace_id``. Pack folders are
-        workspace-local (``CONTEXTS_DIR/<workspace>/<name>``), so a same-named
-        pack in another workspace is a DIFFERENT asset; an unscoped delete/re-key
-        would clobber that other workspace's owner/visibility mirror. Scoping
-        means the source must belong to ``workspace_id`` to move, and only a stale
-        destination row in the SAME workspace is cleared.
-
-        Returns the moved row, or ``None`` when no source row exists in that
-        workspace (the caller then materializes a fresh row). Never raises for a
-        missing source. Raises ``ValueError`` when ``new_asset_id`` is already
-        held by a DIFFERENT workspace: ``id`` is a global PK, so re-keying onto
-        it would violate the constraint; rejecting protects the foreign row
-        (the route pre-checks this and 409s before any filesystem move, so this
-        is a backstop for direct callers).
+        Returns the moved row, or ``None`` when no source row exists (the caller
+        then materializes a fresh row). Never raises for a missing source.
         """
         table = _ASSET_TABLES.get(asset_type)
         if table is None:
@@ -4779,30 +4767,18 @@ class SqliteAssetAccessRepository:
         now = now_iso()
         with get_db() as conn:
             src = conn.execute(
-                f"SELECT id FROM {table} WHERE id = ? AND workspace_id = ? LIMIT 1",
-                (old_asset_id, workspace_id),
+                f"SELECT id FROM {table} WHERE id = ? LIMIT 1", (old_asset_id,)
             ).fetchone()
             if src is None:
                 return None
-            conflict = conn.execute(
-                f"SELECT 1 FROM {table} WHERE id = ? AND workspace_id != ? LIMIT 1",
-                (new_asset_id, workspace_id),
-            ).fetchone()
-            if conflict is not None:
-                raise ValueError(
-                    f"{asset_type} id {new_asset_id!r} already exists in another workspace"
-                )
+            conn.execute(f"DELETE FROM {table} WHERE id = ?", (new_asset_id,))
             conn.execute(
-                f"DELETE FROM {table} WHERE id = ? AND workspace_id = ?",
-                (new_asset_id, workspace_id),
-            )
-            conn.execute(
-                f"UPDATE {table} SET id = ?, name = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
-                (new_asset_id, new_asset_id, now, old_asset_id, workspace_id),
+                f"UPDATE {table} SET id = ?, name = ?, updated_at = ? WHERE id = ?",
+                (new_asset_id, new_asset_id, now, old_asset_id),
             )
             row = conn.execute(
-                f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ? AND workspace_id = ?",
-                (new_asset_id, workspace_id),
+                f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ?",
+                (new_asset_id,),
             ).fetchone()
         return _row_dict(row) if row else None
 
