@@ -4,20 +4,33 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, symlink } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 const CLI_PATH = join(process.cwd(), "dist", "cli.js");
 
-// Spawn the CLI through a symlink whose basename is `name`, mirroring how npm
-// installs the `workeros` / `floom` bins (both point at dist/cli.js).
+// Spawn the CLI through a tiny wrapper whose basename is `name`, mirroring the
+// bin path the user invoked without requiring symlink privileges on Windows.
 async function runAs(name, args, env = {}) {
   const dir = await mkdtemp(join(tmpdir(), "workeros-cmdname-"));
-  const linkPath = join(dir, name);
-  await symlink(CLI_PATH, linkPath);
-  const child = spawn(process.execPath, [linkPath, ...args], {
+  const wrapperPath = join(dir, name);
+  await writeFile(
+    join(dir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  await writeFile(
+    wrapperPath,
+    [
+      "import { fileURLToPath } from 'node:url';",
+      `import { main } from ${JSON.stringify(pathToFileURL(CLI_PATH).href)};`,
+      "await main([process.argv[0], fileURLToPath(import.meta.url), ...process.argv.slice(2)]);",
+      "",
+    ].join("\n"),
+  );
+  const child = spawn(process.execPath, [wrapperPath, ...args], {
     env: {
       ...process.env,
       WORKEROS_API_BASE: "",
