@@ -212,6 +212,11 @@ export class FloomApiClient {
     if (this.credentials.workspace_id) {
       headers["x-workeros-workspace"] = this.credentials.workspace_id;
     }
+    // Self-hosted engines with user-header scope require x-floom-user alongside
+    // the shared secret; otherwise they 401. Only meaningful in OSS mode.
+    if (this.credentials.user) {
+      headers["x-floom-user"] = this.credentials.user;
+    }
     return headers;
   }
 

@@ -77,7 +77,19 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "floom"): Co
     .name(commandName)
     .description("Floom CLI")
     .version(getPackageVersion())
-    .showHelpAfterError();
+    .showHelpAfterError()
+    // OSS/self-hosted: identity sent as x-floom-user (engines with user-header
+    // scope require it). Also settable via WORKEROS_USER / FLOOM_USER.
+    .option("--user <user>", "OSS self-hosted: send x-floom-user header");
+
+  // A global --user must reach readCredentials(), which reads from env. Mirror
+  // the flag into WORKEROS_USER before any subcommand action runs.
+  program.hook("preSubcommand", (thisCommand) => {
+    const user = thisCommand.opts().user;
+    if (typeof user === "string" && user.trim()) {
+      process.env.WORKEROS_USER = user.trim();
+    }
+  });
 
   program.command("login")
     .description("Login via browser device authorization")

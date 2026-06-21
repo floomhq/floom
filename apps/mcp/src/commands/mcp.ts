@@ -153,6 +153,10 @@ async function resolveMcpConfig(
     if (credentials.workspace_id) {
       headers["x-workeros-workspace"] = credentials.workspace_id;
     }
+    // Self-hosted engines with user-header scope require x-floom-user.
+    if (credentials.user) {
+      headers["x-floom-user"] = credentials.user;
+    }
     return {
       mcpUrl: `${apiBase}/mcp-tools/serve`,
       headers,

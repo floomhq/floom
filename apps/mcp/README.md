@@ -26,6 +26,16 @@ floom run <worker-id> --input key=value
 
 If your local API runs without `FLOOM_SECRET`, login is not required for basic local development. For a protected self-hosted API, set `FLOOM_SECRET` on the backend and use the matching secret when the CLI prompts.
 
+If the self-hosted engine has user-header scope enabled (it requires `x-floom-user` alongside the shared secret), pass the identity with the `--user` flag or `WORKEROS_USER` env var:
+
+```bash
+WORKEROS_API_BASE=http://127.0.0.1:8011 WORKEROS_API_SECRET=<secret> WORKEROS_USER=<user> floom whoami
+# or
+floom --user <user> whoami
+```
+
+`WORKEROS_API_BASE` + `WORKEROS_API_SECRET` select self-hosted (OSS) mode and take precedence over any saved hosted credentials file; `mcp install` bakes `x-floom-user` into the generated client config when it is set.
+
 Credentials live at `~/.config/floom/credentials.json` (mode 0600). Existing `~/.config/workeros/credentials.json` files are still read for compatibility. `floom logout` clears both paths.
 
 ## MCP install

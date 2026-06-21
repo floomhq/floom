@@ -25,6 +25,7 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
       }
     } else {
       payload.api_secret_masked = maskSecret(credentials.api_secret || "");
+      payload.user = credentials.user || null;
     }
     if (options.json) {
       printJson(payload);
@@ -42,6 +43,9 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
         }
       } else {
         log.kv("API secret", maskSecret(credentials.api_secret || ""));
+        if (credentials.user) {
+          log.kv("User", credentials.user);
+        }
       }
       log.kv("Authed at", credentials.authed_at);
       log.ok("System reachable");

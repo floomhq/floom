@@ -20,6 +20,9 @@ export type StoredCredentials = {
   supabase_url?: string;
   // Hosted mode: Supabase anon key (needed for the /auth/v1/token refresh call).
   supabase_anon_key?: string;
+  // OSS mode: identity sent as x-floom-user when the engine has user-header
+  // scope enabled. Comes from WORKEROS_USER / FLOOM_USER / --user.
+  user?: string;
   // Currently-active workspace id (hosted or OSS). Sent as x-workeros-workspace.
   workspace_id?: string;
   // Human-readable workspace name (for `floom workspaces show`).
@@ -34,6 +37,10 @@ const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 
 function envApiBase(defaultBase: string): string {
   return (process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE || defaultBase).replace(/\/+$/, "");
+}
+
+function envUser(): string | undefined {
+  return (process.env.WORKEROS_USER || process.env.FLOOM_USER || "").trim() || undefined;
 }
 
 function envCloudRequested(): boolean {
@@ -80,6 +87,7 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
       api_base: envApiBase(DEFAULT_OSS_API_BASE),
       mode: "oss",
       api_secret: envOssSecret,
+      user: envUser(),
       workspace_id: process.env.WORKEROS_WORKSPACE_ID?.trim() || undefined,
       workspace_name: process.env.WORKEROS_WORKSPACE_NAME?.trim() || undefined,
       authed_at: new Date().toISOString(),
@@ -117,6 +125,8 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     refresh_token: parsed.refresh_token,
     supabase_url: parsed.supabase_url ? parsed.supabase_url.replace(/\/+$/, "") : undefined,
     supabase_anon_key: parsed.supabase_anon_key,
+    // Env/flag wins so `--user` overrides a saved OSS creds file on a single call.
+    user: envUser() || parsed.user,
     workspace_id: parsed.workspace_id,
     workspace_name: parsed.workspace_name,
     active_mcp_label: parsed.active_mcp_label,
