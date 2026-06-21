@@ -74,20 +74,42 @@ There is a hard ownership boundary. Respect it on every change.
 must add one to unblock prod (e.g. a manifest-lift shim), open the matching
 WorkerOS PR in the same session and delete the workaround once it merges.
 
-### Sync workflow
+### Sync workflow — the engine bump is the ONLY step; deploy is automatic
+A push to cloud `main` **auto-deploys the backend** (api/web + worker) to Railway
+via `.github/workflows/railway-deploy.yml` (mirrors `vercel-deploy.yml` for the
+dashboard), then runs the smoke gate. So **do NOT `railway up` by hand** — shipping
+a new engine version is just: **open a PR that bumps the `engine/` submodule pin to
+the version you need; merging it to `main` deploys both services + smoke-gates.**
+
 ```bash
-# After a WorkerOS PR merges:
-cd engine && git fetch origin && git checkout <new-sha> && cd ..
+# After a WorkerOS PR merges, on a cloud branch -> PR:
+cd engine && git fetch origin && git checkout <new-engine-sha> && cd ..
 git add engine && git commit -m "chore(engine): bump to <sha> (<what>)"
-# deploy: railway up --service workeros-cloud-api, then run smoke gate
+# push the branch, open a PR, merge to main  ->  CI deploys api+worker + smoke gate.
 ```
 
+- **Engine bumps are a reviewed PR, never auto-merged.** Engine is source of truth
+  and a bad bump can break the overlay (e.g. an `engine/apps/api/requirements.txt`
+  dep conflict — keep the cloud `apps/api/requirements.txt` from pinning shared
+  deps the engine also pins). The PR review + the post-deploy smoke gate are the
+  safety; the deploy is the only thing that's automated, not the decision to bump.
+- The deploy workflow needs the `RAILWAY_TOKEN` repo secret (a Railway project
+  token) and the `workeros-ci` self-hosted runner; it ships the working tree
+  (engine submodule files included) and **fails red if smoke fails**.
+- **Manual fallback** (runner/token down): `railway up --service
+  workeros-cloud-worker && railway up --service workeros-cloud-api`, then
+  `bash ops/smoke-routes.sh cloud`.
+
 ## Live deployment
+- **Deploys are automated on push to `main`** (`.github/workflows/railway-deploy.yml`
+  → `railway up` for both services + smoke gate). The commands below are the manual
+  fallback only.
 - API: Railway service `workeros-cloud-api`, public base
-  `https://workeros-api.floom.dev`. Deploy from this repo after the engine
-  submodule is pinned:
+  `https://workeros-api.floom.dev`. Worker: `workeros-cloud-worker`. Manual deploy
+  (fallback) after the engine submodule is pinned:
 
   ```bash
+  railway up --service workeros-cloud-worker
   railway up --service workeros-cloud-api
   bash ops/smoke-routes.sh cloud
   ```
