@@ -240,3 +240,100 @@ def list_files_at_ref(pat: str, repo_full_name: str, prefix: str, ref: str) -> l
     ]
 
 
+# ---------------------------------------------------------------------------
+# GitHub Issues API
+#
+# Backs Floom "workspace issues": GitHub Issues are the source of truth, and
+# Floom projects them (plus a hidden metadata marker in the body) into its own
+# WorkspaceIssue view. The functions below are thin REST wrappers; the marker
+# parsing and asset binding live in services/workspace_issues.py.
+#
+# Note: GitHub's issues endpoint also returns pull requests (a PR is an issue
+# under the hood). Entries carrying a "pull_request" key are PRs; callers that
+# want issues only must filter them out (list_issues does).
+# ---------------------------------------------------------------------------
+
+import urllib.parse as _urlparse
+
+
+def list_issues(
+    pat: str,
+    repo_full_name: str,
+    state: str = "all",
+    labels: Optional[list[str]] = None,
+    per_page: int = 100,
+) -> list[dict]:
+    """List repository issues (pull requests excluded).
+
+    state is one of "open", "closed", or "all". labels, when given, restricts
+    to issues carrying every listed label (GitHub AND semantics).
+    """
+    if state not in ("open", "closed", "all"):
+        state = "all"
+    query: dict[str, str] = {"state": state, "per_page": str(max(1, min(per_page, 100)))}
+    if labels:
+        query["labels"] = ",".join(labels)
+    path = f"/repos/{repo_full_name}/issues?{_urlparse.urlencode(query)}"
+    result = _call("GET", path, pat)
+    if not isinstance(result, list):
+        return []
+    return [item for item in result if "pull_request" not in item]
+
+
+def get_issue(pat: str, repo_full_name: str, number: int) -> dict:
+    """Return a single issue by number."""
+    return _call("GET", f"/repos/{repo_full_name}/issues/{int(number)}", pat)
+
+
+def create_issue(
+    pat: str,
+    repo_full_name: str,
+    title: str,
+    body: Optional[str] = None,
+    labels: Optional[list[str]] = None,
+) -> dict:
+    """Create a new issue and return the created issue object."""
+    payload: dict = {"title": title}
+    if body is not None:
+        payload["body"] = body
+    if labels:
+        payload["labels"] = labels
+    return _call("POST", f"/repos/{repo_full_name}/issues", pat, payload)
+
+
+def update_issue(
+    pat: str,
+    repo_full_name: str,
+    number: int,
+    title: Optional[str] = None,
+    body: Optional[str] = None,
+    state: Optional[str] = None,
+    labels: Optional[list[str]] = None,
+) -> dict:
+    """Patch an issue's title/body/state/labels. Only provided fields change."""
+    payload: dict = {}
+    if title is not None:
+        payload["title"] = title
+    if body is not None:
+        payload["body"] = body
+    if state is not None:
+        if state not in ("open", "closed"):
+            raise GitHubAPIError(f"Invalid issue state: {state}", 400)
+        payload["state"] = state
+    if labels is not None:
+        payload["labels"] = labels
+    if not payload:
+        return get_issue(pat, repo_full_name, number)
+    return _call("PATCH", f"/repos/{repo_full_name}/issues/{int(number)}", pat, payload)
+
+
+def create_issue_comment(pat: str, repo_full_name: str, number: int, body: str) -> dict:
+    """Add a comment to an issue and return the created comment object."""
+    return _call(
+        "POST",
+        f"/repos/{repo_full_name}/issues/{int(number)}/comments",
+        pat,
+        {"body": body},
+    )
+
+

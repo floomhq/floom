@@ -856,3 +856,87 @@ def _tool_contexts_write(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": True, "message": f"Written {len(content)} chars to {name}/{file_path}."}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Workspace issues (GitHub-backed) — see services/workspace_issues.py
+# ---------------------------------------------------------------------------
+
+def _tool_workspace_issues_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from services.workspace_issues import GitHubNotConnected, list_workspace_issues
+
+    state = str(args.get("state") or "all")
+    if state not in ("open", "closed", "all"):
+        state = "all"
+    try:
+        issues = list_workspace_issues(
+            user_id,
+            state=state,
+            asset_type=args.get("asset_type"),
+            asset_id=args.get("asset_id"),
+        )
+    except GitHubNotConnected as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": f"GitHub request failed: {exc}"}
+    rows = [i.model_dump() for i in issues]
+    return {"ok": True, "issues": rows, "count": len(rows)}
+
+
+def _tool_workspace_issues_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from services.workspace_issues import GitHubNotConnected, create_workspace_issue
+
+    title = str(args.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "title is required"}
+    try:
+        issue = create_workspace_issue(
+            user_id,
+            title=title,
+            body=args.get("body"),
+            asset_type=args.get("asset_type"),
+            asset_id=args.get("asset_id"),
+            source=args.get("source"),
+            labels=args.get("labels"),
+        )
+    except GitHubNotConnected as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": f"GitHub request failed: {exc}"}
+    return {"ok": True, "issue": issue.model_dump()}
+
+
+def _tool_workspace_issues_comment(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from services.workspace_issues import GitHubNotConnected, comment_on_issue
+
+    number = args.get("number")
+    body = str(args.get("body") or "").strip()
+    if number is None:
+        return {"ok": False, "error": "number is required"}
+    if not body:
+        return {"ok": False, "error": "body is required"}
+    try:
+        result = comment_on_issue(user_id, int(number), body)
+    except GitHubNotConnected as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": f"GitHub request failed: {exc}"}
+    return {"ok": True, "comment": result}
+
+
+def _tool_workspace_issues_close(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from services.workspace_issues import GitHubNotConnected, update_workspace_issue
+
+    number = args.get("number")
+    if number is None:
+        return {"ok": False, "error": "number is required"}
+    state = str(args.get("state") or "closed")
+    if state not in ("open", "closed"):
+        state = "closed"
+    try:
+        issue = update_workspace_issue(user_id, int(number), state=state)
+    except GitHubNotConnected as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": f"GitHub request failed: {exc}"}
+    return {"ok": True, "issue": issue.model_dump()}

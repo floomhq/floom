@@ -1412,6 +1412,77 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
             },
             _tool_slack_read_channel,
         ),
+        _make_tool(
+            "workspace_issues__list",
+            (
+                "List this workspace's GitHub-backed issues. Use to answer "
+                "'what issues are open for this workspace?'. Optionally filter by "
+                "state (open/closed/all) and by asset binding (asset_type + "
+                "asset_id, e.g. asset_type='worker', asset_id='<worker id>')."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string", "enum": ["open", "closed", "all"], "default": "all"},
+                    "asset_type": {"type": "string", "description": "Filter by asset type: worker, context, run, ..."},
+                    "asset_id": {"type": "string", "description": "Filter by the bound asset id."},
+                },
+                "required": [],
+            },
+            _tool_workspace_issues_list,
+        ),
+        _make_tool(
+            "workspace_issues__create",
+            (
+                "Create a workspace issue on the workspace's GitHub repo. Use to "
+                "'create an issue for this worker' or to file a follow-up from a "
+                "failed run. Optionally bind it to an asset via asset_type + "
+                "asset_id (worker, context, run, ...). Returns the github issue "
+                "number and url."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "asset_type": {"type": "string", "description": "worker | context | run | connection | approval | mcp"},
+                    "asset_id": {"type": "string", "description": "The bound asset's id (e.g. worker id, run id)."},
+                    "source": {"type": "string", "description": "Optional origin tag, e.g. run_failure, needs_attention."},
+                    "labels": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["title"],
+            },
+            _tool_workspace_issues_create,
+        ),
+        _make_tool(
+            "workspace_issues__comment",
+            "Add a comment to a workspace issue by its GitHub issue number.",
+            {
+                "type": "object",
+                "properties": {
+                    "number": {"type": "integer", "description": "GitHub issue number."},
+                    "body": {"type": "string"},
+                },
+                "required": ["number", "body"],
+            },
+            _tool_workspace_issues_comment,
+        ),
+        _make_tool(
+            "workspace_issues__close",
+            (
+                "Close (or reopen) a workspace issue by its GitHub issue number. "
+                "Pass state='open' to reopen; defaults to closing."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "number": {"type": "integer", "description": "GitHub issue number."},
+                    "state": {"type": "string", "enum": ["open", "closed"], "default": "closed"},
+                },
+                "required": ["number"],
+            },
+            _tool_workspace_issues_close,
+        ),
     ]
     blocked: set[str] = set()
     if not settings.get("connections_read"):
@@ -1448,6 +1519,10 @@ from services.chat_tool_impls import (  # noqa: E402,F401
     _tool_contexts_list,
     _tool_contexts_read,
     _tool_contexts_write,
+    _tool_workspace_issues_list,
+    _tool_workspace_issues_create,
+    _tool_workspace_issues_comment,
+    _tool_workspace_issues_close,
 )
 
 

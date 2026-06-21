@@ -5399,6 +5399,9 @@ from routers.system_git import (
 )
 app.include_router(system_git_router)
 
+from routers.workspace_issues import workspace_issues_router
+app.include_router(workspace_issues_router)
+
 from routers.system import (
     system_router,
     WorkspaceAgentSettingsUpdate,
