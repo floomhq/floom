@@ -91,6 +91,39 @@ def test_available_count_uses_injected(run_service):
     assert run_service._semaphore_available_count() == 3
 
 
+class _MinimalLimiter:
+    """Contract-minimal limiter: only acquire/release, no optional
+    available_count() (the seam documents available_count as optional)."""
+
+    def acquire(self, blocking: bool = False) -> bool:
+        return True
+
+    def release(self) -> None:
+        pass
+
+
+class _RaisingCountLimiter(_MinimalLimiter):
+    """Limiter whose optional available_count() raises (best-effort path)."""
+
+    def available_count(self) -> int:
+        raise RuntimeError("backend unavailable")
+
+
+def test_available_count_unknown_without_optional_method(run_service):
+    # A limiter honoring only the required acquire/release contract has no
+    # countable free-slot source, so the helper reports -1 (unknown) instead
+    # of reaching into the injected object's internals.
+    run_service.register_run_limiter("runs", _MinimalLimiter())
+    assert run_service._semaphore_available_count() == -1
+
+
+def test_available_count_unknown_when_optional_method_raises(run_service):
+    # available_count() is best-effort: a raising backend must not propagate;
+    # the helper degrades to -1 (unknown).
+    run_service.register_run_limiter("runs", _RaisingCountLimiter())
+    assert run_service._semaphore_available_count() == -1
+
+
 def test_clear_reverts_to_semaphore(run_service):
     run_service.register_run_limiter("runs", _FakeLimiter(1))
     assert isinstance(run_service._get_semaphore(), _FakeLimiter)
