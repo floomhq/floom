@@ -240,9 +240,8 @@ def build_tool_event_metadata(
     from chat_service import (
         CHAT_EVENT_PROTOCOL_VERSION,
         CHAT_EVENT_VERSION,
-        _APPROVALS_BASE_URL,
     )
-    from core.approval_signing import try_approval_public_token
+    from core.approval_signing import try_approval_review_url
     args_preview = build_args_preview(tool_name, args)
     status = "starting" if phase == "call" else "completed"
     if phase == "result" and isinstance(result, dict) and not result.get("ok", True):
@@ -267,30 +266,27 @@ def build_tool_event_metadata(
         if approvals:
             first = approvals[0]
             if isinstance(first, dict):
-                base = _APPROVALS_BASE_URL.rstrip("/")
                 for approval in approvals:
                     if not isinstance(approval, dict):
                         continue
                     approval_id = str(approval.get("id") or "").strip()
-                    run_id = str(approval.get("run_id") or "").strip()
-                    owner_id = str(approval.get("owner_id") or "").strip()
-                    if not approval_id or not run_id or not owner_id:
+                    if not approval_id:
                         continue
                     # DEGRADE, never 503: omit the "Open review" deep-link action
                     # when no signer secret is configured (e.g. hosted mode) instead
                     # of crashing the card render. The card still shows the pending
                     # approval; only the optional signed deep link is dropped.
-                    token = try_approval_public_token(
-                        {"id": approval_id, "run_id": run_id, "owner_id": owner_id}
-                    )
-                    if not token:
+                    # Shared helper is the single source of truth for the host +
+                    # token shape (id/run_id/owner_id validated inside).
+                    href = try_approval_review_url(approval)
+                    if not href:
                         continue
                     approval_actions.append(
                         {
                             "id": f"open_review_{approval_id}",
                             "label": "Open review",
                             "method": "GET",
-                            "href": f"{base}/approvals/review?id={approval_id}&token={token}",
+                            "href": href,
                         }
                     )
                 resource = {
