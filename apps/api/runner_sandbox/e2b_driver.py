@@ -588,7 +588,56 @@ def _default_template_resources(kind: str) -> tuple[int, int]:
     return memory_mb, cpu_count
 
 
+class TemplateProfileError(RuntimeError):
+    """A worker requested a template profile that the operator has not configured."""
+
+
+def _template_profile(config: WorkerConfig | None) -> str | None:
+    profile = getattr(config, "template_profile", None)
+    if not profile:
+        return None
+    text = str(profile).strip()
+    return text or None
+
+
+def _profile_template_env_key(profile: str) -> str:
+    # #1764: map a logical profile (e.g. "workeros-dev") to its operator env key
+    # (WORKEROS_E2B_TEMPLATE_PROFILE_WORKEROS_DEV). The profile name is
+    # author-supplied; sanitize to a safe env-key suffix.
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", profile).strip("_").upper()
+    return f"WORKEROS_E2B_TEMPLATE_PROFILE_{slug}"
+
+
+def _resolve_template_profile(profile: str) -> str | None:
+    """Resolve an operator-approved profile to a template id.
+
+    Returns the configured template id, or ``None`` when the profile is
+    unconfigured and the fallback policy permits falling through to the existing
+    runtime-kind/resource-bucket resolution. Raises ``TemplateProfileError`` under
+    the default (strict) policy so unknown profiles fail clearly instead of
+    silently running on the wrong toolchain.
+    """
+    env_key = _profile_template_env_key(profile)
+    value = (os.environ.get(env_key) or "").strip()
+    if value:
+        return value
+    policy = (os.environ.get("WORKEROS_E2B_TEMPLATE_PROFILE_FALLBACK") or "strict").strip().lower()
+    if policy == "default":
+        return None
+    raise TemplateProfileError(
+        f"Worker requested E2B template profile {profile!r}, but the operator has not "
+        f"configured it (set {env_key} to a template id, or set "
+        "WORKEROS_E2B_TEMPLATE_PROFILE_FALLBACK=default to fall back to the default template)."
+    )
+
+
 def _e2b_template_for_config(config: WorkerConfig | None) -> str | None:
+    profile = _template_profile(config)
+    if profile:
+        resolved = _resolve_template_profile(profile)
+        if resolved:
+            return resolved
+        # policy=default: profile unconfigured, fall through to legacy resolution.
     kind = _runtime_kind(config)
     memory_mb, cpu_count = _worker_resources(config)
     for resource_env in _resource_template_env_keys(kind, memory_mb, cpu_count):
@@ -664,6 +713,18 @@ def _e2b_template_for_run(
         )
 
     template = _e2b_template_for_config(config)
+    profile = _template_profile(config)
+    if profile:
+        # #1764: surface that a custom profile drove selection without leaking the
+        # raw template id (an internal infra identifier, see #1700).
+        if (os.environ.get(_profile_template_env_key(profile)) or "").strip():
+            log_fn(f"[e2b] Using operator-approved template profile {profile!r}", "info")
+        else:
+            log_fn(
+                f"[e2b] Template profile {profile!r} is not configured; falling back to the "
+                "default template per WORKEROS_E2B_TEMPLATE_PROFILE_FALLBACK=default policy",
+                "warning",
+            )
     kind = _runtime_kind(config)
     memory_mb, cpu_count = _worker_resources(config)
     resource_envs = _resource_template_env_keys(kind, memory_mb, cpu_count)
