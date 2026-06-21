@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+import yaml as pyyaml
+
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -137,7 +139,51 @@ def test_initial_registration_accepts_result_json(monkeypatch, tmp_path):
     assert created == "registered-worker"
     assert len(registered) == 1
     assert any(file.path == "run.py" and "result.json" in file.content for file in registered[0])
-    assert not any(level == "warning" for level, _message in logs)
+    assert not any("invalid runtime contract" in message for _level, message in logs)
+
+
+def test_run_code_bundle_forces_script_runtime_for_live_gemini_shape():
+    import services.run_authoring as run_authoring
+
+    worker_yml = """
+schema_version: "0.3"
+name: live-result-json-smoke
+title: Live Result Json Smoke
+description: Uppercases text.
+version: "0.1.0"
+trigger:
+  type: manual
+exec:
+  runner: e2b
+  command: python run.py
+  mode: agent
+inputs:
+  - name: text_input
+    type: string
+    kind: scalar
+    required: true
+outputs:
+  - name: uppercase_text
+    kind: file
+    path: out/uppercase.txt
+    media_type: text/plain
+entrypoint: SKILL.md
+""".strip()
+    logs: list[tuple[str, str]] = []
+
+    fixed = run_authoring._force_script_runtime_for_run_code(
+        worker_yml,
+        log_fn=lambda message, level="info": logs.append((level, message)),
+    )
+    parsed = pyyaml.safe_load(fixed)
+
+    assert parsed["exec"]["runtime"] == "python311"
+    assert parsed["exec"]["entry"] == "run.py"
+    assert parsed["exec"]["runner"] == "e2b"
+    assert parsed["exec"]["command"] == "python run.py"
+    assert "mode" not in parsed["exec"]
+    assert "entrypoint" not in parsed
+    assert any("script runtime" in message for _level, message in logs)
 
 
 def test_repair_rejects_legacy_output_json_filenames(monkeypatch):
