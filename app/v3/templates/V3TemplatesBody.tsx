@@ -19,7 +19,6 @@ import {
 import { V3Composer } from "../V3Composer";
 import { V3TemplateCard } from "../V3TemplateCard";
 import { V3WorkspaceCard } from "../V3WorkspaceCard";
-import { V3FeaturedWorker } from "../V3FeaturedWorker";
 import { Hl, V3Shell } from "../V3Shell";
 import Link from "next/link";
 import "../theme.css";
@@ -79,9 +78,6 @@ export function V3TemplatesBody() {
           and asks before anything ships.
         </motion.p>
       </div>
-
-      {/* featured worker spotlight — sells the output, not the label */}
-      <V3FeaturedWorker />
 
       {/* Workers / Workspaces toggle */}
       <motion.div
