@@ -480,6 +480,14 @@ def _register_authored_worker(
     if isinstance(skill_md, str) and skill_md.strip():
         files.append(_main.DraftFile(path="SKILL.md", content=skill_md))
     if isinstance(run_code, str) and run_code.strip():
+        contract_error = _generated_run_py_contract_error(run_code)
+        if contract_error:
+            log_fn(
+                "worker-author bundle run.py has invalid runtime contract: "
+                f"{contract_error}; not auto-registering. The drafted bundle stays viewable.",
+                level="warning",
+            )
+            return None
         files.append(_main.DraftFile(path="run.py", content=run_code))
     if isinstance(requirements_txt, str) and requirements_txt.strip():
         files.append(_main.DraftFile(path="requirements.txt", content=requirements_txt))

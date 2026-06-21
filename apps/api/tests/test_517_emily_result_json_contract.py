@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import sys
 import types
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +23,121 @@ def _stub_codegen(monkeypatch, content: str) -> None:
     )
     monkeypatch.setitem(sys.modules, "llm", llm_mod)
     monkeypatch.setitem(sys.modules, "codegen_model", codegen_mod)
+
+
+@dataclass
+class _DraftFile:
+    path: str
+    content: str
+
+
+def _register_generated_run_py(monkeypatch, tmp_path, run_code: str):
+    import services.run_authoring as run_authoring
+
+    worker_yml = """
+schema_version: "0.3"
+name: result-json-contract-smoke
+title: Result JSON Contract Smoke
+description: Verifies generated run.py writes result.json.
+version: "0.1.0"
+trigger:
+  type: manual
+exec:
+  runtime: python311
+  entry: run.py
+  runner: e2b
+  inputs: []
+  outputs: []
+""".strip()
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "worker_yml": worker_yml,
+                "run_code": run_code,
+                "requirements_txt": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    registered: list[list[_DraftFile]] = []
+    main_mod = types.ModuleType("main")
+    main_mod.DraftFile = _DraftFile
+
+    def _register_worker_from_files(files, **_kwargs):
+        registered.append(files)
+        return "registered-worker"
+
+    main_mod._register_worker_from_files = _register_worker_from_files
+    monkeypatch.setitem(sys.modules, "main", main_mod)
+    monkeypatch.setattr(run_authoring, "_find_bundle_artifact", lambda *_args: bundle_path)
+    monkeypatch.setattr(run_authoring, "_normalize_authored_worker_yml", lambda worker_yml, _log_fn: worker_yml)
+    monkeypatch.setattr(
+        run_authoring,
+        "_backfill_example_input",
+        lambda worker_yml, _sample_input, _log_fn: worker_yml,
+    )
+
+    logs: list[tuple[str, str]] = []
+    created = run_authoring._register_authored_worker(
+        run_id="run_result_contract",
+        outputs={},
+        artifacts=[],
+        user_id="user_1",
+        repos=SimpleNamespace(),
+        log_fn=lambda message, level="info": logs.append((level, message)),
+    )
+    return created, registered, logs
+
+
+def test_initial_registration_rejects_outputs_json(monkeypatch, tmp_path):
+    created, registered, logs = _register_generated_run_py(
+        monkeypatch,
+        tmp_path,
+        'from pathlib import Path\nPath("outputs.json").write_text("{}")\n',
+    )
+
+    assert created is None
+    assert registered == []
+    assert any("legacy outputs.json" in message for _level, message in logs)
+
+
+def test_initial_registration_rejects_output_json(monkeypatch, tmp_path):
+    created, registered, logs = _register_generated_run_py(
+        monkeypatch,
+        tmp_path,
+        'from pathlib import Path\nPath("output.json").write_text("{}")\n',
+    )
+
+    assert created is None
+    assert registered == []
+    assert any("legacy output.json" in message for _level, message in logs)
+
+
+def test_initial_registration_rejects_missing_result_json(monkeypatch, tmp_path):
+    created, registered, logs = _register_generated_run_py(
+        monkeypatch,
+        tmp_path,
+        'print({"status": "success", "outputs": {"result": "HI"}})\n',
+    )
+
+    assert created is None
+    assert registered == []
+    assert any("does not write result.json" in message for _level, message in logs)
+
+
+def test_initial_registration_accepts_result_json(monkeypatch, tmp_path):
+    created, registered, logs = _register_generated_run_py(
+        monkeypatch,
+        tmp_path,
+        'from pathlib import Path\nPath("result.json").write_text("{}")\n',
+    )
+
+    assert created == "registered-worker"
+    assert len(registered) == 1
+    assert any(file.path == "run.py" and "result.json" in file.content for file in registered[0])
+    assert not any(level == "warning" for level, _message in logs)
 
 
 def test_repair_rejects_legacy_output_json_filenames(monkeypatch):
