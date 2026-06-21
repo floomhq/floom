@@ -507,22 +507,33 @@ def iter_issue_export_files() -> List[Tuple[str, bytes]]:
     return files
 
 
-def _valid_issue_md_bytes(data: bytes) -> bool:
+def _valid_issue_md_bytes(data: bytes, expected_issue_id: str) -> bool:
     """True if imported ``.md`` bytes are safe to write and later read back.
 
     The listing/get endpoints read every issue file with
     ``read_text(encoding="utf-8")`` and parse the YAML frontmatter, so a member
-    with invalid UTF-8 or unparseable frontmatter would break ``GET
-    /workspace/issues`` until removed by hand. Reject such members at import time
-    (mirrors the worker import path skipping malformed assets).
+    with invalid UTF-8, unparseable frontmatter, or malformed frontmatter fields
+    would break or corrupt ``GET /workspace/issues`` until removed by hand.
+    Reject such members at import time (mirrors the worker import path skipping
+    malformed assets).
     """
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return False
     try:
-        _split_frontmatter(text)
+        meta, _body = _split_frontmatter(text)
     except Exception:
+        return False
+    if str(meta.get("id") or "").strip() != expected_issue_id:
+        return False
+    if str(meta.get("status") or "").strip() not in ISSUE_STATUSES:
+        return False
+    if not str(meta.get("title") or "").strip():
+        return False
+    try:
+        _validate_asset_binding(meta.get("asset_type"), meta.get("asset_id"))
+    except IssueError:
         return False
     return True
 
@@ -594,7 +605,7 @@ def restore_issue_files(
             if md_path.exists():
                 # Never clobber an issue that already lives in this workspace.
                 continue
-            if not _valid_issue_md_bytes(parts["md"]):
+            if not _valid_issue_md_bytes(parts["md"], issue_id):
                 # Malformed body would break the read path on the next list/get.
                 continue
             md_path.write_bytes(parts["md"])
