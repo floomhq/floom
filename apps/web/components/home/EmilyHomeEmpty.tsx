@@ -26,7 +26,8 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
-import { EmilyRadarMark } from "./EmilyRadarMark";
+import { BrandLogo } from "@/components/connections/BrandLogo";
+import { tokenisePrompt } from "@/lib/prompt-detect";
 import { resolveWorkersGate } from "./emily-home-empty";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
@@ -100,6 +101,36 @@ function attentionToFix(item: SystemOverviewAttentionItem, idx: number): FixItem
 }
 
 // ── pills ─────────────────────────────────────────────────────────────────────
+
+// Inline tool tokens (Federico 2026-06-21): render an example prompt with its
+// tool names highlighted INLINE, each with its real brand icon — the same
+// register as the marketing landing prompt box (PromptText/tokenisePrompt), NOT
+// a separate "Uses [pill] [pill]" row. Matched tool terms get a faint --bg-3
+// token + the BrandLogo sprite; plain text renders as-is. The button's
+// accessible name stays the full prompt string so seeding + a11y are unchanged.
+function PromptTokens({ text }: { text: string }) {
+  const segments = tokenisePrompt(text);
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.kind === "plain") {
+          return <span key={i}>{seg.text}</span>;
+        }
+        return (
+          <span
+            key={i}
+            className="inline-flex items-baseline gap-[3px] rounded-[var(--radius-ui)] bg-[var(--bg-3)] px-[5px] py-px mx-px align-baseline text-ink"
+          >
+            {seg.brand && (
+              <BrandLogo icon={seg.brand} className="size-[13px] shrink-0 translate-y-[1px]" />
+            )}
+            <span>{seg.text}</span>
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 function Pill({
   children,
@@ -213,9 +244,6 @@ export function EmilyHomeEmpty({
       {/* greeting / hero */}
       {isFirstWorker ? (
         <div className="flex flex-col items-center pb-[22px]">
-          <div className="mb-4">
-            <EmilyRadarMark size={46} variant="ink" />
-          </div>
           <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
             Let&apos;s hire your first worker
           </div>
@@ -262,7 +290,7 @@ export function EmilyHomeEmpty({
           <div className="flex flex-wrap justify-center gap-2">
             {CREATE_PILLS.map((p) => (
               <Pill key={p} onClick={() => onSeed(p)}>
-                {p}
+                <PromptTokens text={p} />
               </Pill>
             ))}
             <Pill accent onClick={onPickMcp}>

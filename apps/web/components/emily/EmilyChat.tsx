@@ -766,9 +766,11 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 onPickMcp={() => mcpModal.open()}
               />
               <div className="mt-6 w-full max-w-2xl px-6">
-                {/* Create mode uses the landing-style composer with a "Hire"
-                    send affordance. Normal home Emily keeps the default send
-                    control because it handles general assistant questions too. */}
+                {/* Hero composer (Federico 2026-06-21): the home/create empty
+                    state is the primary call-to-action, so it uses the FLAT,
+                    BORDERLESS landing-style composer (no "Uses" chip row) at the
+                    LARGER hero size. Tool names are highlighted INLINE inside the
+                    example pills above (PromptTokens), matching the landing box. */}
                 <PromptInput
                   value={input}
                   onChange={setInput}
@@ -777,7 +779,8 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   attachedFiles={attachedFiles}
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
-                  variant={createMode ? "landing" : "default"}
+                  variant="landing"
+                  large
                   // #1698: "New worker" / ?create=1 must give visible feedback
                   // from ANY route. Focus the composer when entering create mode
                   // so the click lands a caret here instead of a dead no-op.
