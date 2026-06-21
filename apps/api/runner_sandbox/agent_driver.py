@@ -485,6 +485,18 @@ class AgentDriver(SandboxDriver):
         last_result: Any = None
         mcp_servers: list[Any] = []
 
+        # PostHog LLM Observability (Track A): one trace per run, captured
+        # host-side (this loop runs in the API process; provider creds never
+        # enter the sandbox). No-op when POSTHOG_API_KEY is unset.
+        ai_ctx = self._build_ai_trace_context(
+            run_id=run_id,
+            worker_id=worker_id,
+            trace_id=trace_id,
+            user_id=user_id,
+            config=config,
+        )
+        ai_outcome = {"succeeded": False}
+
         try:
             mcp_servers = await self._connect_mcp_servers(config, secrets, log_fn)
             while True:
@@ -557,6 +569,7 @@ class AgentDriver(SandboxDriver):
                         transcript=transcript,
                         total_tokens=total_tokens,
                         max_total_tokens=limits.max_total_tokens,
+                        ai_ctx=ai_ctx,
                     )
                 except Exception as exc:
                     if exc.__class__.__name__ == "MaxTurnsExceeded":
@@ -603,8 +616,32 @@ class AgentDriver(SandboxDriver):
 
             if last_result is not None:
                 transcript.append({"type": "final_output", "content": str(getattr(last_result, "final_output", ""))})
-            if total_tokens > 0:
-                transcript.append({"type": "usage", "total_tokens": total_tokens})
+            if total_tokens > 0 or (ai_ctx is not None and ai_ctx.total_tokens > 0):
+                # Enrich the usage row with the trace-derived input/output split
+                # + summed per-generation cost (Track A §A2). cost.py prefers
+                # these real numbers over the single blended rate, so persisted
+                # total_tokens/total_cost_usd stop being null/estimated.
+                usage_row: Dict[str, Any] = {"type": "usage", "total_tokens": total_tokens}
+                if ai_ctx is not None:
+                    summary = ai_ctx.summary()
+                    if summary.get("total_tokens"):
+                        usage_row["total_tokens"] = summary["total_tokens"]
+                    if summary.get("total_input_tokens") is not None:
+                        usage_row["input_tokens"] = summary["total_input_tokens"]
+                    if summary.get("total_output_tokens") is not None:
+                        usage_row["output_tokens"] = summary["total_output_tokens"]
+                    if summary.get("total_cost_usd") is not None:
+                        usage_row["total_cost_usd"] = summary["total_cost_usd"]
+                    if summary.get("generation_count"):
+                        usage_row["generation_count"] = summary["generation_count"]
+                    # Cost provenance (§A2): never let a partial sum masquerade as
+                    # a complete cost. When any generation was unpriced, flag it.
+                    usage_row["cost_source"] = summary.get("cost_source")
+                    usage_row["pricing_version"] = summary.get("pricing_version")
+                    usage_row["cost_is_partial"] = summary.get("cost_is_partial")
+                    if summary.get("unpriced_generation_count"):
+                        usage_row["unpriced_generation_count"] = summary["unpriced_generation_count"]
+                transcript.append(usage_row)
             self._persist_transcript(output_dir, transcript, artifacts)
             missing_outputs = self._missing_required_outputs(config, outputs)
             if missing_outputs:
@@ -622,7 +659,13 @@ class AgentDriver(SandboxDriver):
                 user_id=user_id,
                 log_fn=log_fn,
             )
-            return WorkerResult(status="success", outputs=outputs, artifacts=artifacts)
+            ai_outcome["succeeded"] = True
+            return WorkerResult(
+                status="success",
+                outputs=outputs,
+                artifacts=artifacts,
+                ai_summary=(ai_ctx.summary() if ai_ctx is not None else None),
+            )
         except _MCPConnectionError as exc:
             log_fn(str(exc), level="error")
             return WorkerResult(
@@ -631,6 +674,10 @@ class AgentDriver(SandboxDriver):
                 error_code="mcp_connect_failed",
             )
         finally:
+            # Finish the AI trace exactly once, on every exit path (success,
+            # error, timeout, cancel, cap). Local outcome flag -> concurrency safe
+            # (AgentDriver instances may be reused across runs). Never raises.
+            self._finish_ai_trace(ai_ctx, succeeded=ai_outcome["succeeded"])
             await self._cleanup_mcp_servers(mcp_servers, log_fn)
             # Close the per-run OpenAI + httpx client while THIS run's loop is
             # still alive, so the connection pool is released cleanly (no leaks,
@@ -654,6 +701,7 @@ class AgentDriver(SandboxDriver):
         transcript: list[Dict[str, Any]],
         total_tokens: int,
         max_total_tokens: int,
+        ai_ctx: Any = None,
     ) -> Dict[str, Any]:
         emitted_text_delta = False
         cancelled = False
@@ -671,6 +719,10 @@ class AgentDriver(SandboxDriver):
             usage_tokens = self._usage_tokens_from_raw_event(event)
             if usage_tokens:
                 total_tokens += usage_tokens
+                # PostHog LLM-obs: a usage-bearing raw_response_event is the
+                # completion of one model call -> emit a $ai_generation at call
+                # time (host-side), with the model + input/output split + cost.
+                self._emit_ai_generation(ai_ctx, event)
                 if total_tokens > max_total_tokens:
                     try:
                         result.cancel()
@@ -683,6 +735,8 @@ class AgentDriver(SandboxDriver):
             emitted_text_delta = emitted_text_delta or emitted_delta
             if part is None:
                 continue
+            # PostHog LLM-obs: tool-call / tool-result parts are $ai_span events.
+            self._emit_ai_span(ai_ctx, part)
             transcript.append(part)
             self._emit_part(run_id, part)
 
@@ -2061,6 +2115,136 @@ class AgentDriver(SandboxDriver):
         if isinstance(usage, dict):
             return int(usage.get("total_tokens") or 0)
         return int(getattr(usage, "total_tokens", 0) or 0)
+
+    # --- PostHog LLM Observability (Track A) -------------------------------
+    # All AI-obs hooks are fail-soft no-ops when ai_ctx is None (analytics
+    # disabled). They run host-side in this API process; the capture key never
+    # enters the e2b sandbox.
+
+    def _build_ai_trace_context(
+        self,
+        *,
+        run_id: str,
+        worker_id: str,
+        trace_id: str,
+        user_id: str | None,
+        config: Optional[WorkerConfig],
+    ) -> Any:
+        """Construct the per-run AI trace context, or None when disabled."""
+        try:
+            from services import ai_observability as ai_obs
+            from db import derive_workspace_id
+        except Exception:
+            return None
+        if not ai_obs.is_enabled():
+            return None
+        try:
+            owner_id = str(user_id or "")
+            workspace_id = derive_workspace_id(owner_id)
+            capture_mode = self._resolve_ai_capture_mode(owner_id, config)
+            runner = "e2b"
+            if config and config.runtime:
+                runner = config.runtime.runner or "e2b"
+            return ai_obs.AITraceContext(
+                trace_id=str(trace_id or run_id),
+                run_id=run_id,
+                worker_id=worker_id or "",
+                workspace_id=workspace_id or "",
+                owner_id=owner_id,
+                capture_mode=capture_mode,
+                runner=runner,
+            )
+        except Exception:
+            logger.debug("AI trace context build failed for run %s", run_id, exc_info=True)
+            return None
+
+    def _resolve_ai_capture_mode(self, owner_id: str, config: Optional[WorkerConfig]) -> str:
+        """Per-workspace AI-payload capture mode (§A3). Default METADATA-only.
+
+        Raw prompts/completions/tool I/O are MORE sensitive than DOM-replay PII
+        (emails, Slack, secrets pasted into context), so bodies are NEVER
+        captured unless a workspace explicitly opts in. Resolution order:
+        env override (debug) -> workspace setting -> metadata default.
+        """
+        from services import ai_observability as ai_obs
+
+        env_mode = os.environ.get("WORKEROS_AI_CAPTURE_MODE")
+        if env_mode:
+            return ai_obs.normalize_capture_mode(env_mode)
+        # Workspace setting, read from the active owner context scope (set by
+        # the run's use_context_scope). Default metadata-only when unset.
+        ws_mode = _ws_setting("ai_capture_mode")
+        if ws_mode:
+            return ai_obs.normalize_capture_mode(str(ws_mode))
+        return ai_obs.CAPTURE_METADATA
+
+    def _finish_ai_trace(self, ai_ctx: Any, *, succeeded: bool) -> None:
+        if ai_ctx is None:
+            return
+        try:
+            ai_ctx.finish(
+                status="completed" if succeeded else "failed",
+                is_error=not succeeded,
+            )
+        except Exception:
+            logger.debug("AI trace finish failed", exc_info=True)
+
+    def _emit_ai_generation(self, ai_ctx: Any, event: Any) -> None:
+        """Emit a $ai_generation from a usage-bearing raw_response_event."""
+        if ai_ctx is None:
+            return
+        try:
+            data = getattr(event, "data", None)
+            response = getattr(data, "response", None)
+            usage = getattr(response, "usage", None)
+            if usage is None:
+                return
+            model = str(getattr(response, "model", "") or "")
+            input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+            output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+            total = int(getattr(usage, "total_tokens", 0) or 0) or None
+            cached = 0
+            details = getattr(usage, "input_tokens_details", None)
+            if details is not None:
+                cached = int(getattr(details, "cached_tokens", 0) or 0)
+            ai_ctx.capture_generation(
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total,
+                cached_input_tokens=cached,
+            )
+        except Exception:
+            logger.debug("AI generation emit failed", exc_info=True)
+
+    def _emit_ai_span(self, ai_ctx: Any, part: Dict[str, Any]) -> None:
+        """Emit a $ai_span for a tool-call / tool-result transcript part.
+
+        Metadata only (tool name + error flag); tool args/results are bodies and
+        are gated by capture mode inside the context, so nothing leaks by default.
+        """
+        if ai_ctx is None or not isinstance(part, dict):
+            return
+        try:
+            ptype = part.get("type")
+            if ptype == "tool-call":
+                ai_ctx.capture_span(
+                    name=str(part.get("toolName") or "tool"),
+                    span_type="tool",
+                    is_error=False,
+                    span_id=str(part.get("callId") or "") or None,
+                    input_body=part.get("args_preview"),
+                )
+            elif ptype == "tool-result":
+                ai_ctx.capture_span(
+                    name="tool_result",
+                    span_type="tool_result",
+                    is_error=bool(part.get("isError")),
+                    span_id=str(part.get("callId") or "") or None,
+                    output_body=part.get("result_preview"),
+                )
+        except Exception:
+            logger.debug("AI span emit failed", exc_info=True)
 
     def _emit_part(self, run_id: str, part: Dict[str, Any]) -> None:
         try:
