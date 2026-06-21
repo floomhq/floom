@@ -82,7 +82,13 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         <BootSplash />
         <IconSprite />
         <Ambient />
-        <main className="relative z-10 min-h-screen w-full">{children}</main>
+        {/* The <body> is `h-screen overflow-hidden`, so a standalone page needs
+            its OWN scroll container or any content taller than the viewport is
+            clipped and unreachable. `min-h-screen` alone grew the page past the
+            fold with nothing able to scroll to it (#1717: the /approvals/review
+            multi-item proposed output was clipped). `h-full overflow-y-auto`
+            makes this pane the scroller, matching standard app pages. */}
+        <main className="relative z-10 h-full w-full overflow-y-auto">{children}</main>
         <Toaster position="bottom-right" closeButton />
       </>
     );
