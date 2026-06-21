@@ -64,7 +64,8 @@ export function isInfraLogLine(message: string): boolean {
   //   - square-bracket  [redacted-id]            (public_view log redactor)
   //   - angle-bracket   <REDACTED:SECRET_NAME>   (#1703, scrub_secrets)
   if (/\[redacted-[a-z-]+\]/i.test(m)) return true;
-  if (/<REDACTED(?::[A-Z0-9_]+)?>/.test(m)) return true;
+  // Secret names allow mixed/lower case ([A-Za-z_]); match them all (#1752).
+  if (/<REDACTED(?::[A-Za-z0-9_]+)?>/.test(m)) return true;
   // Low-level lifecycle noise that duplicates the timeline / metrics strip
   if (/^(Validating inputs|Loading secrets)$/i.test(m)) return true;
   return false;

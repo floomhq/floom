@@ -879,7 +879,9 @@ function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
         </div>
         {approval.preview && (
           <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded [border:var(--bd-card)] bg-muted/30 px-3 py-2">
-            {approval.preview}
+            {/* approval.preview is not stripped server-side; sanitize internal
+                <REDACTED:...> / citation markers at render (#1752). */}
+            {sanitizeOutputText(approval.preview)}
           </pre>
         )}
         <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">

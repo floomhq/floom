@@ -52,6 +52,12 @@ describe("isInfraLogLine angle-bracket redaction (#1703 / #1700)", () => {
     expect(isInfraLogLine("value <REDACTED>")).toBe(true);
   });
 
+  it("filters mixed/lower-case secret-name markers (#1752)", () => {
+    expect(isInfraLogLine("token <REDACTED:apifyToken> active")).toBe(true);
+    expect(isInfraLogLine("key <REDACTED:my_key> set")).toBe(true);
+    expect(isInfraLogLine("name <REDACTED:Mixed_Case> used")).toBe(true);
+  });
+
   it("still filters [e2b] infra lines", () => {
     expect(isInfraLogLine("[e2b] Sandbox resources: memory=2048MB ...")).toBe(true);
   });

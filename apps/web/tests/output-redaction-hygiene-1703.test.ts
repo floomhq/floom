@@ -43,6 +43,20 @@ describe("stripInternalPlaceholders (#1703)", () => {
     expect(stripInternalPlaceholders(once)).toBe(once);
   });
 
+  // #1752 — secret names allow mixed/lower case (manifest/MCP secrets permit
+  // [A-Za-z_]); the marker name char-class must strip them all, not just UPPER.
+  it("strips mixed/lower-case secret-name markers (#1752)", () => {
+    expect(stripInternalPlaceholders("<REDACTED:apifyToken> Engineer")).toBe("Engineer");
+    expect(stripInternalPlaceholders("<REDACTED:my_key> Engineer")).toBe("Engineer");
+    expect(stripInternalPlaceholders("<REDACTED:Mixed_Case> Engineer")).toBe("Engineer");
+  });
+
+  it("strips lower/mixed-case markers via the combined sanitizer (#1752)", () => {
+    expect(sanitizeOutputText("<REDACTED:apifyToken> Full Stack")).toBe("Full Stack");
+    expect(sanitizeOutputText("<REDACTED:my_key> Full Stack")).toBe("Full Stack");
+    expect(sanitizeOutputText("<REDACTED:Mixed_Case> Full Stack")).toBe("Full Stack");
+  });
+
   it("leaves legitimate angle-bracket text alone", () => {
     expect(stripInternalPlaceholders("if a < b and b > c")).toBe("if a < b and b > c");
     // Not all-caps / not the REDACTED keyword -> untouched.

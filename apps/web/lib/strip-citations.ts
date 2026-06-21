@@ -56,7 +56,10 @@ export function stripCitationTokens(input: string): string {
 // cleanly without weakening the backend redaction. The token is replaced with
 // nothing; surrounding whitespace/punctuation left behind is then tidied.
 // ---------------------------------------------------------------------------
-const INTERNAL_PLACEHOLDER = /<REDACTED(?::[A-Z0-9_]+)?>/g;
+// Secret names allow mixed/lower case (manifest/MCP secrets permit [A-Za-z_]),
+// so the marker name char-class must too — an uppercase-only class let
+// `<REDACTED:apifyToken>` / `<REDACTED:my_key>` leak through (#1752).
+const INTERNAL_PLACEHOLDER = /<REDACTED(?::[A-Za-z0-9_]+)?>/g;
 
 /**
  * Remove internal `<REDACTED:NAME>` / `<REDACTED>` secret-scrubber markers from

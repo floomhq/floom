@@ -169,7 +169,7 @@ function ObjectTable({ rows }: { rows: Array<Record<string, unknown>> }) {
           <TableRow>
             {columns.map((col) => (
               <TableHead key={col} className="text-xs font-medium whitespace-nowrap">
-                {humanizeColumn(col)}
+                {humanizeColumn(sanitizeOutputText(col))}
               </TableHead>
             ))}
           </TableRow>
@@ -197,7 +197,7 @@ function KeyValueList({ obj }: { obj: Record<string, unknown> }) {
     <dl className="grid gap-x-4 gap-y-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 text-sm sm:grid-cols-[minmax(0,180px)_1fr]">
       {entries.map(([key, value]) => (
         <div key={key} className="contents">
-          <dt className="text-xs font-medium text-muted-foreground sm:py-0.5">{humanizeColumn(key)}</dt>
+          <dt className="text-xs font-medium text-muted-foreground sm:py-0.5">{humanizeColumn(sanitizeOutputText(key))}</dt>
           <dd className="min-w-0 sm:py-0.5">
             {isScalar(value) || value == null ? (
               <CellValue value={value} />

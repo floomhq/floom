@@ -12,6 +12,7 @@ import { FloomMark } from "@/components/share/ShareCardShell";
 import { approvalActionLine } from "@/components/share/ApprovalActionItems";
 import { ApprovalReviewBody } from "@/components/share/ApprovalReviewBody";
 import type { ApprovalRow, Artifact } from "@/lib/types";
+import { sanitizeOutputText } from "@/lib/strip-citations";
 import { AnnotationsViewer } from "./annotations";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
@@ -414,12 +415,18 @@ function TextArtifactPreview({
     );
   }
 
+  // This is the SHARED review surface (a recipient may have no account) and the
+  // preview text comes from decision_input_json / a fetched artifact, neither of
+  // which the backend strips of internal <REDACTED:...> / citation markers. The
+  // client is the only defense, so sanitize before any render branch (#1752).
+  const clean = sanitizeOutputText(text);
+
   if (kind === "html") {
     return (
       <div className="max-h-[52vh] overflow-auto bg-white">
         <iframe
-          title={file.title}
-          srcDoc={text}
+          title={sanitizeOutputText(file.title)}
+          srcDoc={clean}
           sandbox=""
           referrerPolicy="no-referrer"
           className="h-[52vh] min-h-[420px] w-full [border:0] bg-white"
@@ -430,13 +437,13 @@ function TextArtifactPreview({
 
   if (kind === "table") {
     const delimiter = file.title.toLowerCase().endsWith(".tsv") || (file.detail || "").toLowerCase().endsWith(".tsv") ? "\t" : undefined;
-    const rows = Papa.parse<string[]>(text, { delimiter, skipEmptyLines: true }).data;
+    const rows = Papa.parse<string[]>(clean, { delimiter, skipEmptyLines: true }).data;
     return <TablePreview rows={rows} />;
   }
 
   return (
     <pre className="max-h-[52vh] overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-[var(--ink)]">
-      {text}
+      {clean}
     </pre>
   );
 }
@@ -657,7 +664,7 @@ function ApprovalFilePreview({
           <span className="flex min-w-0 items-center gap-2">
             {fileKindIcon(kind)}
             <span className="min-w-0">
-              <span className="block truncate text-sm font-medium text-[var(--ink)]">{file.title}</span>
+              <span className="block truncate text-sm font-medium text-[var(--ink)]">{sanitizeOutputText(file.title)}</span>
               <span className="block truncate text-xs text-[var(--ink-soft)]">{[file.detail, meta].filter(Boolean).join(" · ")}</span>
             </span>
           </span>

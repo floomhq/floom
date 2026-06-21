@@ -52,4 +52,34 @@ describe("GenericOutput strips internal redaction markers (#1703)", () => {
     const { container } = render(<GenericOutput type="json" value={value} />);
     expect(container.textContent).not.toContain("<REDACTED:");
   });
+
+  // #1752: JSON KEYS (object-table headers, key/value list keys) were rendered
+  // raw via humanizeColumn while only values were sanitized. Reachable on the
+  // public share card. The keys must be sanitized too, including lower/mixed
+  // case secret names that the old uppercase-only regex missed.
+  it("array-of-objects table HEADERS drop the marker (#1752)", () => {
+    const rows = [
+      { "<REDACTED:apifyToken>": "v1", name: "ok" },
+      { "<REDACTED:apifyToken>": "v2", name: "fine" },
+    ];
+    const { container } = render(<GenericOutput type="json" value={rows} />);
+    const headers = Array.from(container.querySelectorAll("th")).map((th) => th.textContent ?? "");
+    expect(headers.join("|")).not.toMatch(/<REDACTED/i);
+    expect(container.textContent).not.toMatch(/<REDACTED/i);
+  });
+
+  it("key/value list KEYS drop the marker, incl. mixed/lower case (#1752)", () => {
+    const obj = {
+      "<REDACTED:my_key>": "alpha",
+      "<REDACTED:Mixed_Case>": "beta",
+      clean_field: "gamma",
+    };
+    const { container } = render(<GenericOutput type="json" value={obj} />);
+    const keys = Array.from(container.querySelectorAll("dt")).map((dt) => dt.textContent ?? "");
+    expect(keys.join("|")).not.toMatch(/<REDACTED/i);
+    expect(container.textContent).not.toMatch(/<REDACTED/i);
+    // values still present
+    expect(container.textContent).toContain("alpha");
+    expect(container.textContent).toContain("gamma");
+  });
 });
