@@ -3,19 +3,16 @@ WorkerOS API actually EMITS.
 
 WHY THIS EXISTS
 ---------------
-The PostHog dashboards/insights in project **479185** (``WorkerOS Cloud``) are
-built against specific event names and property keys. If a refactor renames a
-property (``error_category`` -> ``failure_category``), drops one
-(``cost_is_partial``), or removes an event, the dashboards rot SILENTLY — the
-charts just go empty with no error anywhere. Codex flagged this as the gap:
-"dashboards rot silently on drift."
+Any PostHog dashboards/insights an operator builds are tied to specific event
+names and property keys. If a refactor renames a property (``error_category``
+-> ``failure_category``), drops one (``cost_is_partial``), or removes an event,
+those dashboards rot SILENTLY — the charts just go empty with no error anywhere.
 
 ``test_posthog_event_contract.py`` drives every real emit path with a stub
 client and asserts the captured event name + properties match THIS contract,
 failing CI on drift. So this file is the contract the code is held to AND the
-contract the 479185 dashboards target — keep them in lockstep. When you
-intentionally change an emitted event, update this contract in the same PR and
-re-point the affected 479185 insight.
+contract any downstream dashboards target — keep them in lockstep. When you
+intentionally change an emitted event, update this contract in the same PR.
 
 CONTRACT SHAPE
 --------------

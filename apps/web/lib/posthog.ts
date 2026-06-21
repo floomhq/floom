@@ -1,20 +1,20 @@
 "use client";
 
-// Client-side PostHog wiring for the WorkerOS Cloud dashboard.
+// Client-side PostHog wiring for the dashboard.
 //
-// Scope (Track B, Phase 2 + Phase 3 of the instrumentation spec):
-//   - Phase 2: client INTENT events only. Run/worker/connection OUTCOMES are
-//     emitted server-side (engine PRs #1715/#1718). The client must NEVER also
-//     emit run_started / worker_created / connection_added or it double-counts.
+// Scope:
+//   - Client INTENT events only. Run/worker/connection OUTCOMES are emitted
+//     server-side. The client must NEVER also emit run_started / worker_created
+//     / connection_added or it double-counts.
 //   - $groups.workspace on every event so client events are workspace-attributed
 //     and join the server-side per-workspace funnels.
-//   - Phase 3: session-replay privacy. Workers touch email/Slack/PII, so the
-//     replay config is default-deny on payloads (mask all inputs, ph-no-capture
-//     on payload elements, console limited to warn/error, /api/proxy bodies
+//   - Session-replay privacy. Workers touch email/Slack/PII, so the replay
+//     config is default-deny on payloads (mask all inputs, ph-no-capture on
+//     payload elements, console limited to warn/error, /api/proxy bodies
 //     dropped).
 //
 // Reads NEXT_PUBLIC_POSTHOG_KEY / NEXT_PUBLIC_POSTHOG_HOST. When the key is
-// unset (local/dev, and prod until Vivek sets the env at deploy) every export
+// unset (local/dev, and any deploy until an operator sets the env) every export
 // here is a no-op, so importing it is always safe.
 
 import posthog from "posthog-js";
@@ -100,7 +100,7 @@ export function initPostHog() {
     // Web vitals only (no full network-timing capture as a perf side channel).
     capture_performance: { web_vitals: true, network_timing: false },
 
-    // -------- Phase 3: session replay privacy (workers touch email/Slack/PII) --------
+    // -------- session replay privacy (workers touch email/Slack/PII) --------
     session_recording: {
       // Mask every <input>/<textarea> value by default.
       maskAllInputs: true,

@@ -18,12 +18,12 @@ fail-soft P1 client (``services.analytics_posthog``):
 
 Hard contracts (all inherited from ``analytics_posthog``):
 1. **Fail-soft / no-op** when ``POSTHOG_API_KEY`` is unset. Nothing emits until
-   the Railway env var lands (Federico-gated). Identical behaviour to P1.
+   an operator sets their own key. Identical behaviour to the base client.
 2. **Never raises.** Every public function swallows and logs. Telemetry must
    NEVER fail a run.
 3. **Host-side only.** The capture key lives in the API process; it is never
-   injected into the e2b sandbox env. Tenant sandbox code never emits canonical
-   telemetry (it is spoofable / would leak the key) — spec §12.2 gap #3.
+   injected into the e2b sandbox env. Sandbox code never emits canonical
+   telemetry (it is spoofable / would leak the key).
 
 Privacy (§A3): **default is METADATA-ONLY.** Prompts, completions, and tool I/O
 are MORE sensitive than DOM-replay PII (they carry emails, Slack, secrets pasted

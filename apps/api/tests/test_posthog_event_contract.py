@@ -1,8 +1,8 @@
 """Schema-contract test: the event names + REQUIRED props the code EMITS must
 match the checked-in contract (``services.posthog_event_contract``).
 
-This is the drift gate Codex flagged: PostHog dashboards in project 479185 rot
-SILENTLY when a refactor renames/drops a property or removes an event. This test
+This is the drift gate: downstream PostHog dashboards rot SILENTLY when a
+refactor renames/drops a property or removes an event. This test
 drives every real emit path with a stub PostHog client and asserts the captured
 event carries every ``required_props`` key + the auto-injected envelope keys for
 its emitter. A rename/drop/removal fails CII here instead of in an empty chart.
@@ -213,8 +213,8 @@ def test_emitted_event_matches_contract(stub, event):
 def test_no_unexpected_required_drift(stub, event):
     # Catch the inverse drift: an emitted prop that is neither required, optional,
     # nor an envelope key indicates the code grew a prop the contract (and thus
-    # the dashboards) don't know about. This is a soft drift signal — it fails so
-    # the contract stays the single source the 479185 dashboards target.
+    # any dashboards) don't know about. This is a soft drift signal — it fails so
+    # the contract stays the single source any downstream dashboards target.
     _DRIVERS[event]()
     emitted = _events(stub, event)
     props = set(emitted[0]["properties"])
@@ -227,5 +227,5 @@ def test_no_unexpected_required_drift(stub, event):
     unexpected = props - known
     assert not unexpected, (
         f"{event}: emitted props NOT in contract (update posthog_event_contract.py "
-        f"AND the 479185 dashboards): {sorted(unexpected)}"
+        f"AND any downstream dashboards): {sorted(unexpected)}"
     )

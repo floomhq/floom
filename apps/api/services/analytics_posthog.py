@@ -4,27 +4,26 @@ This is the single server entry point for emitting WorkerOS product-outcome
 events to PostHog (run lifecycle, worker lifecycle, approvals). It is a thin
 wrapper over ``posthog`` (posthog-python) with three hard contracts:
 
-1. **Fail-soft.** When ``POSTHOG_API_KEY`` is unset (local dev, OSS single-tenant,
+1. **Fail-soft.** When ``POSTHOG_API_KEY`` is unset (local dev, self-hosted,
    the test suite) the client is a no-op: ``capture_event`` returns immediately
-   and nothing is sent. This keeps dev/OSS working with zero config and means
-   merging Phase 1 emits NOTHING until the Railway env var is added (Phase 4,
-   Federico-gated).
+   and nothing is sent. This keeps dev/self-hosted working with zero config:
+   the build ships only inert wiring with no key and no destination, so nothing
+   is collected unless an operator sets their own key.
 2. **Never raises.** posthog-python's ``capture`` is already wrapped in a
    ``@no_throw`` decorator, but we additionally guard init + every call in a
    ``try/except`` that logs and swallows. Telemetry must NEVER fail a run.
 3. **Non-blocking.** posthog-python batches on a background thread; ``capture``
    does not block the run executor. ``flush()`` is registered on FastAPI
-   shutdown so buffered events survive a Railway redeploy.
+   shutdown so buffered events survive a redeploy/restart.
 
 Privacy: callers send sizes/flags/hashes (``*_bytes``, ``*_present``,
 ``*_count``, ``*_hash``), NEVER raw run input/output/transcript, secret
 names/values, or connection tokens. Use ``hash_value`` for any identifier that
 must be sent as a hash.
 
-Property/event taxonomy is owned by the spec
-(``internal/projects/workeros-posthog-instrumentation-spec.md``); error
-categories are owned by ``run_metrics.classify_failure`` and must never be
-hand-typed at a call site.
+Property/event taxonomy is owned by ``posthog_event_contract`` (the single
+source of truth for event/property names); error categories are owned by
+``run_metrics.classify_failure`` and must never be hand-typed at a call site.
 """
 from __future__ import annotations
 
