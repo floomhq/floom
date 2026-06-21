@@ -169,6 +169,7 @@ def test_upload_rejects_disallowed_media_type(monkeypatch, tmp_path):
 
 
 def test_upload_rejects_oversized_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_UPLOAD_MAX_BYTES", str(10 * 1024 * 1024))
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
 

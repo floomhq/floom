@@ -909,7 +909,7 @@ async def lifespan(app: FastAPI):
             if _rows_updated:
                 logger.info("Migration #603: converted %d workers from exec.mode=hybrid to pure-script", _rows_updated)
     except Exception as _mig_exc:
-        logger.warning("Migration #603 (hybrid?pure-script) failed (non-fatal): %s", _mig_exc)
+        logger.warning("Migration #603 (hybrid -> pure-script) failed (non-fatal): %s", _mig_exc)
     # Ensure the git workspace repo is initialized (idempotent)
     try:
         _wgit = _git_workspace()
@@ -1827,7 +1827,7 @@ print(
 # ---------------------------------------------------------------------------
 # SSE event queue registry
 # ---------------------------------------------------------------------------
-# Maps run_id ? list of (queue, loop). Each connected SSE consumer gets one
+# Maps run_id -> list of (queue, loop). Each connected SSE consumer gets one
 # queue. Cross-thread asyncio.Queue.put_nowait is unsafe, so we capture the
 # loop the queue was bound to and use call_soon_threadsafe from worker threads.
 # ---------------------------------------------------------------------------
@@ -1988,9 +1988,9 @@ from services.secrets_env import _platform_openai_api_key  # noqa: E402  (re-exp
 
 
 def _workspace_instructions_asset_id(request: Request | None = None) -> str:
-    """Scope version history per cloud workspace when x-workeros-workspace is set."""
+    """Scope version history per cloud workspace when a workspace header is set."""
     if request is not None:
-        workspace_id = (request.headers.get("x-workeros-workspace") or "").strip()
+        workspace_id = requested_local_workspace_id(request) or ""
         if workspace_id and workspace_id != "local-default":
             return workspace_id
     return "default"
@@ -2414,7 +2414,7 @@ def global_search(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> SearchResponse:
-    """#806: global ?K search across workers, runs, brain packs, and
+    """#806: global Cmd-K search across workers, runs, brain packs, and
     connections (case-insensitive substring), owner/visibility scoped. Each
     type is capped so one source can't crowd out the others."""
     needle = q.strip().lower()
@@ -4510,7 +4510,7 @@ def composio_execute_proxy(
 
     # 1. Validate run_id — must exist in DB and be RUNNING.
     #    NOTE: get_any() is the UNSCOPED run lookup. That is correct *here* and
-    #    only here on an HTTP path: this endpoint is the sandbox?API callback,
+    #    only here on an HTTP path: this endpoint is the sandbox -> API callback,
     #    middleware-exempt, and authorized by possession of a live run_id (the
     #    capability), not by an operator auth context. The run_id is only a valid
     #    capability while the run is RUNNING — a missing/garbage/terminal run is
@@ -4698,7 +4698,7 @@ def _webhook_receipt_ttl_seconds() -> int:
 class WebhookDeliveryStore(Protocol):
     def claim(self, source: str, delivery_id: str) -> bool:
         """Atomically record (source, delivery_id). Return True if this is the
-        FIRST time it is seen (claim succeeds ? process the webhook), False if it
+        FIRST time it is seen (claim succeeds -> process the webhook), False if it
         is a duplicate/redelivery (drop it). Implementations own their own TTL."""
         ...
 
@@ -5962,9 +5962,9 @@ def _mcp_arg_str(arguments: Dict[str, Any], name: str) -> str:
     the empty string — the required-check then fires and the tool returns
     "required" even though the caller provided a valid value.  For the
     secrets.set ``value`` argument the key insight is:
-      - None / missing           ? required error (caller omitted it)
-      - ""  (empty string)       ? still invalid (blank secret is meaningless)
-      - "0", "false", 0, False   ? valid; must be stringified and passed through
+      - None / missing           -> required error (caller omitted it)
+      - ""  (empty string)       -> still invalid (blank secret is meaningless)
+      - "0", "false", 0, False   -> valid; must be stringified and passed through
 
     This function converts the raw value to str BEFORE checking emptiness, so
     ``0`` becomes ``"0"`` (non-empty) and is accepted, while None and missing
@@ -6210,7 +6210,7 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
         message = (
             f"Context file saved. WARNING: this file looks like it contains a live "
             f"credential ({patterns}). Brain packs are readable by anyone with workspace "
-            f"access — store secrets in Settings ? Secrets, not in a Brain pack."
+            f"access -- store secrets in Settings -> Secrets, not in a Brain pack."
         )
     return _mcp_call_result(result, message)
 
@@ -6831,6 +6831,7 @@ _API_CALL_AUTH_HEADERS = frozenset({
     "x-api-key",
     "authorization",
     "cookie",
+    "x-floom-workspace",
     "x-workeros-workspace",
     # M-03: forward x-floom-user so the re-authenticated in-process sub-request
     # can resolve the acting user under WORKEROS_ENABLE_USER_HEADER_SCOPE.
@@ -6840,6 +6841,8 @@ _API_CALL_AUTH_HEADERS = frozenset({
 
 def _api_call_auth_headers(request: Request) -> dict[str, str]:
     auth_headers = {k.lower(): v for k, v in request.headers.items() if k.lower() in _API_CALL_AUTH_HEADERS}
+    if "x-floom-workspace" in auth_headers and "x-workeros-workspace" not in auth_headers:
+        auth_headers["x-workeros-workspace"] = auth_headers["x-floom-workspace"]
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy == "local" and "x-workeros-workspace" not in auth_headers:
         auth_headers["x-workeros-workspace"] = DEFAULT_WORKSPACE_ID
@@ -7489,7 +7492,7 @@ async def mcp_http_endpoint(
 ) -> JSONResponse:
     """MCP JSON-RPC 2.0 endpoint for /mcp-tools/serve.
 
-    RECONCILIATION (round-09 base ?? main): main hardened the shared
+    RECONCILIATION (round-09 base <-> main): main hardened the shared
     ``_mcp_handle_request`` dispatcher to be JSON-RPC-2.0 spec-correct —
     a non-object body, an invalid batch item, and an oversized batch all
     return a Response *object* carrying error -32600 at HTTP 200 (transport

@@ -19,10 +19,10 @@ manifest.
 
 ### Path A — Guided (Settings UI + OAuth)
 
-1. Create the Slack app from the manifest: Slack API console ? *Create New App*
-   ? *From an app manifest* ? paste `docs/slack-app-manifest.example.yml`
+1. Create the Slack app from the manifest: Slack API console -> *Create New App*
+   -> *From an app manifest* -> paste `docs/slack-app-manifest.example.yml`
    (update the three URLs to your API base).
-2. In Floom Settings ? Channels ? Slack, enter the app's **Client ID**,
+2. In Floom Settings -> Channels -> Slack, enter the app's **Client ID**,
    **Client Secret**, and **Signing Secret**. This calls
    `POST /slack/setup/config` (env allowlist: `SLACK_CLIENT_ID`,
    `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`, `SLACK_EVENTS_ENABLED`).
@@ -31,7 +31,7 @@ manifest.
    `interactivity_url` / `callback_url` to paste into the Slack app config,
    and an `install_url` once configured.
 4. Click **Install to Slack** (the `install_url`, i.e.
-   `POST /slack/oauth/install` ? Slack consent ? `GET /slack/oauth/callback`).
+   `POST /slack/oauth/install` -> Slack consent -> `GET /slack/oauth/callback`).
    The callback stores the team's bot token and appends the team to
    `SLACK_ALLOWED_TEAM_IDS`.
 
@@ -102,7 +102,7 @@ test channel, one `/floom approvals`.
 |---|---|---|
 | Slack URL verification fails, API returns 503 `SLACK_SIGNING_SECRET is not configured` | Signing secret missing on the API host | Set it via `POST /slack/setup/config` or the server env path, restart, re-verify |
 | 401/invalid signature on `/slack/events` | Wrong signing secret, or request older than the tolerance window | Re-copy the signing secret from the Slack app; check host clock skew |
-| Events verified but Emily never replies | `SLACK_EVENTS_ENABLED=0`, team not in `SLACK_ALLOWED_TEAM_IDS`, or bot token missing/invalid for the team | `GET /slack/setup/status` ? check `events_enabled`, `allowed_team_ids`, `installed_teams` |
+| Events verified but Emily never replies | `SLACK_EVENTS_ENABLED=0`, team not in `SLACK_ALLOWED_TEAM_IDS`, or bot token missing/invalid for the team | `GET /slack/setup/status` -> check `events_enabled`, `allowed_team_ids`, `installed_teams` |
 | Emily replies with a claim link instead of answering | Sender is unbound (expected on first contact) | Complete the claim flow in Settings; check `GET /slack/bindings/me` |
 | Claim link 404s or bounces to /login | Frontend base URL misconfigured for short claim links | Verify the API's public/frontend base URL env; the short link must resolve to `/settings?slack_claim=...` |
 | `@Floom` in a channel does nothing | Bot not invited, or `app_mention` event not subscribed | `/invite @Floom`; confirm bot events in the app config; reinstall after changes |

@@ -39,15 +39,16 @@ def _require_worker_write_workspace_context(request: Request) -> None:
     if (request.headers.get("host") or "").lower() == "asgi":
         return
     if _is_cloud_deploy():
+        from auth.local_workspaces import requested_local_workspace_id
+
         raw_workspace = (
-            request.headers.get("x-workeros-workspace")
-            or request.query_params.get("workspace_id")
+            requested_local_workspace_id(request)
             or ""
         ).strip()
         if not raw_workspace:
             raise HTTPException(
                 status_code=400,
-                detail="x-workeros-workspace header is required for worker writes.",
+                detail="x-floom-workspace or x-workeros-workspace header is required for worker writes.",
             )
         return
     if not require_explicit:
@@ -56,7 +57,7 @@ def _require_worker_write_workspace_context(request: Request) -> None:
         raise HTTPException(
             status_code=400,
             detail=(
-                "A valid x-workeros-workspace header or workspace_id query parameter "
+                "A valid x-floom-workspace or x-workeros-workspace header, or workspace_id query parameter, "
                 "is required for worker writes."
             ),
         )

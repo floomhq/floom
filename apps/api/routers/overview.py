@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
+from auth.local_workspaces import requested_local_workspace_id
 from core import hot_cache
 from core.config import PROTECTED_STOCK_WORKER_IDS, PUBLIC_STOCK_WORKER_IDS
 from core.utils import _parse_iso8601
@@ -289,10 +290,7 @@ def system_overview(
     repos: Repositories = Depends(get_repos),
 ) -> OverviewResponse:
     started = time.perf_counter()
-    workspace_key = (
-        request.headers.get("x-workeros-workspace")
-        or request.query_params.get("workspace_id")
-    )
+    workspace_key = requested_local_workspace_id(request)
     cache_key = ("overview", _hot_cache_scope(), auth.user_id, auth.role, workspace_key)
     cached = hot_cache.get(cache_key)
     if cached is not None:
