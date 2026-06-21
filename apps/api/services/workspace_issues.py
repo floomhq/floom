@@ -297,6 +297,31 @@ def create_workspace_issue(
     return project_issue(created, workspace_id)
 
 
+def _load_floom_issue(pat: str, repo: str, number: int) -> Dict[str, Any]:
+    """Fetch an issue and confirm it is Floom-managed before mutating it.
+
+    Mutations (comment/close/update) must not touch arbitrary repo issues that
+    were never filed through Floom. A repo may hold ordinary GitHub issues, so
+    we require the ``floom`` label or a parsed metadata marker — the same things
+    list_workspace_issues uses to scope the workspace view — before writing.
+    Returns the raw issue dict so callers can reuse it without re-fetching.
+    """
+    import github_api as _gh
+
+    raw = _gh.get_issue(pat, repo, int(number))
+    labels = [
+        (lab.get("name") if isinstance(lab, dict) else str(lab))
+        for lab in (raw.get("labels") or [])
+    ]
+    has_floom_label = any(str(lab) == "floom" for lab in labels)
+    has_marker = parse_metadata_marker(raw.get("body")) is not None
+    if not (has_floom_label or has_marker):
+        raise ValueError(
+            f"Issue #{int(number)} is not a Floom workspace issue; refusing to modify it."
+        )
+    return raw
+
+
 def comment_on_issue(user_id: str, number: int, body: str) -> Dict[str, Any]:
     """Add a comment to a workspace issue."""
     import github_api as _gh
@@ -304,6 +329,7 @@ def comment_on_issue(user_id: str, number: int, body: str) -> Dict[str, Any]:
     if not (body or "").strip():
         raise ValueError("Comment body cannot be empty")
     pat, repo = resolve_connection(user_id)
+    _load_floom_issue(pat, repo, int(number))
     comment = _gh.create_issue_comment(pat, repo, int(number), body)
     return {"id": comment.get("id"), "url": comment.get("html_url")}
 
@@ -327,9 +353,14 @@ def update_workspace_issue(
     pat, repo = resolve_connection(user_id)
     workspace_id = _git_workspace_key(user_id)
 
+    raw = _load_floom_issue(pat, repo, int(number))
+    existing = parse_metadata_marker(raw.get("body")) or {}
+    # Recover the asset type via the same marker-then-label fallback the listing
+    # uses, so a label patch can preserve it even on older markerless issues.
+    existing_asset_type = project_issue(raw, workspace_id).asset_type
+
     new_body: Optional[str] = None
     if body is not None:
-        existing = parse_metadata_marker(_gh.get_issue(pat, repo, int(number)).get("body")) or {}
         new_body = compose_issue_body(
             body,
             existing.get("workspace_id") or workspace_id,
@@ -341,9 +372,11 @@ def update_workspace_issue(
     new_labels: Optional[List[str]] = None
     if labels is not None:
         # A label patch replaces the whole set on GitHub. Re-inject the base
-        # Floom labels so a caller sending e.g. ['bug'] can't strip 'floom' and
-        # make the issue vanish from list_workspace_issues (which filters on it).
-        new_labels = derive_labels(None, labels)
+        # Floom labels and the asset-type label so a caller sending e.g. ['bug']
+        # can't strip 'floom' (which would hide the issue from
+        # list_workspace_issues) or the asset label (used for GitHub-native
+        # asset filtering).
+        new_labels = derive_labels(existing_asset_type, labels)
         _gh.ensure_labels(pat, repo, new_labels)
 
     updated = _gh.update_issue(

@@ -260,7 +260,7 @@ def test_create_workspace_issue_embeds_marker_and_labels(monkeypatch):
     assert ensured and "floom" in ensured[0] and "connection" in ensured[0]
 
 
-def test_update_workspace_issue_preserves_floom_label(monkeypatch):
+def _patch_floom_repo(monkeypatch):
     from services import git_service
 
     monkeypatch.setattr(
@@ -268,6 +268,18 @@ def test_update_workspace_issue_preserves_floom_label(monkeypatch):
         lambda uid: {"github_pat": "pat", "repo_full_name": "o/r"},
     )
     monkeypatch.setattr(git_service, "_git_workspace_key", lambda uid: "ws_test")
+
+
+def test_update_workspace_issue_preserves_floom_and_asset_label(monkeypatch):
+    _patch_floom_repo(monkeypatch)
+
+    # The existing issue is a worker-bound Floom issue (marker + labels).
+    marker = wi.build_metadata_marker("ws_test", "worker", "w1")
+    existing_raw = {
+        "number": 1, "title": "t", "body": f"failed\n\n{marker}", "state": "open",
+        "html_url": "https://github.com/o/r/issues/1",
+        "labels": [{"name": "floom"}, {"name": "workspace"}, {"name": "worker"}],
+    }
 
     sent = {}
 
@@ -279,14 +291,56 @@ def test_update_workspace_issue_preserves_floom_label(monkeypatch):
             "labels": [{"name": x} for x in (labels or [])],
         }
 
+    monkeypatch.setattr(github_api, "get_issue", lambda *a, **k: existing_raw)
     monkeypatch.setattr(github_api, "update_issue", fake_update_issue)
     monkeypatch.setattr(github_api, "ensure_labels", lambda *a, **k: None)
 
-    # Caller tries to set labels to just ['bug']; floom must survive so the
-    # issue stays visible in list_workspace_issues.
+    # Caller tries to set labels to just ['bug']; floom (visibility) and the
+    # worker asset label (GitHub-native asset filtering) must both survive.
     wi.update_workspace_issue("u1", 1, labels=["bug"])
     assert "floom" in sent["labels"]
+    assert "worker" in sent["labels"]
     assert "bug" in sent["labels"]
+
+
+def test_mutations_refuse_non_floom_issue(monkeypatch):
+    _patch_floom_repo(monkeypatch)
+
+    # A plain repo issue with no floom label and no marker.
+    plain = {
+        "number": 9, "title": "unrelated", "body": "regular issue", "state": "open",
+        "html_url": "https://github.com/o/r/issues/9", "labels": [{"name": "bug"}],
+    }
+    monkeypatch.setattr(github_api, "get_issue", lambda *a, **k: plain)
+    # If a mutation slipped through these would be called; make them explode.
+    monkeypatch.setattr(github_api, "create_issue_comment", lambda *a, **k: pytest.fail("commented"))
+    monkeypatch.setattr(github_api, "update_issue", lambda *a, **k: pytest.fail("updated"))
+
+    with pytest.raises(ValueError):
+        wi.comment_on_issue("u1", 9, "hi")
+    with pytest.raises(ValueError):
+        wi.update_workspace_issue("u1", 9, state="closed")
+
+
+def test_mutations_allow_marker_only_issue(monkeypatch):
+    """An issue with a marker but a stripped 'floom' label is still ours."""
+    _patch_floom_repo(monkeypatch)
+
+    marker = wi.build_metadata_marker("ws_test", "run", "run_1")
+    raw = {
+        "number": 3, "title": "t", "body": f"x\n\n{marker}", "state": "open",
+        "html_url": "https://github.com/o/r/issues/3", "labels": [],
+    }
+    monkeypatch.setattr(github_api, "get_issue", lambda *a, **k: raw)
+    called = {}
+
+    def fake_comment(pat, repo, number, body):
+        called["c"] = (number, body)
+        return {"id": 1, "html_url": "u"}
+
+    monkeypatch.setattr(github_api, "create_issue_comment", fake_comment)
+    wi.comment_on_issue("u1", 3, "noted")
+    assert called["c"] == (3, "noted")
 
 
 # ---------------------------------------------------------------------------

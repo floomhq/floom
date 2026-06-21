@@ -1489,6 +1489,18 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         blocked.add("connections__list")
     if not settings.get("connections_add"):
         blocked.add("connections__add_mcp")
+    if not settings.get("connections_use"):
+        # The workspace issue write tools mutate GitHub through the stored
+        # workspace PAT (a connection). Without connections_use the agent must
+        # not create/comment/close issues, matching how other connection-backed
+        # actions are gated.
+        blocked.update(
+            {
+                "workspace_issues__create",
+                "workspace_issues__comment",
+                "workspace_issues__close",
+            }
+        )
     if not settings.get("brain_read"):
         blocked.update({"contexts__list", "contexts__read"})
     if not settings.get("brain_write"):

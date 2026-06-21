@@ -415,3 +415,36 @@ def test_tool_metadata_includes_brain_and_composio(chat_env):
     assert "brain__list" in names
     assert "brain__read" in names
     assert "composio__gmail__execute" in names
+
+
+def _tool_names(tools):
+    return {str(getattr(t, "name", "")) for t in tools}
+
+
+def test_workspace_issue_write_tools_gated_by_connections_use(chat_env):
+    chat = chat_env["chat"]
+
+    # connections_use off (the default): the read tool stays, the GitHub-backed
+    # write tools are withheld so the agent can't use the stored PAT to mutate.
+    locked = chat._workspace_tools(
+        "local-user",
+        {"connections_read": True, "connections_use": False, "brain_read": True},
+    )
+    locked_names = _tool_names(locked)
+    assert "workspace_issues__list" in locked_names
+    assert "workspace_issues__create" not in locked_names
+    assert "workspace_issues__comment" not in locked_names
+    assert "workspace_issues__close" not in locked_names
+
+    # connections_use on: the write tools are advertised.
+    unlocked = _tool_names(
+        chat._workspace_tools(
+            "local-user",
+            {"connections_read": True, "connections_use": True, "brain_read": True},
+        )
+    )
+    assert {
+        "workspace_issues__create",
+        "workspace_issues__comment",
+        "workspace_issues__close",
+    } <= unlocked
