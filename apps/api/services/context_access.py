@@ -684,10 +684,7 @@ def _git_commit_context_rename(
         workspace = _git_workspace()
         with _git_ops_lock:
             _ensure_git_workspace_ready(workspace)
-            # The source dir has already been moved away; resolve its git path
-            # WITHOUT hydration so a hosted hook can't rematerialize the old pack
-            # (which would leave the old folder behind + stage the wrong state).
-            old_rel = _context_git_path(old_name, hydrate=False)
+            old_rel = _context_git_path(old_name)
             new_rel = _context_git_path(new_name)
             _git_ops.commit_paths(workspace, [old_rel, new_rel], message, author_name, author_email)
             _git_ops.push_background(workspace)

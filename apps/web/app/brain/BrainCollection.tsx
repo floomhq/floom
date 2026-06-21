@@ -301,6 +301,116 @@ function RenameFolderModal({
   );
 }
 
+// #1813: rename an auto-named folder. Mirrors NewFolderForm: free-typed name,
+// slugified to the backend-safe form, with a "Saved as" hint when they differ.
+function RenameFolderForm({
+  folder,
+  onRenamed,
+}: {
+  folder: ContextSummary;
+  onRenamed: (newName: string) => void | Promise<void>;
+}) {
+  const [name, setName] = useState(folder.name);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const slug = slugifyContextName(name);
+  const showSlugHint = name.trim() !== "" && name.trim() !== slug;
+  const unchanged = slug === folder.name;
+
+  const submit = async () => {
+    if (!slug || unchanged) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.contexts.rename(folder.name, slug);
+      toast.success(`Renamed to "${slug}"`);
+      await onRenamed(slug);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not rename the folder.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 420 }}>
+      <label style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Folder name</label>
+      <input
+        className="c-srch"
+        style={{ maxWidth: "none" }}
+        autoFocus
+        value={name}
+        onChange={(e) => { setName(e.target.value); setError(null); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void submit();
+        }}
+        placeholder="e.g. company-facts or Walk Test Folder"
+      />
+      {showSlugHint && (
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+          Saved as: <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink)" }}>{slug}</span>
+        </div>
+      )}
+      {error && (
+        <div style={{ fontSize: 12, color: "var(--red, #c0392b)", padding: "6px 10px", background: "var(--bg-2)", borderRadius: 8 }}>
+          {error}
+        </div>
+      )}
+      <button type="button" className="c-addbtn" disabled={busy || !slug || unchanged} onClick={() => void submit()}>
+        {busy ? "Renaming…" : "Rename folder"}
+      </button>
+    </div>
+  );
+}
+
+function RenameFolderModal({
+  folder,
+  onRenamed,
+  onCancel,
+}: {
+  folder: ContextSummary;
+  onRenamed: (newName: string) => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(0,0,0,.35)",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div
+        style={{
+          background: "var(--bg-card)",
+          border: "var(--bd-card)",
+          borderRadius: "var(--radius-card)",
+          padding: 24,
+          minWidth: 340,
+          maxWidth: 440,
+          boxShadow: "var(--shadow-pop)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Folder size={16} style={{ color: "var(--ink-soft)" }} />
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Rename folder</span>
+        </div>
+        <RenameFolderForm folder={folder} onRenamed={onRenamed} />
+      </div>
+    </div>
+  );
+}
+
 function UsedByTab({ folder }: { folder: ContextSummary }) {
   const [d] = useContextDetail(folder.name);
   if (!d) return <LoadingState rows={3} />;
@@ -369,8 +479,8 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
   // Cached revisits bypass this because the query already has data.
   const loading = foldersQuery.isLoading && !foldersQuery.data;
   const [listDragOver, setListDragOver] = useState(false);
-  // Guards the auto-create folder paths against double-fires.
-  const [creating, setCreating] = useState(false);
+  // Secondary path: create an empty folder (drop is the primary affordance).
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
   // #1813: folder being renamed (drives the rename modal).
   const [renameTarget, setRenameTarget] = useState<ContextSummary | null>(null);
   // Browse-files trigger for the empty state (same flow as a drop).
@@ -648,6 +758,16 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
             // wrong folder's files. #1813.
             detailCache.delete(renameTarget.name);
             detailCache.delete(newName);
+            setRenameTarget(null);
+            await refresh();
+          }}
+          onCancel={() => setRenameTarget(null)}
+        />
+      )}
+      {renameTarget && (
+        <RenameFolderModal
+          folder={renameTarget}
+          onRenamed={async () => {
             setRenameTarget(null);
             await refresh();
           }}

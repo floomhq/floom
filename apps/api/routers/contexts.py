@@ -527,19 +527,8 @@ def rename_context(
     new_root = context_dir(new_name)
     if new_root.exists():
         raise HTTPException(status_code=409, detail="A folder with that name already exists")
-    # Scan the WHOLE workspace for mounts, not just the caller's own workers: an
-    # admin renaming another member's shared pack must still see the pack owner's
-    # (or a third member's) workers, or the rename breaks them silently (#1813).
-    # role="admin" lists all workers; scope to the pack's workspace because pack
-    # names are workspace-local (a same-named pack elsewhere is a false match).
-    pack_owner_id = context_owner_id(safe_name) or context_user_id
-    pack_workspace_id = _asset_workspace_id(pack_owner_id)
     referenced_by = _workers_referencing_context(
-        safe_name,
-        user_id=context_user_id,
-        repos=repos,
-        role="admin",
-        workspace_id=pack_workspace_id,
+        safe_name, user_id=context_user_id, repos=repos
     )
     if referenced_by:
         raise HTTPException(
@@ -549,99 +538,29 @@ def rename_context(
                 "referenced_by": referenced_by,
             },
         )
-    # `brain_packs.id` is a GLOBAL primary key while pack folders are
-    # workspace-local, so the destination name can collide with a DIFFERENT
-    # workspace's access row even though `new_root` is free on this workspace's
-    # disk. Re-keying onto it would violate the PK, and the fallback below would
-    # then ON CONFLICT(id) rewrite (corrupt) that workspace's owner/visibility
-    # mirror. Reject up front, before any filesystem move, so the rename stays
-    # all-or-nothing. Message mirrors the on-disk conflict above (no cross-
-    # workspace existence is leaked).
-    asset_access = getattr(repos, "asset_access", None)
-    if asset_access is not None and hasattr(asset_access, "asset_id_conflict"):
-        try:
-            cross_workspace_conflict = asset_access.asset_id_conflict(
-                asset_type="brain_pack",
-                asset_id=new_name,
-                workspace_id=pack_workspace_id,
-            )
-        except Exception:
-            cross_workspace_conflict = False
-        if cross_workspace_conflict:
-            raise HTTPException(
-                status_code=409, detail="A folder with that name already exists"
-            )
-    # Read the source visibility before the move so the fallback path below can
-    # carry it over (auto-named folders are private, but a shared pack must stay
-    # shared).
+    # Preserve visibility across the rename (auto-named folders are private, but a
+    # shared pack must stay shared). Read it before the dir + metadata move.
     old_visibility = _brain_pack_visibility(safe_name, metadata, repos=repos)
     context_dir(safe_name).rename(new_root)
     rename_context_metadata(safe_name, new_name)
-    # Move the access-control mirror row from the old id to the new id. The row is
-    # keyed by pack name, so the rename must RE-KEY it, not create a second row:
-    #   * leaving the old `safe_name` row behind re-exposes a later folder that
-    #     reuses that name (`ensure_brain_pack` never downgrades, so the stale
-    #     "workspace" row would silently share the new private folder), and
-    #   * a stale row already sitting at `new_name` (left by a previously
-    #     deleted/renamed shared folder) would keep ITS old visibility.
-    # `rename_asset` deletes any destination row, then re-keys the source row, so
-    # visibility/owner ride the same row and both leaks are closed in one step.
-    # Scope the move to the pack's workspace: pack ids are workspace-local, so an
-    # unscoped re-key would clobber a same-named pack's row in another workspace.
+    # Re-materialize the access-control mirror row under the new id and carry the
+    # prior visibility (the row is keyed by pack name, so the rename needs a new row).
     owner_id = context_owner_id(new_name)
-    moved_row = None
-    if asset_access is not None and hasattr(asset_access, "rename_asset"):
-        try:
-            moved_row = asset_access.rename_asset(
-                asset_type="brain_pack",
-                old_asset_id=safe_name,
-                new_asset_id=new_name,
-                workspace_id=pack_workspace_id,
-            )
-        except Exception:
-            # A RAISED error here is not the benign "no source row" signal -- that
-            # is a None RETURN. It means the re-key itself failed, e.g. the
-            # destination id is held by another workspace (the global `id` PK can't
-            # be re-keyed onto it) and the precheck raced, or a repo ships
-            # rename_asset without asset_id_conflict. Falling through to
-            # `_ensure_brain_pack_row` would ON CONFLICT(id) rewrite (corrupt) that
-            # foreign workspace's owner/visibility row. Roll the filesystem +
-            # metadata move back so the rename stays all-or-nothing, then reject.
-            logger.warning(
-                "rename_asset failed for %s -> %s; rolling back rename",
-                safe_name, new_name, exc_info=True,
-            )
-            try:
-                # Resolve the original source path WITHOUT hydration: the dir was
-                # just moved away, so a hosted hook would otherwise re-materialize
-                # the old pack at `safe_name`, making this rename-back fail on an
-                # already-existing destination and leaving the move half-applied.
-                new_root.rename(context_dir(safe_name, hydrate=False))
-                rename_context_metadata(new_name, safe_name)
-            except Exception:
-                logger.error(
-                    "failed to roll back context rename %s -> %s",
-                    safe_name, new_name, exc_info=True,
-                )
-            raise HTTPException(
-                status_code=409, detail="A folder with that name already exists"
-            )
-    if moved_row is None and owner_id:
-        # No source row to move (or a repo without rename_asset): materialize a
-        # fresh row and rewrite its visibility to the source value, INCLUDING
-        # "private", so a stale destination row can't keep its old visibility.
+    if owner_id:
         _ensure_brain_pack_row(new_name, owner_id=owner_id, repos=repos)
-        if old_visibility and asset_access is not None and hasattr(asset_access, "set_visibility"):
-            try:
-                asset_access.set_visibility(
-                    workspace_id=_asset_workspace_id(owner_id),
-                    actor_id=context_user_id,
-                    asset_type="brain_pack",
-                    asset_id=new_name,
-                    visibility=old_visibility,
-                )
-            except Exception:
-                pass  # visibility carry-over is best-effort, never blocks rename
+        if old_visibility and old_visibility != "private":
+            asset_access = getattr(repos, "asset_access", None)
+            if asset_access is not None and hasattr(asset_access, "set_visibility"):
+                try:
+                    asset_access.set_visibility(
+                        workspace_id=_asset_workspace_id(owner_id),
+                        actor_id=context_user_id,
+                        asset_type="brain_pack",
+                        asset_id=new_name,
+                        visibility=old_visibility,
+                    )
+                except Exception:
+                    pass  # visibility carry-over is best-effort, never blocks rename
     author_name, author_email = _git_author(auth)
     _git_commit_context_rename(
         safe_name,
