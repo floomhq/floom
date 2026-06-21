@@ -27,7 +27,15 @@
 
 set -euo pipefail
 
-WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/floom}"
+detect_default_root() {
+  if [[ -d /opt/floom || ! -d /opt/workeros ]]; then
+    echo "/opt/floom"
+  else
+    echo "/opt/workeros"
+  fi
+}
+
+WORKEROS_ROOT="${WORKEROS_ROOT:-$(detect_default_root)}"
 WORKEROS_API_DIR="${WORKEROS_API_DIR:-$WORKEROS_ROOT/apps/api}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 ARTIFACTS_DIR="${FLOOM_ARTIFACTS_DIR:-$WORKEROS_ROOT/data/artifacts}"
@@ -142,7 +150,7 @@ root = Path(sys.argv[1])
 hourly_keep = int(sys.argv[2])
 daily_keep = int(sys.argv[3])
 weekly_keep = int(sys.argv[4])
-pattern = re.compile(r"^floom-(\d{4}-\d{2}-\d{2}-\d{4})(?:-\d{2})?$")
+pattern = re.compile(r"^(?:floom|workeros)-(\d{4}-\d{2}-\d{2}-\d{4})(?:-\d{2})?$")
 
 
 @dataclass(frozen=True)

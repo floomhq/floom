@@ -6655,7 +6655,10 @@ async def webhook_trigger(
                         f"/workers/{worker_id}/webhook-secret/rotate first"
                     ),
                 )
-            sig_header = request.headers.get("X-Floom-Signature", "")
+            sig_header = (
+                request.headers.get("X-Floom-Signature", "")
+                or request.headers.get("X-Workeros-Signature", "")
+            )
             if not verify_signature(body, sig_header, secret_hash):
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
 

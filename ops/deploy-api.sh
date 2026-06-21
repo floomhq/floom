@@ -26,7 +26,43 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Config (all overridable via env)
 # ---------------------------------------------------------------------------
-WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/floom}"
+detect_default_root() {
+  if [[ -d /opt/floom || ! -d /opt/workeros ]]; then
+    echo "/opt/floom"
+  else
+    echo "/opt/workeros"
+  fi
+}
+
+detect_service_name() {
+  if [[ -n "${WORKEROS_SERVICE_NAME:-}" ]]; then
+    echo "$WORKEROS_SERVICE_NAME"
+    return
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl list-unit-files --type=service 2>/dev/null | awk '{print $1}' | grep -qx "floom-api.service"; then
+      echo "floom-api"
+      return
+    fi
+    if systemctl list-unit-files --type=service 2>/dev/null | awk '{print $1}' | grep -qx "workeros-api.service"; then
+      echo "workeros-api"
+      return
+    fi
+  fi
+  echo "floom-api"
+}
+
+detect_api_env_file() {
+  if [[ -n "${FLOOM_API_ENV_FILE:-}" ]]; then
+    echo "$FLOOM_API_ENV_FILE"
+  elif [[ -f /etc/floom/api.env || ! -f /etc/workeros/api.env ]]; then
+    echo "/etc/floom/api.env"
+  else
+    echo "/etc/workeros/api.env"
+  fi
+}
+
+WORKEROS_ROOT="${WORKEROS_ROOT:-$(detect_default_root)}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 BACKUP_ROOT="${WORKEROS_BACKUP_ROOT:-/root/backups}"
 SERVICE_VENV="${WORKEROS_API_VENV:-$WORKEROS_ROOT/apps/api/venv}"
@@ -37,7 +73,8 @@ HEALTH_POLL_INTERVAL=2          # seconds between health polls
 HEALTH_TIMEOUT=90               # seconds before giving up
 DRAIN_WAIT=80                   # seconds to wait for active runs to finish
 DRAIN_POLL=5                    # seconds between drain checks
-SERVICE_NAME="floom-api"
+SERVICE_NAME="$(detect_service_name)"
+ENV_FILE="$(detect_api_env_file)"
 DRY_RUN=0
 SKIP_DRAIN=0
 
@@ -288,7 +325,6 @@ check_endpoint() {
 
 # Read FLOOM_SECRET from the env file (it's not in our environment)
 FLOOM_SECRET=""
-ENV_FILE="/etc/floom/api.env"
 if [[ -f "$ENV_FILE" ]]; then
   FLOOM_SECRET="$(grep '^FLOOM_SECRET=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)"
 fi

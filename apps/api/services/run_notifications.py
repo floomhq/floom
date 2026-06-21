@@ -412,10 +412,18 @@ def _fire_alert_webhooks(
                 logger.warning("Skipping unsafe alert webhook URL for run %s: %s", run_id, exc)
         if url and url_safe:
             secret = row.get("secret")
-            headers = {"Content-Type": "application/json", "X-Floom-Run-Id": run_id}
+            # Emit both names for a deprecation window. Existing customer
+            # receivers may verify the legacy Workeros HMAC/run headers and
+            # cannot all be upgraded in lockstep with the product rename.
+            headers = {
+                "Content-Type": "application/json",
+                "X-Floom-Run-Id": run_id,
+                "X-Workeros-Run-Id": run_id,
+            }
             if secret:
                 sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()  # type: ignore[attr-defined]
                 headers["X-Floom-Signature"] = f"sha256={sig}"
+                headers["X-Workeros-Signature"] = f"sha256={sig}"
             try:
                 req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
                 # Bounded timeout — a hostile/slow endpoint must not hang the

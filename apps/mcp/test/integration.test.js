@@ -711,6 +711,56 @@ test("install subcommand patches agent config idempotently", async () => {
   }
 });
 
+test("credentials migrate from legacy workeros path and logout clears both paths", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-home-"));
+  try {
+    const legacyDir = join(home, ".config", "workeros");
+    const floomDir = join(home, ".config", "floom");
+    const legacyPath = join(legacyDir, "credentials.json");
+    const floomPath = join(floomDir, "credentials.json");
+    await mkdir(legacyDir, { recursive: true });
+    await mkdir(floomDir, { recursive: true });
+    await writeFile(legacyPath, JSON.stringify({
+      api_base: "http://legacy.example.test",
+      api_secret: "legacy-secret",
+      authed_at: "2026-01-01T00:00:00.000Z",
+    }));
+    await writeFile(floomPath, JSON.stringify({
+      api_base: "http://new.example.test",
+      mode: "oss",
+      api_secret: "new-secret",
+      authed_at: "2026-01-01T00:00:00.000Z",
+    }));
+
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const { readCredentials, clearCredentials } = await import("../dist/lib/credentials.js");
+      const preferred = await readCredentials();
+      assert.equal(preferred.api_base, "http://new.example.test");
+      assert.equal(preferred.api_secret, "new-secret");
+
+      await rm(floomPath, { force: true });
+      const legacy = await readCredentials();
+      assert.equal(legacy.api_base, "http://legacy.example.test");
+      assert.equal(legacy.api_secret, "legacy-secret");
+
+      assert.equal(await clearCredentials(), true);
+      await assert.rejects(readFile(legacyPath, "utf8"));
+      await assert.rejects(readFile(floomPath, "utf8"));
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+    }
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test("mcp add patches agent config", async () => {
   const home = await mkdtemp(join(tmpdir(), "workeros-mcp-add-home-"));
   try {

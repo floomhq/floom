@@ -1,0 +1,15 @@
+[Unit]
+Description=Workeros hourly data snapshot and artifact rotation (legacy compatibility unit)
+After=workeros-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/workeros
+EnvironmentFile=/etc/workeros/api.env
+ExecStart=/opt/workeros/ops/backup-db.sh
+Nice=10
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

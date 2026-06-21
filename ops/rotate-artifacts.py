@@ -12,7 +12,12 @@ from pathlib import Path
 
 
 def _configured_root() -> Path:
-    return Path(os.environ.get("WORKEROS_ROOT", "/opt/floom")).resolve()
+    configured = os.environ.get("WORKEROS_ROOT")
+    if configured:
+        return Path(configured).resolve()
+    if Path("/opt/floom").exists() or not Path("/opt/workeros").exists():
+        return Path("/opt/floom").resolve()
+    return Path("/opt/workeros").resolve()
 
 
 def _configured_db(root: Path) -> Path:

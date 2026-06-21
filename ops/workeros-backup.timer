@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly Workeros data snapshot (legacy compatibility unit)
+Requires=workeros-backup.service
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+Unit=workeros-backup.service
+
+[Install]
+WantedBy=timers.target
