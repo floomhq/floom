@@ -507,6 +507,40 @@ def iter_issue_export_files() -> List[Tuple[str, bytes]]:
     return files
 
 
+def _valid_issue_md_bytes(data: bytes) -> bool:
+    """True if imported ``.md`` bytes are safe to write and later read back.
+
+    The listing/get endpoints read every issue file with
+    ``read_text(encoding="utf-8")`` and parse the YAML frontmatter, so a member
+    with invalid UTF-8 or unparseable frontmatter would break ``GET
+    /workspace/issues`` until removed by hand. Reject such members at import time
+    (mirrors the worker import path skipping malformed assets).
+    """
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    try:
+        _split_frontmatter(text)
+    except Exception:
+        return False
+    return True
+
+
+def _valid_issue_comments_bytes(data: bytes) -> bool:
+    """True if imported comment-log bytes decode as UTF-8.
+
+    ``_read_comments`` already tolerates non-JSON lines, so per-line JSON is not
+    required, but it reads the file as UTF-8 text — invalid UTF-8 here would
+    raise inside the listing endpoint.
+    """
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 def restore_issue_files(
     files: List[Tuple[str, bytes]],
     *,
@@ -518,8 +552,10 @@ def restore_issue_files(
     ``files`` is an iterable of ``(basename, raw_bytes)`` produced by
     :func:`iter_issue_export_files`. Any issue id whose ``.md`` already exists in
     the target workspace is skipped (never clobber existing issues); a comment
-    log is only restored alongside an imported ``.md``. Returns the sorted list
-    of issue ids that were imported.
+    log is only restored alongside an imported ``.md``. Members whose bytes would
+    later break the read path (invalid UTF-8 or unparseable frontmatter) are
+    skipped rather than written. Returns the sorted list of issue ids that were
+    imported.
     """
     from services.git_service import _ensure_git_workspace_ready, _git_ops_lock, _git_workspace
 
@@ -558,9 +594,12 @@ def restore_issue_files(
             if md_path.exists():
                 # Never clobber an issue that already lives in this workspace.
                 continue
+            if not _valid_issue_md_bytes(parts["md"]):
+                # Malformed body would break the read path on the next list/get.
+                continue
             md_path.write_bytes(parts["md"])
             rel_paths.append(_issue_md_rel(issue_id))
-            if "comments" in parts:
+            if "comments" in parts and _valid_issue_comments_bytes(parts["comments"]):
                 comments_path = workspace / _issue_comments_rel(issue_id)
                 comments_path.write_bytes(parts["comments"])
                 rel_paths.append(_issue_comments_rel(issue_id))

@@ -466,3 +466,60 @@ def test_import_never_clobbers_existing_issue(monkeypatch, tmp_path):
 
     assert imported == []  # collision -> skipped, never clobbered
     assert issues.get_issue(issue_id)["title"] == "keep me"
+
+
+def test_import_skips_malformed_issue_bytes(monkeypatch, tmp_path):
+    workspace, workers_dir = _make_workspace(tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "dev")
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
+    _purge_api_modules()
+    issues = importlib.import_module("services.workspace_issues")
+
+    # A real issue to keep the listing endpoint healthy alongside the bad import.
+    good = issues.create_issue(title="healthy", created_by="user_x")
+
+    # Bundle members with invalid UTF-8 in the body and in the comment log.
+    bad_md = b"---\nid: ISSUE-0002\nstatus: open\ntitle: broken\n---\n\n\xff\xfe body\n"
+    bad_comments = b'{"id":"cmt_x","body":"\xff\xfe"}\n'
+    imported = issues.restore_issue_files(
+        [("ISSUE-0002.md", bad_md), ("ISSUE-0002.comments.ndjson", bad_comments)]
+    )
+
+    assert imported == []  # malformed body -> not written, not reported
+    assert not (workspace / ".floom" / "issues" / "ISSUE-0002.md").exists()
+    assert not (workspace / ".floom" / "issues" / "ISSUE-0002.comments.ndjson").exists()
+
+    # The endpoint still works because nothing undecodable hit the issues dir.
+    listed = {i["id"] for i in issues.list_issues()}
+    assert good["id"] in listed
+    assert "ISSUE-0002" not in listed
+
+
+def test_import_keeps_md_but_drops_invalid_comment_log(monkeypatch, tmp_path):
+    workspace, workers_dir = _make_workspace(tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "dev")
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
+    _purge_api_modules()
+    issues = importlib.import_module("services.workspace_issues")
+
+    good_md = b"---\nid: ISSUE-0003\nstatus: open\ntitle: valid body\n---\n\nfine\n"
+    bad_comments = b'{"id":"cmt_x","body":"\xff\xfe"}\n'
+    imported = issues.restore_issue_files(
+        [("ISSUE-0003.md", good_md), ("ISSUE-0003.comments.ndjson", bad_comments)]
+    )
+
+    assert imported == ["ISSUE-0003"]  # valid md restored
+    assert (workspace / ".floom" / "issues" / "ISSUE-0003.md").exists()
+    # Invalid comment log skipped so the read path stays healthy.
+    assert not (workspace / ".floom" / "issues" / "ISSUE-0003.comments.ndjson").exists()
+    fetched = issues.get_issue("ISSUE-0003")
+    assert fetched["title"] == "valid body"
+    assert fetched["comment_count"] == 0
