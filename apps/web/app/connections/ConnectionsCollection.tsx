@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { resolveUserLabel } from "@/lib/workspace/display-name";
 import { useConnections, useMembers, useSecrets, useWorkers } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
@@ -42,9 +43,10 @@ function resolveOwner(
 ): string {
   if (!ownerId) return "Not set";
   const member = members.find((m) => m.user_id === ownerId);
-  if (member) return member.display_name || member.email || ownerId;
-  // Fallback: truncate UUID so it's friendlier than the full 36-char string
-  return ownerId.length > 8 ? `${ownerId.slice(0, 8)}...` : ownerId;
+  // #1728 — never surface a raw/truncated UUID as the Owner. Use a real label
+  // (member name/email) when available, else a friendly "Workspace owner".
+  if (member) return resolveUserLabel([member.display_name, member.email], "Workspace owner");
+  return "Workspace owner";
 }
 
 // ---------------------------------------------------------------------------

@@ -1677,8 +1677,8 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
   return (
     <form
       onSubmit={handleSubmit}
-      className="mt-4 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
-      style={{ maxWidth: 380 }}
+      className="mt-4 flex w-full items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
+      style={{ maxWidth: 480 }}
     >
       <input
         ref={inputRef}
