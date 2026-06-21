@@ -22,8 +22,4 @@ regexes = [
   # CI-only Fernet test key in cloud-engine-autosync.yml — base64 of
   # "managed-deployment-ci-test-key-32byt"; documented as CI-only, never a real secret.
   '''d29ya2Vyb3MtY2xvdWQtY2ktdGVzdC1rZXktMzJieXQ=''',
-  # PostHog PUBLISHABLE client project key (phc_ prefix) for the WorkerOS Cloud
-  # analytics project, documented in apps/web/.env.example. phc_ keys are PUBLIC
-  # by design (shipped in the browser bundle, write-only ingest) — not a secret.
-  '''phc_xKvvXmDLvrzCK9mr2YyAaWNanpcSKCtadyDidtBfi3Vn''',
 ]
