@@ -192,7 +192,10 @@ export function WorkspaceSwitcher() {
     setImporting(true);
     try {
       const result = await api.workspace.importTemplate(file);
-      const imported = result.workers_imported.length + result.contexts_imported.length;
+      const imported =
+        result.workers_imported.length +
+        result.contexts_imported.length +
+        (result.issues_imported?.length ?? 0);
       toast.success(
         `Imported ${imported} item${imported === 1 ? "" : "s"}${
           result.skipped.length ? ` · ${result.skipped.length} skipped` : ""
