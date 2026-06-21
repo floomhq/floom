@@ -4,8 +4,10 @@ import { QueryProvider } from "@/components/providers/QueryProvider";
 
 // R9 worker-detail FIX 1 + FIX 2 — structural proof on the REAL WorkersCollection.
 //   FIX 1: the advanced tab group ("Advanced") is a visible affordance ON the
-//          primary tab row (inside .c-dtabs), not a hidden header control.
-//   FIX 2: in Operations, the second-row tabs (.c-dtabs2) stack flush under the
+//          primary tab row (inside .c-dtabs), directly after the operator tabs —
+//          not far-right, not a dropdown menu. Clicking once reveals ALL advanced
+//          tabs inline; clicking again collapses them (disclosure, not pick-one).
+//   FIX 2: in Setup, the second-row tabs (.c-dtabs2) stack flush under the
 //          primary row — no "Visual editor of worker.yml" framing text or gap
 //          element sits BETWEEN .c-dtabs and .c-dtabs2.
 
@@ -92,68 +94,54 @@ async function openDetail() {
   await waitFor(() => expect(document.querySelector(".c-dtabs")).toBeTruthy());
 }
 
-describe("R9 worker-detail FIX 1 — Advanced group is visible ON the tab row", () => {
-  it("renders an 'Advanced' affordance inside the primary .c-dtabs row", async () => {
+describe("R9 worker-detail FIX 1 — Advanced disclosure is inline on the tab row", () => {
+  it("renders an 'Advanced' button inside the primary .c-dtabs row (not far-right / not a dropdown)", async () => {
     await openDetail();
     const tabRow = document.querySelector(".c-dtabs");
     expect(tabRow).toBeTruthy();
-    // The Advanced trigger lives inside the tab row (via tabsTrailing), not in
-    // the detail header actions.
-    const adv = tabRow!.querySelector("[aria-label='Advanced tabs']");
+    // The Advanced button lives inside .c-dtabs-trailing which is a direct child
+    // of the tab row — inline, not a far-right floating pill.
+    const trailing = tabRow!.querySelector(".c-dtabs-trailing");
+    expect(trailing).toBeTruthy();
+    const adv = trailing!.querySelector("[aria-label='Show developer tabs']");
     expect(adv).toBeTruthy();
     expect(adv!.textContent).toMatch(/Advanced/);
+    // It is a plain button, not a dropdown trigger.
+    expect(adv!.tagName.toLowerCase()).toBe("button");
+    // No checkmark/menuitemcheckbox inside the row.
+    expect(tabRow!.querySelector('[role="menuitemcheckbox"]')).toBeNull();
   });
 
-  it("opening Advanced lists the four advanced tabs and selecting one pins it onto the row", async () => {
+  it("clicking Advanced once reveals ALL advanced tabs (Source, Versions, Brain, Tools) as real tabs", async () => {
     await openDetail();
-    fireEvent.click(await screen.findByRole("button", { name: /Advanced tabs/i }));
-    expect(await screen.findByRole("menuitemcheckbox", { name: "Source" })).toBeTruthy();
-    expect(screen.getByRole("menuitemcheckbox", { name: "Versions" })).toBeTruthy();
-    expect(screen.getByRole("menuitemcheckbox", { name: "Brain" })).toBeTruthy();
-    expect(screen.getByRole("menuitemcheckbox", { name: "Tools" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Versions" }));
-    // Versions now renders as a real tab on the primary row.
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Versions" })).toBeTruthy());
-  });
-});
+    // Initially no advanced tabs visible.
+    expect(screen.queryByRole("tab", { name: "Source" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Versions" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Brain" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Tools" })).toBeNull();
 
-describe("worker-detail #1680 — Advanced menu marks the ACTIVE view, mutually exclusive", () => {
-  it("checks ONLY the active advanced tab even when several are pinned", async () => {
-    // Pin both Source and Versions, deep-link the detail with Source active.
-    window.localStorage.setItem(
-      "floom.workerDetail.pinnedTabs",
-      JSON.stringify(["Source", "Versions"]),
-    );
-    mockSearch = `sel=${WORKER_ID}&tab=Source`;
-
-    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    render(
-      <QueryProvider>
-        <WorkersCollection initialWorkers={[worker as never]} />
-      </QueryProvider>,
-    );
-    await waitFor(() => expect(document.querySelector(".c-dtabs")).toBeTruthy());
-
-    fireEvent.click(await screen.findByRole("button", { name: /Advanced tabs/i }));
-    const source = await screen.findByRole("menuitemcheckbox", { name: "Source" });
-    const versions = screen.getByRole("menuitemcheckbox", { name: "Versions" });
-    // Exactly one checkmark — the active view (Source), NOT the pinned set.
-    expect(source.getAttribute("aria-checked")).toBe("true");
-    expect(versions.getAttribute("aria-checked")).toBe("false");
+    // Click Advanced — all four appear as real selectable tabs.
+    const advBtn = await screen.findByRole("button", { name: /Show developer tabs/i });
+    fireEvent.click(advBtn);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy());
+    expect(screen.getByRole("tab", { name: "Versions" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Brain" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Tools" })).toBeTruthy();
   });
 
-  it("an inactive advanced view is unchecked even while pinned (no double checkmark)", async () => {
-    await openDetail(); // active tab = Overview (first base tab), nothing advanced
-    fireEvent.click(screen.getByRole("button", { name: /Advanced tabs/i }));
-    // Pin Source and Versions; neither is the active view, so neither is checked.
-    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Source" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Versions" }));
-    const checked = screen
-      .getAllByRole("menuitemcheckbox")
-      .filter((el) => el.getAttribute("aria-checked") === "true");
-    // selectWorkerTab uses the (mocked, no-op) router, so the URL-driven active
-    // tab stays Overview — the menu must therefore show ZERO checkmarks, never two.
-    expect(checked.length).toBeLessThanOrEqual(1);
+  it("clicking Advanced again collapses the advanced tabs", async () => {
+    await openDetail();
+    const advBtn = await screen.findByRole("button", { name: /Show developer tabs/i });
+
+    // Expand.
+    fireEvent.click(advBtn);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy());
+
+    // Collapse — advanced tabs gone, button label reverts.
+    const collapseBtn = screen.getByRole("button", { name: /Hide developer tabs/i });
+    fireEvent.click(collapseBtn);
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "Source" })).toBeNull());
+    expect(screen.queryByRole("tab", { name: "Versions" })).toBeNull();
   });
 });
 

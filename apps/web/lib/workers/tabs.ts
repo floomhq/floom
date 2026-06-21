@@ -26,3 +26,6 @@ export const SETUP_SUBTABS = [
 ] as const;
 
 export type SetupSubtab = (typeof SETUP_SUBTABS)[number];
+
+/** localStorage key — persists the Advanced disclosure open/closed state. */
+export const ADVANCED_MODE_STORAGE_KEY = "workeros:worker-advanced-open";
