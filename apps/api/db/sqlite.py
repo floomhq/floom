@@ -4658,7 +4658,7 @@ class SqliteAssetAccessRepository:
         )
 
     def rename_asset(
-        self, *, asset_type: str, old_asset_id: str, new_asset_id: str
+        self, *, asset_type: str, old_asset_id: str, new_asset_id: str, workspace_id: str
     ) -> dict[str, Any] | None:
         """Re-key an asset's access row from ``old_asset_id`` to ``new_asset_id``.
 
@@ -4672,8 +4672,16 @@ class SqliteAssetAccessRepository:
         place — visibility/owner/workspace ride along on the same row. ``name``
         tracks the id for packs, so it is rewritten to ``new_asset_id`` too.
 
-        Returns the moved row, or ``None`` when no source row exists (the caller
-        then materializes a fresh row). Never raises for a missing source.
+        Every statement is scoped to ``workspace_id``. Pack folders are
+        workspace-local (``CONTEXTS_DIR/<workspace>/<name>``), so a same-named
+        pack in another workspace is a DIFFERENT asset; an unscoped delete/re-key
+        would clobber that other workspace's owner/visibility mirror. Scoping
+        means the source must belong to ``workspace_id`` to move, and only a stale
+        destination row in the SAME workspace is cleared.
+
+        Returns the moved row, or ``None`` when no source row exists in that
+        workspace (the caller then materializes a fresh row). Never raises for a
+        missing source.
         """
         table = _ASSET_TABLES.get(asset_type)
         if table is None:
@@ -4681,18 +4689,22 @@ class SqliteAssetAccessRepository:
         now = now_iso()
         with get_db() as conn:
             src = conn.execute(
-                f"SELECT id FROM {table} WHERE id = ? LIMIT 1", (old_asset_id,)
+                f"SELECT id FROM {table} WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (old_asset_id, workspace_id),
             ).fetchone()
             if src is None:
                 return None
-            conn.execute(f"DELETE FROM {table} WHERE id = ?", (new_asset_id,))
             conn.execute(
-                f"UPDATE {table} SET id = ?, name = ?, updated_at = ? WHERE id = ?",
-                (new_asset_id, new_asset_id, now, old_asset_id),
+                f"DELETE FROM {table} WHERE id = ? AND workspace_id = ?",
+                (new_asset_id, workspace_id),
+            )
+            conn.execute(
+                f"UPDATE {table} SET id = ?, name = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+                (new_asset_id, new_asset_id, now, old_asset_id, workspace_id),
             )
             row = conn.execute(
-                f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ?",
-                (new_asset_id,),
+                f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ? AND workspace_id = ?",
+                (new_asset_id, workspace_id),
             ).fetchone()
         return _row_dict(row) if row else None
 

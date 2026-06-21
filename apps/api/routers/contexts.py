@@ -564,13 +564,18 @@ def rename_context(
     #     deleted/renamed shared folder) would keep ITS old visibility.
     # `rename_asset` deletes any destination row, then re-keys the source row, so
     # visibility/owner ride the same row and both leaks are closed in one step.
+    # Scope the move to the pack's workspace: pack ids are workspace-local, so an
+    # unscoped re-key would clobber a same-named pack's row in another workspace.
     owner_id = context_owner_id(new_name)
     asset_access = getattr(repos, "asset_access", None)
     moved_row = None
     if asset_access is not None and hasattr(asset_access, "rename_asset"):
         try:
             moved_row = asset_access.rename_asset(
-                asset_type="brain_pack", old_asset_id=safe_name, new_asset_id=new_name
+                asset_type="brain_pack",
+                old_asset_id=safe_name,
+                new_asset_id=new_name,
+                workspace_id=pack_workspace_id,
             )
         except Exception:
             logger.debug("rename_asset failed for %s -> %s", safe_name, new_name, exc_info=True)

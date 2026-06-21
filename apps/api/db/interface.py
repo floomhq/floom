@@ -650,11 +650,14 @@ class AssetAccessRepository(Protocol):
     ) -> RowDict | None: ...
 
     def rename_asset(
-        self, *, asset_type: str, old_asset_id: str, new_asset_id: str
+        self, *, asset_type: str, old_asset_id: str, new_asset_id: str, workspace_id: str
     ) -> RowDict | None:
         """Re-key an asset's access row (brain-pack rename moves its row, never
-        leaving a stale one behind). Returns the moved row, or ``None`` when no
-        source row exists. Deletes any row already at ``new_asset_id`` first."""
+        leaving a stale one behind). Scoped to ``workspace_id`` because pack
+        folders are workspace-local, so a same-named pack in another workspace is
+        a different asset and must not be touched. Returns the moved row, or
+        ``None`` when no source row exists in that workspace. Deletes any stale
+        row already at ``new_asset_id`` in the SAME workspace first."""
         ...
 
 
