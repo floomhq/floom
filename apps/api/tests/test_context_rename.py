@@ -131,6 +131,44 @@ def test_rename_does_not_leave_stale_shared_row_at_old_name(client):
     assert client.get("/contexts/facts").json()["visibility"] == "private"
 
 
+def test_rename_does_not_rehydrate_moved_source(client):
+    """#1813 P2: staging the rename's removed-source path in git must not
+    re-materialize the old pack via the hosted hydration hook.
+
+    `_git_commit_context_rename` resolves the OLD name's git path AFTER the
+    directory has been moved. If that resolution hydrates (the source dir is now
+    missing), a hosted hook would pull the old pack back from remote storage,
+    leaving the old folder present again and staging the wrong git state. The
+    rename path resolves the source git path with hydration suppressed.
+    """
+    import contexts as contexts_mod
+
+    calls: list[str] = []
+
+    def _hook(scope, name, dest):
+        # Mimic a real hosted hook: only pull packs that exist in remote storage.
+        # Here only the source pack "facts" is "stored remotely"; a name that has
+        # no remote copy (the new target) is left untouched so the precheck does
+        # not see a phantom folder.
+        if name != "facts":
+            return
+        calls.append(name)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "rehydrated.md").write_text("pulled from remote", encoding="utf-8")
+
+    contexts_mod.set_context_hydration_hook(_hook)
+    try:
+        resp = client.post("/contexts/facts/rename", json={"new_name": "renamed-facts"})
+        assert resp.status_code == 200, resp.text
+    finally:
+        contexts_mod.set_context_hydration_hook(None)
+
+    # The old name must NOT have been hydrated back into existence by the commit.
+    assert "facts" not in calls, f"old source was rehydrated during rename: {calls}"
+    assert client.get("/contexts/facts").status_code == 404
+    assert _names(client.get("/contexts/renamed-facts")) == {"top.md", "reports/q1.md"}
+
+
 def test_rename_blocks_on_other_owner_worker_in_workspace(client):
     """#1813 P2: the worker-reference scan must cover the whole workspace, not
     just the caller's own workers. A worker owned by a different user but mounting
