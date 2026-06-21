@@ -1196,7 +1196,11 @@ def _ensure_magic_link_secret() -> None:
     if os.environ.get("WORKEROS_MAGIC_LINK_SECRET", "").strip():
         return  # operator set an explicit key — honour it
 
-    service_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    service_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
     if not service_key:
         return  # no service key available — fall through to per-process fallback
 
@@ -1209,6 +1213,52 @@ def _ensure_magic_link_secret() -> None:
         hashlib.sha256,
     ).hexdigest()
     os.environ["WORKEROS_MAGIC_LINK_SECRET"] = derived
+
+
+def _ensure_approval_signing_secret() -> None:
+    """Derive a stable approval-share signing key from SUPABASE_SERVICE_ROLE_KEY.
+
+    Mirrors _ensure_magic_link_secret. The engine's
+    core.approval_signing._approval_signing_secret() resolves
+    WORKEROS_APPROVAL_SIGNING_SECRET -> FLOOM_SECRET -> None and FAILS CLOSED with
+    503 when none is set (#998 — never sign a public share token with a public
+    constant). In cloud, FLOOM_SECRET is deliberately stripped and
+    WORKEROS_APPROVAL_SIGNING_SECRET is typically unset, so every public
+    approval/review share-link mint 503'd — and because the approvals list/detail
+    serializer mints a link per row, GET /api/approvals 503'd the entire list
+    whenever any row was pending (#1716).
+
+    Derive a deterministic key so public approval/review links work in hosted mode
+    without an extra env var and survive restarts. Only runs when
+    WORKEROS_APPROVAL_SIGNING_SECRET is unset — an explicit env var always wins.
+
+    Derivation: HMAC-SHA256(SUPABASE_SERVICE_ROLE_KEY, "workeros-approval-signing-secret-v1")
+    Domain separation ("v1" suffix) keeps this key distinct from the magic-link
+    and worker-call keys derived from the same service-role secret. The service
+    key is read from SUPABASE_SERVICE_ROLE_KEY OR its WORKEROS_CLOUD_ alias, the
+    same way get_cloud_settings() resolves it — so an alias-only cloud deployment
+    still derives the key instead of silently leaving the engine fail-closed.
+    """
+    if os.environ.get("WORKEROS_APPROVAL_SIGNING_SECRET", "").strip():
+        return  # operator set an explicit key — honour it
+
+    service_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
+    if not service_key:
+        return  # no service key available — engine stays fail-closed (503)
+
+    import hashlib
+    import hmac as _hmac
+
+    derived = _hmac.new(
+        service_key.encode("utf-8"),
+        b"workeros-approval-signing-secret-v1",
+        hashlib.sha256,
+    ).hexdigest()
+    os.environ["WORKEROS_APPROVAL_SIGNING_SECRET"] = derived
 
 
 def _install_worker_call_signing_key() -> None:
@@ -1233,7 +1283,11 @@ def _install_worker_call_signing_key() -> None:
     Replaces the prior private-symbol monkeypatch of run_token._worker_call_
     signing_key now that #992 provides the public hook.
     """
-    service_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    service_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
     if not service_key:
         return  # no service key — leave the engine's fail-closed behaviour intact
 
@@ -1277,6 +1331,7 @@ def register_cloud_components() -> None:
     get_cloud_settings()
     ensure_secret_crypto_ready()
     _ensure_magic_link_secret()
+    _ensure_approval_signing_secret()
     _disable_postgrest_http2()
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)
