@@ -83,6 +83,12 @@ os.environ.setdefault(
     "FLOOM_WORKERS_DIR",
     _custom_wd or str(_Path(__file__).resolve().parents[2] / "engine" / "workers"),
 )
+# Capture a cloud-provided secret before any route import can import the engine.
+# The engine import can load a local OSS api.env; that fallback must not become
+# cloud auth state, but an explicit Railway value is needed for Slack state HMAC.
+_cloud_floom_secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+if _cloud_floom_secret:
+    os.environ["WORKEROS_SLACK_STATE_SECRET"] = _cloud_floom_secret
 
 from fastapi import FastAPI, HTTPException, Query, Request
 
