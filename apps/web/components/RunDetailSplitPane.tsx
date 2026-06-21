@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Copy, Check, Download, FileText, Pencil, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { Task } from "@/components/ai-elements/task";
 import { OutputRenderer } from "@/components/output-renderer";
 import { GenericOutput } from "@/components/generic-output";
 import { api } from "@/lib/api";
+import { capturePostHogEvent } from "@/lib/posthog";
 import { formatAbsolute } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import {
@@ -56,6 +57,19 @@ export function RunDetailSplitPane({
   onReplay,
   onCancel,
 }: Props) {
+  // INTENT: run detail opened. Fire once per distinct run_id (this pane
+  // re-renders on every stream tick).
+  const viewedRunId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!run?.id || viewedRunId.current === run.id) return;
+    viewedRunId.current = run.id;
+    capturePostHogEvent("run_viewed", {
+      run_id: run.id,
+      worker_id: run.worker_id,
+      status: run.status,
+    });
+  }, [run?.id, run?.worker_id, run?.status]);
+
   const transcriptParts = parts.length > 0 ? parts : partsFromRun(run);
   const timeline = buildTimeline(run, transcriptParts);
   const isActive = run.status === "running" || run.status === "queued";

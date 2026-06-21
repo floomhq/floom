@@ -3,6 +3,7 @@
 // raw fetch() calls are not auto-prefixed by basePath, so hosts can set
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy" without forking this client.
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
+import { captureIntentEvent } from "@/lib/posthog-intent";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
@@ -78,6 +79,17 @@ function withWorkspaceQuery(path: string): string {
 
 export function apiProxyPath(path: string, includeWorkspaceQuery = false): string {
   return `${API_BASE}${includeWorkspaceQuery ? withWorkspaceQuery(path) : path}`;
+}
+
+// Emit a client INTENT event, workspace-attributed. Outcomes (run_started /
+// worker_created / connection_added) are SERVER-only; this client emits intent
+// only (*_submitted / *_started / *_clicked). Server-safe: captureIntentEvent
+// no-ops outside the browser. See lib/posthog-intent.ts.
+function captureProductEvent(eventName: string, properties: Record<string, unknown> = {}) {
+  captureIntentEvent(eventName, {
+    workspace_id: getActiveWorkspaceId(),
+    ...properties,
+  });
 }
 
 async function fetchApi(path: string, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -319,6 +331,14 @@ export const api = {
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: async (id: string, inputs: Record<string, unknown>) => {
+      // INTENT: the user submitted a manual run. The authoritative run_started
+      // OUTCOME is emitted server-side (do NOT emit run_started here — it would
+      // double-count the server event).
+      captureProductEvent("run_create_submitted", {
+        worker_id: id,
+        trigger_source: "manual",
+        input_present: Object.keys(inputs || {}).length > 0,
+      });
       const result = await fetchJson<import("./types").ActionResponse>(`/workers/${id}/runs`, {
         method: "POST",
         body: JSON.stringify({ inputs, trigger_source: "manual" }),
@@ -329,6 +349,11 @@ export const api = {
       const worker = await fetchJson<import("./types").WorkerDetail>("/workers", {
         method: "POST",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
+      });
+      // INTENT only. Server emits the authoritative worker_created outcome.
+      captureProductEvent("worker_create_submitted", {
+        worker_id: worker.id,
+        creation_method: "source",
       });
       return worker;
     },
@@ -342,12 +367,33 @@ export const api = {
         method: "POST",
         body: JSON.stringify(params),
       });
+      // INTENT only. Server emits the authoritative worker_created outcome.
+      captureProductEvent("worker_create_submitted", {
+        worker_id: result.worker_id,
+        creation_method: "draft_and_create",
+        has_prompt: Boolean(params.prompt),
+        file_count: params.files?.length ?? 0,
+      });
       return result;
     },
     newFromPrompt: async (params: { prompt: string; mode?: "draft" | "create"; parent_worker_id?: string }) => {
       const result = await fetchJson<{ run_id: string; worker_id: string; status: string }>("/workers/new/from-prompt", {
         method: "POST",
         body: JSON.stringify(params),
+      });
+      // INTENT only (worker create + its first run). The server emits the
+      // authoritative worker_created and run_started outcomes — do NOT emit
+      // those here.
+      captureProductEvent("worker_create_submitted", {
+        worker_id: result.worker_id,
+        creation_method: "prompt",
+        mode: params.mode || "create",
+        parent_worker_id: params.parent_worker_id || undefined,
+      });
+      captureProductEvent("run_create_submitted", {
+        worker_id: result.worker_id,
+        trigger_source: "worker_author",
+        input_present: Boolean(params.prompt),
       });
       return result;
     },
@@ -370,6 +416,11 @@ export const api = {
         throw new Error(err);
       }
       const worker = await res.json() as import("./types").WorkerDetail;
+      // INTENT only. Server emits the authoritative worker_created outcome.
+      captureProductEvent("worker_create_submitted", {
+        worker_id: worker.id,
+        creation_method: "bundle",
+      });
       return worker;
     },
     update: async (id: string, worker_yml: string, run_py: string, skill_md?: string) => {
@@ -461,6 +512,12 @@ export const api = {
       editedOutput?: Record<string, unknown>,
       annotations?: import("./types").ApprovalAnnotations | null
     ) => {
+      // INTENT: user clicked approve. The authoritative approval_approved
+      // outcome is emitted server-side.
+      captureProductEvent("approval_action_clicked", {
+        run_id: id,
+        action: "approve",
+      });
       const result = await fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, {
         method: "POST",
         body: JSON.stringify({ edited_output: editedOutput ?? null, annotations: annotations ?? null }),
@@ -472,6 +529,12 @@ export const api = {
       reason?: string,
       annotations?: import("./types").ApprovalAnnotations | null
     ) => {
+      // INTENT: user clicked reject. The authoritative approval_rejected
+      // outcome is emitted server-side.
+      captureProductEvent("approval_action_clicked", {
+        run_id: id,
+        action: "reject",
+      });
       const result = await fetchJson<import("./types").ActionResponse>(`/runs/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null }),
@@ -479,6 +542,14 @@ export const api = {
       return result;
     },
     replay: async (workerId: string, runId: string) => {
+      // INTENT: user confirmed a replay. Named *_clicked (not *_replayed) so a
+      // failed replay POST is not recorded as a completed replay — the
+      // authoritative replayed run surfaces server-side as
+      // run_started(trigger_source="retry").
+      captureProductEvent("run_replay_clicked", {
+        worker_id: workerId,
+        run_id: runId,
+      });
       const result = await fetchJson<{ run_id: string }>(
         `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
         { method: "POST" }
@@ -516,6 +587,7 @@ export const api = {
       approvalId: string,
       annotations?: import("./types").ApprovalAnnotations | null
     ) => {
+      captureProductEvent("approval_action_clicked", { approval_id: approvalId, action: "approve" });
       const result = await fetchJson<{ status: string; executed: string; detail: string }>(
         `/approvals/${approvalId}/approve-action`,
         {
@@ -530,6 +602,7 @@ export const api = {
       reason?: string,
       annotations?: import("./types").ApprovalAnnotations | null
     ) => {
+      captureProductEvent("approval_action_clicked", { approval_id: approvalId, action: "reject" });
       const result = await fetchJson<{ status: string; path: string; reason?: string }>(
         `/approvals/${approvalId}/reject-action`,
         {
@@ -540,6 +613,7 @@ export const api = {
       return result;
     },
     approveAgentTool: async (approvalId: string, editedOutput?: Record<string, unknown>) => {
+      captureProductEvent("approval_action_clicked", { approval_id: approvalId, action: "approve" });
       const result = await fetchJson<import("./types").ActionResponse>(
         `/approvals/${approvalId}/approve`,
         {
@@ -550,6 +624,7 @@ export const api = {
       return result;
     },
     rejectAgentTool: async (approvalId: string, reason?: string) => {
+      captureProductEvent("approval_action_clicked", { approval_id: approvalId, action: "reject" });
       const result = await fetchJson<import("./types").ActionResponse>(
         `/approvals/${approvalId}/reject`,
         {
@@ -919,6 +994,12 @@ export const api = {
       return rows;
     },
     initiate: async (app_name: string) => {
+      // INTENT: user started adding a connection. The authoritative
+      // connection_added outcome is emitted server-side on OAuth completion.
+      captureProductEvent("connection_add_started", {
+        provider: app_name,
+        auth_kind: "composio",
+      });
       return fetchJson<import("./types").ConnectionInitResponse>("/connections", {
         method: "POST",
         body: JSON.stringify({ app_name }),
@@ -935,6 +1016,13 @@ export const api = {
       auth_secret?: string | null;
       allowed_tools?: string[];
     }) => {
+      // INTENT: user started adding an MCP connection. Server emits the
+      // authoritative connection_added outcome.
+      captureProductEvent("connection_add_started", {
+        provider: payload.label,
+        auth_kind: "mcp",
+        transport: payload.transport,
+      });
       const connection = await fetchJson<import("./types").ConnectionItem>("/connections/mcp", {
         method: "POST",
         body: JSON.stringify(payload),

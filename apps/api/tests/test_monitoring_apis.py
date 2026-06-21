@@ -237,6 +237,50 @@ class TestWorkerStats:
         body = resp.json()
         assert body["last_error"] is not None
 
+    def test_stuck_run_does_not_poison_avg_duration(self, client_and_repos):
+        """A single orphaned 14.5h run must be excluded from avg/p95 (REL-DUR)."""
+        client, repos = client_and_repos
+        # Five normal runs (~2s each) + one stuck run (~14.5h, like the live
+        # run_ee90e0db5937 = 52431881 ms).
+        import uuid
+        for ms in (1000, 1500, 2000, 2500, 3000):
+            repos.runs.create(
+                user_id=_USER_ID,
+                run_id=f"run_{uuid.uuid4().hex[:12]}",
+                worker_id=_WORKER_ID,
+                trigger_source="manual",
+                status="completed",
+                runner="e2b",
+                duration_ms=ms,
+            )
+        repos.runs.create(
+            user_id=_USER_ID,
+            run_id=f"run_{uuid.uuid4().hex[:12]}",
+            worker_id=_WORKER_ID,
+            trigger_source="manual",
+            status="failed",
+            runner="e2b",
+            error="Agent run exceeded timeout of 300s",
+            duration_ms=52_431_881,
+        )
+        body = client.get(f"/workers/{_WORKER_ID}/stats").json()
+        # The poisoned mean would be > 8 million ms; the honest one is small.
+        assert body["avg_duration_ms"] is not None
+        assert body["avg_duration_ms"] < 10_000
+        assert body["p95_duration_ms"] < 10_000
+        assert body["median_duration_ms"] is not None
+        assert body["duration_outliers_excluded"] >= 1
+
+    def test_failures_by_category_is_present(self, client_and_repos):
+        client, repos = client_and_repos
+        _create_run(client, status="failed", error="Agent run exceeded timeout of 300s")
+        _create_run(client, status="failed", error="Server disconnected")
+        body = client.get(f"/workers/{_WORKER_ID}/stats").json()
+        assert "failures_by_category" in body
+        cats = body["failures_by_category"]
+        assert cats.get("timeout", 0) >= 1
+        assert cats.get("crash", 0) >= 1
+
 
 # ---------------------------------------------------------------------------
 # GET /workers/{id}/logs

@@ -144,6 +144,50 @@ class TestRunDetailCost:
         # response_model_exclude_none=True drops a None field entirely.
         assert body.get("total_cost_usd") is None
 
+    def test_repo_update_persists_tokens_and_cost(self, client_main):
+        """The bug #2 fix: cost persistence routes through repos.runs.update so
+        it lands in whatever backend the deployment uses (sqlite OR cloud
+        Supabase). Previously the raw get_db() write missed the cloud entirely.
+        """
+        import importlib
+
+        client, _ = client_main
+        assert (
+            client.post("/workers", json={"worker_yml": _yml("costworker3"), "run_py": "print(1)"}).status_code
+            == 200
+        )
+        _seed_run("costworker3", "run_cost_repo", total_cost_usd=None)
+
+        db = importlib.import_module("db")
+        repos = db.get_repositories()
+        # Resolve the worker owner so the repo's ownership-scoped update applies.
+        from db import get_db
+
+        with get_db() as conn:
+            owner_id = conn.execute(
+                "SELECT owner_id FROM workers WHERE id = ?", ("costworker3",)
+            ).fetchone()[0]
+
+        # Mirror what _persist_run_cost now does at terminal status.
+        repos.runs.update(
+            user_id=owner_id,
+            run_id="run_cost_repo",
+            total_tokens=12345,
+            total_cost_usd=0.0617,
+        )
+
+        # Ground truth: the columns were written by the repo update path. (The
+        # runs SELECT exposes total_cost_usd via the model; total_tokens is read
+        # from the transcript at request time, so assert the stored columns
+        # directly here.)
+        with get_db() as conn:
+            stored = conn.execute(
+                "SELECT total_tokens, total_cost_usd FROM runs WHERE id = ?",
+                ("run_cost_repo",),
+            ).fetchone()
+        assert stored["total_tokens"] == 12345
+        assert stored["total_cost_usd"] == pytest.approx(0.0617)
+
 
 # --------------------------------------------------------------------------- #
 # BE-NEXTRUN: WorkerDetail.next_run_at / last_fired_at

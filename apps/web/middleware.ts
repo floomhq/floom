@@ -155,10 +155,17 @@ function isCsrfSafe(req: NextRequest): boolean {
 // #926 — per-request nonce CSP. script-src drops 'unsafe-inline' and the broad
 // https: allowance; 'strict-dynamic' lets nonce'd Next bootstrap scripts load
 // their chunk graph. connect-src is same-origin (client API calls go through
-// /api/proxy); CSP_EXTRA_CONNECT_SRC is the documented seam for self-hosted
-// instances that talk to a cross-origin API from the browser. style-src keeps
-// 'unsafe-inline' (Next/Tailwind inline styles; explicitly acceptable per the
-// audit). img/font keep https: for remote logos/fonts — they cannot execute.
+// /api/proxy). PostHog needs NO connect-src entry: ingestion is same-origin via
+// the /ingest/* reverse proxy (next.config.ts), so 'self' covers it and the
+// session-replay recorder loads as a nonce'd 'strict-dynamic' script from the
+// same origin. This SUPERSEDES the earlier #1724 plan to allowlist
+// us.i.posthog.com / us-assets.i.posthog.com via CSP_EXTRA_CONNECT_SRC — the
+// proxy is the preferred path (same-origin + ad-blocker resistant), so no
+// PostHog domain belongs in connect-src. CSP_EXTRA_CONNECT_SRC remains the
+// documented seam for self-hosted instances that talk to a genuinely
+// cross-origin API from the browser (it is NOT needed for PostHog). style-src
+// keeps 'unsafe-inline' (Next/Tailwind inline styles; explicitly acceptable per
+// the audit). img/font keep https: for remote logos/fonts — they cannot execute.
 export function buildCsp(nonce: string): string {
   const isDev = process.env.NODE_ENV === "development";
   const extraConnect = (process.env.CSP_EXTRA_CONNECT_SRC || "").trim();
@@ -277,8 +284,14 @@ export async function middleware(req: NextRequest) {
 // Run on everything EXCEPT Next internals and common static assets. The matcher
 // keeps the middleware off the static pipeline (favicon, _next, images, fonts),
 // which both avoids redirect loops on assets and keeps it fast.
+//
+// `ingest` is excluded too: it is the PostHog first-party reverse proxy
+// (next.config.ts rewrites /ingest/* -> PostHog). Those requests are anonymous
+// telemetry POSTs from logged-out and logged-in visitors alike — they must NOT
+// be auth-redirected to /login, CSRF-blocked, or have a CSP nonce injected.
+// Letting the rewrite forward them untouched is both correct and faster.
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico|woff|woff2|ttf|otf|css|js|map)$).*)",
+    "/((?!ingest|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico|woff|woff2|ttf|otf|css|js|map)$).*)",
   ],
 };
