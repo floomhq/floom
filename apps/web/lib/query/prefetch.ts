@@ -97,13 +97,41 @@ export function prefetchRouteData(qc: QueryClient, href: string): void {
   void fn(qc);
 }
 
+// The primary tabs whose data we warm eagerly on shell mount. Ordered by how
+// likely the operator is to open them, but all fire in parallel.
+const MAIN_ROUTES = ["/overview", "/workers", "/runs", "/connections", "/library"] as const;
+
 /**
- * After first paint, warm the highest-value next routes once when the browser
+ * Eagerly warm every main route's data the moment the authed shell mounts, in
+ * PARALLEL — do NOT wait for idle. Within ~1s of landing every primary tab's
+ * cache entry is populated, so the first tab switch hits the cache and is
+ * instant instead of losing the race to the ~0.68s backend query.
+ *
+ * Safe to fire as a burst: each call is `prefetchRouteData` →
+ * `qc.prefetchQuery`, which is cache-first and respects the 30s staleTime, so
+ * a route already hydrated from the persisted localStorage cache (or warmed by
+ * a hover) is a no-op — no duplicate network call, no thundering herd. We skip
+ * the current route since its own hook already owns that fetch.
+ *
+ * ~5 routes is a small, bounded burst; cache-first dedup keeps it from
+ * hammering the backend on revisits.
+ */
+export function prefetchMainRoutesEager(qc: QueryClient, current: string): void {
+  if (typeof window === "undefined") return;
+  for (const href of MAIN_ROUTES) {
+    if (href === current) continue;
+    prefetchRouteData(qc, href);
+  }
+}
+
+/**
+ * After the eager burst, warm the remaining secondary routes once the browser
  * is idle. Conservative: each is a single cache-first prefetch (no-op if the
- * persisted cache already restored a fresh entry), no polling, no refetch loop.
+ * persisted cache or the eager burst already populated a fresh entry), no
+ * polling, no refetch loop.
  */
 export function prefetchIdleRoutes(qc: QueryClient, current: string): void {
-  const targets = ["/workers", "/connections", "/approvals", "/library"].filter((href) => href !== current);
+  const targets = ["/approvals"].filter((href) => href !== current);
   const run = () => targets.forEach((href) => prefetchRouteData(qc, href));
   if (typeof window === "undefined") return;
   const ric = (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;

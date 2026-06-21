@@ -12,7 +12,7 @@ import { openCommandPalette } from "@/components/CommandPalette";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { useQueryClient } from "@tanstack/react-query";
-import { prefetchRouteData, prefetchIdleRoutes } from "@/lib/query/prefetch";
+import { prefetchRouteData, prefetchIdleRoutes, prefetchMainRoutesEager } from "@/lib/query/prefetch";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
@@ -181,6 +181,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
             href={item.href}
             prefetch
             onMouseEnter={() => warm(item.href)}
+            onPointerDown={() => warm(item.href)}
             onFocus={() => warm(item.href)}
             onClick={onNavigate}
             title={item.hint}
@@ -331,9 +332,13 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
     router.prefetch(href);
   };
   useEffect(() => {
+    // Warm ALL main routes' data immediately (parallel, cache-first/idempotent)
+    // so the first tab switch hits the cache = instant; then warm the remaining
+    // secondary routes on idle. Run once after mount; pathname/queryClient are
+    // stable enough for a one-shot warm (re-running on every nav would be a
+    // refetch storm).
+    prefetchMainRoutesEager(queryClient, pathname);
     prefetchIdleRoutes(queryClient, pathname);
-    // Run once after mount; pathname/queryClient are stable enough for a
-    // one-shot idle warm (re-running on every nav would be a refetch storm).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -442,6 +447,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                   href={item.href}
                   prefetch
                   onMouseEnter={() => warm(item.href)}
+                  onPointerDown={() => warm(item.href)}
                   onFocus={() => warm(item.href)}
                   title={item.label}
                   className={cn(
