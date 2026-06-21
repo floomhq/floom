@@ -5,6 +5,7 @@ import {
   resolveLoginApiBase,
 } from "../lib/api.js";
 import { promptYesNo } from "../lib/prompt.js";
+import { getCommandName } from "../lib/command-name.js";
 import { log } from "../lib/output.js";
 import {
   writeCredentials,
@@ -219,7 +220,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
         log.kv("API", polled.api_base);
         log.kv("Token saved to", credentialsPath());
         log.blank();
-        log.info("Try: floom workers list");
+        log.info(`Try: ${getCommandName()} workers list`);
         return 0;
       }
       await sleep(started.polling_interval_seconds * 1000);
@@ -227,12 +228,12 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
       if (error instanceof FloomApiError) {
         if (error.status === 403) {
           log.err("CLI authorization was denied.");
-          log.info("Run: floom login to try again");
+          log.info(`Run: ${getCommandName()} login to try again`);
           return 1;
         }
         if (error.status === 410) {
           log.err("Device code expired before approval.");
-          log.info("Run: floom login to start a new session");
+          log.info(`Run: ${getCommandName()} login to start a new session`);
           return 1;
         }
         if (error.status === 404) {
@@ -243,7 +244,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
             continue;
           }
           log.err("Device code not found.");
-          log.info("Run: floom login to start a new session");
+          log.info(`Run: ${getCommandName()} login to start a new session`);
           return 1;
         }
         if (error.status === 409 && isCloud) {
@@ -264,7 +265,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
     }
   }
   log.err("Timed out waiting for CLI approval.");
-  log.info("Run: floom login to try again");
+  log.info(`Run: ${getCommandName()} login to try again`);
   return 1;
 }
 
@@ -339,9 +340,9 @@ async function saveCloudCredentials(creds: StoredCredentials, apiBase: string): 
   log.kv("Token saved to", credentialsPath());
   log.blank();
   if (workspace) {
-    log.info("Tip: run `floom workers list` to inspect this workspace.");
+    log.info(`Tip: run \`${getCommandName()} workers list\` to inspect this workspace.`);
   } else {
-    log.info("Tip: run `floom workspaces list` to pick a workspace.");
+    log.info(`Tip: run \`${getCommandName()} workspaces list\` to pick a workspace.`);
   }
   return 0;
 }
