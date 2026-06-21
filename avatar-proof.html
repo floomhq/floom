@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+:root{--bg:#0E0F12;--card:#15171c;--ink:#F4F5F7;--mute:#9aa0aa;--line:#23262d;--radius-squircle:9px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font-family:-apple-system,system-ui,sans-serif;color:var(--ink);padding:46px}
+h1{font-size:23px;font-weight:650;letter-spacing:-.02em;margin:0 0 6px}
+.sub{font-size:13px;color:var(--mute);margin:0 0 34px;max-width:720px;line-height:1.5}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--mute);margin:36px 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:30px 40px;width:max-content}
+.three{display:flex;gap:54px}
+.slot{display:flex;flex-direction:column;align-items:center;gap:11px;width:140px}
+.role{font-size:14px;font-weight:600}
+.shape{font-size:11px;color:var(--mute);text-align:center;line-height:1.4}
+.shape b{color:#8fb0ff}
+.grid{display:flex;gap:16px;flex-wrap:wrap;max-width:760px}
+.gi{display:flex;flex-direction:column;align-items:center;gap:6px}
+.gi small{font-size:10px;color:var(--mute)}
+.label{font-size:11px;color:var(--mute);margin-top:4px;text-align:center}
+</style>
+</head>
+<body>
+<h1>GenerativeAvatar proof — same algorithm as gensys.html</h1>
+<p class="sub">Deterministic SVG-based avatars, SSR-safe. Same three entities, same palettes, same shapes as the approved gensys.html design.</p>
+
+<h2>The three entities</h2>
+<div class="card">
+<div class="three">
+  <div class="slot">
+    <div id="workspace"></div>
+    <div class="role">Workspace</div>
+    <div class="shape"><b>squircle</b><br>"Nova Search"</div>
+  </div>
+  <div class="slot">
+    <div id="user"></div>
+    <div class="role">You</div>
+    <div class="shape"><b>circle</b><br>"Federico De Ponte"</div>
+  </div>
+  <div class="slot">
+    <div id="emily"></div>
+    <div class="role">Emily</div>
+    <div class="shape"><b>squircle</b><br>blue · product accent<br>pinned palette</div>
+  </div>
+</div>
+</div>
+
+<h2>Unique per name — proof it scales</h2>
+<div class="grid" id="grid"></div>
+
+<script>
+// EXACT algorithm from gensys.html
+function hash(s){let h=0;for(let i=0;i<s.length;i++){h=(h<<5)-h+s.charCodeAt(i);h|=0}return Math.abs(h)}
+const PAL=[["#6D5DF6","#22D3EE","#F472B6"],["#F59E0B","#EF4444","#8B5CF6"],["#10B981","#3B82F6","#A3E635"],["#FB7185","#FBBF24","#34D399"],["#3E6FE0","#9333EA","#06B6D4"],["#EC4899","#8B5CF6","#3B82F6"]];
+
+function makeSVG(seed, shape, size, fixedPal) {
+  const h = hash(seed);
+  const pal = fixedPal ? fixedPal : PAL[h % PAL.length];
+  const uid = 'ga-' + (h >>> 0).toString(36);
+  const clipId = uid+'-clip';
+  const filterId = uid+'-blur';
+  const gradId = uid+'-g';
+  const V = 100;
+  const blur = V * 0.22;
+  const R = shape === 'circ' ? V/2 : V*0.27;
+
+  let clipD;
+  if (shape === 'circ') {
+    clipD = `M ${V/2} 0 A ${V/2} ${V/2} 0 1 0 ${V/2} ${V} A ${V/2} ${V/2} 0 1 0 ${V/2} 0 Z`;
+  } else {
+    clipD = `M ${R} 0 L ${V-R} 0 Q ${V} 0 ${V} ${R} L ${V} ${V-R} Q ${V} ${V} ${V-R} ${V} L ${R} ${V} Q 0 ${V} 0 ${V-R} L 0 ${R} Q 0 0 ${R} 0 Z`;
+  }
+
+  let ellipsesHTML = '';
+  for (let i = 0; i < 3; i++) {
+    const hx = hash(seed + i);
+    const cx = (hx % 100) / 100 * V;
+    const cy = ((hx >> 7) % 100) / 100 * V;
+    const rx = V * 0.5;
+    const ry = V * 0.42;
+    const deg = hx % 360;
+    const color = pal[(hx >> 3) % pal.length];
+    ellipsesHTML += `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${color}" filter="url(#${filterId})" transform="rotate(${deg} ${cx} ${cy})"/>`;
+  }
+
+  const borderRadius = shape === 'circ' ? '9999px' : 'var(--radius-squircle)';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${V} ${V}" width="${size}" height="${size}" style="display:block;flex-shrink:0;border-radius:${borderRadius}" aria-hidden="true">
+  <defs>
+    <filter id="${filterId}" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="${blur}"/>
+    </filter>
+    <clipPath id="${clipId}"><path d="${clipD}"/></clipPath>
+    <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="rgba(255,255,255,0.22)"/>
+      <stop offset="0.5" stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#${clipId})">
+    <rect x="0" y="0" width="${V}" height="${V}" fill="${pal[0]}"/>
+    ${ellipsesHTML}
+    <rect x="0" y="0" width="${V}" height="${V}" fill="url(#${gradId})"/>
+  </g>
+</svg>`;
+}
+
+document.getElementById('workspace').innerHTML = makeSVG('Nova Search', 'sq', 76, null);
+document.getElementById('user').innerHTML = makeSVG('Federico De Ponte', 'circ', 76, null);
+document.getElementById('emily').innerHTML = makeSVG('Emily', 'sq', 76, ['#3E6FE0','#22D3EE','#6D5DF6']);
+
+const names = ["Acme Robotics","Lighthouse Capital","Verdant","Kontor","Bluefin Labs","Atlas Freight","Mira Health","Northwind"];
+const grid = document.getElementById('grid');
+names.forEach(n => {
+  const w = document.createElement('div');
+  w.className = 'gi';
+  w.innerHTML = makeSVG(n, 'sq', 56, null) + `<small>${n}</small>`;
+  grid.appendChild(w);
+});
+</script>
+</body>
+</html>
