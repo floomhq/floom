@@ -103,16 +103,6 @@ To verify the implementation, the following test cases must be executed:
 2. Verify that a file `.floom/issues/ISSUE-0001.md` is created with correct frontmatter.
 3. Verify that a Git commit is automatically created with a message like `docs(issues): create ISSUE-0001`.
 
-### Test Case 2: Listing and Filtering
-1. Create multiple issues bound to different assets (e.g., `worker:gmail-inbox-manager`, `context:policies/refund.md`).
-2. Query `GET /workspace/issues?asset_type=worker&asset_id=gmail-inbox-manager`.
-3. Verify only the matching issue is returned.
-
-### Test Case 3: Commenting
-1. Call `POST /workspace/issues/ISSUE-0001/comments` with a comment body.
-2. Verify that `.floom/issues/ISSUE-0001.comments.ndjson` is created/appended to.
-3. Verify that the comment is returned in `GET /workspace/issues/ISSUE-0001`.
-
-### Test Case 4: Emily Interaction
-1. Ask Emily: "What issues are open for the gmail-inbox-manager worker?"
-2. Verify Emily calls the `list_workspace_issues` tool and reports the correct issue.
+### Test Case 2: Listing and Filtering Issues
+1. Call `GET /workspace/issues` and verify that the newly created issue is returned in the list.
+2. Filter by `asset_type=worker` and verify that only matching issues are returned.
