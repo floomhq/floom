@@ -199,3 +199,6 @@ Phase 6 — Multi-tenant cron + webhooks
 ## License
 
 Private. Floom internal.
+
+## Hosting & worker storage (read before touching cloud workers/deploys)
+workeros.floom.dev = CLOUD = **Railway** backend (manual `railway up`) + Vercel frontend. workers.floom.dev = OSS = AX41. Cloud workers are stored portably in Supabase `_files` (never a disk path). Full model: [docs/CLOUD-WORKER-STORAGE-MODEL.md](docs/CLOUD-WORKER-STORAGE-MODEL.md).
