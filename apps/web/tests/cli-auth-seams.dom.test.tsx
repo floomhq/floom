@@ -77,6 +77,46 @@ describe("CLI auth seams", () => {
     expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
   });
 
+  it("bounces to login (preserving the code) on a 401 instead of dead-ending (#1789)", async () => {
+    const assign = vi.fn();
+    const realLocation = window.location;
+    // jsdom navigation is a no-op that warns; swap in a location stub so we can
+    // assert the login bounce target without triggering navigation.
+    Object.defineProperty(window, "location", {
+      value: { pathname: "/cli-auth", search: "?code=ABCD-2345", assign },
+      configurable: true,
+      writable: true,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: "unauthorized" }),
+      })
+    );
+    render(<CliAuthContent />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith(
+        "/login?next=%2Fcli-auth%3Fcode%3DABCD-2345"
+      );
+    });
+    // The dead-end "unauthorized" error text is NEVER shown; the page shows the
+    // redirect interstitial instead.
+    expect(screen.queryByText("unauthorized")).toBeNull();
+    expect(screen.getByText("Sign in to continue")).toBeInTheDocument();
+
+    Object.defineProperty(window, "location", {
+      value: realLocation,
+      configurable: true,
+      writable: true,
+    });
+  });
+
   it("surfaces an error and stays on the idle action state for retry", async () => {
     vi.stubGlobal(
       "fetch",

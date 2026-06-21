@@ -113,6 +113,18 @@ describe("middleware auth gate", () => {
     expect(location).toContain("next=%2Fconnections");
   });
 
+  it("redirects an anonymous /cli-auth approval page to /login, preserving the code (#1789)", async () => {
+    // The CLI device-approval page must NEVER dead-end on "unauthorized": an
+    // unauthenticated visitor is bounced to login with the full path+code
+    // preserved in `next`, so login returns them to the approval screen.
+    const { proxy: middleware } = await import("@/proxy");
+    const res = await middleware(req("/cli-auth?code=ABCD-2345"));
+    expect(res.status).toBe(307);
+    const location = res.headers.get("location")!;
+    expect(location).toContain("/login");
+    expect(location).toContain("next=%2Fcli-auth%3Fcode%3DABCD-2345");
+  });
+
   it("keeps public pages reachable without login", async () => {
     const { proxy: middleware } = await import("@/proxy");
     for (const p of ["/login", "/connections/callback?status=success", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {

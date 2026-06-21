@@ -17,11 +17,32 @@ export type CliAuthContentProps = {
 
 // Explicit state machine. A terminal state (approved/denied) NEVER renders the
 // action buttons, the security warning, or the code-confirm prompt — only a
-// calm "return to your terminal" / "access denied" panel.
-type AuthState = "idle" | "approving" | "denying" | "approved" | "denied" | "error";
+// calm "return to your terminal" / "access denied" panel. "redirecting" is the
+// brief state while we bounce an unauthenticated visitor to login (#1789).
+type AuthState =
+  | "idle"
+  | "approving"
+  | "denying"
+  | "approved"
+  | "denied"
+  | "error"
+  | "redirecting";
 
 function cliAuthEndpoint(endpointBase: string, action: "approve" | "deny") {
   return `${endpointBase.replace(/\/$/, "")}/${action}`;
+}
+
+// #1789: when the browser session is missing/expired the approve/deny call
+// comes back 401. Instead of dead-ending on a bare "unauthorized", bounce to
+// login and come straight back to this approval screen with the code preserved.
+// The app base path (e.g. "/app" on cloud, "" on the OSS single-tenant build)
+// is derived from where this page is mounted so the bounce stays inside the
+// same deployment.
+function loginRedirectHref(): string {
+  const { pathname, search } = window.location;
+  const next = pathname + search;
+  const base = pathname.replace(/\/cli-auth\/?$/, "");
+  return `${base}/login?next=${encodeURIComponent(next)}`;
 }
 
 export default function CliAuthPage() {
@@ -56,6 +77,13 @@ export function CliAuthContent({
         },
         body: JSON.stringify({ user_code: code }),
       });
+      if (response.status === 401) {
+        // Not signed in (or session expired): never dead-end on "unauthorized".
+        // Bounce to login, preserving the code so the user lands back here.
+        setState("redirecting");
+        window.location.assign(loginRedirectHref());
+        return;
+      }
       const body = (await response.json().catch(() => ({}))) as { detail?: string };
       if (!response.ok) {
         setErrorText(body.detail || "Authorization failed");
@@ -86,6 +114,13 @@ export function CliAuthContent({
 
           {(state === "approved" || state === "denied") ? (
             <TerminalState kind={state} />
+          ) : state === "redirecting" ? (
+            <div className="py-2">
+              <h1 className="text-xl font-semibold tracking-tight">Sign in to continue</h1>
+              <p className="mt-1.5 text-sm text-[var(--muted-text)]">
+                Taking you to sign in, then back to this approval...
+              </p>
+            </div>
           ) : (
             <>
               <h1 className="text-xl font-semibold tracking-tight">Authorize CLI</h1>
