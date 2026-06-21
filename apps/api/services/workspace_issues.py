@@ -11,11 +11,8 @@ Layout, relative to the git workspace root (services.git_service._git_workspace)
   .floom/issues/ISSUE-0001.comments.ndjson — append-only comment log (NDJSON)
 
 Because every workspace has its own git root, the issue id namespace is
-per-workspace. Issues ride the git source of truth, so a git remote clone/push
-and the cloud bundle flow preserve them automatically (same git path as every
-other workspace asset). The curated ``/workspace/export`` + ``/workspace/import``
-template bundle is an allow-list, not a raw git copy, so it preserves issues
-explicitly via ``iter_issue_export_files()`` / ``restore_issue_files()`` below.
+per-workspace and is preserved through workspace export/import and the cloud
+bundle flow automatically (same git path as every other workspace asset).
 
 This module is intentionally dependency-light: it imports git_ops and the
 git_service resolution/commit helpers lazily, never ``main``, so it stays
@@ -147,10 +144,6 @@ def _validate_asset_binding(
     return asset_type, asset_id
 
 
-def _optional_str_or_none(value: Any) -> bool:
-    return value is None or isinstance(value, str)
-
-
 def _issue_to_dict(meta: Dict[str, Any], body: str, comment_count: int) -> Dict[str, Any]:
     return {
         "id": str(meta.get("id") or ""),
@@ -172,25 +165,20 @@ def _issue_to_dict(meta: Dict[str, Any], body: str, comment_count: int) -> Dict[
 # Git commit helper
 # ---------------------------------------------------------------------------
 
-def _commit_paths_locked(
+def _commit_paths(
     workspace: Path,
     rel_paths: List[str],
     message: str,
     author_name: str,
     author_email: str,
 ) -> None:
-    """Commit + background push. Caller MUST already hold ``_git_ops_lock``.
-
-    Used by the read-modify-write paths (update/comment) so the load, write and
-    commit happen under a single lock acquisition and cannot lose updates to a
-    concurrent mutation of the same issue.
-    """
     import git_ops as _git_ops
-    from services.git_service import _ensure_git_workspace_ready
+    from services.git_service import _ensure_git_workspace_ready, _git_ops_lock
 
-    _ensure_git_workspace_ready(workspace)
-    _git_ops.commit_paths(workspace, rel_paths, message, author_name, author_email)
-    _git_ops.push_background(workspace)
+    with _git_ops_lock:
+        _ensure_git_workspace_ready(workspace)
+        _git_ops.commit_paths(workspace, rel_paths, message, author_name, author_email)
+        _git_ops.push_background(workspace)
 
 
 def _next_issue_id(issues_dir: Path) -> str:
@@ -358,57 +346,50 @@ def update_issue(
     author_email: str = "workeros@local",
 ) -> Dict[str, Any]:
     from db import now_iso
-    from services.git_service import _git_ops_lock, _git_workspace
+    from services.git_service import _git_workspace
 
     issue_id = _validate_issue_id(issue_id)
     workspace = _git_workspace()
+    meta, current_body = _load_issue(workspace, issue_id)
 
-    # Validate status before taking the lock so bad input fails fast.
+    if title is not None:
+        new_title = title.strip()
+        if not new_title:
+            raise IssueError("title cannot be empty")
+        meta["title"] = new_title
     if status is not None:
         status = status.strip()
         if status not in ISSUE_STATUSES:
             raise IssueError(
                 f"Invalid status {status!r} (expected one of {', '.join(ISSUE_STATUSES)})"
             )
+        meta["status"] = status
+    if labels is not None:
+        meta["labels"] = _normalize_labels(labels)
+    if clear_asset:
+        meta["asset_type"] = None
+        meta["asset_id"] = None
+    elif asset_type is not None or asset_id is not None:
+        bound_type, bound_id = _validate_asset_binding(asset_type, asset_id)
+        meta["asset_type"] = bound_type
+        meta["asset_id"] = bound_id
+    if body is not None:
+        current_body = body
 
-    # Hold the lock across load/modify/write/commit so a concurrent mutation of
-    # the same issue cannot read stale frontmatter and clobber an earlier change
-    # (e.g. a comment racing with a close must not restore status: open).
-    with _git_ops_lock:
-        meta, current_body = _load_issue(workspace, issue_id)
+    meta["updated_at"] = now_iso()
+    md_path = workspace / _issue_md_rel(issue_id)
+    md_path.write_text(_serialize_issue(meta, current_body), encoding="utf-8")
+    _commit_paths(
+        workspace,
+        [_issue_md_rel(issue_id)],
+        f"issues: update {issue_id}",
+        author_name,
+        author_email,
+    )
 
-        if title is not None:
-            new_title = title.strip()
-            if not new_title:
-                raise IssueError("title cannot be empty")
-            meta["title"] = new_title
-        if status is not None:
-            meta["status"] = status
-        if labels is not None:
-            meta["labels"] = _normalize_labels(labels)
-        if clear_asset:
-            meta["asset_type"] = None
-            meta["asset_id"] = None
-        elif asset_type is not None or asset_id is not None:
-            bound_type, bound_id = _validate_asset_binding(asset_type, asset_id)
-            meta["asset_type"] = bound_type
-            meta["asset_id"] = bound_id
-        if body is not None:
-            current_body = body
-
-        meta["updated_at"] = now_iso()
-        md_path = workspace / _issue_md_rel(issue_id)
-        md_path.write_text(_serialize_issue(meta, current_body), encoding="utf-8")
-        _commit_paths_locked(
-            workspace,
-            [_issue_md_rel(issue_id)],
-            f"issues: update {issue_id}",
-            author_name,
-            author_email,
-        )
-        comment_count = len(_read_comments(workspace, issue_id))
-
-    return _issue_to_dict(meta, current_body.strip(), comment_count)
+    return _issue_to_dict(
+        meta, current_body.strip(), len(_read_comments(workspace, issue_id))
+    )
 
 
 def close_issue(
@@ -436,7 +417,7 @@ def add_comment(
     author_email: str = "workeros@local",
 ) -> Dict[str, Any]:
     from db import now_iso
-    from services.git_service import _git_ops_lock, _git_workspace
+    from services.git_service import _git_workspace
 
     issue_id = _validate_issue_id(issue_id)
     body = (body or "").strip()
@@ -444,238 +425,28 @@ def add_comment(
         raise IssueError("comment body is required")
 
     workspace = _git_workspace()
+    meta, issue_body = _load_issue(workspace, issue_id)
 
-    # Hold the lock across load/append/touch/commit so the issue's updated_at
-    # touch cannot clobber a concurrent update of the same issue's frontmatter.
-    with _git_ops_lock:
-        meta, issue_body = _load_issue(workspace, issue_id)
+    comment = {
+        "id": f"cmt_{secrets.token_hex(8)}",
+        "body": body,
+        "created_by": created_by,
+        "created_at": now_iso(),
+    }
+    comments_path = workspace / _issue_comments_rel(issue_id)
+    with comments_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(comment, ensure_ascii=False) + "\n")
 
-        comment = {
-            "id": f"cmt_{secrets.token_hex(8)}",
-            "body": body,
-            "created_by": created_by,
-            "created_at": now_iso(),
-        }
-        comments_path = workspace / _issue_comments_rel(issue_id)
-        with comments_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(comment, ensure_ascii=False) + "\n")
+    # Touch the issue so updated_at reflects the new activity.
+    meta["updated_at"] = comment["created_at"]
+    md_path = workspace / _issue_md_rel(issue_id)
+    md_path.write_text(_serialize_issue(meta, issue_body), encoding="utf-8")
 
-        # Touch the issue so updated_at reflects the new activity.
-        meta["updated_at"] = comment["created_at"]
-        md_path = workspace / _issue_md_rel(issue_id)
-        md_path.write_text(_serialize_issue(meta, issue_body), encoding="utf-8")
-
-        _commit_paths_locked(
-            workspace,
-            [_issue_comments_rel(issue_id), _issue_md_rel(issue_id)],
-            f"issues: comment on {issue_id}",
-            author_name,
-            author_email,
-        )
+    _commit_paths(
+        workspace,
+        [_issue_comments_rel(issue_id), _issue_md_rel(issue_id)],
+        f"issues: comment on {issue_id}",
+        author_name,
+        author_email,
+    )
     return comment
-
-
-# ---------------------------------------------------------------------------
-# Workspace template export / import
-#
-# The curated ``/workspace/export`` zip and ``/workspace/import`` restore path
-# are an explicit allow-list (workers, contexts, workspace config), NOT a raw
-# git copy, so issues would be silently dropped without these helpers. They keep
-# the bundle round-trip honest: export emits every issue file verbatim, import
-# writes back any issue id that does not already exist (never clobbers).
-# ---------------------------------------------------------------------------
-
-_ISSUE_COMMENTS_FILE_RE = re.compile(r"^ISSUE-(\d+)\.comments\.ndjson$")
-
-
-def iter_issue_export_files() -> List[Tuple[str, bytes]]:
-    """Return ``(basename, raw_bytes)`` for every issue file in the workspace.
-
-    Basenames are bare (``ISSUE-0001.md`` / ``ISSUE-0001.comments.ndjson``); the
-    caller places them under whatever bundle prefix it uses. Returns an empty
-    list when the workspace has no issues directory yet.
-    """
-    from services.git_service import _git_workspace
-
-    workspace = _git_workspace()
-    issues_dir = _issues_dir(workspace)
-    if not issues_dir.is_dir():
-        return []
-
-    files: List[Tuple[str, bytes]] = []
-    for child in sorted(issues_dir.iterdir(), key=lambda p: p.name):
-        if not child.is_file():
-            continue
-        if _ISSUE_FILE_RE.match(child.name) or _ISSUE_COMMENTS_FILE_RE.match(child.name):
-            files.append((child.name, child.read_bytes()))
-    return files
-
-
-def _valid_issue_md_bytes(data: bytes, expected_issue_id: str) -> bool:
-    """True if imported ``.md`` bytes are safe to write and later read back.
-
-    The listing/get endpoints read every issue file with
-    ``read_text(encoding="utf-8")`` and parse the YAML frontmatter, so a member
-    with invalid UTF-8, unparseable frontmatter, or malformed frontmatter fields
-    would break or corrupt ``GET /workspace/issues`` until removed by hand.
-    Reject such members at import time (mirrors the worker import path skipping
-    malformed assets).
-    """
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    try:
-        meta, _body = _split_frontmatter(text)
-    except Exception:
-        return False
-    if str(meta.get("id") or "").strip() != expected_issue_id:
-        return False
-    if str(meta.get("status") or "").strip() not in ISSUE_STATUSES:
-        return False
-    if not str(meta.get("title") or "").strip():
-        return False
-    labels = meta.get("labels")
-    if labels is not None and not isinstance(labels, list):
-        return False
-    if not _optional_str_or_none(meta.get("asset_type")) or not _optional_str_or_none(
-        meta.get("asset_id")
-    ):
-        return False
-    for key in ("source", "created_by", "created_at", "updated_at"):
-        if not _optional_str_or_none(meta.get(key)):
-            return False
-    try:
-        _validate_asset_binding(meta.get("asset_type"), meta.get("asset_id"))
-    except IssueError:
-        return False
-    return True
-
-
-def _valid_issue_comments_bytes(data: bytes) -> bool:
-    """True if imported comment-log bytes decode as UTF-8.
-
-    ``_read_comments`` already tolerates non-JSON lines, so per-line JSON is not
-    required, but any line that does parse as JSON must have the object shape
-    accepted by the issue-detail response model.
-    """
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(parsed, dict):
-            return False
-        if not isinstance(parsed.get("id"), str) or not isinstance(
-            parsed.get("body"), str
-        ):
-            return False
-        for key in ("created_by", "created_at"):
-            if not _optional_str_or_none(parsed.get(key)):
-                return False
-    return True
-
-
-def _remap_issue_asset_id_bytes(data: bytes, asset_id_remaps: Dict[str, str]) -> bytes:
-    if not asset_id_remaps:
-        return data
-    try:
-        text = data.decode("utf-8")
-        meta, body = _split_frontmatter(text)
-    except Exception:
-        return data
-    if meta.get("asset_type") != "worker":
-        return data
-    asset_id = meta.get("asset_id")
-    if not isinstance(asset_id, str) or asset_id not in asset_id_remaps:
-        return data
-    meta["asset_id"] = asset_id_remaps[asset_id]
-    return _serialize_issue(meta, body).encode("utf-8")
-
-
-def restore_issue_files(
-    files: List[Tuple[str, bytes]],
-    *,
-    asset_id_remaps: Optional[Dict[str, str]] = None,
-    author_name: str = "Floom",
-    author_email: str = "workeros@local",
-) -> List[str]:
-    """Write imported issue files into ``.floom/issues/`` and commit them.
-
-    ``files`` is an iterable of ``(basename, raw_bytes)`` produced by
-    :func:`iter_issue_export_files`. Any issue id whose ``.md`` already exists in
-    the target workspace is skipped (never clobber existing issues); a comment
-    log is only restored alongside an imported ``.md``. Members whose bytes would
-    later break the read path (invalid UTF-8 or unparseable frontmatter) are
-    skipped rather than written. Returns the sorted list of issue ids that were
-    imported.
-    """
-    from services.git_service import _ensure_git_workspace_ready, _git_ops_lock, _git_workspace
-
-    import git_ops as _git_ops
-
-    # Group the incoming members by issue id so the .md gate controls whether its
-    # comment log is also restored.
-    grouped: Dict[str, Dict[str, bytes]] = {}
-    for name, data in files:
-        md_match = _ISSUE_FILE_RE.match(name)
-        cmt_match = _ISSUE_COMMENTS_FILE_RE.match(name)
-        if md_match:
-            issue_id = f"ISSUE-{int(md_match.group(1)):04d}"
-            grouped.setdefault(issue_id, {})["md"] = data
-        elif cmt_match:
-            issue_id = f"ISSUE-{int(cmt_match.group(1)):04d}"
-            grouped.setdefault(issue_id, {})["comments"] = data
-
-    if not grouped:
-        return []
-
-    workspace = _git_workspace()
-    issues_dir = _issues_dir(workspace)
-    imported: List[str] = []
-    rel_paths: List[str] = []
-
-    with _git_ops_lock:
-        _ensure_git_workspace_ready(workspace)
-        issues_dir.mkdir(parents=True, exist_ok=True)
-        for issue_id in sorted(grouped):
-            parts = grouped[issue_id]
-            if "md" not in parts:
-                # Orphan comment log with no issue body — skip, nothing to anchor it.
-                continue
-            md_path = workspace / _issue_md_rel(issue_id)
-            if md_path.exists():
-                # Never clobber an issue that already lives in this workspace.
-                continue
-            md_bytes = _remap_issue_asset_id_bytes(
-                parts["md"], asset_id_remaps or {}
-            )
-            if not _valid_issue_md_bytes(md_bytes, issue_id):
-                # Malformed body would break the read path on the next list/get.
-                continue
-            md_path.write_bytes(md_bytes)
-            rel_paths.append(_issue_md_rel(issue_id))
-            if "comments" in parts and _valid_issue_comments_bytes(parts["comments"]):
-                comments_path = workspace / _issue_comments_rel(issue_id)
-                comments_path.write_bytes(parts["comments"])
-                rel_paths.append(_issue_comments_rel(issue_id))
-            imported.append(issue_id)
-
-        if rel_paths:
-            _git_ops.commit_paths(
-                workspace,
-                rel_paths,
-                f"issues: import {len(imported)} issue(s)",
-                author_name,
-                author_email,
-            )
-            _git_ops.push_background(workspace)
-
-    return imported
