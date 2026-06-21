@@ -112,35 +112,25 @@ Request body:
 ### Asset-scoped Panels
 - **Worker Detail Page**: An "Issues" tab showing open/closed issues bound to `worker:<worker_id>`. Includes a "Create Issue" button.
 - **Context Detail Page**: An "Issues" tab showing issues bound to `context:<context_id>`.
-- **Run Detail Page**: A "Create Issue" action on failed runs, pre-populating the issue with run details and binding it to `run:<run_id>`.
+- **Run Detail Page**: Displays associated issues and allows creating a new issue directly from a failed run.
 
-## 5. Emily Agent Tools
+## 5. Emily Tools Integration
 
-Emily should be equipped with the following tools to interact with workspace issues:
-
-1. `list_workspace_issues(state: str, asset_type: str, asset_id: str)`
-2. `create_workspace_issue(title: str, body: str, asset_type: str, asset_id: str)`
-3. `comment_on_workspace_issue(issue_id: str, body: str)`
-4. `close_workspace_issue(issue_id: str)`
+Emily can interact with workspace issues using the following tools:
+- `list_workspace_issues`: Retrieves issues filtered by state or asset.
+- `create_workspace_issue`: Creates a new issue with appropriate metadata.
+- `add_issue_comment`: Adds a comment to an existing issue.
+- `update_workspace_issue`: Updates the state or title of an issue.
 
 ## 6. Verification Steps
 
-### Test Case 1: Issue Creation & GitHub Sync
-1. Call `POST /workspace/issues` with asset binding `worker:gmail-inbox-manager`.
-2. Verify that a GitHub issue is created in the tracked repository.
-3. Verify that the GitHub issue body contains the correct `<!-- floom:issue ... -->` metadata block.
-4. Verify that the labels `floom`, `worker` are applied.
+### Automated Tests
+- Verify that creating an issue correctly appends the metadata block.
+- Verify that syncing parses the metadata block and reconstructs the bindings.
+- Verify that the API endpoints return the correct status codes and payloads.
 
-### Test Case 2: Metadata Parsing
-1. Fetch issues via `GET /workspace/issues?asset_type=worker&asset_id=gmail-inbox-manager`.
-2. Verify that the returned issue correctly parses the metadata from GitHub and populates `asset_type` and `asset_id`.
-
-### Test Case 3: Commenting & Closing
-1. Call `POST /workspace/issues/{id}/comments` and verify the comment appears on GitHub.
-2. Call `PATCH /workspace/issues/{id}` with `{"state": "closed"}` and verify the issue is closed on GitHub.
-
-### Test Case 4: Emily Tool Execution
-1. Ask Emily: "What issues are open for the gmail-inbox-manager worker?"
-2. Verify Emily calls `list_workspace_issues` with the correct parameters and presents the results.
-3. Ask Emily: "Create an issue for this worker because it failed to parse the inbox."
-4. Verify Emily calls `create_workspace_issue` and confirms creation.
+### Manual Verification
+1. Navigate to `/workspace/issues` and verify the list of issues is displayed.
+2. Filter issues by state and asset type.
+3. Create a new issue from a worker detail page and verify it is linked correctly.
+4. Close an issue and verify the state updates to `closed` on both Floom and GitHub.
