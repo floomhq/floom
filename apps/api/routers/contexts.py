@@ -15,6 +15,7 @@ by fixtures). The router is purged in lockstep with main by the test fixtures.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import sqlite3
 import uuid as _uuid_mod
@@ -85,6 +86,8 @@ from services.context_access import (
     _write_context_file,
 )
 from services.git_service import _git_author, _git_workspace, _require_sha_in_asset_history
+
+logger = logging.getLogger(__name__)
 
 contexts_router = APIRouter()
 
@@ -524,8 +527,19 @@ def rename_context(
     new_root = context_dir(new_name)
     if new_root.exists():
         raise HTTPException(status_code=409, detail="A folder with that name already exists")
+    # Scan the WHOLE workspace for mounts, not just the caller's own workers: an
+    # admin renaming another member's shared pack must still see the pack owner's
+    # (or a third member's) workers, or the rename breaks them silently (#1813).
+    # role="admin" lists all workers; scope to the pack's workspace because pack
+    # names are workspace-local (a same-named pack elsewhere is a false match).
+    pack_owner_id = context_owner_id(safe_name) or context_user_id
+    pack_workspace_id = _asset_workspace_id(pack_owner_id)
     referenced_by = _workers_referencing_context(
-        safe_name, user_id=context_user_id, repos=repos
+        safe_name,
+        user_id=context_user_id,
+        repos=repos,
+        role="admin",
+        workspace_id=pack_workspace_id,
     )
     if referenced_by:
         raise HTTPException(
@@ -535,24 +549,36 @@ def rename_context(
                 "referenced_by": referenced_by,
             },
         )
-    # Preserve visibility across the rename (auto-named folders are private, but a
-    # shared pack must stay shared). Read it before the dir + metadata move.
+    # Read the source visibility before the move so the fallback path below can
+    # carry it over (auto-named folders are private, but a shared pack must stay
+    # shared).
     old_visibility = _brain_pack_visibility(safe_name, metadata, repos=repos)
     context_dir(safe_name).rename(new_root)
     rename_context_metadata(safe_name, new_name)
-    # Re-materialize the access-control mirror row under the new id and carry the
-    # prior visibility (the row is keyed by pack name, so the rename needs a new row).
+    # Move the access-control mirror row from the old id to the new id. The row is
+    # keyed by pack name, so the rename must RE-KEY it, not create a second row:
+    #   * leaving the old `safe_name` row behind re-exposes a later folder that
+    #     reuses that name (`ensure_brain_pack` never downgrades, so the stale
+    #     "workspace" row would silently share the new private folder), and
+    #   * a stale row already sitting at `new_name` (left by a previously
+    #     deleted/renamed shared folder) would keep ITS old visibility.
+    # `rename_asset` deletes any destination row, then re-keys the source row, so
+    # visibility/owner ride the same row and both leaks are closed in one step.
     owner_id = context_owner_id(new_name)
-    if owner_id:
+    asset_access = getattr(repos, "asset_access", None)
+    moved_row = None
+    if asset_access is not None and hasattr(asset_access, "rename_asset"):
+        try:
+            moved_row = asset_access.rename_asset(
+                asset_type="brain_pack", old_asset_id=safe_name, new_asset_id=new_name
+            )
+        except Exception:
+            logger.debug("rename_asset failed for %s -> %s", safe_name, new_name, exc_info=True)
+    if moved_row is None and owner_id:
+        # No source row to move (or a repo without rename_asset): materialize a
+        # fresh row and rewrite its visibility to the source value, INCLUDING
+        # "private", so a stale destination row can't keep its old visibility.
         _ensure_brain_pack_row(new_name, owner_id=owner_id, repos=repos)
-        # Always rewrite the destination row's visibility to the source value,
-        # INCLUDING "private". `ensure_brain_pack` never downgrades an existing
-        # row's visibility, so if `new_name` reuses a pack id left behind by a
-        # previously deleted/renamed shared folder, the stale row would keep its
-        # old "workspace" visibility. Carrying only non-private values would then
-        # silently expose a renamed private folder. set_visibility writes the
-        # value unconditionally, making the carry-over deterministic.
-        asset_access = getattr(repos, "asset_access", None)
         if old_visibility and asset_access is not None and hasattr(asset_access, "set_visibility"):
             try:
                 asset_access.set_visibility(

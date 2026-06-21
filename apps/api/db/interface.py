@@ -649,6 +649,14 @@ class AssetAccessRepository(Protocol):
         self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, new_owner_id: str
     ) -> RowDict | None: ...
 
+    def rename_asset(
+        self, *, asset_type: str, old_asset_id: str, new_asset_id: str
+    ) -> RowDict | None:
+        """Re-key an asset's access row (brain-pack rename moves its row, never
+        leaving a stale one behind). Returns the moved row, or ``None`` when no
+        source row exists. Deletes any row already at ``new_asset_id`` first."""
+        ...
+
 
 class UserRepository(Protocol):
     """Local user accounts for multi-member OSS deployments (migration 59)."""

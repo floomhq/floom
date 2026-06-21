@@ -114,6 +114,58 @@ def test_rename_into_stale_shared_id_does_not_leak_private(client):
     assert client.get("/contexts/facts").json()["visibility"] == "private"
 
 
+def test_rename_does_not_leave_stale_shared_row_at_old_name(client):
+    """#1813 P1: renaming a SHARED pack must not leave its `brain_packs` row
+    stranded at the old id. A new folder later created with the old name would
+    otherwise inherit the stale `workspace` visibility (`ensure_brain_pack`
+    never downgrades), silently sharing a private folder.
+    """
+    # Share `facts`, then rename it away.
+    assert client.put("/contexts/facts/visibility", json={"visibility": "workspace"}).status_code == 200
+    assert client.post("/contexts/facts/rename", json={"new_name": "renamed-shared"}).status_code == 200
+    assert client.get("/contexts/renamed-shared").json()["visibility"] == "workspace"
+
+    # CREATE a brand-new folder reusing the freed `facts` id. It must be private,
+    # not silently workspace-shared by the row the rename left behind.
+    assert client.post("/contexts/facts", json={"writeable": True, "sensitive": False}).status_code in (200, 201)
+    assert client.get("/contexts/facts").json()["visibility"] == "private"
+
+
+def test_rename_blocks_on_other_owner_worker_in_workspace(client):
+    """#1813 P2: the worker-reference scan must cover the whole workspace, not
+    just the caller's own workers. A worker owned by a different user but mounting
+    the pack must still block the rename (else the admin breaks it silently).
+    """
+    import db as db_mod
+
+    # Insert a worker owned by ANOTHER user in the same (default) workspace that
+    # mounts `facts`. The caller's owner-scoped list would never see it.
+    repos = db_mod.get_repositories()
+    repos.workers.create(
+        user_id="someone-else",
+        worker_id="w-other",
+        name="other-worker",
+        manifest_json={
+            "schema_version": "0.3",
+            "name": "other-worker",
+            "title": "Other",
+            "description": "mounts facts",
+            "version": "0.1.0",
+            "trigger": {"type": "manual"},
+            "exec": {"entry": "run.py", "runtime": "python311", "runner": "e2b", "command": "python run.py"},
+            "inputs": [],
+            "connections": [],
+            "contexts": ["facts"],
+        },
+    )
+    resp = client.post("/contexts/facts/rename", json={"new_name": "renamed-facts"})
+    assert resp.status_code == 409, resp.text
+    assert "w-other" in resp.json()["detail"]["referenced_by"]
+    # rename did not happen
+    assert client.get("/contexts/facts").status_code == 200
+    assert client.get("/contexts/renamed-facts").status_code == 404
+
+
 def test_rename_to_existing_name_conflicts(client):
     assert client.post("/contexts/other", json={"writeable": True}).status_code in (200, 201)
     resp = client.post("/contexts/facts/rename", json={"new_name": "other"})

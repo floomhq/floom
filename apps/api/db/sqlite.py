@@ -4657,6 +4657,45 @@ class SqliteAssetAccessRepository:
             workspace_id=workspace_id, user_id=actor_id, asset_type=asset_type, asset_id=asset_id
         )
 
+    def rename_asset(
+        self, *, asset_type: str, old_asset_id: str, new_asset_id: str
+    ) -> dict[str, Any] | None:
+        """Re-key an asset's access row from ``old_asset_id`` to ``new_asset_id``.
+
+        Brain packs are keyed by pack name, so renaming a pack must MOVE its
+        access-control row, not leave one behind. Leaving the old row stranded
+        re-exposes a later folder that reuses the old name (``ensure_brain_pack``
+        never downgrades, so the stale ``workspace`` row would make the new
+        private folder shared). Colliding with a stale row already sitting at the
+        destination name would likewise keep that row's old visibility. So:
+        delete any pre-existing destination row, then re-key the source row in
+        place — visibility/owner/workspace ride along on the same row. ``name``
+        tracks the id for packs, so it is rewritten to ``new_asset_id`` too.
+
+        Returns the moved row, or ``None`` when no source row exists (the caller
+        then materializes a fresh row). Never raises for a missing source.
+        """
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        now = now_iso()
+        with get_db() as conn:
+            src = conn.execute(
+                f"SELECT id FROM {table} WHERE id = ? LIMIT 1", (old_asset_id,)
+            ).fetchone()
+            if src is None:
+                return None
+            conn.execute(f"DELETE FROM {table} WHERE id = ?", (new_asset_id,))
+            conn.execute(
+                f"UPDATE {table} SET id = ?, name = ?, updated_at = ? WHERE id = ?",
+                (new_asset_id, new_asset_id, now, old_asset_id),
+            )
+            row = conn.execute(
+                f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ?",
+                (new_asset_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
 
 # ---------------------------------------------------------------------------
 # Multi-member: users, sessions, personal access tokens (migration 59)

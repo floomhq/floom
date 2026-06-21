@@ -459,11 +459,33 @@ def _context_description(root: Path) -> Optional[str]:
     return None
 
 
-def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories) -> List[str]:
+def _workers_referencing_context(
+    name: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+    role: str | None = None,
+    workspace_id: str | None = None,
+) -> List[str]:
+    """Worker ids that mount the pack ``name``.
+
+    ``role``/``workspace_id`` widen the scan beyond the caller's own workers:
+    a mutation that breaks a mount (rename/delete) must see EVERY worker in the
+    pack's workspace, not just the ones visible to the caller. An admin renaming
+    another member's shared pack would otherwise miss the pack owner's (or a
+    third member's) workers and break them silently (#1813). Pass ``role="admin"``
+    to list all workers and ``workspace_id`` to keep only that workspace's rows
+    (pack names are workspace-scoped, so cross-workspace matches are false
+    positives). Defaults preserve the original owner-scoped behaviour.
+    """
     from contexts import context_mount_names
     referenced_by: List[str] = []
-    for worker in repos.workers.list(user_id=user_id):
+    for worker in repos.workers.list(user_id=user_id, role=role):
         try:
+            if workspace_id is not None and str(
+                worker.get("workspace_id") or "local-default"
+            ) != workspace_id:
+                continue
             contexts = (worker.get("config") or {}).get("contexts") or []
             if name in context_mount_names(contexts):
                 referenced_by.append(str(worker["id"]))
