@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FloomApiClient, FloomApiError } from "../lib/api.js";
+import { getCommandName } from "../lib/command-name.js";
 import { readCredentials } from "../lib/credentials.js";
 import { log, printJson } from "../lib/output.js";
 
@@ -50,12 +51,12 @@ async function checkAuth(client: FloomApiClient): Promise<Check> {
     return pass("auth", "Token valid");
   } catch (error) {
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
-      return fail("auth", "Token rejected by API", "Re-run: floom login");
+      return fail("auth", "Token rejected by API", `Re-run: ${getCommandName()} login`);
     }
     if (error instanceof FloomApiError && error.status) {
-      return fail("auth", `HTTP ${error.status}`, "Re-run: floom login");
+      return fail("auth", `HTTP ${error.status}`, `Re-run: ${getCommandName()} login`);
     }
-    return fail("auth", "Could not reach API to validate token", "Re-run: floom login");
+    return fail("auth", "Could not reach API to validate token", `Re-run: ${getCommandName()} login`);
   }
 }
 
@@ -95,7 +96,7 @@ function checkMcpInstall(): Check {
   if (found.length > 0) {
     return pass("mcp_install", `Found in: ${found.join(", ")}`);
   }
-  return warn("mcp_install", "Not found in any editor config", "Install: floom mcp install");
+  return warn("mcp_install", "Not found in any editor config", `Install: ${getCommandName()} mcp install`);
 }
 
 async function checkRecentRuns(client: FloomApiClient): Promise<Check> {
@@ -104,7 +105,7 @@ async function checkRecentRuns(client: FloomApiClient): Promise<Check> {
     return pass("recent_runs", "API + auth + DB reachable");
   } catch (error) {
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
-      return fail("recent_runs", "Auth rejected", "Re-run: floom login");
+      return fail("recent_runs", "Auth rejected", `Re-run: ${getCommandName()} login`);
     }
     if (error instanceof FloomApiError && error.status) {
       return fail("recent_runs", `HTTP ${error.status}`, "Check API status: https://github.com/floomhq/floom/issues");
@@ -125,7 +126,7 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
 
   // Check 2: Auth valid
   if (!client) {
-    checks.push(fail("auth", "No credentials found", "Run: floom login"));
+    checks.push(fail("auth", "No credentials found", `Run: ${getCommandName()} login`));
   } else {
     checks.push(await checkAuth(client));
   }
@@ -137,7 +138,7 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
   if (client) {
     checks.push(await checkRecentRuns(client));
   } else {
-    checks.push(fail("recent_runs", "Skipped — not authenticated", "Run: floom login"));
+    checks.push(fail("recent_runs", "Skipped — not authenticated", `Run: ${getCommandName()} login`));
   }
 
   if (options.json) {
@@ -145,7 +146,7 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
     return checks.every((c) => c.ok) ? 0 : 1;
   }
 
-  log.heading("Floom doctor");
+  log.heading(`${getCommandName()} doctor`);
 
   for (const check of checks) {
     const detail = check.detail ? ` — ${check.detail}` : "";

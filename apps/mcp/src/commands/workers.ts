@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { inspect } from "node:util";
 import { parse as parseYaml } from "yaml";
 import { createAuthenticatedClient, FloomApiError, FloomConnectionError } from "../lib/api.js";
+import { getCommandName } from "../lib/command-name.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
 type WorkerSummary = {
@@ -575,7 +576,7 @@ function isExpiredAuthError(error: FloomApiError): boolean {
 function emitApiError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("Not logged in")) {
-    return emitError("Not authenticated.", "Run: floom login");
+    return emitError("Not authenticated.", `Run: ${getCommandName()} login`);
   }
   if (error instanceof FloomConnectionError) {
     return emitError(
@@ -584,7 +585,7 @@ function emitApiError(error: unknown): number {
     );
   }
   if (error instanceof FloomApiError && isExpiredAuthError(error)) {
-    return emitError("Your session expired.", "Re-run: floom login");
+    return emitError("Your session expired.", `Re-run: ${getCommandName()} login`);
   }
   if (error instanceof FloomApiError && error.status === 403) {
     return emitError(
@@ -596,7 +597,7 @@ function emitApiError(error: unknown): number {
     return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues");
   }
   if (error instanceof FloomApiError && error.status && error.status >= 400) {
-    return emitError(`API rejected worker source: ${apiErrorDetail(error)}`, "Fix the worker files and retry: floom workers validate <dir>");
+    return emitError(`API rejected worker source: ${apiErrorDetail(error)}`, `Fix the worker files and retry: ${getCommandName()} workers validate <dir>`);
   }
   throw error;
 }
@@ -644,7 +645,7 @@ export async function workersPushCommand(dir: string): Promise<number> {
         if (error instanceof FloomApiError && error.status === 409 && /already exists/i.test(apiErrorDetail(error))) {
           return emitError(
             `Worker id '${source.workerId}' already exists outside the active workspace.`,
-            "Choose a unique worker id in worker.yml, then run: floom workers validate <dir> && floom workers push <dir>",
+            `Choose a unique worker id in worker.yml, then run: ${getCommandName()} workers validate <dir> && ${getCommandName()} workers push <dir>`,
           );
         }
         throw error;
@@ -709,10 +710,10 @@ export async function workersListCommand(options: { json?: boolean }): Promise<n
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
-      return emitError("Not authenticated.", "Run: floom login", options.json);
+      return emitError("Not authenticated.", `Run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
-      return emitError("Your session expired.", "Re-run: floom login", options.json);
+      return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status && error.status >= 500) {
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
@@ -758,13 +759,13 @@ export async function workersShowCommand(workerId: string, options: { json?: boo
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
-      return emitError("Not authenticated.", "Run: floom login", options.json);
+      return emitError("Not authenticated.", `Run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status === 404) {
-      return emitError(`Worker '${workerId}' not found.`, "List available workers: floom workers list", options.json);
+      return emitError(`Worker '${workerId}' not found.`, `List available workers: ${getCommandName()} workers list`, options.json);
     }
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
-      return emitError("Your session expired.", "Re-run: floom login", options.json);
+      return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status && error.status >= 500) {
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
@@ -840,18 +841,18 @@ export async function workersInfoCommand(workerId: string, options: { json?: boo
     }
 
     log.blank();
-    log.info(`Try: floom run ${workerId}`);
+    log.info(`Try: ${getCommandName()} run ${workerId}`);
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
-      return emitError("Not authenticated.", "Run: floom login", options.json);
+      return emitError("Not authenticated.", `Run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status === 404) {
-      return emitError(`Worker '${workerId}' not found.`, "List available workers: floom workers list", options.json);
+      return emitError(`Worker '${workerId}' not found.`, `List available workers: ${getCommandName()} workers list`, options.json);
     }
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
-      return emitError("Your session expired.", "Re-run: floom login", options.json);
+      return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status && error.status >= 500) {
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
