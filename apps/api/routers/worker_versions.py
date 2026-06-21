@@ -14,8 +14,10 @@ import logging
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+import yaml
 
 from auth import AuthContext, get_auth_context
+from auth.guards import _require_admin
 from db import Repositories, get_repos
 from models import VersionSummary, WorkerDetail
 from services.git_service import _git_author, _git_workspace, _require_sha_in_asset_history, _workers_git_prefix
@@ -36,6 +38,74 @@ from services.worker_serialize import _build_worker_detail
 logger = logging.getLogger("floom.api")
 
 worker_versions_router = APIRouter()
+
+
+def _manifest_approvals_required(manifest: Dict[str, Any] | None) -> bool:
+    approvals = (manifest or {}).get("approvals") or {}
+    return bool(approvals.get("required", False)) if isinstance(approvals, dict) else False
+
+
+def _manifest_enabled(manifest: Dict[str, Any] | None) -> bool:
+    if not isinstance(manifest, dict):
+        return True
+    return bool(manifest.get("enabled", True))
+
+
+def _rollback_security_downgrade(
+    *,
+    current_worker: Dict[str, Any],
+    restored_manifest: Dict[str, Any] | None,
+) -> str | None:
+    current_manifest = current_worker.get("manifest")
+    if not isinstance(current_manifest, dict):
+        current_manifest = current_worker.get("config") if isinstance(current_worker.get("config"), dict) else {}
+    if _manifest_approvals_required(current_manifest) and not _manifest_approvals_required(restored_manifest):
+        return "Rollback would disable approvals.required for this worker"
+    if not bool(current_worker.get("enabled", _manifest_enabled(current_manifest))) and _manifest_enabled(restored_manifest):
+        return "Rollback would re-enable a disabled worker"
+    return None
+
+
+def _validate_rollback_target_files(
+    *,
+    git_ops: Any,
+    workspace: str,
+    sha: str,
+    worker_git_path: str,
+    current_worker: Dict[str, Any],
+) -> None:
+    from secret_scan import scan_text
+
+    file_paths = git_ops.list_files_at_sha(workspace, sha, worker_git_path)
+    if not file_paths:
+        raise HTTPException(status_code=404, detail="Version not found or worker had no files at this commit")
+
+    restored_manifest: Dict[str, Any] | None = None
+    for file_path in file_paths:
+        content = git_ops.get_file_at_sha(workspace, sha, file_path)
+        if content is None:
+            continue
+        rel = file_path[len(f"{worker_git_path}/") :]
+        if scan_text(str(content)):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Rollback target contains secret-like content in {rel}; restore refused.",
+            )
+        if rel == "worker.yml":
+            try:
+                parsed = yaml.safe_load(str(content)) or {}
+            except yaml.YAMLError as exc:
+                raise HTTPException(status_code=409, detail=f"Rollback target worker.yml is invalid: {exc}") from exc
+            if not isinstance(parsed, dict):
+                raise HTTPException(status_code=409, detail="Rollback target worker.yml is not a mapping")
+            restored_manifest = parsed
+
+    reason = _rollback_security_downgrade(
+        current_worker=current_worker,
+        restored_manifest=restored_manifest,
+    )
+    if reason:
+        raise HTTPException(status_code=409, detail=reason)
 
 @worker_versions_router.get("/workers/{worker_id}/versions", response_model=List[VersionSummary])
 def list_worker_versions(
@@ -107,6 +177,7 @@ def rollback_worker(
     # #1455(b): rollback rewrites the worker bundle, so it is a worker write and
     # takes the same workspace-context guard as create/update/delete.
     _require_worker_write_workspace_context(request)
+    _require_admin(auth)
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _worker_for_mutation(worker_id, auth, repos)
@@ -117,6 +188,13 @@ def rollback_worker(
     prefix = _workers_git_prefix()
     worker_git_path = f"{prefix}/{worker_id}"
     _require_sha_in_asset_history(workspace, sha, worker_git_path)
+    _validate_rollback_target_files(
+        git_ops=_git_ops,
+        workspace=workspace,
+        sha=sha,
+        worker_git_path=worker_git_path,
+        current_worker=worker,
+    )
 
     try:
         _git_ops.checkout_path(workspace, sha, worker_git_path)
