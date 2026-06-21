@@ -583,9 +583,27 @@ def _valid_issue_comments_bytes(data: bytes) -> bool:
     return True
 
 
+def _remap_issue_asset_id_bytes(data: bytes, asset_id_remaps: Dict[str, str]) -> bytes:
+    if not asset_id_remaps:
+        return data
+    try:
+        text = data.decode("utf-8")
+        meta, body = _split_frontmatter(text)
+    except Exception:
+        return data
+    if meta.get("asset_type") != "worker":
+        return data
+    asset_id = meta.get("asset_id")
+    if not isinstance(asset_id, str) or asset_id not in asset_id_remaps:
+        return data
+    meta["asset_id"] = asset_id_remaps[asset_id]
+    return _serialize_issue(meta, body).encode("utf-8")
+
+
 def restore_issue_files(
     files: List[Tuple[str, bytes]],
     *,
+    asset_id_remaps: Optional[Dict[str, str]] = None,
     author_name: str = "Floom",
     author_email: str = "workeros@local",
 ) -> List[str]:
@@ -636,10 +654,13 @@ def restore_issue_files(
             if md_path.exists():
                 # Never clobber an issue that already lives in this workspace.
                 continue
-            if not _valid_issue_md_bytes(parts["md"], issue_id):
+            md_bytes = _remap_issue_asset_id_bytes(
+                parts["md"], asset_id_remaps or {}
+            )
+            if not _valid_issue_md_bytes(md_bytes, issue_id):
                 # Malformed body would break the read path on the next list/get.
                 continue
-            md_path.write_bytes(parts["md"])
+            md_path.write_bytes(md_bytes)
             rel_paths.append(_issue_md_rel(issue_id))
             if "comments" in parts and _valid_issue_comments_bytes(parts["comments"]):
                 comments_path = workspace / _issue_comments_rel(issue_id)

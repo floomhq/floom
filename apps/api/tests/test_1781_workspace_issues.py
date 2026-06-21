@@ -446,6 +446,70 @@ def test_export_import_round_trip_preserves_issues(monkeypatch, tmp_path):
     assert fetched["comments"][0]["body"] == "carried over"
 
 
+def test_import_remaps_worker_bound_issue_asset_id(monkeypatch, tmp_path):
+    import io
+    import zipfile
+
+    dst_ws, dst_workers = _make_workspace(tmp_path)
+    existing = dst_workers / "collision-worker"
+    existing.mkdir(parents=True)
+    existing.joinpath("worker.yml").write_text(
+        "schema_version: '0.3'\nname: collision-worker\ntitle: Existing\n",
+        encoding="utf-8",
+    )
+    client, _ = _install_app(
+        monkeypatch, tmp_path, workers_dir=dst_workers, workspace_dir=dst_ws
+    )
+
+    worker_yml = """\
+schema_version: '0.3'
+name: collision-worker
+title: Imported Worker
+description: Imported worker.
+version: 0.1.0
+targets:
+- generic
+exec:
+  entry: run.py
+  runtime: python311
+  runner: e2b
+  command: python run.py
+trigger:
+  type: manual
+"""
+    issue_md = """\
+---
+id: ISSUE-0001
+status: open
+title: Worker-bound imported issue
+asset_type: worker
+asset_id: collision-worker
+labels: []
+---
+
+body
+"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("workers/collision-worker/worker.yml", worker_yml)
+        zf.writestr("workers/collision-worker/run.py", "def run(inputs, context):\n    return {}\n")
+        zf.writestr("issues/ISSUE-0001.md", issue_md)
+
+    resp = client.post(
+        "/workspace/import",
+        files={"bundle": ("workspace.zip", buf.getvalue(), "application/zip")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id_remaps"] == {"collision-worker": "collision-worker-2"}
+    assert body["workers_imported"] == ["collision-worker-2"]
+    assert body["issues_imported"] == ["ISSUE-0001"]
+    issue = client.get("/workspace/issues/ISSUE-0001").json()
+    assert issue["asset_type"] == "worker"
+    assert issue["asset_id"] == "collision-worker-2"
+
+
 def test_import_never_clobbers_existing_issue(monkeypatch, tmp_path):
     workspace, workers_dir = _make_workspace(tmp_path)
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
