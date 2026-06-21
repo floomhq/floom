@@ -2664,6 +2664,16 @@ def execute_run(
         # gets a REAL, editable, runnable worker instead of a dead-end bundle.
         # The new worker id is stored on the run output AND broadcast via SSE
         # so /workers/new can navigate to /workers/<id>?edit=1.
+        if worker_id == _WORKER_AUTHOR_WORKER_ID or (
+            isinstance(outputs, dict) and "bundle" in outputs
+        ):
+            log_fn(
+                "worker-author registration gate: "
+                f"worker_id={worker_id!r} expected={_WORKER_AUTHOR_WORKER_ID!r} "
+                f"outputs_keys={sorted(outputs.keys()) if isinstance(outputs, dict) else type(outputs).__name__} "
+                f"artifact_count={len(artifacts or [])}",
+                level="debug",
+            )
         if worker_id == _WORKER_AUTHOR_WORKER_ID:
             try:
                 created_worker_id = _register_authored_worker(
