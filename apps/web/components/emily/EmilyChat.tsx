@@ -843,10 +843,12 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
 type DockMode = "collapsed" | "rail" | "wide";
 
 // Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px.
+// The dock only mounts on desktop (≥1024, useIsDesktop), so the fixed widths key
+// off `lg` to stay in lockstep with the shell breakpoint (#1544 tablet fix).
 const DOCK_WIDTH: Record<DockMode, string> = {
   collapsed: "w-[46px]",
-  rail: "w-full md:w-[330px]",
-  wide: "w-full md:w-[560px] md:max-w-[52vw]",
+  rail: "w-full lg:w-[330px]",
+  wide: "w-full lg:w-[560px] lg:max-w-[52vw]",
 };
 
 export function EmilyDock({ className }: { className?: string }) {
