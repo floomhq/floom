@@ -693,14 +693,26 @@ function ReviewContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Noindex public approval pages so share links don't appear in search results.
+  // Noindex public approval pages so share links don't appear in search results,
+  // and force a no-referrer policy document-wide so the tokenised review URL is
+  // never leaked via the Referer header to the worker-controlled media host.
+  // `referrerPolicy` is not a valid attribute on <video>, so the inline preview
+  // video request would otherwise carry the full ?id=...&token=... URL as Referer.
+  // The page-level <meta name="referrer"> covers <video> (and every subresource).
   useEffect(() => {
     if (!isSignedLink) return;
-    const meta = document.createElement("meta");
-    meta.name = "robots";
-    meta.content = "noindex,nofollow";
-    document.head.appendChild(meta);
-    return () => { document.head.removeChild(meta); };
+    const robots = document.createElement("meta");
+    robots.name = "robots";
+    robots.content = "noindex,nofollow";
+    document.head.appendChild(robots);
+    const referrer = document.createElement("meta");
+    referrer.name = "referrer";
+    referrer.content = "no-referrer";
+    document.head.appendChild(referrer);
+    return () => {
+      document.head.removeChild(robots);
+      document.head.removeChild(referrer);
+    };
   }, [isSignedLink]);
 
   const load = useCallback(async () => {

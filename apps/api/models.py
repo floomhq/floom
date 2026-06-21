@@ -2204,6 +2204,10 @@ class ApprovalEntry(BaseModel):
     decided_at: Optional[str] = None
     reason: Optional[str] = None
     follow_up_run_id: Optional[str] = None
+    # #1732: tokenised /approvals/review deep link the operator (or the CLI) can
+    # open to approve/reject. None when no signer secret is configured. Same link
+    # the chat tool + approvals list emit (built via core.approval_signing).
+    link: Optional[str] = None
 
 
 class RunDetail(BaseModel):

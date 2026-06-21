@@ -52,6 +52,13 @@ describe("#926 buildCsp", () => {
     }
   });
 
+  it("media-src allows https: so embedded approval preview <video src='https://...'> can load", () => {
+    const media = directive(buildCsp("n"), "media-src");
+    expect(media).toContain("https:");
+    expect(media).toContain("'self'");
+    expect(media).toContain("blob:");
+  });
+
   it("style-src keeps unsafe-inline (explicitly acceptable per audit) and keeps frame-ancestors none", () => {
     const csp = buildCsp("n");
     expect(directive(csp, "style-src")).toContain("'unsafe-inline'");
