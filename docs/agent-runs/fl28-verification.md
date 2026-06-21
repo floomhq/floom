@@ -1,37 +1,36 @@
-# FL28: Blocked State and Verification Planning for Issue #524
+# FL28: Blocked State and Verification Requirements for Issue #524
 
-## PR Status: BLOCKED & NON-CLOSING (DOCUMENTATION ONLY)
+## PR Status: BLOCKED & NON-CLOSING
 
-> **CRITICAL NOTE:** This PR is explicitly **non-closing** and does **not** resolve issue #524. The actual code fix for issue #524 cannot be inferred from the available context. This PR is currently in a **BLOCKED** state pending further requirements and concrete code changes. No code changes have been implemented in this PR.
->
-> **Note on PR Title/Description:** The PR title ("Fix issue #524") and description are automated/system-generated and cannot be modified by the autonomous fixer loop. This PR is intended solely as a documentation-only record of the blocked state and verification planning.
+This PR is explicitly **non-closing** and **does not** resolve issue #524. The code changes required to address issue #524 cannot be inferred from the available context. No code changes have been implemented, and the PR remains in a **BLOCKED** state.
 
-## Blocked State Documentation
+## Verification Status: UNVERIFIED
 
-- **Reason for Blocked State:** The specific functional requirements, bug reports, or code changes required to resolve issue #524 are not present in the available context.
-- **Action Required:** Maintainers or authors must provide the actual code changes or detailed specifications of the defect in issue #524.
-- **Verification Status:** All channels are currently **unverified** and marked as **Pending Verification** because no code changes have been introduced. **No verification claims are being made in this PR.**
+- **No verification has been performed.**
+- **No tests have been executed.**
+- **No verification claims are made in this PR.**
+- All verification channels are currently marked as **Pending** and **Unverified**.
 
-## Concrete Evidence Requirements (Post-Fix)
+## Concrete Evidence Requirements (Required for Future Fix)
 
-Once the code changes are provided in a future PR, the following concrete evidence must be produced and attached to verify the fix across all channels before merging:
+Before any future PR addressing issue #524 can be merged, the following concrete evidence must be produced and verified:
 
-### 1. UI Channel
+### 1. UI Channel Requirements
 - **Required Evidence:**
-  - Concrete CI execution logs for DOM tests in `apps/web/tests/new-worker-emily-902.dom.test.tsx` and `apps/web/tests/new-worker-emily-chat-only.dom.test.tsx`.
-  - Test run outputs for chat streaming and scroll lock verified by `apps/web/tests/fl-scroll-lock.test.ts`.
+  - Complete, successful CI execution logs for DOM tests in `apps/web/tests/new-worker-emily-902.dom.test.tsx` and `apps/web/tests/new-worker-emily-chat-only.dom.test.tsx`.
+  - Successful test run outputs for chat streaming and scroll lock verified by `apps/web/tests/fl-scroll-lock.test.ts`.
 
-### 2. WhatsApp Channel
+### 2. WhatsApp Channel Requirements
 - **Required Evidence:**
   - Webhook signature verification and message parsing test outputs.
   - Live sandbox run logs or webhook delivery receipts.
 
-### 3. MCP Channel
+### 3. MCP Channel Requirements
 - **Required Evidence:**
   - Test execution logs of `tests/test_agent_mcp_connections.py` verifying MCP connection lifecycle, tool discovery, and execution.
   - Test execution logs of `tests/test_langdock_workspace_agent_mcp.py` verifying workspace-level MCP parity and tool calling.
 
-### 4. Slack Channel
+### 4. Slack Channel Requirements
 - **Required Evidence:**
   - Test execution logs of `tests/test_emily_slack_channels.py` verifying channel routing, message dispatching, and response delivery.
   - Completed checklist or logs from manual self-testing of the Slack integration using `docs/slack-self-test.md`.
