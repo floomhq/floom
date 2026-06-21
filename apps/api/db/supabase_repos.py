@@ -3981,15 +3981,13 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         # approve carrying annotations. Accept + persist (annotations_json
         # column added in migration 0034).
         #
-        # #280: the conditional `eq("status", "pending")` UPDATE is the atomic
-        # claim gate. The engine route only proceeds (spawns the follow-up run,
-        # double-spends) when this returns a row, and 409s when it returns None.
-        # Returning get_by_run_id() unconditionally defeated that: a race loser
-        # got the now-approved/rejected row back, so `claimed is None` never
-        # fired and concurrent approve+reject / double-approve both won. Postgres
-        # re-evaluates `status='pending'` after the row lock, so only the call
-        # that actually flipped the row gets data back -> return None otherwise.
-        response = (
+        # #280: the conditional UPDATE ... WHERE status='pending' is the atomic
+        # claim. PostgREST returns the rows it actually updated in `.data`, so an
+        # empty result means a concurrent caller already decided this approval —
+        # return None (NOT a re-read of get_by_run_id, which would surface the
+        # row the *other* caller flipped) so the route can 409 instead of
+        # spawning a duplicate / rejected-but-executed follow-up run.
+        resp = (
             self._client.table(self._TABLE)
             .update(
                 {
@@ -4007,9 +4005,10 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             .or_(f"expires_at.is.null,expires_at.gte.{decided_at}")
             .execute()
         )
-        if not (getattr(response, "data", None) or []):
-            return None  # lost the claim — another decision already won
-        return self.get_by_run_id(run_id=run_id)
+        rows = getattr(resp, "data", None) or []
+        if not rows:
+            return None
+        return rows[0]
 
     def attach_follow_up(
         self,
@@ -4019,9 +4018,9 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         follow_up_run_id: str,
         edited_output_json: str | None = None,
     ) -> dict[str, Any] | None:
-        # #280: approve() claims pending->approved atomically *before* the
-        # follow-up run is spawned, so the spawned run id is recorded here in a
-        # second step. Scoped to the already-approved row this owner just won.
+        # #280: approve() claims the decision atomically *before* the follow-up
+        # run is spawned (so a lost race can never spawn one); the follow-up id
+        # is attached here in a second step, scoped to the just-approved row.
         update: dict[str, Any] = {"follow_up_run_id": follow_up_run_id}
         if edited_output_json is not None:
             update["edited_output_json"] = edited_output_json
@@ -4039,10 +4038,8 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         reason: str | None = None,
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
-        # #280: same atomic-claim semantics as approve() — return None when the
-        # conditional UPDATE flipped no pending row so the route's `claimed is
-        # None` 409 guard fires instead of letting a race loser proceed.
-        response = (
+        # #280: atomic claim — empty `.data` means already decided -> None.
+        resp = (
             self._client.table(self._TABLE)
             .update(
                 {
@@ -4058,9 +4055,10 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             .or_(f"expires_at.is.null,expires_at.gte.{decided_at}")
             .execute()
         )
-        if not (getattr(response, "data", None) or []):
-            return None  # lost the claim — another decision already won
-        return self.get_by_run_id(run_id=run_id)
+        rows = getattr(resp, "data", None) or []
+        if not rows:
+            return None
+        return rows[0]
 
 
 class SupabaseApiTokenRepository(_BaseSupabaseRepository):
