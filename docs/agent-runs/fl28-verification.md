@@ -2,13 +2,15 @@
 
 ## PR Status: BLOCKED & NON-CLOSING
 
-> **CRITICAL NOTE:** This PR is explicitly **non-closing** for issue #524. The actual code fix for issue #524 cannot be inferred from the available context, and the PR is currently in a blocked state pending further requirements and concrete code changes. No code changes have been implemented in this PR.
+> **CRITICAL NOTE:** This PR is explicitly **non-closing** for issue #524. The actual code fix for issue #524 cannot be inferred from the available context, and this PR is currently in a **BLOCKED** state pending further requirements and concrete code changes. No code changes have been implemented in this PR.
+>
+> **Note on PR Title/Description:** The PR title ("Fix issue #524") and description are automated/system-generated and cannot be modified by the autonomous fixer loop. This PR is intended solely as a documentation-only record of the blocked state and verification planning.
 
 ## Blocked State Documentation
 
 - **Reason for Blocked State:** The specific functional requirements, bug reports, or code changes required to resolve issue #524 are not present in the available context.
 - **Action Required:** Maintainers or authors must provide the actual code changes or detailed specifications of the defect in issue #524.
-- **Verification Status:** All channels are currently **unverified** and marked as **Pending Verification** because no code changes have been introduced.
+- **Verification Status:** All channels are currently **unverified** and marked as **Pending Verification** because no code changes have been introduced. No verification claims are being made.
 
 ## Verification Requirements (Post-Fix)
 
