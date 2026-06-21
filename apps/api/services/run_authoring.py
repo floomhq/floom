@@ -66,6 +66,21 @@ def _find_bundle_artifact(run_id: str, artifacts: list[Dict[str, Any]]) -> Optio
     return fallback if fallback.is_file() else None
 
 
+def _bundle_artifact_debug(run_id: str, artifacts: list[Dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for index, art in enumerate(artifacts or []):
+        rel = str(art.get("relative_path") or "")
+        name = str(art.get("name") or "")
+        path = str(art.get("path") or "")
+        exists = Path(path).is_file() if path else False
+        parts.append(
+            f"{index}:name={name!r},rel={rel!r},path={path!r},exists={exists}"
+        )
+    fallback = ARTIFACTS_DIR / run_id / "out" / "bundle.json"
+    parts.append(f"fallback={str(fallback)!r},exists={fallback.is_file()}")
+    return "; ".join(parts)
+
+
 def _read_authored_bundle(
     run_id: str, artifacts: list[Dict[str, Any]]
 ) -> Optional[Dict[str, Any]]:
@@ -352,13 +367,23 @@ def _register_authored_worker(
     (e.g. a resumed/re-executed run), no second worker is created.
     """
     started_at = time.perf_counter()
+    log_fn(
+        "worker-author registration: entered "
+        f"outputs_keys={sorted(outputs.keys()) if isinstance(outputs, dict) else type(outputs).__name__} "
+        f"artifact_count={len(artifacts or [])}",
+        level="debug",
+    )
     if isinstance(outputs, dict) and outputs.get("created_worker_id"):
         return str(outputs["created_worker_id"])  # already registered
 
     stage_at = time.perf_counter()
     bundle_path = _find_bundle_artifact(run_id, artifacts)
     if bundle_path is None:
-        log_fn("worker-author produced no bundle.json — nothing to register", level="warning")
+        log_fn(
+            "worker-author produced no bundle.json - nothing to register "
+            f"({_bundle_artifact_debug(run_id, artifacts)})",
+            level="warning",
+        )
         return None
     log_fn(f"worker-author registration: found bundle artifact in {time.perf_counter() - stage_at:.2f}s")
 
