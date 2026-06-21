@@ -368,7 +368,9 @@ def set_context_category(
     from contexts import set_context_metadata
 
     context_user_id = _context_actor_user_id(auth.user_id)
-    safe_name, _metadata = _require_context_for_user(name, user_id=context_user_id)
+    safe_name, _metadata = _require_context_for_user(
+        name, user_id=context_user_id, repos=repos
+    )
     set_context_metadata(safe_name, category=(payload.category or ""))
     return _context_detail(safe_name, repos=repos, user_id=context_user_id)
 
@@ -444,6 +446,7 @@ def set_context_sensitive(
     name: str,
     body: ContextSensitiveRequest,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> dict:
     """Mark a brain pack as sensitive (skips git + GitHub, Supabase Storage only).
 
@@ -454,7 +457,9 @@ def set_context_sensitive(
     from contexts import set_context_metadata
 
     context_user_id = _context_actor_user_id(auth.user_id)
-    safe_name, _metadata = _require_context_for_user(name, user_id=context_user_id)
+    safe_name, _metadata = _require_context_for_user(
+        name, user_id=context_user_id, repos=repos
+    )
     set_context_metadata(safe_name, sensitive=body.sensitive)
     return {"name": safe_name, "sensitive": body.sensitive}
 
