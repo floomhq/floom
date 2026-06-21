@@ -5,6 +5,7 @@ import uuid
 import json
 import threading
 import re
+import math
 import logging
 import shutil
 import time
@@ -549,16 +550,99 @@ def publish_run_part(run_id: str, part: dict) -> None:
 SECRET_PATTERNS = [
     re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[=:]\s*[^\s'\"]+"),
     re.compile(r"\b(?:sk|pk)_(?:live|test|proj|sec)_[a-zA-Z0-9_-]+\b"),
+    # JWTs: three base64url segments separated by dots.
+    re.compile(r"\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b"),
 ]
+
+# Secret *names* that are credential-class: their values are always redacted
+# (raw substring replace) regardless of value length or entropy.
+_CREDENTIAL_NAME_RE = re.compile(
+    r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CRED|AUTH|PRIVATE|PIN|"
+    r"SIGNATURE|SIGNING|CERT|SESSION|COOKIE|BEARER|_JSON$)"
+)
+
+# Secret *names* that are config-class: short/low-entropy values declared under
+# these are mis-declared config flags, not secrets (the "Full"/MODE case).
+_CONFIG_NAME_RE = re.compile(
+    r"(?i)(MODE|REGION|CONCURRENCY|BATCH|THRESHOLD|MODEL|LIMIT|TIMEOUT|"
+    r"RETRY|RETRIES|COUNT|SIZE|INTERVAL|LEVEL|FORMAT|LOCALE|LANG|VERSION|"
+    r"_PATH$|_URL$)"
+)
+
+# A short, single, common-word-shaped value (pure alpha, no entropy). These get
+# globally substring-replaced under the old code, mangling unrelated text.
+_LOW_ENTROPY_WORD_RE = re.compile(r"[A-Za-z]+")
+
+
+def _shannon_entropy(value: str) -> float:
+    counts: Dict[str, int] = {}
+    for char in value:
+        counts[char] = counts.get(char, 0) + 1
+    length = len(value)
+    entropy = 0.0
+    for count in counts.values():
+        p = count / length
+        entropy -= p * math.log2(p)
+    return entropy
+
+
+def _value_is_credential_shaped(value: str) -> bool:
+    """True when the value itself looks like a real credential and must be
+    redacted even if its declared name is not credential-class."""
+    if len(value) >= 20:
+        return True
+    for pattern in SECRET_PATTERNS:
+        if pattern.search(value):
+            return True
+    has_alpha = any(c.isalpha() for c in value)
+    has_digit = any(c.isdigit() for c in value)
+    has_symbol = any(not c.isalnum() for c in value)
+    # Mixed character classes at a credential-ish length.
+    if len(value) >= 8 and ((has_alpha and has_digit) or has_symbol):
+        return True
+    # Long, high-entropy single-class tokens (e.g. 16-char alpha key).
+    if len(value) >= 16 and _shannon_entropy(value) >= 3.0:
+        return True
+    return False
+
+
+def _is_low_entropy_word(value: str) -> bool:
+    """True for a short, plain word/number unlikely to be a secret."""
+    return len(value) < 8 and bool(_LOW_ENTROPY_WORD_RE.fullmatch(value))
 
 
 def scrub_secrets(text: str, secrets: Dict[str, str]) -> str:
-    """Replace secret values with redacted markers in log messages."""
+    """Replace secret values with redacted markers in log messages.
+
+    Tiered, security-first redaction: credential-named or credential-shaped
+    values are always redacted; provably non-secret short/low-entropy values
+    declared under config-class names are left intact (they are mis-declared
+    config flags, and blind substring-replacing them corrupts legitimate
+    output such as titles and descriptions).
+    """
     if not text:
         return text
     for name, value in secrets.items():
-        if value and len(value) > 3:
+        if not value or len(value) <= 3:
+            continue
+        # Tier 1: always redact (security unchanged for real secrets).
+        if _CREDENTIAL_NAME_RE.search(name) or _value_is_credential_shaped(value):
             text = text.replace(value, f"<REDACTED:{name}>")
+            continue
+        # Tier 3: never blind-replace a short common word under a config-class
+        # name. Warn so operators move it to env: instead of secrets:.
+        if _CONFIG_NAME_RE.search(name) and _is_low_entropy_word(value):
+            logger.warning(
+                "Declared secret %s has a low-entropy/config-shaped value; "
+                "consider declaring it in env: not secrets:",
+                name,
+            )
+            continue
+        # Tier 2: redact short/ambiguous values, but only on word boundaries so
+        # they cannot mangle unrelated substrings of legitimate output.
+        text = re.sub(
+            rf"\b{re.escape(value)}\b", f"<REDACTED:{name}>", text
+        )
     for pattern in SECRET_PATTERNS:
         text = pattern.sub("<REDACTED>", text)
     return text
