@@ -289,9 +289,11 @@ def create_workspace_issue(
     pat, repo = resolve_connection(user_id)
     workspace_id = _git_workspace_key(user_id)
     full_body = compose_issue_body(body, workspace_id, asset_type, asset_id, source)
-    created = _gh.create_issue(
-        pat, repo, title, full_body, derive_labels(asset_type, labels)
-    )
+    issue_labels = derive_labels(asset_type, labels)
+    # Fresh repos won't have the floom/workspace/asset labels yet, and GitHub
+    # rejects issue creation that references unknown labels. Create them first.
+    _gh.ensure_labels(pat, repo, issue_labels)
+    created = _gh.create_issue(pat, repo, title, full_body, issue_labels)
     return project_issue(created, workspace_id)
 
 
@@ -335,7 +337,16 @@ def update_workspace_issue(
             existing.get("asset_id"),
             existing.get("source"),
         )
+
+    new_labels: Optional[List[str]] = None
+    if labels is not None:
+        # A label patch replaces the whole set on GitHub. Re-inject the base
+        # Floom labels so a caller sending e.g. ['bug'] can't strip 'floom' and
+        # make the issue vanish from list_workspace_issues (which filters on it).
+        new_labels = derive_labels(None, labels)
+        _gh.ensure_labels(pat, repo, new_labels)
+
     updated = _gh.update_issue(
-        pat, repo, int(number), title=title, body=new_body, state=state, labels=labels
+        pat, repo, int(number), title=title, body=new_body, state=state, labels=new_labels
     )
     return project_issue(updated, workspace_id)

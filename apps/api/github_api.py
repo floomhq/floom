@@ -263,21 +263,69 @@ def list_issues(
     labels: Optional[list[str]] = None,
     per_page: int = 100,
 ) -> list[dict]:
-    """List repository issues (pull requests excluded).
+    """List repository issues (pull requests excluded), following pagination.
 
     state is one of "open", "closed", or "all". labels, when given, restricts
     to issues carrying every listed label (GitHub AND semantics).
+
+    GitHub caps a single page at 100 entries, so this walks successive ``page``
+    values until a short page is returned. Without this a workspace with more
+    than 100 matching issues would silently drop the rest.
     """
     if state not in ("open", "closed", "all"):
         state = "all"
-    query: dict[str, str] = {"state": state, "per_page": str(max(1, min(per_page, 100)))}
+    per_page = max(1, min(per_page, 100))
+    base: dict[str, str] = {"state": state, "per_page": str(per_page)}
     if labels:
-        query["labels"] = ",".join(labels)
-    path = f"/repos/{repo_full_name}/issues?{_urlparse.urlencode(query)}"
-    result = _call("GET", path, pat)
-    if not isinstance(result, list):
-        return []
-    return [item for item in result if "pull_request" not in item]
+        base["labels"] = ",".join(labels)
+    issues: list[dict] = []
+    page = 1
+    # Hard cap (100 pages = up to 10k issues) guards against an unbounded loop
+    # if GitHub ever keeps returning full pages.
+    while page <= 100:
+        query = dict(base, page=str(page))
+        path = f"/repos/{repo_full_name}/issues?{_urlparse.urlencode(query)}"
+        result = _call("GET", path, pat)
+        if not isinstance(result, list) or not result:
+            break
+        issues.extend(item for item in result if "pull_request" not in item)
+        if len(result) < per_page:
+            break
+        page += 1
+    return issues
+
+
+def create_label(
+    pat: str,
+    repo_full_name: str,
+    name: str,
+    color: str = "ededed",
+    description: Optional[str] = None,
+) -> dict:
+    """Create a repository label and return it."""
+    payload: dict = {"name": name, "color": color}
+    if description:
+        payload["description"] = description
+    return _call("POST", f"/repos/{repo_full_name}/labels", pat, payload)
+
+
+def ensure_labels(pat: str, repo_full_name: str, labels: Optional[list[str]]) -> None:
+    """Create any of ``labels`` that don't yet exist; ignore those that do.
+
+    GitHub rejects issue creation/update with a 422 when asked to apply a label
+    the repo doesn't have, so fresh workspace repos need the Floom labels created
+    first. Creating a label that already exists also returns 422 ("already
+    exists"), which is treated as success; other errors propagate.
+    """
+    for name in labels or []:
+        name = str(name).strip()
+        if not name:
+            continue
+        try:
+            create_label(pat, repo_full_name, name)
+        except GitHubAPIError as exc:
+            if exc.status != 422:
+                raise
 
 
 def get_issue(pat: str, repo_full_name: str, number: int) -> dict:

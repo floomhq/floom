@@ -152,6 +152,51 @@ def test_update_issue_rejects_bad_state(monkeypatch):
         github_api.update_issue("pat", "o/r", 1, state="bogus")
 
 
+def test_list_issues_follows_pagination(monkeypatch):
+    # Two full pages of 2 then a short page -> all collected, stops after short.
+    pages = {
+        "1": [{"number": 1}, {"number": 2}],
+        "2": [{"number": 3}, {"number": 4}],
+        "3": [{"number": 5}],
+    }
+    seen_pages: list[str] = []
+
+    def fake_call(method, path, pat, body=None, timeout=15):
+        import urllib.parse as _u
+        page = _u.parse_qs(_u.urlparse(path).query)["page"][0]
+        seen_pages.append(page)
+        return pages.get(page, [])
+
+    monkeypatch.setattr(github_api, "_call", fake_call)
+    out = github_api.list_issues("pat", "o/r", per_page=2)
+    assert [i["number"] for i in out] == [1, 2, 3, 4, 5]
+    assert seen_pages == ["1", "2", "3"]  # stopped on the short page
+
+
+def test_ensure_labels_ignores_already_exists(monkeypatch):
+    attempted: list[str] = []
+
+    def fake_create_label(pat, repo, name, color="ededed", description=None):
+        attempted.append(name)
+        if name == "floom":  # simulate "already exists"
+            raise github_api.GitHubAPIError("already_exists", 422)
+        return {"name": name}
+
+    monkeypatch.setattr(github_api, "create_label", fake_create_label)
+    # 422 is swallowed; the loop still tries every label.
+    github_api.ensure_labels("pat", "o/r", ["floom", "workspace"])
+    assert attempted == ["floom", "workspace"]
+
+
+def test_ensure_labels_propagates_non_422(monkeypatch):
+    def fake_create_label(pat, repo, name, color="ededed", description=None):
+        raise github_api.GitHubAPIError("server error", 500)
+
+    monkeypatch.setattr(github_api, "create_label", fake_create_label)
+    with pytest.raises(github_api.GitHubAPIError):
+        github_api.ensure_labels("pat", "o/r", ["floom"])
+
+
 # ---------------------------------------------------------------------------
 # Service: connection guard + create
 # ---------------------------------------------------------------------------
@@ -195,7 +240,9 @@ def test_create_workspace_issue_embeds_marker_and_labels(monkeypatch):
             "labels": [{"name": x} for x in labels],
         }
 
+    ensured: list[list[str]] = []
     monkeypatch.setattr(github_api, "create_issue", fake_create_issue)
+    monkeypatch.setattr(github_api, "ensure_labels", lambda pat, repo, labels: ensured.append(list(labels)))
 
     issue = wi.create_workspace_issue(
         "u1", title="Reconnect gmail", body="needs reconnect",
@@ -209,6 +256,37 @@ def test_create_workspace_issue_embeds_marker_and_labels(monkeypatch):
     assert parsed["workspace_id"] == "ws_test"
     assert parsed["asset_id"] == "gmail"
     assert "floom" in sent["labels"] and "connection" in sent["labels"]
+    # labels are ensured to exist before the issue references them
+    assert ensured and "floom" in ensured[0] and "connection" in ensured[0]
+
+
+def test_update_workspace_issue_preserves_floom_label(monkeypatch):
+    from services import git_service
+
+    monkeypatch.setattr(
+        git_service, "_git_cfg_get",
+        lambda uid: {"github_pat": "pat", "repo_full_name": "o/r"},
+    )
+    monkeypatch.setattr(git_service, "_git_workspace_key", lambda uid: "ws_test")
+
+    sent = {}
+
+    def fake_update_issue(pat, repo, number, title=None, body=None, state=None, labels=None):
+        sent.update(labels=labels)
+        return {
+            "number": number, "title": "t", "body": "b", "state": "open",
+            "html_url": "https://github.com/o/r/issues/1",
+            "labels": [{"name": x} for x in (labels or [])],
+        }
+
+    monkeypatch.setattr(github_api, "update_issue", fake_update_issue)
+    monkeypatch.setattr(github_api, "ensure_labels", lambda *a, **k: None)
+
+    # Caller tries to set labels to just ['bug']; floom must survive so the
+    # issue stays visible in list_workspace_issues.
+    wi.update_workspace_issue("u1", 1, labels=["bug"])
+    assert "floom" in sent["labels"]
+    assert "bug" in sent["labels"]
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +336,7 @@ def test_create_then_list_roundtrip(client, monkeypatch):
 
     monkeypatch.setattr(github_api, "create_issue", fake_create_issue)
     monkeypatch.setattr(github_api, "list_issues", fake_list_issues)
+    monkeypatch.setattr(github_api, "ensure_labels", lambda *a, **k: None)
 
     created = client.post(
         "/workspace/issues",
