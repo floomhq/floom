@@ -1219,6 +1219,10 @@ class WorkerConfig(BaseModel):
     contexts: List[WorkerContextMountSpec] = []
     memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
     resources: Optional[WorkerResources] = None
+    # #1764: operator-approved E2B template profile resolved by the runner before
+    # sandbox creation (see runner_sandbox.e2b_driver). None = legacy
+    # runtime-kind/resource-bucket selection.
+    template_profile: Optional[str] = None
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
@@ -1435,6 +1439,11 @@ class WorkerContractExec(BaseModel):
     # was removed in PR #28).
     runner: str = "e2b"
     bundle_baked: bool = False
+    # #1764: operator-approved E2B template profile. An explicit toolchain
+    # selector (e.g. "workeros-dev") that the runtime maps to an operator-owned
+    # template id via WORKEROS_E2B_TEMPLATE_PROFILE_<NAME>. Profiles are logical
+    # names, not raw template ids, so hosted infra controls stay operator-owned.
+    template_profile: Optional[str] = None
     # PR S11: `entry` is the canonical mode signal. `.md` -> agent, `.py/.sh/.js` -> script.
     # `mode` is a deprecated alias retained for back-compat; if both are absent we infer
     # from `command` / `runtime` (legacy path).
@@ -1476,6 +1485,23 @@ class WorkerContractExec(BaseModel):
         if value != "e2b":
             raise ValueError(f"runner must be 'e2b' (got {value!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
         return value
+
+    @field_validator("template_profile")
+    @classmethod
+    def validate_template_profile(cls, value: Optional[str]) -> Optional[str]:
+        # #1764: profile names are author-supplied logical selectors that map to an
+        # operator env key, so constrain them to a safe slug shape and treat blank
+        # as unset for backward-compat with manifests that omit the field.
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", text):
+            raise ValueError(
+                "exec.template_profile must be alphanumeric and may contain '-' or '_'"
+            )
+        return text
 
     @field_validator("entry")
     @classmethod
@@ -1946,6 +1972,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         ],
         memory=contract.memory,
         resources=contract.exec.resources or contract.resources,
+        template_profile=contract.exec.template_profile,
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
