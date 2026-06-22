@@ -2221,93 +2221,142 @@ def _resolve_file_input_references(
                 # Optional file omitted for this run — leave it absent in the
                 # per-run dir so stale files from earlier runs are never visible.
                 continue
-            if not is_sha256(value):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"File input '{inp.name}': value must be a SHA-256 reference "
-                        f"from /uploads, got non-SHA value"
-                    ),
-                )
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
                 raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
 
-            row = conn.execute(
-                "SELECT id, filename, media_type, size_bytes, uploaded_by FROM files WHERE id = ?",
-                (value,),
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail=f"Uploaded file not found: {inp.name}")
-
-            source = blob_path(row["id"])
-            if not source.is_file():
-                raise HTTPException(status_code=400, detail=f"Uploaded file blob missing: {inp.name}")
-
-            # Fix 4: Bind-time revalidation — reject if blob violates this input's constraints.
-            if inp.accepts:
-                accepted = set(inp.accepts)
-                if row["media_type"] not in accepted:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"File input '{inp.name}': stored media_type {row['media_type']!r} "
-                            f"is not in accepts {sorted(accepted)}"
-                        ),
-                    )
-            if inp.max_size_mb is not None:
-                max_bytes = int(inp.max_size_mb * 1024 * 1024)
-                if row["size_bytes"] > max_bytes:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"File input '{inp.name}': stored size {row['size_bytes']} bytes "
-                            f"exceeds max_size_mb={inp.max_size_mb}"
-                        ),
-                    )
-
-            # Fix 5: File ownership audit — log cross-user bindings (non-blocking per T1c).
-            file_owner = row["uploaded_by"] or "anonymous"
-            if not _user_owns_uploaded_file(conn, row["id"], bound_by):
-                logger.info(
-                    "file_binding_audit: run=%s worker=%s input=%s sha=%s "
-                    "uploaded_by=%r bound_by=%r",
-                    run_id,
-                    worker_id,
-                    inp.name,
-                    row["id"],
-                    file_owner,
-                    bound_by,
+            # A file input is either a single SHA reference (one file) or, for a
+            # grouped multi-file "episode", an ordered list of SHA references.
+            is_group = isinstance(value, list)
+            refs = value if is_group else [value]
+            if is_group and not refs:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File input '{inp.name}': grouped file list must not be empty",
                 )
-                try:
-                    conn.execute(
-                        """
-                        INSERT INTO file_binding_audit
-                            (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
-                    )
-                except sqlite3.OperationalError as exc:
-                    logger.debug("file_binding_audit write skipped: %s", exc)
-                raise HTTPException(status_code=403, detail=f"Uploaded file not found: {inp.name}")
 
-            ext = extension_for_file(row["filename"], row["media_type"])
-            mounted = run_inputs_dir / f"{inp.name}{ext}"
-            shutil.copyfile(source, mounted)
-            # Store absolute path so runners don't need cwd tricks to locate the file.
-            resolved_inputs[inp.name] = str(mounted)
-            bound_file_ids.append(row["id"])
+            staged_paths: List[str] = []
+            for index, ref in enumerate(refs):
+                if not is_sha256(ref):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"File input '{inp.name}': value must be a SHA-256 reference "
+                            f"from /uploads, got non-SHA value"
+                        ),
+                    )
+                row = _bind_file_input_blob(
+                    conn, inp, ref, run_id=run_id, worker_id=worker_id, bound_by=bound_by
+                )
+                source = blob_path(row["id"])
+                ext = extension_for_file(row["filename"], row["media_type"])
+                if is_group:
+                    # Stage grouped clips into a per-input subdir with a zero-padded
+                    # ordinal prefix so the worker receives the files in upload order.
+                    group_dir = run_inputs_dir / inp.name
+                    group_dir.mkdir(parents=True, exist_ok=True)
+                    mounted = group_dir / f"{index:03d}_{inp.name}{ext}"
+                else:
+                    mounted = run_inputs_dir / f"{inp.name}{ext}"
+                shutil.copyfile(source, mounted)
+                # Store absolute path so runners don't need cwd tricks to locate the file.
+                staged_paths.append(str(mounted))
+                bound_file_ids.append(row["id"])
+
+            resolved_inputs[inp.name] = staged_paths if is_group else staged_paths[0]
 
     _increment_file_ref_counts(bound_file_ids)
 
     return resolved_inputs
 
 
+def _bind_file_input_blob(
+    conn: sqlite3.Connection,
+    inp: Any,
+    ref: str,
+    *,
+    run_id: str,
+    worker_id: str,
+    bound_by: str,
+) -> sqlite3.Row:
+    """Validate one uploaded blob against a file input and return its files row.
+
+    Performs existence, blob-on-disk, accepts/size, and ownership-audit checks.
+    Raises HTTPException on any failure. Shared by single-file and grouped
+    (multi-file episode) staging so both shapes get identical bind-time guards.
+    """
+    row = conn.execute(
+        "SELECT id, filename, media_type, size_bytes, uploaded_by FROM files WHERE id = ?",
+        (ref,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Uploaded file not found: {inp.name}")
+
+    source = blob_path(row["id"])
+    if not source.is_file():
+        raise HTTPException(status_code=400, detail=f"Uploaded file blob missing: {inp.name}")
+
+    # Fix 4: Bind-time revalidation — reject if blob violates this input's constraints.
+    if inp.accepts:
+        accepted = set(inp.accepts)
+        if row["media_type"] not in accepted:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"File input '{inp.name}': stored media_type {row['media_type']!r} "
+                    f"is not in accepts {sorted(accepted)}"
+                ),
+            )
+    if inp.max_size_mb is not None:
+        max_bytes = int(inp.max_size_mb * 1024 * 1024)
+        if row["size_bytes"] > max_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"File input '{inp.name}': stored size {row['size_bytes']} bytes "
+                    f"exceeds max_size_mb={inp.max_size_mb}"
+                ),
+            )
+
+    # Fix 5: File ownership audit — log cross-user bindings (non-blocking per T1c).
+    file_owner = row["uploaded_by"] or "anonymous"
+    if not _user_owns_uploaded_file(conn, row["id"], bound_by):
+        logger.info(
+            "file_binding_audit: run=%s worker=%s input=%s sha=%s "
+            "uploaded_by=%r bound_by=%r",
+            run_id,
+            worker_id,
+            inp.name,
+            row["id"],
+            file_owner,
+            bound_by,
+        )
+        try:
+            conn.execute(
+                """
+                INSERT INTO file_binding_audit
+                    (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
+            )
+        except sqlite3.OperationalError as exc:
+            logger.debug("file_binding_audit write skipped: %s", exc)
+        raise HTTPException(status_code=403, detail=f"Uploaded file not found: {inp.name}")
+
+    return row
+
+
 def _validate_file_input_references(
     run_config: Optional[WorkerConfig],
     inputs: Dict[str, Any],
 ) -> None:
-    """Reject invalid file input references before a run row is created."""
+    """Reject invalid file input references before a run row is created.
+
+    A file input value is either a single SHA-256 reference (one file) or, for a
+    grouped multi-file "episode", an ordered list of SHA-256 references. Both
+    shapes are validated the same way; a list must be non-empty and every member
+    must be a valid SHA reference.
+    """
     if not run_config:
         return
     for inp in getattr(run_config, "inputs", []) or []:
@@ -2316,16 +2365,74 @@ def _validate_file_input_references(
         value = inputs.get(inp.name)
         if value in (None, ""):
             continue
-        if not is_sha256(value):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"File input '{inp.name}': value must be a SHA-256 reference "
-                    f"from /uploads, got non-SHA value"
-                ),
-            )
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
             raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
+        refs = value if isinstance(value, list) else [value]
+        if isinstance(value, list) and not refs:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File input '{inp.name}': grouped file list must not be empty",
+            )
+        for ref in refs:
+            if not is_sha256(ref):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File input '{inp.name}': value must be a SHA-256 reference "
+                        f"from /uploads, got non-SHA value"
+                    ),
+                )
+
+
+def create_run_with_staged_files(
+    worker_id: str,
+    inputs: Dict[str, Any],
+    *,
+    trigger_source: str,
+    user_id: str,
+    repos: Optional[Any] = None,
+) -> str:
+    """Create a run, stage its file inputs, and enqueue it for execution.
+
+    Mirrors the eager file-staging the manual ``POST /workers/{id}/runs`` endpoint
+    performs: the run row is created in RUNNING so the drain loop cannot dispatch
+    it before its SHA file references have been resolved into staged absolute
+    paths (single file) or an ordered list of staged paths (grouped episode).
+    Used by trigger surfaces (drop inbox) that accept uploaded files and must
+    deliver them to the worker rather than leaving raw SHA references queued.
+    """
+    repos_obj = repos if repos is not None else get_repositories()
+    run_id = create_run(
+        worker_id,
+        inputs,
+        trigger_source,
+        status=RunStatus.RUNNING.value,
+        user_id=user_id,
+        repos=repos_obj,
+    )
+    try:
+        resolved_inputs = _resolve_file_input_references(
+            worker_id, run_id, inputs, bound_by=user_id
+        )
+    except Exception as exc:
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error=str(getattr(exc, "detail", exc)),
+            error_code="file_input_resolution_failed",
+            user_id=user_id,
+            repos=repos_obj,
+        )
+        raise
+    repos_obj.runs.set_input_json(user_id=user_id, run_id=run_id, input_json=resolved_inputs)
+    repos_obj.runs.update(
+        user_id=user_id,
+        run_id=run_id,
+        status=RunStatus.QUEUED.value,
+        started_at=None,
+    )
+    start_run(run_id, worker_id, resolved_inputs, user_id=user_id, repos=repos_obj)
+    return run_id
 
 
 def _gc_orphan_blobs(*, limit: int = 500) -> int:

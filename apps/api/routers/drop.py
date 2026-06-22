@@ -15,9 +15,9 @@ import os
 import threading
 import time
 import collections
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from services.uploads import _store_uploaded_blob
@@ -28,12 +28,24 @@ _drop_rate_lock = threading.Lock()
 _drop_rate_store: Dict[str, collections.deque[float]] = {}
 
 
+class DropFileRef(BaseModel):
+    file_id: str
+    sha256: str
+    filename: str
+
+
 class DropUploadResponse(BaseModel):
+    # First file's identifiers are kept at the top level for back-compat with
+    # single-file drop clients. ``files`` lists every uploaded blob in order.
     file_id: str
     sha256: str
     run_id: str
     worker_id: str
     input_name: str
+    grouped: bool = False
+    group_id: Optional[str] = None
+    file_count: int = 1
+    files: List[DropFileRef] = []
 
 
 def _drop_signing_key() -> bytes:
@@ -149,9 +161,18 @@ def _verify_drop_upload_token(drop_id: str, token: str) -> Dict[str, Any]:
 async def public_drop_upload(
     drop_id: str,
     request: Request,
-    file: UploadFile = File(...),
+    file: List[UploadFile] = File(...),
     token: str = Query(..., min_length=16),
+    group_id: Optional[str] = Form(None),
 ) -> DropUploadResponse:
+    """Accept one or more files dropped into a workspace and spawn a worker run.
+
+    A single file spawns one run with the file as the worker's input. Several
+    files uploaded together in one request (or any upload tagged with a
+    ``group_id``) are grouped into a SINGLE run as one ordered "episode": the
+    worker receives the files in upload order under its one file input. Grouping
+    is per-request (atomic batch); cross-request accumulation is out of scope.
+    """
     claims = _verify_drop_upload_token(drop_id, token)
     owner_id = str(claims["owner_id"])
     worker_id = str(claims["worker_id"])
@@ -161,26 +182,51 @@ async def public_drop_upload(
     effective_max_size_mb = (
         float(max_size_mb) if max_size_mb is not None else _drop_default_max_size_mb()
     )
+    uploads = [f for f in (file or []) if f is not None]
+    if not uploads:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+    # One batch = one run, so one drop-rate slot regardless of file count.
     _claim_drop_rate_limit(token, owner_id)
-    stored = await _store_uploaded_blob(
-        request,
-        file,
-        owner_id,
-        max_size_mb=effective_max_size_mb,
-        accepts=str(accepts) if accepts else None,
-    )
-    from run_service import create_run
 
-    run_id = create_run(
+    stored_refs: List[DropFileRef] = []
+    for upload in uploads:
+        stored = await _store_uploaded_blob(
+            request,
+            upload,
+            owner_id,
+            max_size_mb=effective_max_size_mb,
+            accepts=str(accepts) if accepts else None,
+        )
+        stored_refs.append(
+            DropFileRef(
+                file_id=str(stored["id"]),
+                sha256=str(stored["sha256"]),
+                filename=str(stored.get("filename") or upload.filename or ""),
+            )
+        )
+
+    grouped = len(stored_refs) > 1 or bool(group_id)
+    if grouped:
+        input_value: Any = [ref.sha256 for ref in stored_refs]
+    else:
+        input_value = stored_refs[0].sha256
+
+    from main import create_run_with_staged_files
+
+    run_id = create_run_with_staged_files(
         worker_id,
-        {input_name: stored["sha256"]},
+        {input_name: input_value},
         trigger_source="drop",
         user_id=owner_id,
     )
     return DropUploadResponse(
-        file_id=str(stored["id"]),
-        sha256=str(stored["sha256"]),
+        file_id=stored_refs[0].file_id,
+        sha256=stored_refs[0].sha256,
         run_id=run_id,
         worker_id=worker_id,
         input_name=input_name,
+        grouped=grouped,
+        group_id=group_id,
+        file_count=len(stored_refs),
+        files=stored_refs,
     )

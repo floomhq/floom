@@ -56,6 +56,7 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "workeros.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "workeros.db"))
     monkeypatch.setenv("FLOOM_BLOBS_DIR", str(tmp_path / "blobs"))
+    monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
     for name in [
         "db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
         "db.interface", "files", "models", "worker_registry", "runner_utils",
@@ -103,13 +104,22 @@ def test_public_drop_upload_stores_blob_and_queues_owner_run(client_and_main):
     assert body["worker_id"] == "drop-worker"
     assert body["input_name"] == "source_file"
     assert body["sha256"]
+    assert body["grouped"] is False
+    assert body["file_count"] == 1
     row = main.get_repositories().runs.get(user_id=OWNER, run_id=body["run_id"])
     assert row is not None
     assert row["trigger_source"] == "drop"
     inputs = row["input_json"]
     if isinstance(inputs, str):
         inputs = json.loads(inputs)
-    assert inputs["source_file"] == body["sha256"]
+    # The drop run now stages the uploaded blob into the run's inputs dir and
+    # delivers the absolute path (not the raw SHA) so the worker receives a file.
+    staged = inputs["source_file"]
+    assert isinstance(staged, str)
+    staged_path = Path(staged)
+    assert staged_path.is_absolute()
+    assert staged_path.name == "source_file.txt"
+    assert staged_path.read_bytes() == b"hello"
 
 
 def test_public_drop_upload_rejects_bad_token(client_and_main):

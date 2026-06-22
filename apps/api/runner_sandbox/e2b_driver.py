@@ -513,6 +513,53 @@ def _requirement_name(line: str) -> str | None:
     return match.group(1).lower().replace("_", "-")
 
 
+def _plan_input_file_uploads(
+    inputs: dict,
+) -> tuple[list[tuple[Path, str]], dict]:
+    """Plan how staged file inputs map into the sandbox ``inputs/`` directory.
+
+    Returns ``(uploads, sandbox_inputs)`` where *uploads* is an ordered list of
+    ``(local_path, remote_relpath)`` to write and *sandbox_inputs* is the inputs
+    dict with file values remapped to the relative path(s) the worker reads:
+
+    - single file (absolute path string) -> ``inputs/<basename>``
+    - grouped episode (list of absolute paths) -> ``[inputs/<key>/<basename>, ...]``
+      in upload order, each clip in a per-input subdir to avoid collisions.
+
+    Non-file values (and paths that are not absolute existing files) are passed
+    through unchanged. Pure function so the remap is unit-testable without a
+    live sandbox.
+    """
+    uploads: list[tuple[Path, str]] = []
+    sandbox_inputs: dict = {}
+    for key, value in inputs.items():
+        if isinstance(value, str):
+            local_path = Path(value)
+            if local_path.is_absolute() and local_path.is_file():
+                remote_relpath = f"inputs/{local_path.name}"
+                uploads.append((local_path, remote_relpath))
+                sandbox_inputs[key] = remote_relpath
+            else:
+                sandbox_inputs[key] = value
+        elif isinstance(value, list):
+            remapped: list = []
+            any_file = False
+            for member in value:
+                if isinstance(member, str):
+                    member_path = Path(member)
+                    if member_path.is_absolute() and member_path.is_file():
+                        remote_relpath = f"inputs/{key}/{member_path.name}"
+                        uploads.append((member_path, remote_relpath))
+                        remapped.append(remote_relpath)
+                        any_file = True
+                        continue
+                remapped.append(member)
+            sandbox_inputs[key] = remapped if any_file else value
+        else:
+            sandbox_inputs[key] = value
+    return uploads, sandbox_inputs
+
+
 def _requirements_covered_by_baked_template(requirements_path: Path) -> tuple[bool, list[str]]:
     baked = _python_baked_package_names()
     missing: list[str] = []
@@ -2040,28 +2087,27 @@ class E2BSandboxDriver(SandboxDriver):
                     )
 
             # Upload per-run file inputs from their isolated staging paths.
-            # Inputs dict values for file inputs are absolute local paths.
+            # A file input value is either an absolute local path (single file)
+            # or, for a grouped multi-file "episode", an ordered list of absolute
+            # local paths. Both are remapped to the relative path(s) the worker
+            # reads inside the sandbox.
             e2b_inputs_dir = f"{workdir}/inputs"
-            e2b_inputs_made = False
-            e2b_inputs: dict[str, str] = {}
-            for key, value in inputs.items():
-                if not isinstance(value, str):
-                    continue
-                local_path = Path(value)
-                if local_path.is_absolute() and local_path.is_file():
-                    if not e2b_inputs_made:
-                        sandbox.files.make_dir(e2b_inputs_dir)
-                        made_dirs.add(e2b_inputs_dir)
-                        e2b_inputs_made = True
-                    remote_name = local_path.name
-                    remote_path = f"{e2b_inputs_dir}/{remote_name}"
-                    sandbox.files.write(remote_path, local_path.read_bytes())
-                    log_fn(f"[e2b] Uploaded input file {remote_name}", "debug")
-                    # Remap to the relative path the worker expects inside the sandbox.
-                    e2b_inputs[key] = f"inputs/{remote_name}"
+            made_subdirs: set[str] = set()
+            uploads, sandbox_inputs = _plan_input_file_uploads(inputs)
+            if uploads and e2b_inputs_dir not in made_subdirs:
+                # Create the base inputs/ dir first so grouped subdirs have a parent.
+                sandbox.files.make_dir(e2b_inputs_dir)
+                made_dirs.add(e2b_inputs_dir)
+                made_subdirs.add(e2b_inputs_dir)
+            for local_path, remote_relpath in uploads:
+                remote_dir = f"{workdir}/{remote_relpath}".rsplit("/", 1)[0]
+                if remote_dir not in made_subdirs:
+                    sandbox.files.make_dir(remote_dir)
+                    made_dirs.add(remote_dir)
+                    made_subdirs.add(remote_dir)
+                sandbox.files.write(f"{workdir}/{remote_relpath}", local_path.read_bytes())
+                log_fn(f"[e2b] Uploaded input file {remote_relpath}", "debug")
             perf.mark("input_files_upload")
-            # Build sandbox-local inputs dict with remapped file paths.
-            sandbox_inputs = {k: e2b_inputs.get(k, v) for k, v in inputs.items()}
 
             # Write inputs.json with sandbox-local (relative) file paths.
             sandbox.files.write(
