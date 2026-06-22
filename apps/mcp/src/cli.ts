@@ -87,7 +87,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
   const program = new Command();
   program
     .name(commandName)
-    .description("Floom CLI")
+    .description(commandName === "workeros" ? "Workeros CLI" : "Floom CLI")
     .version(getPackageVersion())
     .showHelpAfterError()
     // OSS/self-hosted: identity sent as x-floom-user (engines with user-header
@@ -350,7 +350,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .action(async (target: string | undefined, options: { json?: boolean }) =>
       runAction(mcpTestCommand(target, options)));
   mcp.command("add")
-    .description("Add Floom to an MCP client config")
+    .description("Add workeros/floom to an MCP client config")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
     .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
       runAction(mcpInstallCommand(options)));
