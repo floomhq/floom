@@ -1,6 +1,7 @@
 import importlib
 import json
 import sys
+import time
 import types
 import uuid
 import zipfile
@@ -154,11 +155,17 @@ def test_runtime_snapshot_created_and_persisted(api_ctx):
     worker_id = _create_worker(client, headers)
     run_id = _start_run(client, headers, worker_id, {"text": "hello"})
 
-    with main.get_db() as conn:
-        row = conn.execute(
-            "SELECT bundle_snapshot_path FROM runs WHERE id = ?",
-            (run_id,),
-        ).fetchone()
+    row = None
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        with main.get_db() as conn:
+            row = conn.execute(
+                "SELECT bundle_snapshot_path FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        if row is not None and row["bundle_snapshot_path"]:
+            break
+        time.sleep(0.05)
     assert row is not None
     assert row["bundle_snapshot_path"] == f"run-bundles/{run_id}"
 
