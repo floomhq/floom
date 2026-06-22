@@ -16,12 +16,16 @@ import {
   HubSpotLogo,
   NotionLogo,
   SheetsLogo,
+  SlackLogo,
+  DiscordLogo,
+  IntercomLogo,
+  SalesforceLogo,
 } from "@/components/landing-icons";
 import { V3OutputPreview } from "./V3OutputPreview";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
-const MARKS: Record<string, React.ReactNode> = {
+export const MARKS: Record<string, React.ReactNode> = {
   gmail: <GmailLogo />,
   hubspot: <HubSpotLogo />,
   notion: <NotionLogo />,
@@ -29,7 +33,23 @@ const MARKS: Record<string, React.ReactNode> = {
   "google calendar": <GCalLogo />,
   sheets: <SheetsLogo />,
   "google sheets": <SheetsLogo />,
+  slack: <SlackLogo />,
+  discord: <DiscordLogo />,
+  intercom: <IntercomLogo />,
+  salesforce: <SalesforceLogo />,
 };
+
+// Short label for tools that have no SVG mark, so a footer is never blank.
+export const TOOL_ABBR: Record<string, string> = {
+  "google search console": "GSC",
+  web: "Web",
+  drive: "Drive",
+  linear: "Linear",
+};
+
+export function toolLabel(tool: string): string {
+  return TOOL_ABBR[tool.toLowerCase()] ?? tool;
+}
 
 export function V3TemplateCard({
   t,
@@ -48,10 +68,7 @@ export function V3TemplateCard({
       ? { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 } }
       : { initial: { opacity: 0, y: 12 }, whileInView: { opacity: 1, y: 0 }, viewport: { once: true, amount: 0.3 } };
 
-  const marks = t.tools
-    .map((tool) => ({ tool, mark: MARKS[tool.toLowerCase()] }))
-    .filter((m) => m.mark)
-    .slice(0, 3);
+  const toolMarks = t.tools.slice(0, 3);
 
   return (
     <motion.div {...anim} transition={{ duration: 0.4, delay: Math.min(i * 0.05, 0.3), ease: EASE }}>
@@ -70,15 +87,25 @@ export function V3TemplateCard({
         />
 
         <div className="mt-auto flex items-center justify-between gap-3 px-5 py-3">
-          <span className="flex items-center gap-2">
-            {marks.map(({ tool, mark }) => (
-              <span
-                key={tool}
-                className="flex h-[14px] w-[14px] items-center justify-center opacity-60 [&_svg]:h-[14px] [&_svg]:w-[14px]"
-              >
-                {mark}
-              </span>
-            ))}
+          <span className="flex items-center gap-1.5">
+            {toolMarks.map((tool) => {
+              const mark = MARKS[tool.toLowerCase()];
+              return mark ? (
+                <span
+                  key={tool}
+                  className="flex h-[14px] w-[14px] items-center justify-center opacity-60 [&_svg]:h-[14px] [&_svg]:w-[14px]"
+                >
+                  {mark}
+                </span>
+              ) : (
+                <span
+                  key={tool}
+                  className="rounded bg-secondary px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
+                >
+                  {toolLabel(tool)}
+                </span>
+              );
+            })}
           </span>
           <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 font-mono text-[9.5px] text-muted-foreground">
             {t.runs}

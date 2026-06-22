@@ -12,25 +12,9 @@ import {
   getWorkspaceWorkers,
   type Workspace,
 } from "@/components/landing-ref/data";
-import {
-  GCalLogo,
-  GmailLogo,
-  HubSpotLogo,
-  NotionLogo,
-  SheetsLogo,
-} from "@/components/landing-icons";
+import { MARKS, toolLabel } from "./V3TemplateCard";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
-
-const MARKS: Record<string, React.ReactNode> = {
-  gmail: <GmailLogo />,
-  hubspot: <HubSpotLogo />,
-  notion: <NotionLogo />,
-  calendar: <GCalLogo />,
-  "google calendar": <GCalLogo />,
-  sheets: <SheetsLogo />,
-  "google sheets": <SheetsLogo />,
-};
 
 export function V3WorkspaceCard({ w, i = 0 }: { w: Workspace; i?: number }) {
   const workers = getWorkspaceWorkers(w);
@@ -53,10 +37,7 @@ export function V3WorkspaceCard({ w, i = 0 }: { w: Workspace; i?: number }) {
         {/* the stack: workers inside */}
         <div className="mx-5 mb-4 space-y-1.5">
           {workers.map((t) => {
-            const marks = t.tools
-              .map((tool) => ({ tool, mark: MARKS[tool.toLowerCase()] }))
-              .filter((m) => m.mark)
-              .slice(0, 2);
+            const toolMarks = t.tools.slice(0, 2);
             return (
               <div
                 key={t.slug}
@@ -64,14 +45,24 @@ export function V3WorkspaceCard({ w, i = 0 }: { w: Workspace; i?: number }) {
               >
                 <span className="truncate text-[12px] text-foreground/80">{t.name}</span>
                 <span className="flex shrink-0 items-center gap-1.5">
-                  {marks.map(({ tool, mark }) => (
-                    <span
-                      key={tool}
-                      className="flex h-[13px] w-[13px] items-center justify-center opacity-70 [&_svg]:h-[13px] [&_svg]:w-[13px]"
-                    >
-                      {mark}
-                    </span>
-                  ))}
+                  {toolMarks.map((tool) => {
+                    const mark = MARKS[tool.toLowerCase()];
+                    return mark ? (
+                      <span
+                        key={tool}
+                        className="flex h-[13px] w-[13px] items-center justify-center opacity-70 [&_svg]:h-[13px] [&_svg]:w-[13px]"
+                      >
+                        {mark}
+                      </span>
+                    ) : (
+                      <span
+                        key={tool}
+                        className="rounded bg-secondary px-1.5 py-0.5 text-[8.5px] font-medium text-muted-foreground"
+                      >
+                        {toolLabel(tool)}
+                      </span>
+                    );
+                  })}
                 </span>
               </div>
             );

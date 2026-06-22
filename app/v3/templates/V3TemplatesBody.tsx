@@ -197,9 +197,9 @@ export function V3TemplatesBody() {
 
       {/* custom CTA */}
       <div className="mt-20 text-center">
-        <h2 className="text-[26px] font-semibold tracking-[-0.022em]">Don&apos;t see your job?</h2>
+        <h2 className="text-[26px] font-semibold tracking-[-0.022em]">Don&apos;t see the worker you need?</h2>
         <p className="mx-auto mt-2 max-w-[400px] text-[13.5px] text-muted-foreground">
-          Describe it in one sentence. Floom drafts the worker for review.
+          Describe the job in one sentence. Floom builds the worker for your review.
         </p>
         <div className="mt-6">
           <V3Composer placeholder="Describe the job…" />
