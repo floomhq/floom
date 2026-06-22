@@ -537,8 +537,9 @@ def cancel_run(
     any registered sandbox command for this run, then marks the run cancelled
     promptly so list/detail surfaces stop reporting it as active.
 
-    Returns 404 if no visible run exists, 200 if cancellation was recorded or
-    the run is already terminal.
+    Returns 404 if no visible cancellable run exists. Terminal runs are treated
+    like missing runs so the cancel endpoint does not become a run-existence
+    oracle for historical/completed run ids.
     """
     # Cancellation operates on the caller's own run by explicit id, so it must
     # work for system/meta runs too (e.g. aborting a worker-author generation
@@ -550,7 +551,7 @@ def cancel_run(
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row["status"] in _TERMINAL_RUN_STATUSES:
-        return ActionResponse(status=str(row["status"]), run_id=run_id)
+        raise HTTPException(status_code=404, detail="Run not found")
 
     cancelled_at = now_iso()
     repos.runs.cancel(
