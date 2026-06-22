@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { CliAuthContent, cliAuthLoginRedirect } from "@/app/cli-auth/page";
+import { CliAuthContent, cliAuthLoginRedirect } from "@/components/cli-auth/CliAuthContent";
 
 describe("CLI auth seams", () => {
   beforeEach(() => {

@@ -24,7 +24,7 @@ beforeEach(() => {
 
 describe("BehaviourSettings (#794)", () => {
   it("reflects loaded values and persists on toggle", async () => {
-    const { BehaviourSettings } = await import("@/app/settings/page");
+    const { BehaviourSettings } = await import("@/components/settings/SettingsPageClient");
     render(<BehaviourSettings />);
 
     // The three behaviour rows render once loaded.
@@ -48,7 +48,7 @@ import { join } from "node:path";
 
 describe("#794 workspace toggle keys match backend enforcement", () => {
   it("writes auto_pause_enabled / failure_email_enabled / approval_default", () => {
-    const src = readFileSync(join(process.cwd(), "app/settings/page.tsx"), "utf-8");
+    const src = readFileSync(join(process.cwd(), "components/settings/SettingsPageClient.tsx"), "utf-8");
     expect(src).toContain('key: "auto_pause_enabled"');
     expect(src).toContain('key: "failure_email_enabled"');
     expect(src).toContain('key: "approval_default"');

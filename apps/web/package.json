@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint && npm run lint:emdash && npm run lint:tokens && npm run lint:borders",
     "lint:emdash": "node scripts/lint-emdash.mjs",

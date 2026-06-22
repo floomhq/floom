@@ -18,7 +18,7 @@ function src(rel: string) { return readFileSync(resolve(ROOT, rel), "utf8"); }
 
 describe("#616 Settings Developer section", () => {
   it("imports GitWorkspacePanel", () => {
-    const s = src("app/settings/page.tsx");
+    const s = src("components/settings/SettingsPageClient.tsx");
     expect(s).toContain('import { GitWorkspacePanel } from "@/components/GitWorkspacePanel"');
   });
 
@@ -28,13 +28,13 @@ describe("#616 Settings Developer section", () => {
     // automate". Git still lives there, account-scoped.
     const nav = src("lib/settings/nav-groups.ts");
     expect(nav).toContain('{ key: "connect", label: "Connect & automate", scope: "account"');
-    const s = src("app/settings/page.tsx");
+    const s = src("components/settings/SettingsPageClient.tsx");
     expect(s).toContain('"connect"');
     expect(s).toContain("function ConnectSection()");
   });
 
   it("renders GitWorkspacePanel inside the Connect & automate detail", () => {
-    const s = src("app/settings/page.tsx");
+    const s = src("components/settings/SettingsPageClient.tsx");
     const connectSectionIdx = s.indexOf("function ConnectSection()");
     expect(connectSectionIdx).toBeGreaterThanOrEqual(0);
     // Window covers the whole ConnectSection body (the API tab sits ahead of the

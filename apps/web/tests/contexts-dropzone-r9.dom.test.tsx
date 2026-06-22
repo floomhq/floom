@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
-import { PackDetailPane, ContextEmptyState } from "@/app/contexts/page";
+import { PackDetailPane, ContextEmptyState } from "@/components/contexts/ContextsPageClient";
 import type { ContextDetail } from "@/lib/types";
 
 // Round-09 B11 + B6 — drag-upload affordance.

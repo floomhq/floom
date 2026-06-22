@@ -30,7 +30,7 @@ describe("P1 UI copy regressions", () => {
   });
 
   it("keeps cli auth terminal status glyphs as lucide icons", () => {
-    const cliAuth = read("app/cli-auth/page.tsx");
+    const cliAuth = read("components/cli-auth/CliAuthContent.tsx");
 
     expect(cliAuth).not.toContain("✓");
     expect(cliAuth).toContain('import { Check, X } from "lucide-react"');

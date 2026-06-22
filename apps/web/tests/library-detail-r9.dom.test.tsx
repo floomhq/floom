@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { PackDetailPane, ShareControl } from "@/app/contexts/page";
+import { PackDetailPane, ShareControl } from "@/components/contexts/ContextsPageClient";
 import type { ContextDetail } from "@/lib/types";
 
 // Radix DropdownMenu needs these in jsdom to open on click.

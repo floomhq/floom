@@ -24,7 +24,7 @@ beforeEach(() => {
 
 describe("ModelDefaults (#797)", () => {
   it("prefills from settings and saves on blur", async () => {
-    const { ModelDefaults } = await import("@/app/settings/page");
+    const { ModelDefaults } = await import("@/components/settings/SettingsPageClient");
     render(<ModelDefaults />);
 
     expect(await screen.findByText("Claude Opus 4.8")).toBeInTheDocument();

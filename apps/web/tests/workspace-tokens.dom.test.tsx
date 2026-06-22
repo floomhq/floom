@@ -45,7 +45,7 @@ beforeEach(() => {
 
 describe("WorkspaceTokensPanel", () => {
   it("lists workspace tokens by name", async () => {
-    const { WorkspaceTokensPanel } = await import("@/app/settings/page");
+    const { WorkspaceTokensPanel } = await import("@/components/settings/SettingsPageClient");
     render(<WorkspaceTokensPanel />);
     expect(await screen.findByText("shared-runner")).toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(1);
@@ -56,7 +56,7 @@ describe("WorkspaceTokensPanel", () => {
   });
 
   it("create flow shows the one-time token value", async () => {
-    const { WorkspaceTokensPanel } = await import("@/app/settings/page");
+    const { WorkspaceTokensPanel } = await import("@/components/settings/SettingsPageClient");
     render(<WorkspaceTokensPanel />);
     await screen.findByText("shared-runner");
 
@@ -71,7 +71,7 @@ describe("WorkspaceTokensPanel", () => {
   });
 
   it("revoke calls the api with the token id", async () => {
-    const { WorkspaceTokensPanel } = await import("@/app/settings/page");
+    const { WorkspaceTokensPanel } = await import("@/components/settings/SettingsPageClient");
     render(<WorkspaceTokensPanel />);
     await screen.findByText("shared-runner");
 
@@ -81,7 +81,7 @@ describe("WorkspaceTokensPanel", () => {
 
   it("403 from list shows the admins-only message", async () => {
     list.mockRejectedValue(new Error("Admin role required"));
-    const { WorkspaceTokensPanel } = await import("@/app/settings/page");
+    const { WorkspaceTokensPanel } = await import("@/components/settings/SettingsPageClient");
     render(<WorkspaceTokensPanel />);
     expect(
       await screen.findByText("Only workspace admins can manage the workspace token.")

@@ -20,7 +20,7 @@ beforeEach(() => {
 
 describe("WorkspaceInfoSettings (#791)", () => {
   it("prefills and saves region on blur", async () => {
-    const { WorkspaceInfoSettings } = await import("@/app/settings/page");
+    const { WorkspaceInfoSettings } = await import("@/components/settings/SettingsPageClient");
     render(<WorkspaceInfoSettings />);
 
     const tz = (await screen.findByLabelText("Timezone")) as HTMLInputElement;

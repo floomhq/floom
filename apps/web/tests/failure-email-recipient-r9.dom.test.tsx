@@ -44,7 +44,7 @@ beforeEach(() => {
 
 describe("Failure-email recipient (Round-09 silent no-op #2)", () => {
   it("renders the recipient input alongside the failure-email toggle", async () => {
-    const { BehaviourSettings } = await import("@/app/settings/page");
+    const { BehaviourSettings } = await import("@/components/settings/SettingsPageClient");
     render(<BehaviourSettings />);
     await screen.findByText("Email me on run failures");
     expect(screen.getByLabelText(/failure.*recipient|notify.*email|send failure emails to/i)).toBeInTheDocument();
@@ -52,7 +52,7 @@ describe("Failure-email recipient (Round-09 silent no-op #2)", () => {
 
   it("blocks enabling the toggle when no recipient is set (no silent no-op)", async () => {
     getSettings.mockResolvedValue({ failure_email_enabled: "false" });
-    const { BehaviourSettings } = await import("@/app/settings/page");
+    const { BehaviourSettings } = await import("@/components/settings/SettingsPageClient");
     render(<BehaviourSettings />);
     await screen.findByText("Email me on run failures");
 
@@ -68,7 +68,7 @@ describe("Failure-email recipient (Round-09 silent no-op #2)", () => {
 
   it("persists the recipient (failure_email_to) and then allows enabling", async () => {
     getSettings.mockResolvedValue({ failure_email_enabled: "false" });
-    const { BehaviourSettings } = await import("@/app/settings/page");
+    const { BehaviourSettings } = await import("@/components/settings/SettingsPageClient");
     render(<BehaviourSettings />);
     await screen.findByText("Email me on run failures");
 

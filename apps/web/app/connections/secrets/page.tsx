@@ -28,7 +28,7 @@ export default function SecretsPage() {
 // How many "used by" workers to show before truncating on mobile
 const USED_BY_INITIAL_COUNT = 2;
 
-export function canMutateSecretItem(secret: SecretItem, currentUser: CurrentUser | null): boolean {
+function canMutateSecretItem(secret: SecretItem, currentUser: CurrentUser | null): boolean {
   if (!currentUser) return false;
   if (computeIsAdmin(currentUser)) return true;
   return !secret.user_id || secret.user_id === currentUser.user_id;
