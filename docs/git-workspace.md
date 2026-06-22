@@ -16,6 +16,9 @@ Every write to the workspace — saving a worker, editing a context, updating wo
   workspace.md                     ← workspace instructions (live)
   workspace.base.md                ← editable base persona
   workspace-tools.yml              ← MCP tool registrations (serialised)
+  .floom/issues/
+    ISSUE-0001.md                  ← workspace issue (YAML frontmatter + body)
+    ISSUE-0001.comments.ndjson     ← append-only comment log
   .gitignore                       ← excludes *.env, workeros.db, .venv, __pycache__
 ```
 

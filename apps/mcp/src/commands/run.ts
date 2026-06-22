@@ -2,6 +2,7 @@ import { basename, resolve as resolvePath, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createAuthenticatedClient, FloomApiError } from "../lib/api.js";
+import { getCommandName } from "../lib/command-name.js";
 import { log, printJson } from "../lib/output.js";
 
 type ParsedInputs = {
@@ -95,7 +96,7 @@ export async function runWorkerCommand(
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
       log.err("Not authenticated.");
-      log.info("Run: floom login");
+      log.info(`Run: ${getCommandName()} login`);
       process.exit(1);
     }
     throw error;
@@ -119,12 +120,12 @@ export async function runWorkerCommand(
   } catch (error) {
     if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Worker '${workerId}' not found.`);
-      log.info("List available workers: floom workers list");
+      log.info(`List available workers: ${getCommandName()} workers list`);
       return 1;
     }
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
       log.err("Your session expired.");
-      log.info("Re-run: floom login");
+      log.info(`Re-run: ${getCommandName()} login`);
       return 1;
     }
     if (error instanceof FloomApiError && error.status && error.status >= 500) {

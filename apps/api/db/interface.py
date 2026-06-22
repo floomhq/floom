@@ -649,6 +649,29 @@ class AssetAccessRepository(Protocol):
         self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, new_owner_id: str
     ) -> RowDict | None: ...
 
+    def rename_asset(
+        self, *, asset_type: str, old_asset_id: str, new_asset_id: str, workspace_id: str
+    ) -> RowDict | None:
+        """Re-key an asset's access row (brain-pack rename moves its row, never
+        leaving a stale one behind). Scoped to ``workspace_id`` because pack
+        folders are workspace-local, so a same-named pack in another workspace is
+        a different asset and must not be touched. Returns the moved row, or
+        ``None`` when no source row exists in that workspace. Deletes any stale
+        row already at ``new_asset_id`` in the SAME workspace first. Raises when
+        ``new_asset_id`` is held by another workspace (the global ``id`` PK can't
+        be re-keyed onto it); callers should ``asset_id_conflict`` first."""
+        ...
+
+    def asset_id_conflict(
+        self, *, asset_type: str, asset_id: str, workspace_id: str
+    ) -> bool:
+        """True when an access row for ``asset_id`` exists in a DIFFERENT
+        workspace. Asset ids are a global PK while pack folders are
+        workspace-local, so a destination name free on disk can still collide
+        with another workspace's row; the rename route rejects (409) such a
+        name before mutating the filesystem."""
+        ...
+
 
 class UserRepository(Protocol):
     """Local user accounts for multi-member OSS deployments (migration 59)."""
@@ -761,3 +784,26 @@ class FeedbackRepository(Protocol):
     def get(self, *, feedback_id: str) -> RowDict | None: ...
 
     def delete(self, *, feedback_id: str, worker_id: str) -> bool: ...
+
+
+class RunFeedbackRepository(Protocol):
+    """Lightweight per-run feedback comments that can be promoted to issues."""
+
+    def add(
+        self,
+        *,
+        feedback_id: str,
+        run_id: str,
+        worker_id: str,
+        author_id: str,
+        author_name: str | None,
+        content: str,
+        rating: str | None,
+        created_at: str,
+    ) -> RowDict: ...
+
+    def list(self, *, run_id: str) -> list[RowDict]: ...
+
+    def get(self, *, feedback_id: str) -> RowDict | None: ...
+
+    def mark_issue_created(self, *, feedback_id: str, issue_id: str) -> RowDict | None: ...

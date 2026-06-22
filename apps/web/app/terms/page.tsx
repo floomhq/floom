@@ -15,7 +15,7 @@ export default function TermsPage() {
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>
-          Floom is open-source software provided as-is, without warranty of
+          Floom is source-available software provided as-is, without warranty of
           any kind. This instance is operated by its deployer for their own use.
         </p>
 
