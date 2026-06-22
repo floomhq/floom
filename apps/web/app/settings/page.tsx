@@ -512,7 +512,8 @@ function SettingsContent() {
   const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [workspaceList, setWorkspaceList] = useState<LocalWorkspaceListResponse | null>(null);
-  const [isAdmin, setIsAdmin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminResolved, setAdminResolved] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -520,7 +521,11 @@ function SettingsContent() {
         const u = await api.me();
         setCurrentUser(u);
         setIsAdmin(u.is_admin ?? (u.role == null ? true : u.role === "admin" || u.role === "owner"));
-      } catch {}
+      } catch {
+        setIsAdmin(false);
+      } finally {
+        setAdminResolved(true);
+      }
       try {
         setWorkspaceList(await api.workspace.list());
       } catch {}
@@ -735,6 +740,7 @@ function SettingsContent() {
     currentUser?.email?.trim() ||
     currentUser?.username?.trim() ||
     undefined;
+  const canManageWorkspace = adminResolved && isAdmin;
 
   const config = useMemo<CollectionConfig<SettingsNavItemWithIcon>>(() => {
     const items = SETTINGS_NAV.map((item) => ({ ...item, icon: iconForSection(item.key) }));
@@ -803,7 +809,7 @@ function SettingsContent() {
       },
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountName, clearConfirmText, clearing, info, isAdmin, platformConfig, workspaceName]);
+  }, [accountName, adminResolved, clearConfirmText, clearing, info, isAdmin, platformConfig, workspaceName]);
 
   function handleCollectionChange(next: CollectionState) {
     setCollectionState(next);
@@ -823,14 +829,14 @@ function SettingsContent() {
           <SystemSection
             info={info}
             platformConfig={platformConfig}
-            canEdit={isAdmin}
+            canEdit={canManageWorkspace}
             onCopySecretName={copySecretName}
           />
         );
       case "channels":
-        return <ChannelsTab canManageWorkspace={isAdmin} />;
+        return <ChannelsTab canManageWorkspace={canManageWorkspace} />;
       case "assistant":
-        return <AssistantSettingsPanel canManageWorkspace={isAdmin} />;
+        return <AssistantSettingsPanel canManageWorkspace={canManageWorkspace} />;
       case "members":
         return <MembersSettingsPanel />;
       case "versions":
@@ -838,7 +844,7 @@ function SettingsContent() {
       case "danger":
         return (
           <DangerSection
-            canEdit={isAdmin}
+            canEdit={canManageWorkspace}
             clearConfirmText={clearConfirmText}
             setClearConfirmText={setClearConfirmText}
             clearing={clearing}
@@ -850,7 +856,7 @@ function SettingsContent() {
       case "personal_tokens":
         return <PersonalTokensSection accountName={accountName} workspaceName={workspaceName} />;
       case "connect":
-        return <ConnectSection canManageWorkspace={isAdmin} />;
+        return <ConnectSection canManageWorkspace={canManageWorkspace} />;
       case "appearance":
         return <AppearanceSection />;
       case "profile":

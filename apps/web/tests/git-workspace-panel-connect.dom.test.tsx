@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,12 +12,17 @@ const apiMock = vi.hoisted(() => ({
   gitCreateRepo: vi.fn(),
   gitLink: vi.fn(),
 }));
+const toastMock = vi.hoisted(() => ({
+  error: vi.fn(),
+  success: vi.fn(),
+}));
 
 vi.mock("@/lib/api", () => ({
   api: {
     system: apiMock,
   },
 }));
+vi.mock("sonner", () => ({ toast: toastMock }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -38,9 +43,25 @@ describe("GitWorkspacePanel GitHub App connect UI", () => {
     render(<GitWorkspacePanel canManageWorkspace />);
 
     expect(await screen.findByRole("button", { name: "Connect GitHub" })).toBeInTheDocument();
-    expect(screen.getByText("Back up your workspace to a private GitHub repo. Free.")).toBeInTheDocument();
+    expect(screen.getByText("Back up your workspace to GitHub automatically. Free.")).toBeInTheDocument();
     expect(screen.getByText("Advanced: use a token instead")).toBeInTheDocument();
     expect(screen.getByText("Create a token on GitHub")).not.toBeVisible();
+  });
+
+  it("opens the advanced token fallback when one-click install is unavailable", async () => {
+    const user = userEvent.setup();
+    apiMock.gitAppInstallStart.mockRejectedValue(new Error("Not Found"));
+    const { GitWorkspacePanel } = await import("@/components/GitWorkspacePanel");
+
+    render(<GitWorkspacePanel canManageWorkspace />);
+
+    await user.click(await screen.findByRole("button", { name: "Connect GitHub" }));
+
+    await waitFor(() => {
+      expect(toastMock.error).toHaveBeenCalledWith("GitHub one-click isn't available here; use the advanced token option.");
+    });
+    expect(screen.getByText("Create a token on GitHub")).toBeVisible();
+    expect(screen.getByLabelText("GitHub personal access token")).toBeVisible();
   });
 
   it("shows connected backup status and puts disconnect under Advanced", async () => {

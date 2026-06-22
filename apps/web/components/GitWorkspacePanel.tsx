@@ -25,7 +25,7 @@ function backupStatusLine(status: GitWorkspaceStatus): string {
 // Primary path - GitHub App install
 // ---------------------------------------------------------------------------
 
-function GitHubAppConnect({ canConnect }: { canConnect: boolean }) {
+function GitHubAppConnect({ canConnect, onFallback }: { canConnect: boolean; onFallback: () => void }) {
   const [connecting, setConnecting] = useState(false);
 
   async function handleConnect() {
@@ -34,8 +34,9 @@ function GitHubAppConnect({ canConnect }: { canConnect: boolean }) {
     try {
       const result = await api.system.gitAppInstallStart();
       window.location.href = result.install_url;
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to start GitHub connection");
+    } catch {
+      toast.error("GitHub one-click isn't available here; use the advanced token option.");
+      onFallback();
       setConnecting(false);
     }
   }
@@ -46,7 +47,7 @@ function GitHubAppConnect({ canConnect }: { canConnect: boolean }) {
         <div className="space-y-1">
           <h3 className="text-sm font-medium text-foreground">Connect GitHub</h3>
           <p className="text-sm text-muted-foreground">
-            Back up your workspace to a private GitHub repo. Free.
+            Back up your workspace to GitHub automatically. Free.
           </p>
         </div>
         <Button onClick={() => void handleConnect()} disabled={!canConnect || connecting} className="shrink-0">
@@ -451,6 +452,7 @@ export function GitWorkspacePanel({ canManageWorkspace }: { canManageWorkspace: 
   const [step, setStep] = useState<Step>("loading");
   const [status, setStatus] = useState<GitWorkspaceStatus | null>(null);
   const [username, setUsername] = useState<string>("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     api.system.gitStatus().catch(() => null).then((s) => {
@@ -511,8 +513,12 @@ export function GitWorkspacePanel({ canManageWorkspace }: { canManageWorkspace: 
 
       {step === "connect" && (
         <>
-          <GitHubAppConnect canConnect={canManageWorkspace} />
-          <details className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/20 px-4 py-3">
+          <GitHubAppConnect canConnect={canManageWorkspace} onFallback={() => setAdvancedOpen(true)} />
+          <details
+            open={advancedOpen}
+            onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+            className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/20 px-4 py-3"
+          >
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
               Advanced: use a token instead
             </summary>

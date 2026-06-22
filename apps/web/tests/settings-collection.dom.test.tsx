@@ -15,7 +15,11 @@ const apiMock = vi.hoisted(() => ({
 }));
 
 vi.mock("@/components/CliCommandPanel", () => ({ CliCommandPanel: () => <div>CLI panel</div> }));
-vi.mock("@/components/GitWorkspacePanel", () => ({ GitWorkspacePanel: () => <div>Git panel</div> }));
+vi.mock("@/components/GitWorkspacePanel", () => ({
+  GitWorkspacePanel: ({ canManageWorkspace }: { canManageWorkspace: boolean }) => (
+    <div data-testid="git-panel" data-can-manage={String(canManageWorkspace)}>Git panel</div>
+  ),
+}));
 vi.mock("@/components/assistant/SlackConnect", () => ({ SlackConnect: () => <div>Slack connect</div> }));
 
 vi.mock("@/lib/api", () => ({
@@ -173,5 +177,17 @@ describe("Settings Collection (Phase 3)", () => {
     expect(await screen.findByText("Workspace · My workspace", {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByText(/9b1a5065-3ab9-493a-8220-b6c139d9c1b7/i)).not.toBeInTheDocument();
     expect(screen.getAllByText("Settings")).toHaveLength(1);
+  });
+
+  it("does not grant GitHub mutation controls while the admin check is pending", async () => {
+    const user = userEvent.setup();
+    apiMock.me.mockReturnValue(new Promise(() => undefined));
+    window.history.replaceState(null, "", "/settings?sel=connect");
+    const { default: SettingsPage } = await import("@/app/settings/page");
+
+    render(<SettingsPage />);
+
+    await user.click(await screen.findByRole("tab", { name: "GitHub" }));
+    expect(await screen.findByTestId("git-panel")).toHaveAttribute("data-can-manage", "false");
   });
 });
