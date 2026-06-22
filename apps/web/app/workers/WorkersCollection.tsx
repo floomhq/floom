@@ -1471,10 +1471,7 @@ function AddAlertForm({
 
   return (
     <DetailGroup label="Add alert">
-      <div
-        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-4"
-        style={{ display: "flex", flexDirection: "column", gap: 16 }}
-      >
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Events */}
         <div className="flex flex-col gap-2">
           <Label style={{ fontSize: 12.5 }}>Fire on</Label>
@@ -1675,8 +1672,7 @@ function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
 
 // Setup: PRIMARY tab hosting the second-row sub-tabs. Reuses .c-dtabs2 /
 // .c-dtab2 (the smaller straight-ink underline variant) — NO sidebar.
-function SetupTab({ w }: { w: WorkerSummary }) {
-  const router = useRouter();
+function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => void }) {
   const [sub, setSub] = useState<SetupSubtab>("Inputs");
   const counts = useSetupSubCounts(w);
   return (
@@ -1713,7 +1709,7 @@ function SetupTab({ w }: { w: WorkerSummary }) {
           style={{ fontSize: 11, letterSpacing: 0 }}
           onClick={(e) => {
             e.preventDefault();
-            router.replace(`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`);
+            onOpenSource?.();
           }}
         >
           View as YAML →
@@ -2154,6 +2150,16 @@ export default function WorkersCollection({
       return next;
     });
   }, []);
+  const pinAdvancedTab = useCallback((key: WorkerDetailTab) => {
+    if (!ADVANCED_DETAIL_TABS.includes(key)) return;
+    setPinnedTabs((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      savePinnedTabs(next);
+      return next;
+    });
+  }, []);
   // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
   // `tab` URL param to drive the active tab. replace() avoids a history entry.
   const selectWorkerTab = useCallback(
@@ -2163,6 +2169,13 @@ export default function WorkersCollection({
       );
     },
     [router],
+  );
+  const pinAndSelectWorkerTab = useCallback(
+    (workerId: string, key: WorkerDetailTab) => {
+      pinAdvancedTab(key);
+      selectWorkerTab(workerId, key);
+    },
+    [pinAdvancedTab, selectWorkerTab],
   );
 
   useEffect(() => {
@@ -2401,7 +2414,9 @@ export default function WorkersCollection({
                 ? (workerRunsCache.get(w.id)?.length
                     ?? (w.last_run ? 1 : undefined))
                 : undefined,
-              render: () => <Tab w={w} />,
+              render: () => key === "Setup"
+                ? <SetupTab w={w} onOpenSource={() => pinAndSelectWorkerTab(w.id, "Source")} />
+                : <Tab w={w} />,
             };
           });
         })(),

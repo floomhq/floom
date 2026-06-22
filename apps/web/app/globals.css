@@ -982,17 +982,16 @@ html.dark .grain {
    R9: lives in the panel BODY below both tab rows, not between them. */
 .c-ops-frame { display:flex; align-items:center; gap:8px; padding:14px 0 4px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-foreground); }
 .c-dbody { flex:1; min-width:0; overflow:auto; padding:18px 20px; }
-.c-dsec + .c-dsec { border-top:var(--bd-div); padding-top:18px; }
+.c-dgrp + .c-dgrp { border-top:var(--bd-div); margin-top:15px; padding-top:15px; }
 .c-dempty { font-size:12.5px; color:var(--muted-foreground); padding:14px 0; }
 .c-dact { display:flex; gap:8px; align-items:center; }
-.c-dsec + .c-dact { border-top:var(--bd-div); padding-top:18px; }
+.c-dgrp + .c-dact { border-top:var(--bd-div); padding-top:18px; }
 .c-dact[data-sep="true"] { border-top:var(--bd-div); margin-top:18px; padding-top:18px; }
-.c-dsec + .c-dact[data-sep="true"] { margin-top:0; }
+.c-dgrp + .c-dact[data-sep="true"] { margin-top:0; }
 .c-dnote { font-size:12.5px; color:var(--muted-foreground); font-style:italic; margin:0; }
 .c-dsum { display:flex; gap:22px; padding:2px 0 14px; border-bottom:var(--bd-div); margin-bottom:14px; }
 .c-dsum .s .v { font-size:17px; font-weight:600; letter-spacing:-.01em; color:var(--ink); }
 .c-dsum .s .k { font-size:11px; color:var(--muted-foreground); margin-top:1px; }
-.c-dgrp + .c-dgrp { border-top:var(--bd-div); margin-top:15px; padding-top:15px; }
 .c-drow { display:flex; justify-content:space-between; gap:14px; font-size:13px; padding:3px 0; }
 .c-drow .k { color:var(--muted-foreground); }
 .c-drow .v { color:var(--ink); text-align:right; min-width:0; overflow-wrap:anywhere; }
