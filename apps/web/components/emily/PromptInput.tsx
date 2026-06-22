@@ -165,39 +165,42 @@ export function PromptInput({
           default: a single subtle divider outline keeps it discoverable.
           landing (#1557/P1-10): fully FLAT, no box border at all, to match the
           marketing landing prompt box; compact padding (py-2) keeps it short. */}
+      {/* Two-row composer: textarea on top, action toolbar below (attach left,
+          send right) — the prompt-kit/ChatGPT/Cursor layout (Federico 2026-06-21).
+          Flat Floom system: bg fill, NO border, NO shadow. The a11y focus ring
+          (#1711) stays as the visible focus affordance. The bg-2 fill (non-landing)
+          gives the box resting discoverability without a border — replacing the
+          E10 divider outline, per Federico's approval. No "Tools" affordance. */}
       <div
         className={cn(
-          // a11y #1711: the inner <textarea> is outline-none, so the composer
-          // had no visible focus indicator. Move the focus affordance to the
-          // wrapper: a token-based ring (--ring = --accent-line) appears whenever
-          // the composer is focused, satisfying the visible-focus requirement
-          // without changing the resting flat look.
-          "flex gap-2 rounded-xl bg-[var(--bg-app)]",
+          "rounded-xl p-1.5 transition-colors",
           "focus-within:ring-2 focus-within:ring-[var(--ring)] focus-within:ring-offset-0",
-          // Hero (large): taller, roomier padding, send button top-aligned so a
-          // multi-line draft reads cleanly. Standard: compact, vertically centered.
-          large ? "items-start px-4 py-3.5" : "items-center px-3 py-2",
-          isLanding
-            ? "[border:none]"
-            : "[border:var(--bd-div)]"
+          large && "p-2",
+          // landing keeps the fully-flat marketing look (#1557); the Emily
+          // composer uses a bg-2 fill so it's discoverable without a border.
+          isLanding ? "bg-[var(--bg-app)]" : "bg-[var(--bg-2)]",
         )}
       >
-        {/* Attach button */}
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled}
+        <textarea
+          ref={textareaRef}
+          // a11y #1711: explicit accessible name (the textarea has no visible
+          // <label>; the placeholder is not an accessible name).
+          aria-label="Describe the job for a new worker"
           className={cn(
-            "shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40",
-            // Hero composer is top-aligned (items-start); nudge the icon down so
-            // it sits on the first text line instead of the very top edge.
-            large && "mt-1",
+            "w-full resize-none bg-transparent px-2 pt-1.5 outline-none placeholder:text-muted-foreground overflow-auto",
+            // Hero (large): bigger type + taller min-height so the home composer
+            // reads as the primary input. Standard: compact body text.
+            large
+              ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px]"
+              : "text-sm min-h-[24px] max-h-[120px]",
           )}
-          title="Attach file"
-          aria-label="Attach file"
-        >
-          <Paperclip className="size-4" />
-        </button>
+          placeholder={placeholder ?? "Message Emily..."}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKey}
+          rows={1}
+          disabled={disabled}
+        />
 
         <input
           ref={fileInputRef}
@@ -210,59 +213,52 @@ export function PromptInput({
           tabIndex={-1}
         />
 
-        <textarea
-          ref={textareaRef}
-          // a11y #1711: explicit accessible name (the textarea has no visible
-          // <label>; the placeholder is not an accessible name).
-          aria-label="Describe the job for a new worker"
-          className={cn(
-            "flex-1 resize-none bg-transparent outline-none placeholder:text-muted-foreground overflow-auto",
-            // Hero (large): bigger type + taller min-height so the home composer
-            // reads as the primary input. Standard: compact body text.
-            large
-              ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px] py-0.5"
-              : "text-sm min-h-[20px] max-h-[120px]",
-          )}
-          placeholder={placeholder ?? "Message Emily..."}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKey}
-          rows={1}
-          disabled={disabled}
-        />
+        {/* Action toolbar — attach left, send right */}
+        <div className="flex items-center gap-1 px-0.5">
+          {/* Attach button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+            title="Attach file"
+            aria-label="Attach file"
+          >
+            <Paperclip className="size-4" />
+          </button>
 
-        {isLanding ? (
-          // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
-          // landing's prompt CTA, not a bare arrow. Keeps the accessible name
-          // "Send message" so the send action stays discoverable to AT + tests.
-          <Button
-            size="sm"
-            className={cn(
-              "h-7 shrink-0 gap-1.5 px-3 text-xs font-medium",
-              large && "mt-1",
-            )}
-            onClick={onSubmit}
-            disabled={!canSend}
-            style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
-            type="button"
-            aria-label="Hire worker"
-          >
-            Hire
-            <ArrowUp className="size-3.5" />
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="h-7 w-7 p-0 shrink-0"
-            onClick={onSubmit}
-            disabled={!canSend}
-            style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
-            type="button"
-            aria-label="Send message"
-          >
-            <SendHorizonal className="size-3.5" />
-          </Button>
-        )}
+          <div className="flex-1" />
+
+          {isLanding ? (
+            // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
+            // landing's prompt CTA, not a bare arrow. Keeps an accessible name so
+            // the send action stays discoverable to AT + tests.
+            <Button
+              size="sm"
+              className="h-8 shrink-0 gap-1.5 px-3 text-xs font-medium"
+              onClick={onSubmit}
+              disabled={!canSend}
+              style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
+              type="button"
+              aria-label="Hire worker"
+            >
+              Hire
+              <ArrowUp className="size-3.5" />
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="size-8 p-0 shrink-0"
+              onClick={onSubmit}
+              disabled={!canSend}
+              style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
+              type="button"
+              aria-label="Send message"
+            >
+              <SendHorizonal className="size-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
