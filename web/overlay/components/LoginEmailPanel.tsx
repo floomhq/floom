@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { getLastAuthMethod, setLastAuthMethod, type LastAuthMethod } from "@/lib/last-auth";
+import { LastUsedBadge } from "@/components/LastUsedBadge";
 
 async function postAuth(endpoint: string, payload: unknown): Promise<Response> {
   let lastError: unknown = null;
@@ -46,6 +48,11 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastUsed, setLastUsed] = useState<LastAuthMethod | null>(null);
+
+  useEffect(() => {
+    setLastUsed(getLastAuthMethod());
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,6 +74,8 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
         }
         throw new Error(typeof body.detail === "string" ? body.detail : fallback);
       }
+      setLastAuthMethod("email");
+      setLastUsed("email");
       if (mode === "signin" || body.ok) {
         window.location.replace(normalizeNextPath(body.next || normalizedNext || "/app"));
         return;
@@ -143,19 +152,22 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
         </label>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="auth-btn auth-btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {loading
-          ? "Sending..."
-          : mode === "magic"
-            ? "Email me a magic link"
-            : mode === "signup"
-              ? "Create account"
-              : "Sign in with password"}
-      </button>
+      <div style={{ position: "relative" }}>
+        <button
+          type="submit"
+          disabled={loading}
+          className="auth-btn auth-btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading
+            ? "Sending..."
+            : mode === "magic"
+              ? "Email me a magic link"
+              : mode === "signup"
+                ? "Create account"
+                : "Sign in with password"}
+        </button>
+        {lastUsed === "email" ? <LastUsedBadge /> : null}
+      </div>
 
       {status ? <p className="text-center text-[12px] text-[var(--success)]">{status}</p> : null}
       {error ? <p className="text-center text-[12px] text-[var(--warning)]">{error}</p> : null}

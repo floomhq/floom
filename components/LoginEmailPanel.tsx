@@ -1,7 +1,9 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { appUrl } from "@/lib/app-url";
+import { getLastAuthMethod, setLastAuthMethod, type LastAuthMethod } from "@/lib/last-auth";
+import { LastUsedBadge } from "@/components/LastUsedBadge";
 
 async function postAuth(endpoint: string, payload: unknown): Promise<Response> {
   let lastError: unknown = null;
@@ -45,6 +47,11 @@ export function LoginEmailPanel({ next }: { next: string }) {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastUsed, setLastUsed] = useState<LastAuthMethod | null>(null);
+
+  useEffect(() => {
+    setLastUsed(getLastAuthMethod());
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -59,6 +66,8 @@ export function LoginEmailPanel({ next }: { next: string }) {
       if (!response.ok) {
         throw new Error(typeof body.detail === "string" ? body.detail : "Sign-in failed");
       }
+      setLastAuthMethod("email");
+      setLastUsed("email");
       if (mode === "password") {
         window.location.replace(appUrl(normalizeNextPath(body.next || normalizedNext || "/")));
         return;
@@ -122,13 +131,16 @@ export function LoginEmailPanel({ next }: { next: string }) {
         </label>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="flex h-11 w-full items-center justify-center rounded-[12px] bg-foreground px-4 text-[14px] font-medium text-background transition hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {loading ? "Sending..." : mode === "magic" ? "Email me a magic link" : "Sign in with password"}
-      </button>
+      <div style={{ position: "relative" }}>
+        <button
+          type="submit"
+          disabled={loading}
+          className="flex h-11 w-full items-center justify-center rounded-[12px] bg-foreground px-4 text-[14px] font-medium text-background transition hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? "Sending..." : mode === "magic" ? "Email me a magic link" : "Sign in with password"}
+        </button>
+        {lastUsed === "email" ? <LastUsedBadge /> : null}
+      </div>
 
       {status ? <p className="text-center text-[12px]" style={{ color: "var(--v3-accent)" }}>{status}</p> : null}
       {error ? <p className="text-center text-[12px] text-[var(--warning)]">{error}</p> : null}

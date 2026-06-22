@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { OAUTH_LOGIN_URL, OAUTH_LOGIN_URL_GITHUB } from "@/lib/api";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
+import { AuthButton } from "@/components/AuthButton";
 import { Hl, V3Shell } from "@/app/v3/V3Shell";
 import {
   FileTextIcon,
@@ -170,14 +171,14 @@ export default async function LoginPage({
           </div>
 
           <div className="space-y-2.5">
-            <a href={OAUTH_LOGIN_URL(next)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-foreground px-4 text-[14px] font-medium text-background">
+            <AuthButton method="google" href={OAUTH_LOGIN_URL(next)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-foreground px-4 text-[14px] font-medium text-background">
               <GoogleIcon />
               <span>Continue with Google</span>
-            </a>
-            <a href={OAUTH_LOGIN_URL_GITHUB(next)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-secondary px-4 text-[14px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]">
+            </AuthButton>
+            <AuthButton method="github" href={OAUTH_LOGIN_URL_GITHUB(next)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-secondary px-4 text-[14px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]">
               <GitHubIcon />
               <span>Continue with GitHub</span>
-            </a>
+            </AuthButton>
           </div>
 
           <div className="my-5 text-center">

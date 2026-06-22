@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
+import { AuthButton } from "@/components/AuthButton";
 import { cn } from "@/lib/utils";
 import { safeAppNext } from "@/lib/safe-next";
 
@@ -193,14 +194,14 @@ export default async function LoginPage({
             </div>
 
             <div className="space-y-2.5">
-              <a href={oauthLoginUrl("google", next)} className="auth-btn auth-btn-primary">
+              <AuthButton method="google" href={oauthLoginUrl("google", next)} className="auth-btn auth-btn-primary">
                 <GoogleIcon />
                 <span>Continue with Google</span>
-              </a>
-              <a href={oauthLoginUrl("github", next)} className="auth-btn auth-btn-secondary">
+              </AuthButton>
+              <AuthButton method="github" href={oauthLoginUrl("github", next)} className="auth-btn auth-btn-secondary">
                 <GitHubIcon />
                 <span>Continue with GitHub</span>
-              </a>
+              </AuthButton>
             </div>
 
             <div className="my-5 flex items-center gap-3">
