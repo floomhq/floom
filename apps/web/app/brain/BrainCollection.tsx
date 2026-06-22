@@ -220,7 +220,7 @@ function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> })
         </div>
       )}
       {error && (
-        <div style={{ fontSize: 12, color: "var(--red, #c0392b)", padding: "6px 10px", background: "var(--bg-2)", borderRadius: 8 }}>
+        <div style={{ fontSize: 12, color: "var(--negative)", padding: "6px 10px", background: "var(--bg-2)", borderRadius: 8 }}>
           {error}
         </div>
       )}
