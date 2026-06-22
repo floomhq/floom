@@ -1,12 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 
+const router = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  searchParams: "",
+}));
+
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(router.searchParams),
+  useRouter: () => router,
   usePathname: () => "/",
 }));
+
+const TEST_TIMEOUT = 15_000;
 
 const WORKER_ID = "invoice-reconciler";
 const worker = {
@@ -59,6 +67,7 @@ vi.mock("@/lib/api", () => ({
       list: vi.fn().mockResolvedValue([worker]),
       get: vi.fn().mockResolvedValue(workerDetail),
       listVersions: vi.fn().mockResolvedValue([]),
+      alerts: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), remove: vi.fn() },
       feedback: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
     },
     contexts: { list: vi.fn().mockResolvedValue([{ name: "finance-sops" }]) },
@@ -72,22 +81,57 @@ vi.mock("@/lib/useApprovalsSync", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  router.searchParams = "";
   window.localStorage.clear();
+  window.history.replaceState(null, "", "/");
 });
 
-async function openDetail() {
+async function openDetail(tab?: string) {
+  router.searchParams = tab
+    ? `sel=${encodeURIComponent(WORKER_ID)}&tab=${encodeURIComponent(tab)}`
+    : "";
   const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
   render(
     <QueryProvider>
       <WorkersCollection initialWorkers={[worker as never]} />
     </QueryProvider>,
   );
-  fireEvent.click(await screen.findByRole("button", { name: /Invoice Reconciler/i }));
+  if (!tab) {
+    fireEvent.click(await screen.findByRole("button", { name: /Invoice Reconciler/i }));
+  }
   await waitFor(() => expect(document.querySelector(".c-dhead")).toBeTruthy());
 }
 
 function classIncludes(el: Element, value: string): boolean {
   return typeof el.getAttribute("class") === "string" && el.getAttribute("class")!.includes(value);
+}
+
+function greyCardWrappers(scope: Element): Element[] {
+  return Array.from(scope.querySelectorAll("*")).filter((el) =>
+    classIncludes(el, "bg-[var(--bg-2)]") &&
+    classIncludes(el, "rounded-[var(--radius-card)]")
+  );
+}
+
+function detailBody(): Element {
+  const body = document.querySelector(".c-dbody");
+  expect(body).toBeTruthy();
+  return body!;
+}
+
+function expectNoGreyCardWrappers(label: string) {
+  const wrappers = greyCardWrappers(detailBody());
+  expect(
+    wrappers.map((el) => ({
+      label,
+      className: el.getAttribute("class"),
+      text: el.textContent?.replace(/\s+/g, " ").trim().slice(0, 120),
+    })),
+  ).toHaveLength(0);
+}
+
+function tabName(label: string): RegExp {
+  return new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`);
 }
 
 describe("Workers detail redesign register", () => {
@@ -117,5 +161,29 @@ describe("Workers detail redesign register", () => {
       classIncludes(el, "rounded-[var(--radius-card)]")
     );
     expect(oldGreyMetaCards).toHaveLength(0);
-  });
+  }, TEST_TIMEOUT);
+
+  it("keeps Overview and Setup panels free of grey-card detail wrappers", async () => {
+    await openDetail();
+
+    expectNoGreyCardWrappers("Overview");
+
+    cleanup();
+    await openDetail("Setup");
+
+    for (const name of ["Inputs", "Alerts & webhooks", "Triggers", "Limits"]) {
+      fireEvent.click(await screen.findByRole("tab", { name: tabName(name) }));
+      await waitFor(() => expect(screen.getByRole("tab", { name: tabName(name) })).toHaveAttribute("aria-selected", "true"));
+      expectNoGreyCardWrappers(name);
+    }
+  }, TEST_TIMEOUT);
+
+  it("pins Source before the View as YAML action navigates", async () => {
+    await openDetail("Setup");
+
+    fireEvent.click(screen.getByRole("link", { name: /View as YAML/i }));
+
+    expect(window.localStorage.getItem("floom.workerDetail.pinnedTabs") ?? "").toContain("Source");
+    expect(router.replace).toHaveBeenCalledWith(`/workers?sel=${encodeURIComponent(WORKER_ID)}&tab=Source`);
+  }, TEST_TIMEOUT);
 });
