@@ -2831,12 +2831,18 @@ class _ImportFromShareRequest(BaseModel):
     token: str
 
 
+class WorkerCreateFile(BaseModel):
+    path: str
+    content: str
+
+
 class WorkerCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     worker_yml: str
-    run_py: str
+    run_py: Optional[str] = None
     skill_md: Optional[str] = None
+    files: Optional[List[WorkerCreateFile]] = None
 
 
 class SecretWarning(BaseModel):

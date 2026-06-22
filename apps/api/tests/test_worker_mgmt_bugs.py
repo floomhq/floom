@@ -28,7 +28,7 @@ trigger:
 exec:
   entry: "run.py"
   runtime: "python311"
-  runner: "local"
+  runner: "e2b"
   command: "python run.py"
 inputs:
   - name: "channel"
@@ -80,6 +80,7 @@ def app_ctx(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
 
     for name in [
         "db",
@@ -89,6 +90,8 @@ def app_ctx(monkeypatch, tmp_path):
         "db.dependency",
         "db.interface",
         "models",
+        "auth",
+        "auth.local",
         "worker_registry",
         "runner_utils",
         "run_service",
@@ -98,6 +101,8 @@ def app_ctx(monkeypatch, tmp_path):
         sys.modules.pop(name, None)
     for _rn in [x for x in list(sys.modules) if x.startswith("routers")]:
         sys.modules.pop(_rn, None)
+    for _sn in [x for x in list(sys.modules) if x.startswith("services.")]:
+        sys.modules.pop(_sn, None)
 
     db = importlib.import_module("db")
     db.init_db()
@@ -110,7 +115,10 @@ def app_ctx(monkeypatch, tmp_path):
 
     from fastapi.testclient import TestClient
 
-    client = TestClient(main.app, headers={"x-floom-secret": "worker-mgmt-secret"})
+    client = TestClient(
+        main.app,
+        headers={"x-floom-secret": "worker-mgmt-secret", "x-floom-user": "local-user"},
+    )
     yield client, main, importlib.import_module("scheduler")
     db.get_repositories.cache_clear()
 
@@ -142,6 +150,146 @@ def test_worker_routes_resolve_slug_equivalent_id(app_ctx):
     deleted = client.delete("/workers/Sales_Summary")
     assert deleted.status_code == 204, deleted.text
     assert client.get("/workers/sales-summary").status_code == 404
+
+
+def test_worker_create_accepts_full_file_bundle(app_ctx):
+    client, _main, _scheduler = app_ctx
+    worker_yml = _worker_yml("bundle-worker", title="Bundle Worker")
+
+    created = client.post(
+        "/workers",
+        json={
+            "worker_yml": worker_yml,
+            "files": [
+                {"path": "worker.yml", "content": worker_yml},
+                {"path": "run.py", "content": "from lib.helper import main\nmain()\n"},
+                {"path": "lib/helper.py", "content": "def main(): pass\n"},
+            ],
+        },
+    )
+
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["id"] == "bundle-worker"
+    file_paths = {item["path"] for item in body["files"]}
+    assert "lib/helper.py" in file_paths
+
+
+def test_worker_create_rejects_oversized_json_file_bundle(app_ctx):
+    client, _main, _scheduler = app_ctx
+    worker_yml = _worker_yml("huge-json-bundle", title="Huge JSON Bundle")
+    files = [{"path": "worker.yml", "content": worker_yml}]
+    files.extend({"path": f"lib/file_{idx}.py", "content": ""} for idx in range(2000))
+
+    created = client.post(
+        "/workers",
+        json={"worker_yml": worker_yml, "files": files},
+    )
+
+    assert created.status_code == 413, created.text
+    assert "too many entries" in created.json()["detail"]
+
+
+@pytest.mark.parametrize("bad_path", ["../evil.py", "/tmp/evil.py", "C:\\temp\\evil.py"])
+def test_worker_create_rejects_json_file_path_escape(app_ctx, bad_path):
+    client, _main, _scheduler = app_ctx
+    worker_yml = _worker_yml("bad-path-worker", title="Bad Path Worker")
+
+    created = client.post(
+        "/workers",
+        json={
+            "worker_yml": worker_yml,
+            "files": [
+                {"path": "worker.yml", "content": worker_yml},
+                {"path": "run.py", "content": "print('ok')\n"},
+                {"path": bad_path, "content": "print('escape')\n"},
+            ],
+        },
+    )
+
+    assert created.status_code == 400, created.text
+    assert "Invalid path" in created.json()["detail"]
+
+
+def test_worker_clone_duplicates_full_bundle(app_ctx):
+    client, _main, _scheduler = app_ctx
+
+    cloned = client.post("/workers/sales-summary/clone")
+
+    assert cloned.status_code == 200, cloned.text
+    body = cloned.json()
+    assert body["id"] == "sales-summary-copy"
+    assert body["id"] != "sales-summary"
+    file_paths = {item["path"] for item in body["files"]}
+    assert "worker.yml" in file_paths
+    assert "run.py" in file_paths
+
+
+def test_worker_clone_and_restart_404_for_non_owner(app_ctx):
+    client, _main, _scheduler = app_ctx
+    from fastapi.testclient import TestClient
+
+    other_client = TestClient(
+        client.app,
+        headers={"x-floom-secret": "worker-mgmt-secret", "x-floom-user": "other-user"},
+    )
+
+    cloned = other_client.post("/workers/sales-summary/clone")
+    restarted = other_client.post("/workers/sales-summary/restart")
+
+    assert cloned.status_code == 404, cloned.text
+    assert restarted.status_code == 404, restarted.text
+
+
+def test_worker_restart_rematerializes_from_embedded_files(app_ctx):
+    client, main, _scheduler = app_ctx
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    run_py = worker_dir / "run.py"
+    original = run_py.read_text(encoding="utf-8")
+    main._embed_files_in_skill_version("sales-summary", worker_dir)
+    run_py.unlink()
+    assert not run_py.exists()
+
+    restarted = client.post("/workers/sales-summary/restart")
+
+    assert restarted.status_code == 200, restarted.text
+    assert restarted.json()["rematerialized"] is True
+    assert run_py.read_text(encoding="utf-8") == original
+
+
+def test_worker_restart_skips_embedded_path_escape(app_ctx, tmp_path):
+    client, main, _scheduler = app_ctx
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    absolute_escape = (tmp_path / "absolute-escape.py").resolve()
+    main._embed_files_in_skill_version("sales-summary", worker_dir)
+    with main.get_db() as conn:
+        row = conn.execute(
+            "SELECT sv.id, sv.manifest_json FROM skill_versions sv "
+            "JOIN workers w ON w.skill_version_id = sv.id WHERE w.id = ?",
+            ("sales-summary",),
+        ).fetchone()
+        manifest = json.loads(row["manifest_json"])
+        manifest["_files"] = {
+            "worker.yml": _worker_yml("sales-summary", title="Sales Summary"),
+            "run.py": "print('restored')\n",
+            "../escape.py": "print('bad')\n",
+            str(absolute_escape): "print('bad')\n",
+            "C:\\temp\\floom-escape.py": "print('bad')\n",
+        }
+        conn.execute(
+            "UPDATE skill_versions SET manifest_json = ? WHERE id = ?",
+            (json.dumps(manifest), row["id"]),
+        )
+    import shutil
+
+    shutil.rmtree(worker_dir)
+    restarted = client.post("/workers/sales-summary/restart")
+
+    assert restarted.status_code == 200, restarted.text
+    assert (worker_dir / "run.py").read_text(encoding="utf-8") == "print('restored')\n"
+    assert not (main.WORKERS_DIR.parent / "escape.py").exists()
+    assert not absolute_escape.exists()
+    assert not (worker_dir / "C:" / "temp" / "floom-escape.py").exists()
 
 
 def test_workers_shape_list_empty_workspace_returns_200(monkeypatch, tmp_path):

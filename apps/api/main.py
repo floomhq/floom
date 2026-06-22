@@ -3750,6 +3750,9 @@ def update_worker(
     """Update an existing worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
+    if payload.run_py is None:
+        raise HTTPException(status_code=422, detail="run_py is required")
+
     worker_id = _canonical_worker_id(worker_id)
     raw_worker_id = _raw_worker_id_from_worker_yml(payload.worker_yml)
     if raw_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
