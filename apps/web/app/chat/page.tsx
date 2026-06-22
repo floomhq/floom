@@ -12,6 +12,7 @@
  */
 import { redirect } from "next/navigation";
 import { EmilyChatPage } from "@/components/emily/EmilyChat";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 
 export const metadata = {
   title: "Emily - Floom",
@@ -25,8 +26,7 @@ export default async function ChatPage({
 }) {
   const { mode, prime } = await searchParams;
   if (mode === "create") {
-    const primeQs = typeof prime === "string" && prime ? `&prime=${encodeURIComponent(prime)}` : "";
-    redirect(`/?create=1${primeQs}`);
+    redirect(createWorkerHref(typeof prime === "string" ? prime : undefined));
   }
   return <EmilyChatPage />;
 }

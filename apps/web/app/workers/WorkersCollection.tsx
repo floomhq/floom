@@ -97,6 +97,7 @@ import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 import { ADVANCED_DETAIL_TABS, BASE_DETAIL_TABS } from "@/lib/workers/pinned-tabs";
 import { ADVANCED_MODE_STORAGE_KEY } from "@/lib/workers/tabs";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 
 function rel(ts?: string | null): string {
   if (!ts) return "—";
@@ -2328,7 +2329,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "New worker", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed. Label matches the sidebar primary CTA (one action, one label).
+    add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) }, // #902/2026-06-19: create = the home fullscreen Emily, primed. Label matches the sidebar primary CTA (one action, one label).
     states: {
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {
@@ -2336,7 +2337,7 @@ export default function WorkersCollection({
         help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
         action: (
           <WorkersEmptyPrompt
-            onSubmit={(prompt) => router.push(`/?create=1&prime=${encodeURIComponent(prompt)}`)}
+            onSubmit={(prompt) => router.push(createWorkerHref(prompt))}
           />
         ),
       },

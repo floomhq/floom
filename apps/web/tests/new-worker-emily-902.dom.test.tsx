@@ -97,18 +97,18 @@ describe("#902 New worker → consistent Emily empty state", () => {
 
   it("sidebar has the New worker button routing to the home create flow", () => {
     const sidebar = src("components/layout/sidebar.tsx");
-    expect(sidebar).toContain('href="/?create=1"');
+    expect(sidebar).toContain("href={createWorkerHref()}");
     expect(sidebar).toContain("New worker");
   });
 
   it("/workers/new is a redirect, not a form; all create entry points use the home create flow", () => {
     const newPage = src("app/workers/new/page.tsx");
-    expect(newPage).toContain("redirect(`/?create=1");
+    expect(newPage).toContain("redirect(createWorkerHref");
     expect(newPage).not.toContain("worker-author");
-    expect(src("app/workers/WorkersCollection.tsx")).toContain('router.push("/?create=1")');
-    expect(src("components/CommandPalette.tsx")).toContain('go("/?create=1")');
+    expect(src("app/workers/WorkersCollection.tsx")).toContain("router.push(createWorkerHref");
+    expect(src("components/CommandPalette.tsx")).toContain("go(createWorkerHref())");
     // The legacy /chat?mode=create deep link still works → redirects to the home
     // create flow instead of rendering a separate full-page create surface.
-    expect(src("app/chat/page.tsx")).toContain("redirect(`/?create=1");
+    expect(src("app/chat/page.tsx")).toContain("redirect(createWorkerHref");
   });
 });
