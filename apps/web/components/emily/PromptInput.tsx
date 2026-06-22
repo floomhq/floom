@@ -166,10 +166,10 @@ export function PromptInput({
           landing (#1557/P1-10): fully FLAT, no box border at all, to match the
           marketing landing prompt box; compact padding (py-2) keeps it short. */}
       {/* Two-row composer: textarea on top, action toolbar below (attach left,
-          send right) — the prompt-kit/ChatGPT/Cursor layout (Federico 2026-06-21).
+          send right): the prompt-kit/ChatGPT/Cursor layout (Federico 2026-06-21).
           Flat Floom system: bg fill, NO border, NO shadow. The a11y focus ring
           (#1711) stays as the visible focus affordance. The bg-2 fill (non-landing)
-          gives the box resting discoverability without a border — replacing the
+          gives the box resting discoverability without a border, replacing the
           E10 divider outline, per Federico's approval. No "Tools" affordance. */}
       <div
         className={cn(
