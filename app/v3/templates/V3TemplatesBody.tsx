@@ -32,6 +32,7 @@ export function V3TemplatesBody() {
   const [mode, setMode] = useState<Mode>("workers");
   const [cat, setCat] = useState<Category | "All">("All");
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState<"featured" | "az">("featured");
 
   function switchMode(m: Mode) {
     setMode(m);
@@ -81,6 +82,16 @@ export function V3TemplatesBody() {
     }
     return list;
   }, [cat, q]);
+
+  const shownWorkers = useMemo(
+    () => (sort === "az" ? [...filtered].sort((a, b) => a.name.localeCompare(b.name)) : filtered),
+    [filtered, sort],
+  );
+  const shownWorkspaces = useMemo(
+    () => (sort === "az" ? [...filteredWorkspaces].sort((a, b) => a.name.localeCompare(b.name)) : filteredWorkspaces),
+    [filteredWorkspaces, sort],
+  );
+  const count = mode === "workers" ? shownWorkers.length : shownWorkspaces.length;
 
   return (
     <V3Shell active="templates">
@@ -167,14 +178,33 @@ export function V3TemplatesBody() {
         </div>
       </motion.div>
 
+      {/* result count + sort */}
+      <div className="mb-4 flex items-center justify-between">
+        <span className="text-[12.5px] text-muted-foreground">
+          {count} {mode}
+        </span>
+        <div className="flex items-center gap-1 text-[12px]">
+          {(["featured", "az"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSort(s)}
+              className="rounded-full px-2.5 py-1 font-medium transition-colors"
+              style={sort === s ? { background: "var(--bg-2)", color: "var(--foreground)" } : { color: "var(--text-muted)" }}
+            >
+              {s === "featured" ? "Featured" : "A–Z"}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {mode === "workers" ? (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((t, i) => (
+            {shownWorkers.map((t, i) => (
               <V3TemplateCard key={t.slug} t={t} i={i} animate="mount" />
             ))}
           </div>
-          {filtered.length === 0 && (
+          {shownWorkers.length === 0 && (
             <div className="py-16 text-center text-[13.5px] text-muted-foreground">
               Nothing matches. Describe it below and Floom drafts it for you.
             </div>
@@ -183,11 +213,11 @@ export function V3TemplatesBody() {
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredWorkspaces.map((w, i) => (
+            {shownWorkspaces.map((w, i) => (
               <V3WorkspaceCard key={w.slug} w={w} i={i} />
             ))}
           </div>
-          {filteredWorkspaces.length === 0 && (
+          {shownWorkspaces.length === 0 && (
             <div className="py-16 text-center text-[13.5px] text-muted-foreground">
               No workspaces match. Describe what you need below and Floom drafts it.
             </div>

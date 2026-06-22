@@ -562,21 +562,50 @@ const DETAILS: Record<string, TemplateDetail> = {
   },
 };
 
+// Per-category "company brain" the worker reads — grounds each detail page so
+// no two read identically.
+const CATEGORY_BRAIN: Record<Category, string[]> = {
+  Sales: ["Tone guide", "Pricing", "CRM rules", "Past deals"],
+  Ops: ["Runbooks", "Priority rules", "Team owners", "Past tickets"],
+  Marketing: ["Brand voice", "Keyword targets", "Style guide", "Past posts"],
+  Research: ["Source list", "Topic brief", "Citation rules"],
+  Recruiting: ["Role spec", "Must-haves", "DACH rules", "Past hires"],
+  Founder: ["Metric definitions", "Investor list", "Tone guide"],
+  Finance: ["Metric definitions", "Approval rules", "Past reports"],
+  Customer: ["Tone guide", "Help docs", "Past replies", "Escalation rules"],
+};
+
+const APPROVAL_Q: Record<PreviewKind, string> = {
+  email: "Send this email?",
+  digest: "Post this digest?",
+  list: "Approve this shortlist?",
+  kpi: "Send this report?",
+  issues: "File these issues?",
+};
+
+// Deterministic run id per worker (no Math.random — stable across renders/SSG).
+function runId(slug: string): string {
+  let n = 0;
+  for (let i = 0; i < slug.length; i++) n = (n + slug.charCodeAt(i) * (i + 7)) % 8999;
+  return `Run #${1000 + n}`;
+}
+
 export function getTemplateDetail(t: Template): TemplateDetail {
   const bespoke = DETAILS[t.slug];
   if (bespoke) return bespoke;
-  // Grounded fallback so every worker has a real proof page (no broken links).
+  const brain = CATEGORY_BRAIN[t.category] ?? ["Tone guide", "Company rules", "Approval rules"];
+  // Grounded fallback so every worker has a real, distinct proof page.
   return {
     summary: `${t.job} ${t.output ? `Returns ${t.output.toLowerCase()}.` : ""}`.trim(),
-    whatItDoes: `${t.name} pulls the data it needs, applies your company brain, and produces ${t.output.toLowerCase()}. It runs ${t.runs.toLowerCase()} and asks before any risky action.`,
-    brainUsed: ["Tone guide", "Company rules", "Past work", "Approval rules"],
+    whatItDoes: `${t.name} pulls the data it needs, applies your ${t.category.toLowerCase()} brain, and produces ${t.output.toLowerCase()}. It runs ${t.runs.toLowerCase()} and asks before any risky action.`,
+    brainUsed: brain,
     exampleRun: {
-      id: "Run #1042",
+      id: runId(t.slug),
       trigger: t.triggers[0] ?? "Schedule",
       toolsUsed: t.tools.slice(0, 3),
-      brainUsed: ["Tone guide", "Company rules"],
+      brainUsed: brain.slice(0, 3),
       output: t.output,
-      approvalQuestion: "Approve this output?",
+      approvalQuestion: APPROVAL_Q[t.sample.kind] ?? "Approve this output?",
       email: {
         to: "your team",
         subject: t.output,
