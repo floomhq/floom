@@ -4253,6 +4253,7 @@ def create_worker_run(
         )
         raise
     except Exception as exc:
+        logger.exception("File input resolution failed for run %s worker %s", run_id, worker_id)
         update_run_status(
             run_id,
             RunStatus.FAILED.value,
@@ -4261,7 +4262,7 @@ def create_worker_run(
             user_id=true_owner_id,
             repos=repos,
         )
-        raise
+        raise HTTPException(status_code=500, detail="File input resolution failed") from exc
     # Persist resolved inputs (absolute file paths replace SHA values) so that
     # GET /runs/:id returns the staged paths, not raw SHA strings.
     repos.runs.set_input_json(user_id=true_owner_id, run_id=run_id, input_json=resolved_inputs)
@@ -5332,6 +5333,10 @@ app.include_router(review_pack_router)
 # template export/import, share link, changelog).
 from routers.workspace import workspace_router
 app.include_router(workspace_router)
+
+# Git-backed workspace issues (#1781): .floom/issues/ in the workspace git repo.
+from routers.workspace_issues import workspace_issues_router
+app.include_router(workspace_issues_router)
 
 # Auth + users route group (setup/login/logout/magic/me, user CRUD, PAT tokens).
 from routers.auth import auth_router

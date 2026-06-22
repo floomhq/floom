@@ -4077,6 +4077,59 @@ class SqliteFeedbackRepository:
         return cursor.rowcount > 0
 
 
+class SqliteRunFeedbackRepository:
+    """SQLite implementation of per-run feedback comments (#1807)."""
+
+    _cols = "id, run_id, worker_id, author_id, author_name, content, rating, issue_id, created_at"
+
+    def add(
+        self,
+        *,
+        feedback_id: str,
+        run_id: str,
+        worker_id: str,
+        author_id: str,
+        author_name: str | None,
+        content: str,
+        rating: str | None,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_feedback
+                    (id, run_id, worker_id, author_id, author_name, content, rating, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (feedback_id, run_id, worker_id, author_id, author_name, content, rating, created_at),
+            )
+        return self.get(feedback_id=feedback_id) or {}
+
+    def list(self, *, run_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"SELECT {self._cols} FROM run_feedback WHERE run_id = ? ORDER BY created_at",
+                (run_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def get(self, *, feedback_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT {self._cols} FROM run_feedback WHERE id = ?",
+                (feedback_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def mark_issue_created(self, *, feedback_id: str, issue_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE run_feedback SET issue_id = ? WHERE id = ?",
+                (issue_id, feedback_id),
+            )
+        return self.get(feedback_id=feedback_id)
+
+
 class SqliteMcpToolRepository:
     _cols = "id, user_id, name, description, input_schema, worker_id, created_at, updated_at"
 
@@ -4430,6 +4483,31 @@ class SqliteAssetAccessRepository:
             (asset_id,),
         ).fetchone()
 
+    def asset_id_conflict(
+        self, *, asset_type: str, asset_id: str, workspace_id: str
+    ) -> bool:
+        """True when an access row for ``asset_id`` already exists in a DIFFERENT
+        workspace.
+
+        ``brain_packs.id`` (and the other asset tables' ``id``) is a GLOBAL
+        primary key, but pack folders are workspace-local
+        (``CONTEXTS_DIR/<workspace>/<name>``). So a destination name can be free
+        on this workspace's disk yet already taken by another workspace's row.
+        A rename onto such a name cannot re-key the source row — the ``UPDATE``
+        would violate the global PK — so the caller must reject it (409) before
+        touching the filesystem instead of corrupting the foreign workspace's
+        owner/visibility mirror.
+        """
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE id = ? AND workspace_id != ? LIMIT 1",
+                (asset_id, workspace_id),
+            ).fetchone()
+        return row is not None
+
     def ensure_brain_pack(
         self,
         *,
@@ -4656,6 +4734,69 @@ class SqliteAssetAccessRepository:
         return self.get_permissions(
             workspace_id=workspace_id, user_id=actor_id, asset_type=asset_type, asset_id=asset_id
         )
+
+    def rename_asset(
+        self, *, asset_type: str, old_asset_id: str, new_asset_id: str, workspace_id: str
+    ) -> dict[str, Any] | None:
+        """Re-key an asset's access row from ``old_asset_id`` to ``new_asset_id``.
+
+        Brain packs are keyed by pack name, so renaming a pack must MOVE its
+        access-control row, not leave one behind. Leaving the old row stranded
+        re-exposes a later folder that reuses the old name (``ensure_brain_pack``
+        never downgrades, so the stale ``workspace`` row would make the new
+        private folder shared). Colliding with a stale row already sitting at the
+        destination name would likewise keep that row's old visibility. So:
+        delete any pre-existing destination row, then re-key the source row in
+        place — visibility/owner/workspace ride along on the same row. ``name``
+        tracks the id for packs, so it is rewritten to ``new_asset_id`` too.
+
+        Every statement is scoped to ``workspace_id``. Pack folders are
+        workspace-local (``CONTEXTS_DIR/<workspace>/<name>``), so a same-named
+        pack in another workspace is a DIFFERENT asset; an unscoped delete/re-key
+        would clobber that other workspace's owner/visibility mirror. Scoping
+        means the source must belong to ``workspace_id`` to move, and only a stale
+        destination row in the SAME workspace is cleared.
+
+        Returns the moved row, or ``None`` when no source row exists in that
+        workspace (the caller then materializes a fresh row). Never raises for a
+        missing source. Raises ``ValueError`` when ``new_asset_id`` is already
+        held by a DIFFERENT workspace: ``id`` is a global PK, so re-keying onto
+        it would violate the constraint; rejecting protects the foreign row
+        (the route pre-checks this and 409s before any filesystem move, so this
+        is a backstop for direct callers).
+        """
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        now = now_iso()
+        with get_db() as conn:
+            src = conn.execute(
+                f"SELECT id FROM {table} WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (old_asset_id, workspace_id),
+            ).fetchone()
+            if src is None:
+                return None
+            conflict = conn.execute(
+                f"SELECT 1 FROM {table} WHERE id = ? AND workspace_id != ? LIMIT 1",
+                (new_asset_id, workspace_id),
+            ).fetchone()
+            if conflict is not None:
+                raise ValueError(
+                    f"{asset_type} id {new_asset_id!r} already exists in another workspace"
+                )
+            conn.execute(
+                f"DELETE FROM {table} WHERE id = ? AND workspace_id = ?",
+                (new_asset_id, workspace_id),
+            )
+            conn.execute(
+                f"UPDATE {table} SET id = ?, name = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+                (new_asset_id, new_asset_id, now, old_asset_id, workspace_id),
+            )
+            row = conn.execute(
+                f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ? AND workspace_id = ?",
+                (new_asset_id, workspace_id),
+            ).fetchone()
+        return _row_dict(row) if row else None
 
 
 # ---------------------------------------------------------------------------
