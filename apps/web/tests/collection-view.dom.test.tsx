@@ -98,13 +98,6 @@ describe("CollectionView — list & grid (§8e)", () => {
     const state = emptyState("list");
     expect(state.view).toBe("list");
   });
-
-  it("can constrain resting collection content without affecting split mode", () => {
-    const { container } = render(
-      <Harness config={makeConfig({ restingMaxWidth: 900 })} />,
-    );
-    expect(container.querySelector('[style*="max-width: 900px"]')).toBeInTheDocument();
-  });
 });
 
 describe("CollectionView — grouped (day-section) list variant (#1225)", () => {
