@@ -164,6 +164,20 @@ test("updateCredentials persists workspace_id without dropping refresh_token", a
   });
 });
 
+test("readCredentials migrates legacy placeholder cloud API base", async () => {
+  await withTempHome(async () => {
+    await writeCredentials({
+      mode: "cloud",
+      api_base: "https://api.workeros.example.com",
+      api_token: "pat-test",
+      authed_at: "2026-01-01T00:00:00.000Z",
+    });
+
+    const creds = await readCredentials();
+    assert.equal(creds.api_base, "https://workeros-api.floom.dev");
+  });
+});
+
 test("readCredentials accepts cloud PAT from environment", async () => {
   await withTempHome(async () => {
     process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
