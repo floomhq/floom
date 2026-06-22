@@ -1,6 +1,6 @@
 # Floom
 
-[![CI](https://github.com/floomhq/workeros/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/workeros/actions/workflows/ci.yml)
+[![CI](https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/floom/actions/workflows/ci.yml)
 [![License: Floom Source Available](https://img.shields.io/badge/License-Floom%20Source%20Available-blue.svg)](LICENSE)
 
 Floom is a source-available AI runtime for creating, running, and supervising
@@ -105,6 +105,8 @@ runtime contract.
   allows and what needs a commercial agreement.
 - [Third-party licenses](docs/THIRD-PARTY-LICENSES.md) - dependency inventory
   and SBOM release process.
+- [Generated SBOM](docs/sbom/floom-sbom.spdx.json) - SPDX inventory generated
+  from the checked-in dependency manifests.
 
 ## API
 
