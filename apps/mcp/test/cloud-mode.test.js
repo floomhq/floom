@@ -19,7 +19,7 @@ import {
   resolveLoginApiBase,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
-import { cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
+import { acquireLoginLock, cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
 
 test("cloud login honors Retry-After headers on cli-exchange 429", () => {
   const error = new FloomApiError(
@@ -44,6 +44,25 @@ test("cloud login treats cli-exchange 429 without retry metadata as slow_down", 
   const error = new FloomApiError("rate limited", 429, {});
 
   assert.equal(cloudRateLimitRetryMs(error, 2), 5_000);
+});
+
+test("login lock blocks concurrent local login flows", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-login-lock-"));
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  const release = await acquireLoginLock();
+  try {
+    await assert.rejects(
+      () => acquireLoginLock(),
+      /Another .* login is already running/,
+    );
+  } finally {
+    await release();
+    process.env.HOME = originalHome;
+    process.env.USERPROFILE = originalUserProfile;
+  }
 });
 
 test("cloud login defaults to hosted Floom API", () => {
