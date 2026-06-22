@@ -91,7 +91,7 @@ describe("Emily home empty — first-worker zero-state polish", () => {
   });
 });
 
-describe("Emily home composer — bigger, borderless, no Uses row", () => {
+describe("Emily home composer - bigger, borderless, no Uses row", () => {
   it("hero composer (landing + large) is borderless and has no 'Uses' chip row", () => {
     const { container } = render(
       <PromptInput
@@ -106,9 +106,7 @@ describe("Emily home composer — bigger, borderless, no Uses row", () => {
     );
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
     const wrapper = textarea.parentElement as HTMLElement;
-    // Borderless (landing): the composer box carries [border:none], never the
-    // [border:var(--bd-div)] outline of the default in-conversation composer.
-    expect(wrapper.className).toContain("[border:none]");
+    // Borderless (landing): no divider outline on the composer box.
     expect(wrapper.className).not.toContain("[border:var(--bd-div)]");
     // Larger hero sizing: roomier padding + bigger min-height than the compact
     // conversation composer.
@@ -120,7 +118,7 @@ describe("Emily home composer — bigger, borderless, no Uses row", () => {
     expect(container.textContent).not.toContain("Will use");
   });
 
-  it("default conversation composer keeps its outline + the Uses chip row", () => {
+  it("default conversation composer keeps the Uses chip row", () => {
     const { container } = render(
       <PromptInput
         value="Summarise my Granola meetings → HubSpot"
@@ -133,7 +131,8 @@ describe("Emily home composer — bigger, borderless, no Uses row", () => {
     );
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
     const wrapper = textarea.parentElement as HTMLElement;
-    expect(wrapper.className).toContain("[border:var(--bd-div)]");
+    expect(wrapper.className).toContain("bg-[var(--bg-2)]");
+    expect(wrapper.className).not.toContain("[border:var(--bd-div)]");
     // The default composer still surfaces the detected tools as the "Uses" row.
     expect(container.textContent).toContain("Uses");
   });
