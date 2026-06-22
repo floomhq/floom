@@ -27,6 +27,7 @@
     "test:api": "python -m pytest tests -q -n auto --dist loadscope",
     "test:api:serial": "python -m pytest tests -q",
     "test:api:full": "python -m pytest apps/api/tests -q",
-    "test:crud": "python tests/crud_regression.py"
+    "test:crud": "python tests/crud_regression.py",
+    "sbom": "node scripts/generate-sbom.mjs"
   }
 }
