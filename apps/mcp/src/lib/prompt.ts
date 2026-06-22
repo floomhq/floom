@@ -1,11 +1,28 @@
 import { createInterface } from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import { stdin, stdout, stderr } from "node:process";
 
-export async function promptYesNo(question: string, defaultYes = true): Promise<boolean> {
-  if (!stdin.isTTY || !stdout.isTTY) {
+// Streams are injectable so the prompt routing can be unit-tested without a pty.
+// `data` is the machine-readable channel (stdout) that gates whether we prompt at
+// all; `prompt` is where the question renders (stderr) so stdout stays clean.
+export interface PromptStreams {
+  input: NodeJS.ReadStream & { isTTY?: boolean };
+  data: NodeJS.WriteStream & { isTTY?: boolean };
+  prompt: NodeJS.WriteStream;
+}
+
+export async function promptYesNo(
+  question: string,
+  defaultYes = true,
+  streams: Partial<PromptStreams> = {},
+): Promise<boolean> {
+  const input = streams.input ?? stdin;
+  const data = streams.data ?? stdout;
+  const prompt = streams.prompt ?? stderr;
+  if (!input.isTTY || !data.isTTY) {
     return defaultYes;
   }
-  const rl = createInterface({ input: stdin, output: stdout });
+  // Render the prompt on stderr so stdout stays machine-readable (e.g. `--json`).
+  const rl = createInterface({ input, output: prompt });
   try {
     const answer = (await rl.question(question)).trim().toLowerCase();
     if (!answer) return defaultYes;

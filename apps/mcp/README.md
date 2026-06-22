@@ -184,6 +184,16 @@ floom workers info <id>
 
 `workers push` uses `POST /workers` for new workers and `PUT /workers/{id}` for existing workers. If an older API returns 404/405 for source updates, upgrade the API before editing workers in place.
 
+Clean up stale or superseded workers without leaving the CLI:
+
+```bash
+floom workers disable <id>   # keep the worker but stop it running on triggers
+floom workers enable <id>    # re-enable a disabled worker
+floom workers delete <id>    # permanently remove it (and its runs/artifacts); prompts unless --yes
+```
+
+`workers delete` asks for confirmation; pass `-y/--yes` to skip the prompt (also required in non-interactive shells). `workers disable` is the reversible, soft option (`enabled=false`) for hiding a worker from triggers without deleting it.
+
 ## Tools
 
 > **For full worked examples per tool, end-to-end recipes (deploy a worker from prompt, port a Claude skill, schedule + webhook + composio triggers), and the agent draft contract, see [docs/AGENT-COOKBOOK.md](../../docs/AGENT-COOKBOOK.md).**
