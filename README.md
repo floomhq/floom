@@ -105,6 +105,8 @@ runtime contract.
   allows and what needs a commercial agreement.
 - [Third-party licenses](docs/THIRD-PARTY-LICENSES.md) - dependency inventory
   and SBOM release process.
+- [Generated SBOM](docs/sbom/floom-sbom.spdx.json) - SPDX inventory generated
+  from the checked-in dependency manifests.
 
 ## API
 
