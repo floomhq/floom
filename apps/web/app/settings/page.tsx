@@ -1011,7 +1011,7 @@ function SettingsSection({
     <section className={cn("c-set-sec", className)}>
       {title || description ? (
         <div>
-          {title ? <h2 className={cn("c-set-sech", titleClassName)}>{title}</h2> : null}
+          {title ? <div className={cn("c-set-sech", titleClassName)}>{title}</div> : null}
           {description ? <p className="c-set-secd">{description}</p> : null}
         </div>
       ) : null}
@@ -1035,9 +1035,9 @@ function SettingsRow({
 }) {
   return (
     <div className={cn("c-set-row", className)}>
-      <div className="c-set-row-main">
-        <div className={cn("c-set-row-title", titleClassName)}>{title}</div>
-        {description ? <div className="c-set-rowd">{description}</div> : null}
+      <div>
+        <div className={cn("t", titleClassName)}>{title}</div>
+        {description ? <div className="d">{description}</div> : null}
       </div>
       {children ? <div className="c-set-ctrl">{children}</div> : null}
     </div>
@@ -1230,7 +1230,7 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
   return (
     <SettingsSection title={title} description={description}>
       <div className="c-set-row">
-        <div className="c-set-row-main">
+        <div className="min-w-0 flex-1">
           <pre className="c-set-code p-3 font-mono text-xs" style={{ WebkitOverflowScrolling: "touch" }}>
             {value}
           </pre>
