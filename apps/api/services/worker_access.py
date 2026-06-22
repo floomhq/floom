@@ -317,11 +317,11 @@ def _workspace_member_for_worker_row(
     if members is None:
         return False
     try:
-        role = members.get_role(workspace_id=workspace_id, user_id=auth.user_id)
+        row = members.get(workspace_id=workspace_id, user_id=auth.user_id)
     except Exception:
         logger.debug("worker mutation workspace-membership check failed for %s", worker.get("id"), exc_info=True)
         return False
-    return role is not None
+    return bool(row) and str(row.get("status") or "") == "active"
 
 
 def _get_worker_for_workspace_share_source(

@@ -41,7 +41,7 @@ def test_worker_for_mutation_allows_admin_member_of_worker_workspace():
             get_any=lambda **_kwargs: row,
         ),
         members=SimpleNamespace(
-            get_role=lambda *, workspace_id, user_id: "admin"
+            get=lambda *, workspace_id, user_id: {"role": "admin", "status": "active"}
             if workspace_id == "ws-a" and user_id == "admin-user"
             else None,
         ),
@@ -64,7 +64,29 @@ def test_worker_for_mutation_denies_admin_outside_worker_workspace():
             get=lambda **_kwargs: None,
             get_any=lambda **_kwargs: row,
         ),
-        members=SimpleNamespace(get_role=lambda **_kwargs: None),
+        members=SimpleNamespace(get=lambda **_kwargs: None),
+    )
+
+    assert access._worker_for_mutation("shared-worker", _admin_auth(), repos) is None
+
+
+def test_worker_for_mutation_denies_inactive_admin_membership():
+    import services.worker_access as access
+
+    row = {
+        "id": "shared-worker",
+        "owner_id": "owner-user",
+        "visibility": "workspace",
+        "workspace_id": "ws-a",
+    }
+    repos = SimpleNamespace(
+        workers=SimpleNamespace(
+            get=lambda **_kwargs: None,
+            get_any=lambda **_kwargs: row,
+        ),
+        members=SimpleNamespace(
+            get=lambda *, workspace_id, user_id: {"role": "admin", "status": "removed"},
+        ),
     )
 
     assert access._worker_for_mutation("shared-worker", _admin_auth(), repos) is None

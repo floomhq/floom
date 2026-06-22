@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from auth.context import AuthContext
 
 
 def _create_worker(repos, manifest, *, user_id, worker_id, **fields):
@@ -185,6 +186,36 @@ def test_admin_cannot_remove_other_admin(repo_bundle):
     assert repos.members.remove(
         workspace_id="ws_bbbbbbbbbbbbbb", actor_id="owner-1", user_id="admin-2"
     ) is True
+
+
+def test_admin_mutation_scope_uses_real_member_get(repo_bundle):
+    import services.worker_access as access
+
+    repos, db, manifest = repo_bundle
+    _create_worker(
+        repos,
+        manifest,
+        user_id="owner-1",
+        worker_id="shared-admin-worker",
+        workspace_id="ws_admin_scope",
+        visibility="workspace",
+    )
+    with db.get_db() as conn:
+        now = db.now_iso()
+        conn.execute(
+            """
+            INSERT INTO workspace_members
+                (workspace_id, user_id, role, status, created_at, updated_at)
+            VALUES (?, ?, 'admin', 'active', ?, ?)
+            """,
+            ("ws_admin_scope", "admin-1", now, now),
+        )
+
+    auth = AuthContext(user_id="admin-1", role="admin", auth_method="session")
+    worker = access._worker_for_mutation("shared-admin-worker", auth, repos)
+
+    assert worker is not None
+    assert worker["id"] == "shared-admin-worker"
 
 
 # ---------------------------------------------------------------------------
