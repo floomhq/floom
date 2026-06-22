@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 
 // R9 worker-detail FIX 1 + FIX 2 — structural proof on the REAL WorkersCollection.
-//   FIX 1: the developer tab group ("Developer") is a visible affordance ON the
+//   FIX 1: the advanced tab group ("Advanced") is a visible affordance ON the
 //          primary tab row (inside .c-dtabs), directly after the operator tabs —
 //          not far-right, not a dropdown menu. Clicking once reveals ALL advanced
 //          tabs inline; clicking again collapses them (disclosure, not pick-one).
@@ -94,25 +94,25 @@ async function openDetail() {
   await waitFor(() => expect(document.querySelector(".c-dtabs")).toBeTruthy());
 }
 
-describe("R9 worker-detail FIX 1 — Developer disclosure is inline on the tab row", () => {
-  it("renders a 'Developer' button inside the primary .c-dtabs row (not far-right / not a dropdown)", async () => {
+describe("R9 worker-detail FIX 1 — Advanced disclosure is inline on the tab row", () => {
+  it("renders an 'Advanced' button inside the primary .c-dtabs row (not far-right / not a dropdown)", async () => {
     await openDetail();
     const tabRow = document.querySelector(".c-dtabs");
     expect(tabRow).toBeTruthy();
-    // The Developer button lives inside .c-dtabs-trailing which is a direct child
+    // The Advanced button lives inside .c-dtabs-trailing which is a direct child
     // of the tab row — inline, not a far-right floating pill.
     const trailing = tabRow!.querySelector(".c-dtabs-trailing");
     expect(trailing).toBeTruthy();
     const adv = trailing!.querySelector("[aria-label='Show developer tabs']");
     expect(adv).toBeTruthy();
-    expect(adv!.textContent).toMatch(/Developer/);
+    expect(adv!.textContent).toMatch(/Advanced/);
     // It is a plain button, not a dropdown trigger.
     expect(adv!.tagName.toLowerCase()).toBe("button");
     // No checkmark/menuitemcheckbox inside the row.
     expect(tabRow!.querySelector('[role="menuitemcheckbox"]')).toBeNull();
   });
 
-  it("clicking Developer once reveals ALL developer tabs (Source, Versions, Brain, Tools) as real tabs", async () => {
+  it("clicking Advanced once reveals ALL advanced tabs (Source, Versions, Brain, Tools) as real tabs", async () => {
     await openDetail();
     // Initially no advanced tabs visible.
     expect(screen.queryByRole("tab", { name: "Source" })).toBeNull();
@@ -120,7 +120,7 @@ describe("R9 worker-detail FIX 1 — Developer disclosure is inline on the tab r
     expect(screen.queryByRole("tab", { name: "Brain" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Tools" })).toBeNull();
 
-    // Click Developer — all four appear as real selectable tabs.
+    // Click Advanced — all four appear as real selectable tabs.
     const advBtn = await screen.findByRole("button", { name: /Show developer tabs/i });
     fireEvent.click(advBtn);
     await waitFor(() => expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy());
@@ -129,7 +129,7 @@ describe("R9 worker-detail FIX 1 — Developer disclosure is inline on the tab r
     expect(screen.getByRole("tab", { name: "Tools" })).toBeTruthy();
   });
 
-  it("clicking Developer again collapses the developer tabs", async () => {
+  it("clicking Advanced again collapses the advanced tabs", async () => {
     await openDetail();
     const advBtn = await screen.findByRole("button", { name: /Show developer tabs/i });
 

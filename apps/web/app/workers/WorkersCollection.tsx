@@ -1758,12 +1758,12 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
 };
 
 /**
- * Inline "Developer" disclosure button — sits directly after the operator tabs
+ * Inline "Advanced" disclosure button — sits directly after the operator tabs
  * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Brain, Tools).
  * One click reveals all; clicking again collapses all. No dropdown, no pin, no
  * per-item checkmark. Replaces the pick-one dropdown (kills the #1680 bug class).
  */
-function DeveloperDisclosure({
+function AdvancedDisclosure({
   open,
   onToggle,
 }: {
@@ -1778,7 +1778,7 @@ function DeveloperDisclosure({
       aria-expanded={open}
       onClick={onToggle}
     >
-      Developer
+      Advanced
       <ChevronDown
         className="size-3.5"
         aria-hidden="true"
@@ -2099,14 +2099,14 @@ export default function WorkersCollection({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
-  // Developer disclosure — single boolean persisted to localStorage so the
+  // Advanced disclosure — single boolean persisted to localStorage so the
   // user's preference (expanded / collapsed) survives page reloads.
-  const [developerOpen, setDeveloperOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   useEffect(() => {
-    setDeveloperOpen(safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY) === "true");
+    setAdvancedOpen(safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY) === "true");
   }, []);
-  const toggleDeveloper = useCallback(() => {
-    setDeveloperOpen((prev) => {
+  const toggleAdvanced = useCallback(() => {
+    setAdvancedOpen((prev) => {
       const next = !prev;
       safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, next ? "true" : "false");
       return next;
@@ -2371,13 +2371,13 @@ export default function WorkersCollection({
           ),
         },
         // Inline disclosure: BASE_DETAIL_TABS always visible; ADVANCED_DETAIL_TABS
-        // appear after them when developerOpen=true. CollectionView already handles
+        // appear after them when advancedOpen=true. CollectionView already handles
         // the "active tab no longer in tab set" case by falling back to tabs[0],
         // so collapsing while an advanced tab is active gracefully switches to Overview.
         tabs: (() => {
           const visibleKeys: WorkerDetailTab[] = [
             ...BASE_DETAIL_TABS,
-            ...(developerOpen ? ADVANCED_DETAIL_TABS : []),
+            ...(advancedOpen ? ADVANCED_DETAIL_TABS : []),
           ];
           return visibleKeys.map((key) => {
             const Tab = WORKER_TAB_COMPONENT[key];
@@ -2397,11 +2397,11 @@ export default function WorkersCollection({
             };
           });
         })(),
-        // Developer disclosure sits inline directly after the operator tabs —
+        // Advanced disclosure sits inline directly after the operator tabs —
         // no far-right spacer. One click reveals ALL advanced tabs; clicking
         // again collapses them. Replaces the pick-one dropdown (#1680 bug class).
         tabsTrailing: (
-          <DeveloperDisclosure open={developerOpen} onToggle={toggleDeveloper} />
+          <AdvancedDisclosure open={advancedOpen} onToggle={toggleAdvanced} />
         ),
       };
     },
