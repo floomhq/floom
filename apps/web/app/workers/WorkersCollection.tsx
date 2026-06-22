@@ -1609,6 +1609,11 @@ function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
     const v = limits[k];
     return v == null || v === "" ? "Not set" : String(v);
   };
+  // Cost limits read as currency; perDay marks the daily cap.
+  const cost = (k: string, perDay = false): React.ReactNode => {
+    const v = limits[k];
+    return v == null || v === "" ? "Not set" : `$${v}${perDay ? "/day" : ""}`;
+  };
   const connections = d.config?.connections ?? [];
   const approvalConns = connections.filter(
     (c) => typeof c === "object" && c !== null && "mcp" in c && (c as { mcp?: { require_approval?: string } }).mcp?.require_approval === "always",
@@ -1620,14 +1625,14 @@ function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
     <div>
       <DetailSummary
         items={[
-          { key: "per-day", label: "Cap", value: lim("max_cost_usd_per_day") },
+          { key: "per-day", label: "Cap", value: cost("max_cost_usd_per_day", true) },
           { key: "timeout", label: "Timeout", value: lim("timeout_seconds") },
           { key: "retries", label: "Retries", value: lim("max_retries") },
         ]}
       />
       <DetailGroup label="Spend">
-        <DetailRow label="Per run" value={lim("max_cost_usd")} />
-        <DetailRow label="Per day" value={lim("max_cost_usd_per_day")} />
+        <DetailRow label="Per run" value={cost("max_cost_usd")} />
+        <DetailRow label="Per day" value={cost("max_cost_usd_per_day", true)} />
       </DetailGroup>
       <DetailGroup label="Runtime">
         <DetailRow label="Timeout" value={lim("timeout_seconds")} />
