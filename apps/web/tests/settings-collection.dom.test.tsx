@@ -124,29 +124,25 @@ beforeEach(() => {
   });
 });
 
-describe("Settings Collection (Phase 3)", () => {
-  it("renders the grouped Settings collection and member read-only detail", async () => {
+describe("Settings register", () => {
+  it("renders grouped Settings tabs and member read-only detail", async () => {
     const user = userEvent.setup();
     const { default: SettingsPage } = await import("@/app/settings/page");
 
     render(<SettingsPage />);
 
-    expect(await screen.findByRole("button", { name: "Grid view", pressed: true })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "List view" }));
-    await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByRole("tab", { name: /General/ })).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByText("Workspace · Floom")).toBeInTheDocument();
+    expect(screen.getByText("Account · Member User")).toBeInTheDocument();
     expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
-    expect(screen.getByText("Slack, email & WhatsApp")).toBeInTheDocument();
-    expect(screen.getByText("Configure Emily")).toBeInTheDocument();
-    expect(screen.getByText("People & roles")).toBeInTheDocument();
-    expect(screen.getByText("Restore points, download a copy, and undo")).toBeInTheDocument();
-    expect(screen.getByText("Theme (light, dark, system)")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Channels/ })).toBeInTheDocument();
 
-    await user.click(screen.getByText("Members"));
+    await user.click(screen.getByRole("tab", { name: /Members/ }));
 
     expect(await screen.findByText("Member management controls are hidden because this account is not Owner or Admin.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Invite" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("Assistant"));
+    await user.click(screen.getByRole("tab", { name: /Assistant/ }));
 
     expect(await screen.findByText("Assistant editing controls are hidden because this account cannot edit workspace assistant settings.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
@@ -167,9 +163,7 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
-    await user.click(screen.getByRole("button", { name: "List view" }));
-    await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
-    await user.click(screen.getByText("General"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /General/ })).toBeInTheDocument(), { timeout: 3000 });
 
     // The five General sub-areas are now tabs, not a single long scroll.
     const tab = (name: string) => screen.findByRole("tab", { name });
@@ -229,7 +223,6 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
-    await user.click(screen.getByRole("button", { name: "List view" }));
     expect(await screen.findByText("Workspace · My workspace", {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByText(/9b1a5065-3ab9-493a-8220-b6c139d9c1b7/i)).not.toBeInTheDocument();
     expect(screen.getAllByText("Settings")).toHaveLength(1);
