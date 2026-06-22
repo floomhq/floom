@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
+import { Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useConnections, useMembers, useSecrets, useWorkers } from "@/lib/query/hooks";
@@ -46,85 +46,6 @@ export function resolveOwner(
   return resolveUserLabel(
     [member?.display_name, member?.email],
     "My workspace",
-  );
-}
-
-// ---------------------------------------------------------------------------
-// #813 — Setup required callout
-// Computes which connection slugs are needed by workers but not yet connected.
-// missing_connections is populated by the backend (#556) on WorkerSummary.
-// ---------------------------------------------------------------------------
-
-function computeMissingBySlug(
-  workers: WorkerSummary[],
-  connections: ConnectionItem[],
-): Map<string, string[]> {
-  // Build the set of connected app slugs (lower-cased, composio kind only)
-  const connected = new Set(
-    connections
-      .filter((c) => !c.kind || c.kind === "composio")
-      .map((c) => c.app_name.toLowerCase()),
-  );
-
-  // Aggregate: slug -> worker names that still need it
-  const missing = new Map<string, string[]>();
-  for (const worker of workers) {
-    for (const slug of worker.missing_connections ?? []) {
-      const key = slug.toLowerCase();
-      if (!connected.has(key)) {
-        if (!missing.has(key)) missing.set(key, []);
-        missing.get(key)!.push(worker.name);
-      }
-    }
-  }
-  return missing;
-}
-
-function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, string[]> }) {
-  if (missingBySlug.size === 0) return null;
-  const slugs = Array.from(missingBySlug.keys());
-  const totalWorkers = new Set(Array.from(missingBySlug.values()).flat()).size;
-  return (
-    <div
-      className="flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--ink)]"
-      role="alert"
-    >
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <div className="min-w-0">
-        <span className="font-medium">Setup required: </span>
-        {totalWorkers} worker{totalWorkers !== 1 ? "s" : ""} need{totalWorkers === 1 ? "s" : ""}{" "}
-        {slugs.length === 1 ? (
-          <Link
-            href={`/connections/connect/${encodeURIComponent(slugs[0])}?return_to=${encodeURIComponent("/connections")}`}
-            className="font-medium underline underline-offset-2"
-          >
-            {humaniseAppName(slugs[0])}
-          </Link>
-        ) : (
-          <>
-            {slugs.slice(0, -1).map((slug, i) => (
-              <span key={slug}>
-                <Link
-                  href={`/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`}
-                  className="font-medium underline underline-offset-2"
-                >
-                  {humaniseAppName(slug)}
-                </Link>
-                {i < slugs.length - 2 ? ", " : ""}
-              </span>
-            ))}
-            {" and "}
-            <Link
-              href={`/connections/connect/${encodeURIComponent(slugs[slugs.length - 1])}?return_to=${encodeURIComponent("/connections")}`}
-              className="font-medium underline underline-offset-2"
-            >
-              {humaniseAppName(slugs[slugs.length - 1])}
-            </Link>
-          </>
-        )}
-        .
-      </div>
-    </div>
   );
 }
 
@@ -773,12 +694,6 @@ export default function ConnectionsCollection({
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
 
-  // #813: compute which slugs workers need but haven't been connected yet
-  const missingBySlug = useMemo(
-    () => computeMissingBySlug(workers, connections),
-    [workers, connections],
-  );
-
   // #1226: name -> worker id map for clickable used-by links
   const workersByName = useMemo(
     () => new Map(workers.map((w) => [w.name, w.id])),
@@ -842,7 +757,7 @@ export default function ConnectionsCollection({
         { value: "error", label: "error" },
       ],
     },
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
       headers: ["Connects to", "Type", "Detail", "Status", ""],
@@ -1202,12 +1117,7 @@ export default function ConnectionsCollection({
     },
   };
 
-  return (
-    <>
-      <SetupRequiredCallout missingBySlug={missingBySlug} />
-      <Collection config={config} />
-    </>
-  );
+  return <Collection config={config} />;
 }
 
 const pad: React.CSSProperties = { color: "var(--muted-foreground)", padding: "8px 2px" };

@@ -26,6 +26,7 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
+import { isMachineLabel } from "@/lib/workspace/display-name";
 import { EmilyRadarMark } from "./EmilyRadarMark";
 import { resolveWorkersGate } from "./emily-home-empty";
 
@@ -53,12 +54,17 @@ function useGreeting() {
       try {
         const me = await api.me();
         if (cancelled) return;
-        const source = me.display_name || me.email || "";
-        const raw = me.display_name
+        // Never greet with a machine id: a "local-user" / UUID display_name
+        // would render "Good morning, 9b1a5065…". Skip machine labels and
+        // fall back to the email's human part, else no name.
+        const display = isMachineLabel(me.display_name) ? "" : (me.display_name ?? "");
+        const email = isMachineLabel(me.email) ? "" : (me.email ?? "");
+        const source = display || email;
+        const raw = display
           ? source.trim().split(/\s+/)[0]
           : source.split("@")[0]?.split(/[._-]/)[0] ?? "";
         const name = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : null;
-        if (name) setFirstName(name);
+        if (name && !isMachineLabel(name)) setFirstName(name);
       } catch {
         // no name available, greeting renders without one
       }

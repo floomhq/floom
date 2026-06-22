@@ -38,6 +38,29 @@ def default_worker_agent_model() -> str:
 # default_worker_agent_model() instead (see agent_driver / contract builders).
 DEFAULT_WORKER_AGENT_MODEL = default_worker_agent_model()
 
+_SELF_HOSTED_RUNNER_RE = re.compile(r"^self-hosted(?::[A-Za-z0-9][A-Za-z0-9_-]*)?$")
+
+
+def normalize_worker_runner(value: str) -> str:
+    """Normalize accepted worker runner selectors.
+
+    ``self-hosted`` and ``self-hosted:<name>`` are valid manifest intent, but
+    dispatch still fails fast until a connected self-hosted runner exists.
+    """
+    runner = (value or "").strip()
+    if runner == "local":
+        return "e2b"
+    if runner == "e2b" or _SELF_HOSTED_RUNNER_RE.fullmatch(runner):
+        return runner
+    raise ValueError(
+        "runner must be 'e2b', 'self-hosted', or 'self-hosted:<name>' "
+        f"(got {value!r})"
+    )
+
+
+def is_self_hosted_runner(value: object) -> bool:
+    return isinstance(value, str) and _SELF_HOSTED_RUNNER_RE.fullmatch(value.strip()) is not None
+
 
 def _model_data(value: Any) -> Any:
     if hasattr(value, "model_dump"):
@@ -1191,14 +1214,7 @@ class WorkerRuntime(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, v: str) -> str:
-        # In-process execution was removed in PR #28; only E2B is supported.
-        # Coerce legacy `local` declarations to `e2b` for backward-compat
-        # with old worker.yml files, but reject anything else.
-        if v == "local":
-            return "e2b"
-        if v != "e2b":
-            raise ValueError(f"runner must be 'e2b' (got {v!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
-        return v
+        return normalize_worker_runner(v)
 
 
 class WorkerConfig(BaseModel):
@@ -1477,14 +1493,7 @@ class WorkerContractExec(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, value: str) -> str:
-        # Coerce legacy `local` to `e2b` (PR #28 removed the in-process
-        # executor; this guard prevents misleading manifests). Reject any
-        # other value with a clear message.
-        if value == "local":
-            return "e2b"
-        if value != "e2b":
-            raise ValueError(f"runner must be 'e2b' (got {value!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
-        return value
+        return normalize_worker_runner(value)
 
     @field_validator("template_profile")
     @classmethod
