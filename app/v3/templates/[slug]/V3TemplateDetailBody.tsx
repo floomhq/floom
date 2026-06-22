@@ -15,7 +15,6 @@ import { TEMPLATES } from "@/components/landing-ref/data";
 import { V3Shell } from "../../V3Shell";
 import { V3TemplateCard, MARKS, toolLabel } from "../../V3TemplateCard";
 import { V3OutputPreview } from "../../V3OutputPreview";
-import { V3Reviews } from "../../V3Reviews";
 import "../../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -67,7 +66,7 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
             className="mt-6 flex flex-nowrap items-center gap-3"
           >
             <Link
-              href={`/templates/hire?worker=${t.slug}`}
+              href="/login"
               className="inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-[10px] px-4 text-[13.5px] font-medium text-white"
               style={{ background: "var(--v3-accent)" }}
             >
@@ -179,9 +178,6 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
           </div>
         </motion.div>
       </div>
-
-      {/* reviews */}
-      <V3Reviews itemKind="worker" itemSlug={t.slug} />
 
       {/* never dead-end: three other workers */}
       <div className="pb-6">

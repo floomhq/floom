@@ -19,7 +19,6 @@ import {
 import { V3Shell } from "../../V3Shell";
 import { V3TemplateCard } from "../../V3TemplateCard";
 import { V3WorkspaceCard } from "../../V3WorkspaceCard";
-import { V3Reviews } from "../../V3Reviews";
 import "../../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -75,7 +74,7 @@ export function V3WorkspaceDetailBody({ w }: { w: Workspace }) {
           className="mt-6"
         >
           <Link
-            href={`/templates/hire?workspace=${w.slug}`}
+            href={`/login?workspace=${w.slug}`}
             className="inline-flex h-9 items-center whitespace-nowrap rounded-[10px] px-4 text-[13.5px] font-medium text-white"
             style={{ background: "var(--v3-accent)" }}
           >
@@ -147,9 +146,6 @@ export function V3WorkspaceDetailBody({ w }: { w: Workspace }) {
           ))}
         </div>
       </div>
-
-      {/* reviews */}
-      <V3Reviews itemKind="workspace" itemSlug={w.slug} />
 
       {/* never dead-end: other workspaces */}
       <div className="pb-6">

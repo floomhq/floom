@@ -98,7 +98,6 @@ _obs.setup_logging()
 engine_run_service = import_engine_module("run_service")
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.cli_auth_devices import router as cli_auth_devices_router
-from apps.api.routes.marketplace import router as marketplace_router
 from apps.api.routes.members import router as members_router
 from apps.api.routes.novasearch import router as novasearch_router
 from apps.api.routes.slack_events import router as slack_events_router
@@ -678,7 +677,6 @@ app.include_router(workspaces_router, prefix="/api")
 app.include_router(members_router, prefix="/api")
 app.include_router(cli_auth_devices_router, prefix="/api")
 app.include_router(telemetry_router, prefix="/api")
-app.include_router(marketplace_router, prefix="/api")
 app.include_router(novasearch_router, prefix="/api")
 app.include_router(workspace_agent_router, prefix="/api")
 app.include_router(slack_events_router, prefix="/api")

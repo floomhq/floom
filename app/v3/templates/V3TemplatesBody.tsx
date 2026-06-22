@@ -20,7 +20,6 @@ import {
 import { V3Composer } from "../V3Composer";
 import { V3TemplateCard } from "../V3TemplateCard";
 import { V3WorkspaceCard } from "../V3WorkspaceCard";
-import { V3CommunityStrip } from "../V3CommunityStrip";
 import { Hl, V3Shell } from "../V3Shell";
 import Link from "next/link";
 import "../theme.css";
@@ -226,9 +225,6 @@ export function V3TemplatesBody() {
         </>
       )}
 
-      {/* approved community items — completes the publish→review→live loop */}
-      <V3CommunityStrip kind={mode === "workers" ? "worker" : "workspace"} />
-
       {/* custom CTA */}
       <div className="mt-20 text-center">
         <h2 className="text-[26px] font-semibold tracking-[-0.022em]">Don&apos;t see the worker you need?</h2>
@@ -238,13 +234,6 @@ export function V3TemplatesBody() {
         <div className="mt-6">
           <V3Composer placeholder="Describe the job…" />
         </div>
-        <p className="mt-5 text-[13px] text-muted-foreground">
-          Built a worker others would hire?{" "}
-          <Link href="/templates/submit" className="font-medium" style={{ color: "var(--v3-accent)" }}>
-            Publish it
-          </Link>{" "}
-          — we review before it goes live.
-        </p>
       </div>
     </V3Shell>
   );

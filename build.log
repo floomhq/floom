@@ -5,15 +5,15 @@
 ▲ Next.js 16.2.6 (Turbopack)
 
   Creating an optimized production build ...
-✓ Compiled successfully in 13.5s
+✓ Compiled successfully in 15.5s
   Running TypeScript ...
-  Finished TypeScript in 9.6s ...
+  Finished TypeScript in 11.7s ...
   Collecting page data using 11 workers ...
-  Generating static pages using 11 workers (0/54) ...
-  Generating static pages using 11 workers (13/54) 
-  Generating static pages using 11 workers (26/54) 
-  Generating static pages using 11 workers (40/54) 
-✓ Generating static pages using 11 workers (54/54) in 1243ms
+  Generating static pages using 11 workers (0/47) ...
+  Generating static pages using 11 workers (11/47) 
+  Generating static pages using 11 workers (23/47) 
+  Generating static pages using 11 workers (35/47) 
+✓ Generating static pages using 11 workers (47/47) in 1384ms
   Finalizing page optimization ...
 
 Route (app)
@@ -21,12 +21,6 @@ Route (app)
 ├ ○ /_not-found
 ├ ƒ /api/auth/email
 ├ ƒ /api/auth/password
-├ ƒ /api/marketplace/community
-├ ƒ /api/marketplace/hires
-├ ƒ /api/marketplace/reviews
-├ ƒ /api/marketplace/reviews/summary
-├ ƒ /api/marketplace/submissions
-├ ƒ /api/marketplace/submissions/[id]
 ├ ƒ /api/session
 ├ ƒ /api/slack/install/claim
 ├ ƒ /api/waitlist
@@ -42,9 +36,6 @@ Route (app)
 │ ├ /templates/lead-research-worker
 │ ├ /templates/crm-sync-secretary
 │ └ [+13 more paths]
-├ ○ /templates/admin
-├ ƒ /templates/hire
-├ ○ /templates/submit
 ├ ○ /terms
 ├ ○ /v3
 ├ ○ /v3/about
