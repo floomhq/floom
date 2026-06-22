@@ -5838,19 +5838,27 @@ def _workspace_agent_mcp_conversation_id(raw: Any) -> str:
     return f"langdock:{safe or 'default'}"
 
 
-def _workspace_agent_mcp_discovery() -> Dict[str, Any]:
+def _workspace_agent_mcp_visible_tool_names(auth: AuthContext) -> List[str]:
+    return [
+        tool["name"]
+        for tool in _workeros_remote_mcp_tool_definitions()
+        if _mcp_access_error(str(tool["name"]), auth) is None
+    ]
+
+
+def _workspace_agent_mcp_discovery(auth: AuthContext) -> Dict[str, Any]:
     return {
         "name": _WORKEROS_REMOTE_MCP_NAME,
         "version": _WORKEROS_REMOTE_MCP_VERSION,
         "protocol": _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION,
         "transport": "streamable-http",
         "endpoint": "POST /api/mcp",
-        "tools": [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()],
+        "tools": _workspace_agent_mcp_visible_tool_names(auth),
     }
 
 
-def _workspace_agent_mcp_setup_card() -> Dict[str, Any]:
-    tools = [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()]
+def _workspace_agent_mcp_setup_card(auth: AuthContext) -> Dict[str, Any]:
+    tools = _workspace_agent_mcp_visible_tool_names(auth)
     recommended_prompt = (
         "You are the Floom Agent. Use Floom MCP actions to inspect workers, "
         "runs, brain packs, connections, and secrets. Use ask_workspace_agent for "
@@ -6684,50 +6692,42 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
 
 @app.get("/api/mcp")
 async def workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/mcp")
 async def workspace_agent_mcp_mount_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/api/mcp/setup/langdock")
 async def workspace_agent_mcp_langdock_setup(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_setup_card())
+    return JSONResponse(_workspace_agent_mcp_setup_card(auth))
 
 
 @app.get("/mcp/setup/langdock")
 async def workspace_agent_mcp_mount_langdock_setup(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_setup_card())
+    return JSONResponse(_workspace_agent_mcp_setup_card(auth))
 
 
 @app.get("/langdock/mcp")
 async def langdock_workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/workspace-agent/mcp")
 async def workspace_agent_named_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/api/langdock/mcp")
 async def api_langdock_workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/api/workspace-agent/mcp")
 async def api_workspace_agent_named_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.post("/api/mcp")

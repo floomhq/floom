@@ -34,6 +34,9 @@
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
+  "overrides": {
+    "hono": "^4.12.25"
+  },
   "devDependencies": {
     "@types/node": "^20.19.25",
     "tsx": "^4.22.4",
