@@ -12,30 +12,12 @@ import { motion } from "motion/react";
 import { ArrowLeft, Check } from "lucide-react";
 import type { Template, TemplateDetail } from "@/components/landing-ref/data";
 import { TEMPLATES } from "@/components/landing-ref/data";
-import {
-  GCalLogo,
-  GmailLogo,
-  HubSpotLogo,
-  NotionLogo,
-  OutlookLogo,
-  SheetsLogo,
-} from "@/components/landing-icons";
 import { V3Shell } from "../../V3Shell";
-import { V3TemplateCard } from "../../V3TemplateCard";
+import { V3TemplateCard, MARKS, toolLabel } from "../../V3TemplateCard";
 import { V3OutputPreview } from "../../V3OutputPreview";
 import "../../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
-
-const MARKS: Record<string, React.ReactNode> = {
-  gmail: <GmailLogo />,
-  hubspot: <HubSpotLogo />,
-  notion: <NotionLogo />,
-  calendar: <GCalLogo />,
-  "google calendar": <GCalLogo />,
-  sheets: <SheetsLogo />,
-  "google sheets": <SheetsLogo />,
-};
 
 export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail }) {
   const others = TEMPLATES.filter((x) => x.slug !== t.slug).slice(0, 3);
@@ -112,13 +94,16 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
             <div className="rounded-[18px] bg-card p-5 sm:p-6">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 [&_svg]:h-[16px] [&_svg]:w-[16px]">
-                  {t.tools
-                    .map((tool) => ({ tool, mark: MARKS[tool.toLowerCase()] }))
-                    .filter((m) => m.mark)
-                    .slice(0, 4)
-                    .map(({ tool, mark }) => (
+                  {t.tools.slice(0, 4).map((tool) => {
+                    const mark = MARKS[tool.toLowerCase()];
+                    return mark ? (
                       <span key={tool} className="opacity-80">{mark}</span>
-                    ))}
+                    ) : (
+                      <span key={tool} className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        {toolLabel(tool)}
+                      </span>
+                    );
+                  })}
                 </span>
                 <span className="font-mono text-[11px] text-muted-foreground">{d.exampleRun.id}</span>
               </div>

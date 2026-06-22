@@ -1,0 +1,53 @@
+
+> workeros-cloud@0.0.1 build
+> node scripts/guard_vercel_project.mjs && next build
+
+⨯ Another next build process is already running.
+
+  This could be:
+  - A next build still in progress
+  - A previous build that didn't   Finished TypeScript in 12.5s ...
+  Collecting page data using 11 workers ...
+  Generating static pages using 11 workers (0/47) ...
+  Generating static pages using 11 workers (11/47) 
+  Generating static pages using 11 workers (23/47) 
+  Generating static pages using 11 workers (35/47) 
+✓ Generating static pages using 11 workers (47/47) in 1516ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /api/auth/email
+├ ƒ /api/auth/password
+├ ƒ /api/session
+├ ƒ /api/slack/install/claim
+├ ƒ /api/waitlist
+├ ○ /integrations
+├ ƒ /login
+├ ○ /privacy
+├ ƒ /slack/installed
+├ ● /start/[channel]
+│ └ /start/mcp
+├ ○ /templates
+├ ● /templates/[slug]
+│ ├ /templates/client-follow-up-worker
+│ ├ /templates/lead-research-worker
+│ ├ /templates/crm-sync-secretary
+│ └ [+13 more paths]
+├ ○ /terms
+├ ○ /v3
+├ ○ /v3/about
+├ ○ /v3/docs
+├ ○ /v3/product
+└ ● /workspaces/[slug]
+  ├ /workspaces/recruiting-desk
+  ├ /workspaces/founder-cockpit
+  ├ /workspaces/growth-studio
+  └ [+9 more paths]
+
+
+○  (Static)   prerendered as static content
+●  (SSG)      prerendered as static HTML (uses generateStaticParams)
+ƒ  (Dynamic)  server-rendered on demand
+
