@@ -378,6 +378,54 @@ html.dark {
   .floom-boot-pulse { animation: none; }
 }
 
+/* cli-auth animated hero (issue #1819): an agent constellation. Agent nodes
+   orbit the Floom mark and a pulse of light travels each connection line into
+   the center — "your AI workers, one command away". Calm and premium, on-DS:
+   single accent (#3563CC), near-black mark, no red. All motion is decorative
+   and fully disabled under prefers-reduced-motion. */
+@keyframes floom-cli-orbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes floom-cli-beam {
+  0%   { stroke-dashoffset: 0;   opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { stroke-dashoffset: -90; opacity: 0; }
+}
+@keyframes floom-cli-breathe {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+@keyframes floom-cli-halo {
+  0%, 100% { opacity: 0.55; transform: scale(0.96); }
+  50%      { opacity: 0.9;  transform: scale(1.05); }
+}
+.floom-cli-orbit {
+  transform-box: view-box;
+  transform-origin: 160px 80px;
+  animation: floom-cli-orbit 80s linear infinite;
+}
+.floom-cli-beam {
+  animation: floom-cli-beam 3.4s var(--ease) infinite;
+}
+.floom-cli-breathe {
+  animation: floom-cli-breathe 3.6s ease-in-out infinite;
+}
+.floom-cli-halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: floom-cli-halo 4.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .floom-cli-orbit,
+  .floom-cli-beam,
+  .floom-cli-breathe,
+  .floom-cli-halo {
+    animation: none;
+  }
+}
+
 .skeleton-shimmer {
   background-color: var(--bg-2);
   background-image: linear-gradient(

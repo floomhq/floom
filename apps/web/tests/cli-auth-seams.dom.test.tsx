@@ -22,7 +22,7 @@ describe("CLI auth seams", () => {
     render(<CliAuthContent />);
 
     expect(await screen.findByText("floom-cli")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve & connect" }));
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith("/api/proxy/cli-auth/approve", {
@@ -37,7 +37,7 @@ describe("CLI auth seams", () => {
     render(<CliAuthContent endpointBase="/app/api/cli-auth/" clientName="workeros-cli" />);
 
     expect(await screen.findByText("workeros-cli")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve & connect" }));
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith("/app/api/cli-auth/approve", {
@@ -48,23 +48,22 @@ describe("CLI auth seams", () => {
     });
   });
 
-  it("enters the approved terminal state and hides the action buttons", async () => {
+  it("enters the approved terminal state with the brand line and hides the action buttons", async () => {
     render(<CliAuthContent />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve & connect" }));
 
-    // Terminal success state shows.
-    expect(await screen.findByText("Approved")).toBeInTheDocument();
-    expect(
-      screen.getByText("You can return to your terminal.")
-    ).toBeInTheDocument();
+    // Terminal success state carries the brand line + close-tab nod.
+    expect(await screen.findByText("Your agents are connected")).toBeInTheDocument();
+    expect(screen.getByText(/close this tab/i)).toBeInTheDocument();
 
-    // Action buttons + warning + code prompt are GONE — no branch renders both
-    // the success text and the Approve button simultaneously.
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    // Action buttons + security note + code prompt + Details are GONE — no branch
+    // renders both the success text and the approve action simultaneously.
+    expect(screen.queryByRole("button", { name: "Approve & connect" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
-    expect(screen.queryByText(/hijack your login/i)).toBeNull();
+    expect(screen.queryByText(/only approve if this matches/i)).toBeNull();
     expect(screen.queryByText("Confirmation code")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
   });
 
   it("enters the denied terminal state and hides the action buttons", async () => {
@@ -72,8 +71,8 @@ describe("CLI auth seams", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
 
-    expect(await screen.findByText("Access denied")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(await screen.findByText("Request denied")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve & connect" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
   });
 
@@ -87,11 +86,33 @@ describe("CLI auth seams", () => {
     );
     render(<CliAuthContent />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve & connect" }));
 
     expect(await screen.findByText("Code expired")).toBeInTheDocument();
     // Buttons remain available for retry.
-    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve & connect" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
+  it("keeps secondary trust info under a collapsed Details toggle (progressive disclosure)", async () => {
+    render(
+      <CliAuthContent
+        details={[
+          { label: "Device", value: "MacBook Pro" },
+          { label: "Scopes", value: "Full workspace access" },
+        ]}
+      />
+    );
+
+    // Collapsed by default — the approve click is never blocked by trust detail.
+    expect(await screen.findByRole("button", { name: "Approve & connect" })).toBeInTheDocument();
+    expect(screen.queryByText("MacBook Pro")).toBeNull();
+    expect(screen.queryByText("Full workspace access")).toBeNull();
+
+    // Expanding reveals injected device / scopes and a revoke note.
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByText("MacBook Pro")).toBeInTheDocument();
+    expect(screen.getByText("Full workspace access")).toBeInTheDocument();
+    expect(screen.getByText(/revoke this access/i)).toBeInTheDocument();
   });
 });

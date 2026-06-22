@@ -33,6 +33,7 @@ describe("P1 UI copy regressions", () => {
     const cliAuth = read("app/cli-auth/page.tsx");
 
     expect(cliAuth).not.toContain("✓");
-    expect(cliAuth).toContain('import { Check, X } from "lucide-react"');
+    expect(cliAuth).not.toContain("✗");
+    expect(cliAuth).toMatch(/import \{[^}]*\bCheck\b[^}]*\} from "lucide-react"/);
   });
 });
