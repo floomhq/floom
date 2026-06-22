@@ -1,35 +1,20 @@
 // Floom identity mark — the ONE shared avatar component.
 // SPEC: /root/workeros-design-baseline/SPEC.md (locked 2026-06-22).
 //
-// Shape + COLOR both encode ROLE (two independent visual axes):
-//   - "user"      -> CIRCLE + NEUTRAL GRAPHITE palette. Real provider photo
-//                    when `src` present, else a chunky 2-tone graphite mark.
-//                    NEVER initials. onError falls back to generated mark.
-//   - "workspace" -> SQUIRCLE + ACCENT BLUE palette. Favicon/logo when `src`
-//                    present, else a blue generated mark. onError falls back
-//                    to generated mark so a broken/globe favicon never shows.
-//   - "worker"    -> SQUIRCLE + ACCENT BLUE. Same as workspace; workers are
+// Shape encodes ROLE:
+//   - "user"      -> CIRCLE (human). Real provider photo when `src` present,
+//                    else a chunky 2-tone generated mark. NEVER initials.
+//   - "workspace" -> SQUIRCLE (non-human). Uploaded logo/favicon when `src`
+//                    present, else the SAME generated mark.
+//   - "worker"    -> SQUIRCLE (non-human). Same as workspace; workers are
 //                    non-human entities (run cards, share cards).
 //   - "emily"     -> SQUIRCLE, solid accent-blue, fixed A4 mark (white core
 //                    disc + two white@55% energy arcs). Gentle arc PULSE when
 //                    `active`, respecting prefers-reduced-motion.
 //
-// A user and any workspace are ALWAYS visually distinguishable: circle vs
-// squircle AND graphite vs blue, so shape alone never carries the burden.
-//
 // No gradients, no faces, no stock glyphs (radar/orbit/star), no letters.
 // Tokens only: --accent (Emily blue), --radius-squircle (squircle radius).
-"use client";
-import { useState } from "react";
-import { generateMarkForRole, MARK_GROUND, type MarkMotif } from "@/lib/avatar/generate";
-
-// Module-level sets for logo URL load outcomes. Populated on first load per
-// URL so every subsequent mount (e.g. sidebar collapse/expand) renders the
-// final state immediately — no blank-then-logo flash on re-mount.
-// - _logoLoaded: URLs that loaded successfully → render <img> right away.
-// - _logoFailed: URLs that 404'd or errored → skip <img> immediately.
-const _logoLoaded = new Set<string>();
-const _logoFailed = new Set<string>();
+import { generateMark, MARK_GROUND, type MarkMotif } from "@/lib/avatar/generate";
 
 export type AvatarRole = "user" | "workspace" | "worker" | "emily";
 
@@ -151,14 +136,6 @@ export function Avatar({
   "aria-label": ariaLabel,
   active,
 }: AvatarProps) {
-  // Track whether the logo src failed to load so we can fall back to the
-  // generated mark. Seed from the module-level cache: if this URL previously
-  // 404'd we skip the <img> immediately (no blank flash on re-mount); if it
-  // previously loaded we skip the generated fallback immediately (no flash).
-  const [logoError, setLogoError] = useState(() =>
-    src ? _logoFailed.has(src) : false
-  );
-
   const numericSize = typeof size === "number" ? size : undefined;
   const sizeClass = typeof size === "string" ? size : undefined;
   const combinedClass = [sizeClass, className].filter(Boolean).join(" ") || undefined;
@@ -171,9 +148,7 @@ export function Avatar({
   };
 
   // Photo / logo override (user photo, workspace/worker logo). Emily is fixed.
-  // If the logo URL fails to load (onError), we fall back to the generated mark
-  // below. This is essential for DuckDuckGo favicon 404s on non-company names.
-  if (role !== "emily" && src && !logoError) {
+  if (role !== "emily" && src) {
     const imgAlt = ariaLabel ?? "";
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -184,12 +159,6 @@ export function Avatar({
         referrerPolicy="no-referrer"
         className={combinedClass}
         style={{ ...baseStyle, objectFit: "cover" }}
-        onLoad={() => { _logoLoaded.add(src); }}
-        onError={() => {
-          _logoFailed.add(src);
-          _logoLoaded.delete(src);
-          setLogoError(true);
-        }}
         {...(numericSize ? { width: numericSize, height: numericSize } : {})}
       />
     );
@@ -218,11 +187,7 @@ export function Avatar({
   }
 
   // Generated fallback (user circle / workspace+worker squircle).
-  // generateMarkForRole applies role-based index offsets so a user and a
-  // workspace with the same name/id are mathematically guaranteed to produce
-  // different motifIndex values (the offset is coprime to MARK_MOTIF_COUNT).
-  // Pass a stable database id via the `id` prop so the mark survives renames.
-  const { motif, c1, c2 } = generateMarkForRole(role, id || name || "?");
+  const { motif, c1, c2 } = generateMark(id || name || "?");
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"

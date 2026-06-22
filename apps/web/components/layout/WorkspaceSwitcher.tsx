@@ -43,8 +43,7 @@ type WorkspaceState = {
   activeId: string;
 };
 
-/** Identity mark for a workspace — squircle (non-human), seeded by id then name.
- *  Prefer the stable `id` so the mark survives workspace renames.
+/** Identity mark for a workspace — squircle (non-human), seeded by name.
  *  Company logo/favicon overrides the generated mark when available. */
 function WorkspaceAvatar({
   id,
@@ -58,7 +57,7 @@ function WorkspaceAvatar({
   logoUrl?: string | null;
 }) {
   const seed = resolveWorkspaceName(name) || name || "workspace";
-  return <Avatar role="workspace" id={id} name={seed} src={logoUrl ?? undefined} size={size} />;
+  return <Avatar role="workspace" name={seed} src={logoUrl ?? undefined} size={size} />;
 }
 
 export function WorkspaceSwitcher() {
