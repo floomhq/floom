@@ -95,6 +95,29 @@ describe("CLI auth seams", () => {
     expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
   });
 
+  it("redirects logged-out approval attempts to login with the CLI code preserved", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: "Authentication required." }),
+      })
+    );
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, assign },
+      writable: true,
+    });
+    render(<CliAuthContent loginPath="/login" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("/login?next=%2Fcli-auth%3Fcode%3DABCD-2345");
+    });
+  });
+
   it("builds a login redirect that preserves the CLI code", () => {
     expect(cliAuthLoginRedirect("/app/login")).toBe(
       "/app/login?next=%2Fcli-auth%3Fcode%3DABCD-2345",

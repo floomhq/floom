@@ -3,6 +3,22 @@ import { getCommandName } from "../lib/command-name.js";
 import { maskSecret } from "../lib/credentials.js";
 import { log, printJson } from "../lib/output.js";
 
+type AuthMe = {
+  user_id?: unknown;
+  username?: unknown;
+  email?: unknown;
+  role?: unknown;
+  auth_method?: unknown;
+};
+
+function accountLabel(me: AuthMe | null): string | null {
+  if (!me) return null;
+  for (const value of [me.email, me.username, me.user_id]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 export async function runWhoamiCommand(options: { json?: boolean } = {}): Promise<number> {
   try {
     const { client, credentials } = await createAuthenticatedClient();
@@ -10,11 +26,22 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
     // under /api, so cloud-mode whoami needs the /api prefix.
     const path = credentials.mode === "cloud" ? "/api/system/info" : "/system/info";
     const info = await client.requestJson("GET", path);
+    let me: AuthMe | null = null;
+    try {
+      me = (await client.requestJson("GET", "/auth/me")) as AuthMe;
+    } catch {
+      // Older self-hosted engines may not expose /auth/me. whoami should still
+      // prove API reachability and show locally stored credentials.
+      me = null;
+    }
+    const account = accountLabel(me);
     const payload: Record<string, unknown> = {
       mode: credentials.mode,
       api_base: credentials.api_base,
       authed_at: credentials.authed_at,
       system_info: info,
+      account: account || null,
+      auth: me,
     };
     if (credentials.mode === "cloud") {
       payload.workspace_id = credentials.workspace_id || null;
@@ -34,6 +61,9 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
       log.heading("Identity");
       log.kv("Mode", credentials.mode);
       log.kv("API base", credentials.api_base);
+      if (account) {
+        log.kv("Account", account);
+      }
       const ws = credentials.workspace_name || credentials.workspace_id;
       log.kv("Workspace", ws ? ws : `(none, run \`${getCommandName()} workspace switch <name>\`)`);
       if (credentials.mode === "cloud") {

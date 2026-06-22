@@ -319,6 +319,7 @@ def auth_me(auth: AuthContext = Depends(get_auth_context)) -> dict:
     return {
         "user_id": auth.user_id,
         "username": auth.username,
+        "email": auth.email,
         "role": auth.role,
         "auth_method": auth.auth_method,
         "is_admin": auth.is_admin,
