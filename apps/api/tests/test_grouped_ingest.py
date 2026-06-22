@@ -42,6 +42,10 @@ inputs:
   - name: clips
     type: file
     label: Clips
+  - name: style
+    type: text
+    label: Style
+    default: cinematic
 outputs: []
 connections: []
 """
@@ -179,6 +183,31 @@ def test_single_file_without_group_is_one_run_not_grouped(client_and_main):
     staged = _run_inputs(main, body["run_id"])["clips"]
     assert isinstance(staged, str)
     assert Path(staged).read_bytes() == b"only-clip"
+
+
+def test_drop_run_preserves_config_defaulted_inputs(client_and_main):
+    """A drop-triggered run must keep config defaults the worker relies on.
+
+    create_run() stores the EFFECTIVE inputs (drop payload + instance inputs +
+    config defaults). Staging file references must resolve against those, not
+    the raw drop payload, or the defaulted ``style`` input is dropped and the
+    worker runs without it.
+    """
+    client, main = client_and_main
+    token = _token(main)
+
+    response = client.post(
+        f"/drop/public/drop_ep/uploads?token={token}",
+        files={"file": ("solo.txt", io.BytesIO(b"only-clip"), "text/plain")},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    inputs = _run_inputs(main, body["run_id"])
+    # The defaulted scalar input survives staging.
+    assert inputs["style"] == "cinematic"
+    # The file input is still resolved to a staged absolute path.
+    assert Path(inputs["clips"]).read_bytes() == b"only-clip"
 
 
 def test_resolve_file_input_references_stages_list_in_order(client_and_main, tmp_path):

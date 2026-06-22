@@ -2410,9 +2410,23 @@ def create_run_with_staged_files(
         user_id=user_id,
         repos=repos_obj,
     )
+    # create_run() stored the EFFECTIVE inputs on the row: the raw drop payload
+    # merged with the worker's instance-level inputs and config defaults. Resolve
+    # file references against those effective inputs (read back from the run)
+    # rather than the raw payload, so defaulted/instance inputs survive staging
+    # instead of being clobbered by the resolved-inputs overwrite below.
+    stored = repos_obj.runs.get(user_id=user_id, run_id=run_id) or {}
+    effective_inputs = stored.get("input_json")
+    if isinstance(effective_inputs, str):
+        try:
+            effective_inputs = json.loads(effective_inputs or "{}")
+        except Exception:
+            effective_inputs = None
+    if not isinstance(effective_inputs, dict):
+        effective_inputs = dict(inputs)
     try:
         resolved_inputs = _resolve_file_input_references(
-            worker_id, run_id, inputs, bound_by=user_id
+            worker_id, run_id, effective_inputs, bound_by=user_id
         )
     except Exception as exc:
         update_run_status(
