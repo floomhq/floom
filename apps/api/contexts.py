@@ -242,7 +242,7 @@ def current_contexts_root() -> Path:
     """
     scope = _current_scope()
     if scope is None:
-        return CONTEXTS_DIR
+        return CONTEXTS_DIR.resolve()
     return (CONTEXTS_DIR / scope).resolve()
 
 

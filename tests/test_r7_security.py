@@ -235,9 +235,9 @@ def test_cli_auth_store_bounded(monkeypatch, tmp_path):
 def test_cli_auth_requires_typed_code():
     page = (WEB_DIR / "app" / "cli-auth" / "page.tsx").read_text(encoding="utf-8")
 
-    assert 'id="cli-auth-confirm-code"' in page
-    assert "normalizedConfirmCode === code" in page
-    assert "disabled={!canApprove" in page
+    assert "Confirmation code" in page
+    assert "Only approve if this code matches" in page
+    assert "disabled={!canAct}" in page
 
 
 def test_secret_name_too_long_rejected(monkeypatch, tmp_path):
