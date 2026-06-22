@@ -9,7 +9,7 @@ background AI workers. Sandboxed by default.
 > Create a worker. Give it tools. Let it run. See everything.
 
 <p align="center">
-  <img src="docs/media/hero.gif" alt="Describe a worker in plain English, approve the draft, and watch it run on the record" width="900">
+  <img src="docs/media/hero.gif" alt="Open a completed run and see everything the worker produced — sandboxed, on the record" width="900">
 </p>
 
 New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
