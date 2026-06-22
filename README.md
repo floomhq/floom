@@ -172,13 +172,31 @@ data/         SQLite DB + run artifacts
 
 ## Docs
 
-- [Getting started](docs/GETTING-STARTED.md) &mdash; why Floom exists, first run, first worker, safe self-hosting checklist.
-- [Authoring workers](docs/AUTHORING.md) &mdash; full `worker.yml` schema, execution modes, secrets, connections, triggers, approvals.
-- [Agent cookbook](docs/AGENT-COOKBOOK.md) &mdash; agent-assisted worker authoring recipes.
-- [Architecture](ARCHITECTURE.md) &mdash; runtime topology and the sandbox trust model. Read before filing security findings.
-- [API overview](docs/API.md) &mdash; curated endpoint map; full reference at `http://localhost:8000/docs`.
-- [Troubleshooting](docs/TROUBLESHOOTING.md) · [Roadmap](ROADMAP.md) · [Project history](HISTORY.md) · [v1.0.0 release notes](docs/releases/v1.0.0.md)
-- [Licensing](docs/LICENSING.md) &mdash; what the Floom Source Available License allows and what needs a commercial agreement.
+- [Getting started](docs/GETTING-STARTED.md) - why Floom exists, first run,
+  first worker, and safe self-hosting checklist.
+- [Authoring workers](docs/AUTHORING.md) - full `worker.yml` schema, execution
+  modes, secrets, connections, triggers, and approvals.
+- [Agent cookbook](docs/AGENT-COOKBOOK.md) - agent-assisted worker authoring
+  recipes.
+- [API overview](docs/API.md) - curated endpoint map plus the OpenAPI location.
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - setup, runtime, and test fixes.
+- [Project history](HISTORY.md) - what was scrubbed and how the public history is
+  preserved.
+- [v1.0.0 release notes](docs/releases/v1.0.0.md) - launch highlights, limits,
+  and provenance.
+- [Contributing](CONTRIBUTING.md) - local checks, first-contribution map, and PR
+  expectations.
+- [Licensing](docs/LICENSING.md) - what the Floom Source Available License
+  allows and what needs a commercial agreement.
+- [Third-party licenses](docs/THIRD-PARTY-LICENSES.md) - dependency inventory
+  and SBOM release process.
+- [Generated SBOM](docs/sbom/floom-sbom.spdx.json) - SPDX inventory generated
+  from the checked-in dependency manifests.
+
+## API
+
+For a curated endpoint map, see [docs/API.md](docs/API.md). For the exhaustive
+reference, start the API and open `http://localhost:8000/docs`.
 
 ## Contributing
 
