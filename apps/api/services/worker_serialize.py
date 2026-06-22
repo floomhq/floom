@@ -156,21 +156,13 @@ def _worker_public_link(worker: Dict[str, Any]) -> Optional[str]:
 
 
 def _worker_bundle_dir(worker_id: str, config: WorkerConfig) -> Path:
-    from models import WorkerConfig
+    from runner_utils import _resolve_worker_bundle_dir, _safe_path
     from worker_registry import WORKERS_DIR
-    bundle_path = config.runtime.bundle_path if config and config.runtime else None
-    if bundle_path:
-        raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-    else:
-        target = WORKERS_DIR / worker_id
-    resolved = target.resolve()
-    allowed_root = WORKERS_DIR.parent.resolve()
+
     try:
-        resolved.relative_to(allowed_root)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid worker bundle path")
-    return resolved
+        return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid worker bundle path") from exc
 
 
 def _get_stats_batch(
