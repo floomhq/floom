@@ -682,12 +682,21 @@ function SettingsContent() {
   useEffect(() => {
     function syncFromLocation() {
       const params = new URLSearchParams(window.location.search);
-      const fromQuery = sectionFromCandidate(params.get("sel") || params.get("tab"));
+      // ?sel is canonical; ?tab is a legacy section alias only when ?sel is
+      // absent. When ?sel is present, ?tab is the section's sub-tab.
+      const selParam = params.get("sel");
+      const fromQuery = sectionFromCandidate(selParam || params.get("tab"));
       const raw = window.location.hash.replace(/^#/, "");
       const fromHash = sectionFromCandidate(raw);
       const nextSel = fromQuery || fromHash;
       if (nextSel) {
-        setCollectionState((prev) => (prev.sel === nextSel ? prev : { ...prev, sel: nextSel, tab: null }));
+        // Restore a valid sub-tab when ?sel & ?tab both name a real pair;
+        // otherwise reset to the section's default tab.
+        const tabParam = selParam ? params.get("tab") : null;
+        const nextTab = isValidSubTab(nextSel, tabParam) ? tabParam : null;
+        setCollectionState((prev) =>
+          prev.sel === nextSel && prev.tab === nextTab ? prev : { ...prev, sel: nextSel, tab: nextTab },
+        );
       }
       setSearch(window.location.search);
     }
@@ -790,13 +799,28 @@ function SettingsContent() {
             </>
           ),
         },
-        tabs: [
-          {
-            key: "settings",
-            label: item.label,
-            render: () => renderSection(item.key),
-          },
-        ],
+        tabs:
+          item.key === "system"
+            ? SYSTEM_SUBTABS.map((t) => ({
+                key: t.key,
+                label: t.label,
+                render: () => (
+                  <SystemSubTab
+                    tab={t.key}
+                    info={info}
+                    platformConfig={platformConfig}
+                    canEdit={isAdmin}
+                    onCopySecretName={copySecretName}
+                  />
+                ),
+              }))
+            : [
+                {
+                  key: "settings",
+                  label: item.label,
+                  render: () => renderSection(item.key),
+                },
+              ],
       }),
       states: {
         empty: { title: "No settings found" },
@@ -808,9 +832,14 @@ function SettingsContent() {
   function handleCollectionChange(next: CollectionState) {
     setCollectionState(next);
     const params = new URLSearchParams(searchParams.toString());
-    params.delete("tab");
-    if (next.sel && isValidSection(next.sel)) params.set("sel", next.sel);
+    const nextSel = next.sel && isValidSection(next.sel) ? (next.sel as SectionKey) : null;
+    if (nextSel) params.set("sel", nextSel);
     else params.delete("sel");
+    // Persist a valid sub-tab as ?tab= so deep-links/back-forward keep the
+    // selected sub-tab (e.g. General > Behaviour). Drop ?tab otherwise — a
+    // section's single "settings" tab is implicit and must not leak to the URL.
+    if (isValidSubTab(nextSel, next.tab)) params.set("tab", next.tab as string);
+    else params.delete("tab");
     const qs = params.size ? `?${params.toString()}` : "";
     window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
     setSearch(window.location.search);
@@ -819,8 +848,11 @@ function SettingsContent() {
   function renderSection(key: SectionKey) {
     switch (key) {
       case "system":
+        // General is rendered as sub-tabs by detail(); this is a safety
+        // fallback only (renderSection must be total over SectionKey).
         return (
-          <SystemSection
+          <SystemSubTab
+            tab="info"
             info={info}
             platformConfig={platformConfig}
             canEdit={isAdmin}
@@ -971,60 +1003,95 @@ function SettingsIcon({ icon: Icon }: { icon: SettingsIconType }) {
   );
 }
 
-function SystemSection({
+// The General (system) section is the longest in Settings — five distinct
+// sub-areas (system info, workspace info, behaviour, model defaults, platform
+// config). Rather than one long scroll, it is presented as a sub-tab bar
+// (worker-detail chrome via DetailPane's `tabs`), so each area is one click and
+// the visible scroll per tab is short. SYSTEM_SUBTABS drives both the detail()
+// tab list and the ?tab= deep-link validation. Keys are namespaced so they do
+// not collide with section keys in sectionFromCandidate's legacy ?tab alias.
+const SYSTEM_SUBTABS = [
+  { key: "info", label: "System info" },
+  { key: "workspace", label: "Workspace" },
+  { key: "behaviour", label: "Behaviour" },
+  { key: "models", label: "Models" },
+  { key: "platform", label: "Platform" },
+] as const;
+
+type SystemSubTabKey = (typeof SYSTEM_SUBTABS)[number]["key"];
+
+// Sub-tab keys per section (only sections that present sub-tabs appear here).
+// Used to validate/persist ?tab= deep-links so a stray ?tab does not leak.
+function subTabKeysForSection(section: SectionKey | null): string[] {
+  return section === "system" ? SYSTEM_SUBTABS.map((t) => t.key) : [];
+}
+
+function isValidSubTab(section: SectionKey | null, tab: string | null): boolean {
+  return tab !== null && subTabKeysForSection(section).includes(tab);
+}
+
+function SystemSubTab({
+  tab,
   info,
   platformConfig,
   canEdit,
   onCopySecretName,
 }: {
+  tab: SystemSubTabKey;
   info: SystemInfo | null;
   platformConfig: PlatformConfig | null;
   canEdit: boolean;
   onCopySecretName: (name: string) => Promise<void>;
 }) {
-  return (
-    <div className="space-y-8">
-      {!canEdit ? <ReadOnlyNotice /> : null}
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
-        <div className="space-y-2 text-sm">
-          {info ? (
-            <>
-              <SystemInfoRow label="Version" value={info.version} mono />
-              <SystemInfoRow label="Started at" value={info.started_at} mono />
-              <SystemInfoRow label="Python" value={info.python_version} mono />
-              <SystemInfoRow label="Runner" value={info.runner} />
-            </>
-          ) : (
-            <div className="space-y-3">
-              {[120, 96, 80].map((w, i) => (
-                <div key={i} className="flex items-center justify-between">
-                  <Skeleton className="h-4" style={{ width: 80 }} />
-                  <Skeleton className="h-4" style={{ width: w }} />
-                </div>
-              ))}
-            </div>
-          )}
+  switch (tab) {
+    case "info":
+      return (
+        <div className="space-y-3">
+          {!canEdit ? <ReadOnlyNotice /> : null}
+          <div className="space-y-2 text-sm">
+            {info ? (
+              <>
+                <SystemInfoRow label="Version" value={info.version} mono />
+                <SystemInfoRow label="Started at" value={info.started_at} mono />
+                <SystemInfoRow label="Python" value={info.python_version} mono />
+                <SystemInfoRow label="Runner" value={info.runner} />
+              </>
+            ) : (
+              <div className="space-y-3">
+                {[120, 96, 80].map((w, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <Skeleton className="h-4" style={{ width: 80 }} />
+                    <Skeleton className="h-4" style={{ width: w }} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Workspace</h2>
-        <WorkspaceInfoSettings canEdit={canEdit} />
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Behaviour</h2>
-        <BehaviourSettings canEdit={canEdit} />
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Model defaults &amp; limits</h2>
-        <ModelDefaults canEdit={canEdit} />
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
+      );
+    case "workspace":
+      return (
+        <div className="space-y-3">
+          {!canEdit ? <ReadOnlyNotice /> : null}
+          <WorkspaceInfoSettings canEdit={canEdit} />
+        </div>
+      );
+    case "behaviour":
+      return (
+        <div className="space-y-3">
+          {!canEdit ? <ReadOnlyNotice /> : null}
+          <BehaviourSettings canEdit={canEdit} />
+        </div>
+      );
+    case "models":
+      return (
+        <div className="space-y-3">
+          {!canEdit ? <ReadOnlyNotice /> : null}
+          <ModelDefaults canEdit={canEdit} />
+        </div>
+      );
+    case "platform":
+      return (
         <div className="space-y-3">
           {!platformConfig ? (
             <Skeleton className="h-12 w-full" />
@@ -1068,9 +1135,8 @@ function SystemSection({
             </>
           )}
         </div>
-      </section>
-    </div>
-  );
+      );
+  }
 }
 
 function SystemInfoRow({

@@ -35,6 +35,10 @@ export type StoredCredentials = {
 
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
 const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
+const LEGACY_PLACEHOLDER_CLOUD_API_BASES = new Set([
+  "https://api.workeros.example.com",
+  "https://api.floom.example.com",
+]);
 
 function envApiBase(defaultBase: string): string {
   return (process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE || defaultBase).replace(/\/+$/, "");
@@ -47,6 +51,15 @@ function envUser(): string | undefined {
 function envCloudRequested(): boolean {
   const value = (process.env.WORKEROS_CLOUD || "").trim().toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function normalizeStoredApiBase(mode: AuthMode, value: string | undefined): string {
+  const fallback = mode === "cloud" ? DEFAULT_CLOUD_API_BASE : DEFAULT_OSS_API_BASE;
+  const normalized = (value || fallback).replace(/\/+$/, "");
+  if (mode === "cloud" && LEGACY_PLACEHOLDER_CLOUD_API_BASES.has(normalized)) {
+    return DEFAULT_CLOUD_API_BASE;
+  }
+  return normalized;
 }
 
 function resolveHomeDir(): string {
@@ -119,7 +132,7 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     return null;
   }
   return {
-    api_base: (parsed.api_base || (mode === "cloud" ? DEFAULT_CLOUD_API_BASE : DEFAULT_OSS_API_BASE)).replace(/\/+$/, ""),
+    api_base: normalizeStoredApiBase(mode, parsed.api_base),
     mode,
     api_secret: parsed.api_secret,
     api_token: parsed.api_token,
