@@ -18,9 +18,21 @@ describe("guessDomain", () => {
 });
 
 describe("companyLogoUrl", () => {
-  it("builds a favicon URL for the derived domain", () => {
-    expect(companyLogoUrl("Acme")).toContain("domain=acme.com");
+  it("builds a favicon URL only for dot-qualified domain inputs", () => {
+    // Explicit domain → favicon URL (real company logo likely exists).
+    expect(companyLogoUrl("acme.com")).toContain("domain=acme.com");
+    expect(companyLogoUrl("https://acme.io/about")).toContain("domain=acme.io");
+    // Empty → null.
     expect(companyLogoUrl("")).toBeNull();
+  });
+  it("returns null for plain slugs without a dot (personal/non-company names)", () => {
+    // These workspace names would only produce a generic globe favicon from the
+    // favicon service — return null so the caller falls back to the gradient squircle.
+    expect(companyLogoUrl("depontefede")).toBeNull();
+    expect(companyLogoUrl("fede-production")).toBeNull();
+    expect(companyLogoUrl("content-pipeline")).toBeNull();
+    expect(companyLogoUrl("Acme")).toBeNull();
+    expect(companyLogoUrl("My Workspace")).toBeNull();
   });
 });
 

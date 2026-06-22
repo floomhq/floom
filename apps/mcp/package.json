@@ -1,13 +1,13 @@
 {
   "name": "@floomhq/floom",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "CLI + MCP server for self-hosted and hosted Floom instances.",
   "type": "module",
   "bin": {
-    "floom-mcp": "./bin/floom-mcp",
-    "workeros-mcp": "./bin/workeros-mcp",
-    "workeros": "./dist/cli.js",
-    "floom": "./dist/cli.js"
+    "floom-mcp": "bin/floom-mcp",
+    "workeros-mcp": "bin/workeros-mcp",
+    "workeros": "dist/cli.js",
+    "floom": "dist/cli.js"
   },
   "files": [
     "bin/",

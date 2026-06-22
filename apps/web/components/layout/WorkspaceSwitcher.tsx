@@ -10,7 +10,7 @@ import { groupPostHogWorkspace } from "@/lib/posthog";
 import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
-import { GenerativeAvatar } from "@/components/GenerativeAvatar";
+import { Avatar } from "@/components/ui/Avatar";
 import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
 import { computeIsAdmin } from "@/lib/use-is-admin";
 import type { LocalWorkspace } from "@/lib/types";
@@ -43,7 +43,8 @@ type WorkspaceState = {
   activeId: string;
 };
 
-/** Generative avatar for a workspace — squircle shape, seeded by name. */
+/** Identity mark for a workspace — squircle (non-human), seeded by name.
+ *  Company logo/favicon overrides the generated mark when available. */
 function WorkspaceAvatar({
   name,
   size,
@@ -54,14 +55,7 @@ function WorkspaceAvatar({
   logoUrl?: string | null;
 }) {
   const seed = resolveWorkspaceName(name) || name || "workspace";
-  return (
-    <GenerativeAvatar
-      seed={seed}
-      shape="squircle"
-      size={size}
-      avatarUrl={logoUrl ?? undefined}
-    />
-  );
+  return <Avatar role="workspace" name={seed} src={logoUrl ?? undefined} size={size} />;
 }
 
 export function WorkspaceSwitcher() {

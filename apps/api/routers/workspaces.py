@@ -80,6 +80,11 @@ class CurrentUserResponse(BaseModel):
     scopes: List[str] = []
     role: str = "admin"
     username: Optional[str] = None
+    # Provider photo (Google/GitHub) for the user avatar. The OSS single-tenant
+    # AuthContext carries no provider photo, so this stays null here; the cloud
+    # wrapper (Supabase OAuth) is responsible for populating it. Null falls back
+    # to the generated identity mark in the web app.
+    picture: Optional[str] = None
 
 
 def _local_workspace_out(row: Dict[str, Any]) -> LocalWorkspaceOut:
