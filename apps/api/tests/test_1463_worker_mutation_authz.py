@@ -17,6 +17,10 @@ def _member_auth() -> AuthContext:
     return AuthContext(user_id="member-user", role="member", auth_method="session")
 
 
+def _admin_auth() -> AuthContext:
+    return AuthContext(user_id="admin-user", role="admin", auth_method="session")
+
+
 def _repos():
     workers = SimpleNamespace(update=lambda **_kwargs: (_ for _ in ()).throw(AssertionError("mutated worker")))
     return SimpleNamespace(workers=workers)
@@ -37,6 +41,39 @@ def test_pause_resume_denies_workspace_member_without_owner_or_admin(monkeypatch
         )
 
     assert exc.value.status_code == 404
+
+
+def test_pause_resume_workspace_admin_updates_with_worker_owner(monkeypatch):
+    import services.worker_mutation as mutation
+
+    calls = []
+
+    def update(**kwargs):
+        calls.append(kwargs)
+        return {"id": kwargs["worker_id"], "enabled": kwargs["enabled"]}
+
+    repos = SimpleNamespace(workers=SimpleNamespace(update=update, reconcile_triggers=lambda **_kwargs: None))
+    monkeypatch.setattr(
+        mutation,
+        "_worker_for_mutation",
+        lambda *_args, **_kwargs: {
+            "id": "shared-worker",
+            "owner_id": "owner-user",
+            "config": {"triggers": [{"type": "manual"}]},
+        },
+    )
+    monkeypatch.setattr(mutation, "_build_worker_detail", lambda *_args, **_kwargs: {"id": "shared-worker", "enabled": True})
+
+    result = mutation._set_worker_enabled(
+        "shared-worker",
+        enabled=True,
+        auth=_admin_auth(),
+        repos=repos,
+        request=_request(),
+    )
+
+    assert result == {"id": "shared-worker", "enabled": True}
+    assert calls == [{"user_id": "owner-user", "worker_id": "shared-worker", "enabled": True}]
 
 
 def test_context_mutation_denies_workspace_member_without_owner_or_admin(monkeypatch):

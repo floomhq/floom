@@ -76,6 +76,18 @@ test("completion zsh/fish bind to the invoked binary name (workeros)", async () 
   assert.doesNotMatch(fish.stdout, /floom/);
 });
 
+test("completion powershell binds to the invoked binary name (workeros)", async () => {
+  const result = await runAs("workeros", ["completion", "powershell"]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /# workeros PowerShell completion/);
+  assert.match(result.stdout, /Register-ArgumentCompleter -Native -CommandName workeros/);
+  assert.doesNotMatch(result.stdout, /floom/);
+
+  const pwsh = await runAs("workeros", ["completion", "pwsh"]);
+  assert.equal(pwsh.code, 0);
+  assert.match(pwsh.stdout, /Register-ArgumentCompleter -Native -CommandName workeros/);
+});
+
 test("completion keeps the legacy floom name when invoked as floom", async () => {
   const result = await runAs("floom", ["completion", "bash"]);
   assert.equal(result.code, 0);

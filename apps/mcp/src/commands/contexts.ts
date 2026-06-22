@@ -233,6 +233,10 @@ export async function contextsVersionsCommand(name: string, options: { limit?: n
       Author: row?.author || row?.author_name || "-",
       Date: row?.date || row?.created_at || "-",
     })) : [];
+    if (rows.length === 0) {
+      log.info("No versions found. Sensitive brain packs do not record git history; create non-sensitive packs with `contexts create --no-sensitive` when you need rollback.");
+      return 0;
+    }
     process.stdout.write(renderTable(rows, [
       { key: "Sha", label: "Sha" },
       { key: "Message", label: "Message" },
