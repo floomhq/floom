@@ -165,7 +165,9 @@ async function startMockApi({ existing = false, postStatus = 200, postDetail = "
         json(response, deleteStatus, { detail: "Forbidden" });
         return;
       }
-      response.writeHead(204);
+      // Mirror FastAPI: a 204 still carries content-type: application/json with
+      // an empty body. The client must not try to JSON-parse the empty payload.
+      response.writeHead(204, { "content-type": "application/json" });
       response.end();
       return;
     }

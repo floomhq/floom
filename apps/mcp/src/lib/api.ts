@@ -64,11 +64,11 @@ async function fetchFloom(apiBase: string, input: string, init: RequestInit): Pr
 
 async function parseResponse(response: Response): Promise<unknown> {
   const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return response.json();
-  }
   const text = await response.text();
   if (!text) return {};
+  if (contentType.includes("application/json")) {
+    return JSON.parse(text);
+  }
   try {
     return JSON.parse(text);
   } catch {
