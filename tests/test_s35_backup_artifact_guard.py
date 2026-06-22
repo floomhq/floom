@@ -26,6 +26,15 @@ def _bash_path(path: Path) -> str:
     return text
 
 
+def _require_usable_bash() -> None:
+    try:
+        result = subprocess.run(["bash", "-lc", "true"], capture_output=True, text=True)
+    except FileNotFoundError:
+        pytest.skip("bash is not available")
+    if result.returncode != 0:
+        pytest.skip("bash is not usable in this environment")
+
+
 def test_prerun_disk_guard_blocks_when_free_space_below_threshold(monkeypatch):
     import run_service
 
@@ -127,6 +136,7 @@ def test_rotate_artifacts_gzips_old_transcripts(tmp_path):
 
 
 def test_backup_script_writes_db_artifacts_and_manifest(tmp_path):
+    _require_usable_bash()
     workeros_root = tmp_path / "workeros"
     api_dir = workeros_root / "apps" / "api"
     data_dir = workeros_root / "data"
@@ -183,7 +193,7 @@ def test_backup_script_writes_db_artifacts_and_manifest(tmp_path):
         check=True,
     )
 
-    backups = sorted(backup_root.glob("workeros-*"))
+    backups = sorted(backup_root.glob("floom-*"))
     assert len(backups) == 1
     backup = backups[0]
     assert (backup / "floom.db.gz").is_file()

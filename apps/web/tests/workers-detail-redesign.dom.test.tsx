@@ -178,12 +178,12 @@ describe("Workers detail redesign register", () => {
     }
   }, TEST_TIMEOUT);
 
-  it("pins Source before the View as YAML action navigates", async () => {
+  it("opens Advanced before the View as YAML action navigates", async () => {
     await openDetail("Setup");
 
     fireEvent.click(screen.getByRole("link", { name: /View as YAML/i }));
 
-    expect(window.localStorage.getItem("floom.workerDetail.pinnedTabs") ?? "").toContain("Source");
+    expect(window.localStorage.getItem("workeros:worker-advanced-open")).toBe("true");
     expect(router.replace).toHaveBeenCalledWith(`/workers?sel=${encodeURIComponent(WORKER_ID)}&tab=Source`);
   }, TEST_TIMEOUT);
 });

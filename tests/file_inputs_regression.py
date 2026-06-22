@@ -567,7 +567,13 @@ def _main_body() -> int:
     check("run input is an absolute path", mounted_abs is not None and Path(mounted_abs).is_absolute(), str(mounted_abs))
     mounted_path = Path(mounted_abs)
     check("mounted file exists at absolute path", mounted_path.is_file(), str(mounted_path))
-    check("mounted file is under artifacts/<run_id>/inputs/", str(ARTIFACTS_DIR / run_id / "inputs") in str(mounted_path), str(mounted_path))
+    expected_inputs_dir = (ARTIFACTS_DIR / run_id / "inputs").resolve()
+    try:
+        mounted_path.resolve().relative_to(expected_inputs_dir)
+        mounted_under_inputs = True
+    except ValueError:
+        mounted_under_inputs = False
+    check("mounted file is under artifacts/<run_id>/inputs/", mounted_under_inputs, str(mounted_path))
     check("mounted file bytes match blob", mounted_path.read_bytes() == content, str(mounted_path))
     check(
         "worker read correct file content",

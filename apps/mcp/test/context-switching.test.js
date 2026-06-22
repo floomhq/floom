@@ -86,6 +86,7 @@ async function withStubServer(fn, { cloud = false } = {}) {
           id: "ws_created",
           name: parsedBody?.name || "Created",
           created_at: "2026-01-03",
+          ...(cloud ? { api_token: "floom_new_workspace_token" } : {}),
         }));
         return;
       }
@@ -220,6 +221,27 @@ test("workspace create posts to API and persists new active workspace", async ()
         { name: "Customer A" },
       );
     });
+  });
+});
+
+test("cloud workspace create persists replacement workspace-scoped token", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "floom_old_workspace_token",
+        workspace_id: "ws_old",
+        workspace_name: "Old",
+        authed_at: new Date().toISOString(),
+      });
+      const code = await workspacesCreateCommand("Customer A", { json: true });
+      assert.equal(code, 0);
+      const creds = await readCredentials();
+      assert.equal(creds.workspace_id, "ws_created");
+      assert.equal(creds.workspace_name, "Customer A");
+      assert.equal(creds.api_token, "floom_new_workspace_token");
+    }, { cloud: true });
   });
 });
 
