@@ -22,6 +22,7 @@ import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
+import { ToolCallGroup } from "./cards/ToolCallGroup";
 import {
   Message,
   MessageAction,
@@ -43,7 +44,7 @@ import { api } from "@/lib/api";
 import { capturePostHogEvent } from "@/lib/posthog";
 import { reportError, logError } from "@/lib/notify";
 import type { ConversationSummary, SystemOverview } from "@/lib/types";
-import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
+import type { AttachedFile, ChatMessage, MsgPart, ToolCard } from "@/lib/emily-chat-types";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { EmilyHomeEmpty } from "@/components/home/EmilyHomeEmpty";
 
@@ -291,6 +292,58 @@ function MessageCopyAction({ text }: { text: string }) {
   );
 }
 
+// Cards that demand a user decision (approve/reject, connect a service) must
+// stay visible and actionable in the thread — never buried inside a collapsed
+// "N tool calls" summary. Everything else is intermediate tool spam that
+// collapses (#FIX1).
+const INTERACTIVE_CARD_KINDS = new Set<ToolCard["kind"]>(["approval", "connect-service"]);
+
+function cardIsInFlight(card: ToolCard): boolean {
+  return (
+    card.status === "running" ||
+    card.status === "starting" ||
+    card.status === "queued" ||
+    card.status === "drafting" ||
+    card.status === "generating" ||
+    card.status === "smoke" ||
+    card.status === "loading" ||
+    card.status === "pending_approval"
+  );
+}
+
+type RenderUnit =
+  | { kind: "part"; part: MsgPart }
+  | { kind: "tool-group"; cards: ToolCard[] };
+
+// Collapse a message's parts into render units: text parts and interactive cards
+// pass through 1:1, while CONSECUTIVE non-interactive tool-call cards fold into a
+// single grouped unit. A run of exactly one collapsible card is left as a normal
+// card (no pointless "1 tool calls" summary).
+function buildRenderUnits(parts: MsgPart[]): RenderUnit[] {
+  const units: RenderUnit[] = [];
+  let run: ToolCard[] = [];
+  const flush = () => {
+    if (run.length >= 2) {
+      units.push({ kind: "tool-group", cards: run });
+    } else if (run.length === 1) {
+      units.push({ kind: "part", part: { type: "tool-card", card: run[0] } });
+    }
+    run = [];
+  };
+  for (const part of parts) {
+    const collapsible =
+      part.type === "tool-card" && !INTERACTIVE_CARD_KINDS.has(part.card.kind);
+    if (collapsible) {
+      run.push((part as { type: "tool-card"; card: ToolCard }).card);
+      continue;
+    }
+    flush();
+    units.push({ kind: "part", part });
+  }
+  flush();
+  return units;
+}
+
 function MessageRow({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
@@ -328,7 +381,14 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
       <EmilyAvatar size="sm" />
       {/* min-w-0 + overflow-hidden prevent long URLs and code from blowing out the rail */}
       <div className="flex-1 min-w-0 overflow-hidden space-y-2">
-        {msg.parts?.map((part, i) => {
+        {buildRenderUnits(msg.parts ?? []).map((unit, i) => {
+          if (unit.kind === "tool-group") {
+            // Keep the group expanded while any call in it is still in flight so
+            // progress stays visible; collapse once they all settle.
+            const hasInFlight = unit.cards.some(cardIsInFlight);
+            return <ToolCallGroup key={i} cards={unit.cards} defaultOpen={hasInFlight} />;
+          }
+          const part = unit.part;
           if (part.type === "text") {
             return (
               <MessageContent key={i}>
@@ -1022,6 +1082,28 @@ export function EmilyDock({ className }: { className?: string }) {
       setFullscreen(false);
     }
   }, [isHomeRoute, setFullscreen, userCollapsedHome, createMode]);
+
+  // FIX2 — auto-collapse fullscreen Emily on NAVIGATION. When Emily is in
+  // fullscreen on a non-home route (e.g. the user manually maximized it on
+  // /workers) and then clicks a link to ANOTHER route, the fullscreen would
+  // otherwise stay latched over the destination page (AppShell hides <main>),
+  // hiding wherever they navigated to. Detect the actual pathname CHANGE (not a
+  // re-render) and, when the new route is a real non-home destination, dock
+  // Emily back to the rail so the destination is visible. Home→* and *→home are
+  // already handled by the effect above; this only fills the non-home→non-home
+  // gap. Navigating WITHIN the chat/home surface never collapses.
+  const prevPathForCollapseRef = useRef<string | null>(pathname);
+  useEffect(() => {
+    const prev = prevPathForCollapseRef.current;
+    prevPathForCollapseRef.current = pathname;
+    if (prev === null || prev === pathname) return; // no real navigation
+    // The home effect already collapses on any transition leaving home, and we
+    // never collapse when landing back on home/overview (the home owns its own
+    // fullscreen). Only act on navigation BETWEEN non-home routes.
+    const wasHome = prev === "/" || prev === "/overview";
+    if (wasHome || isHomeRoute) return;
+    setFullscreen(false);
+  }, [pathname, isHomeRoute, setFullscreen]);
 
   // Collapse the home fullscreen Emily into the right rail (shows the Workers
   // list in the main pane). Maximize returns to fullscreen Emily.
