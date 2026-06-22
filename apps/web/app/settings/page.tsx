@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { api, API_BASE } from "@/lib/api";
@@ -212,20 +212,22 @@ function PersonalAccessTokensPanel() {
   }
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground">Your tokens</h2>
-      <p className="text-sm text-muted-foreground">
-        Tokens tied to your account (prefix <code className="font-mono text-xs">fl_pat_</code>).
-        They authenticate as you and work in every workspace you belong to. No one
-        else can see or use them. Token values are shown once; store them securely.
-      </p>
-
+    <SettingsSection
+      title="Your tokens"
+      description={
+        <>
+          Tokens tied to your account (prefix <code className="font-mono text-xs">fl_pat_</code>).
+          They authenticate as you and work in every workspace you belong to. No one
+          else can see or use them. Token values are shown once; store them securely.
+        </>
+      }
+    >
       {createdToken && (
         <Alert>
           <CheckCircle2 className="size-4" />
           <AlertTitle>Token created</AlertTitle>
           <AlertDescription>
-            <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+            <div className="c-set-code mt-2 flex items-center gap-2 px-3 py-2 font-mono text-xs">
               <span className="flex-1 break-all">{createdToken}</span>
               <button
                 type="button"
@@ -242,24 +244,27 @@ function PersonalAccessTokensPanel() {
         </Alert>
       )}
 
-      <form onSubmit={handleCreate} className="flex gap-2">
-        <Input
-          placeholder="Token name (e.g. ci-pipeline)"
-          value={newTokenName}
-          onChange={(e) => setNewTokenName(e.target.value)}
-          className="max-w-xs"
-        />
-        <Button type="submit" size="sm" disabled={!newTokenName.trim() || creating}>
-          {creating ? "Creating…" : "Create token"}
-        </Button>
-      </form>
+      <SettingsRow title="Create token" description="Name the token so it is recognizable later.">
+        <form onSubmit={handleCreate} className="flex flex-wrap justify-end gap-2">
+          <Input
+            placeholder="Token name (e.g. ci-pipeline)"
+            value={newTokenName}
+            onChange={(e) => setNewTokenName(e.target.value)}
+            className="c-set-inp w-64 max-w-full"
+          />
+          <Button type="submit" size="sm" disabled={!newTokenName.trim() || creating}>
+            {creating ? "Creating…" : "Create token"}
+          </Button>
+        </form>
+      </SettingsRow>
 
       {tokens.length > 0 ? (
-        <div className="space-y-1">
+        <div>
           {tokens.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 rounded-lg [border:var(--bd-card)] px-3 py-2 text-sm">
-              <div className="flex-1 min-w-0">
-                <div className="font-medium">{t.name}</div>
+            <SettingsRow
+              key={t.id}
+              title={t.name}
+              description={
                 <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                   <span>Created {new Date(t.created_at).toLocaleDateString()}</span>
                   {t.last_used_at ? (
@@ -271,7 +276,8 @@ function PersonalAccessTokensPanel() {
                     <span>· Expires {new Date(t.expires_at).toLocaleDateString()}</span>
                   )}
                 </div>
-              </div>
+              }
+            >
               <button
                 type="button"
                 onClick={() => void handleRevoke(t.id, t.name)}
@@ -280,13 +286,13 @@ function PersonalAccessTokensPanel() {
               >
                 <Trash2 className="size-3.5" />
               </button>
-            </div>
+            </SettingsRow>
           ))}
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No tokens yet.</p>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -360,8 +366,7 @@ export function WorkspaceTokensPanel() {
   }
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground">Shared token</h2>
+    <SettingsSection title="Shared token">
       {forbidden ? (
         <p className="text-sm text-muted-foreground">
           Only workspace admins can manage the workspace token.
@@ -383,7 +388,7 @@ export function WorkspaceTokensPanel() {
               <CheckCircle2 className="size-4" />
               <AlertTitle>Workspace access key created</AlertTitle>
               <AlertDescription>
-                <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                <div className="c-set-code mt-2 flex items-center gap-2 px-3 py-2 font-mono text-xs">
                   <span className="flex-1 break-all">{createdToken}</span>
                   <button
                     type="button"
@@ -401,39 +406,38 @@ export function WorkspaceTokensPanel() {
             </Alert>
           )}
 
-          <form onSubmit={handleCreate} className="flex gap-2">
-            <Input
-              placeholder="Token name (e.g. shared-runner)"
-              value={newTokenName}
-              onChange={(e) => setNewTokenName(e.target.value)}
-              className="max-w-xs"
-            />
-            <Button type="submit" size="sm" disabled={!newTokenName.trim() || creating}>
-              {creating ? "Creating…" : "Create token"}
-            </Button>
-          </form>
+          <SettingsRow title="Create token" description="Name the shared workspace token before creating it.">
+            <form onSubmit={handleCreate} className="flex flex-wrap justify-end gap-2">
+              <Input
+                placeholder="Token name (e.g. shared-runner)"
+                value={newTokenName}
+                onChange={(e) => setNewTokenName(e.target.value)}
+                className="c-set-inp w-64 max-w-full"
+              />
+              <Button type="submit" size="sm" disabled={!newTokenName.trim() || creating}>
+                {creating ? "Creating…" : "Create token"}
+              </Button>
+            </form>
+          </SettingsRow>
 
           {tokens.length > 0 ? (
-            <div className="space-y-1">
+            <div>
               {tokens.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-sm">
-
-                  <div className="flex-1 min-w-0">
-                    <span className="font-medium">{t.name}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      created {new Date(t.created_at).toLocaleDateString()}
-                    </span>
-                    {t.last_used_at && (
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        last used {new Date(t.last_used_at).toLocaleDateString()}
-                      </span>
-                    )}
-                    {t.expires_at && (
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        expires {new Date(t.expires_at).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
+                <SettingsRow
+                  key={t.id}
+                  title={t.name}
+                  description={
+                    <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                      <span>created {new Date(t.created_at).toLocaleDateString()}</span>
+                      {t.last_used_at && (
+                        <span>last used {new Date(t.last_used_at).toLocaleDateString()}</span>
+                      )}
+                      {t.expires_at && (
+                        <span>expires {new Date(t.expires_at).toLocaleDateString()}</span>
+                      )}
+                    </div>
+                  }
+                >
                   {t.revoked_at ? (
                     <span className="text-xs text-muted-foreground">revoked</span>
                   ) : (
@@ -446,7 +450,7 @@ export function WorkspaceTokensPanel() {
                       <Trash2 className="size-3.5" />
                     </button>
                   )}
-                </div>
+                </SettingsRow>
               ))}
             </div>
           ) : (
@@ -454,7 +458,7 @@ export function WorkspaceTokensPanel() {
           )}
         </>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -806,20 +810,22 @@ function SettingsContent() {
                 key: t.key,
                 label: t.label,
                 render: () => (
-                  <SystemSubTab
-                    tab={t.key}
-                    info={info}
-                    platformConfig={platformConfig}
-                    canEdit={isAdmin}
-                    onCopySecretName={copySecretName}
-                  />
+                  <div data-settings-body>
+                    <SystemSubTab
+                      tab={t.key}
+                      info={info}
+                      platformConfig={platformConfig}
+                      canEdit={isAdmin}
+                      onCopySecretName={copySecretName}
+                    />
+                  </div>
                 ),
               }))
             : [
                 {
                   key: "settings",
                   label: item.label,
-                  render: () => renderSection(item.key),
+                  render: () => <div data-settings-body>{renderSection(item.key)}</div>,
                 },
               ],
       }),
@@ -1004,6 +1010,56 @@ function SettingsIcon({ icon: Icon }: { icon: SettingsIconType }) {
   );
 }
 
+function SettingsSection({
+  title,
+  description,
+  children,
+  className,
+  titleClassName,
+}: {
+  title?: ReactNode;
+  description?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  titleClassName?: string;
+}) {
+  return (
+    <section className={cn("c-set-sec", className)}>
+      {title || description ? (
+        <div>
+          {title ? <h2 className={cn("c-set-sech", titleClassName)}>{title}</h2> : null}
+          {description ? <p className="c-set-secd">{description}</p> : null}
+        </div>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+function SettingsRow({
+  title,
+  description,
+  children,
+  className,
+  titleClassName,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  children?: ReactNode;
+  className?: string;
+  titleClassName?: string;
+}) {
+  return (
+    <div className={cn("c-set-row", className)}>
+      <div className="c-set-row-main">
+        <div className={cn("c-set-row-title", titleClassName)}>{title}</div>
+        {description ? <div className="c-set-rowd">{description}</div> : null}
+      </div>
+      {children ? <div className="c-set-ctrl">{children}</div> : null}
+    </div>
+  );
+}
+
 // The General (system) section is the longest in Settings — five distinct
 // sub-areas (system info, workspace info, behaviour, model defaults, platform
 // config). Rather than one long scroll, it is presented as a sub-tab bar
@@ -1047,9 +1103,9 @@ function SystemSubTab({
   switch (tab) {
     case "info":
       return (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {!canEdit ? <ReadOnlyNotice /> : null}
-          <div className="space-y-2 text-sm">
+          <SettingsSection title="System info" description="Runtime details for this Floom instance.">
             {info ? (
               <>
                 <SystemInfoRow label="Version" value={info.version} mono />
@@ -1067,7 +1123,7 @@ function SystemSubTab({
                 ))}
               </div>
             )}
-          </div>
+          </SettingsSection>
         </div>
       );
     case "workspace":
@@ -1098,12 +1154,16 @@ function SystemSubTab({
             <Skeleton className="h-12 w-full" />
           ) : (
             <>
-              <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-muted p-3">
-                <span className="text-sm">Configured</span>
-                <span className="text-sm font-medium">
-                  {platformConfig.set_count}/{platformConfig.required_count}
-                </span>
-              </div>
+              <SettingsSection title="Platform secrets" description="Required secrets available to workspace workers.">
+                <SettingsRow
+                  title="Configured"
+                  description="Required platform configuration present on this instance."
+                >
+                  <span className="text-sm font-medium">
+                    {platformConfig.set_count}/{platformConfig.required_count}
+                  </span>
+                </SettingsRow>
+              </SettingsSection>
               {platformConfig.all_required_set ? (
                 <Alert>
                   <CheckCircle2 className="size-4" />
@@ -1150,10 +1210,9 @@ function SystemInfoRow({
   mono?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 items-start justify-between gap-4 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
-      <span className="text-muted-foreground">{label}</span>
+    <SettingsRow title={label}>
       <span className={`min-w-0 break-all text-right font-medium ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
-    </div>
+    </SettingsRow>
   );
 }
 
@@ -1185,21 +1244,19 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
     }
   }
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-medium">{title}</h2>
-          <p className="text-xs text-muted-foreground">{description}</p>
+    <SettingsSection title={title} description={description}>
+      <div className="c-set-row">
+        <div className="c-set-row-main">
+          <pre className="c-set-code p-3 font-mono text-xs" style={{ WebkitOverflowScrolling: "touch" }}>
+            {value}
+          </pre>
         </div>
         <Button type="button" variant="outline" onClick={() => void copy()}>
           <Copy className="size-3.5" />
           Copy
         </Button>
       </div>
-      <pre className="overflow-x-auto overflow-y-hidden rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]" style={{ WebkitOverflowScrolling: "touch" }}>
-        {value}
-      </pre>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -1263,22 +1320,23 @@ function ConnectSection() {
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
       <TabsContent value="api" className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="text-sm font-medium">REST API</h2>
-          <p className="text-xs text-muted-foreground">
+        <SettingsSection
+          title="REST API"
+          description={
+            <>
             Call your workspace over HTTP. Authenticate every request with a token
             in the <code className="font-mono">x-floom-secret</code> header: a{" "}
             <span className="font-medium text-foreground">personal access token</span>{" "}
             (Account scope) or the{" "}
             <span className="font-medium text-foreground">workspace access key</span>{" "}
             (Workspace scope, admin only).
-          </p>
-        </div>
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">Base URL</p>
-            <code className="break-all font-mono text-xs text-foreground">{API_BASE}</code>
-          </div>
+            </>
+          }
+        >
+        <SettingsRow
+          title="Base URL"
+          description={<code className="break-all font-mono text-xs text-foreground">{API_BASE}</code>}
+        >
           <Button
             type="button"
             variant="outline"
@@ -1294,7 +1352,8 @@ function ConnectSection() {
             <Copy className="size-3.5" />
             Copy
           </Button>
-        </div>
+        </SettingsRow>
+        </SettingsSection>
         <CopyCodeCard
           title="Call the API"
           description="Replace <your-token> with a personal access token from Account · Personal access tokens."
@@ -1344,13 +1403,11 @@ function ConnectSection() {
 
 function AppearanceSection() {
   return (
-    <div className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
-      <p className="text-sm text-muted-foreground">
-        Choose how Floom looks. System follows your operating system.
-      </p>
-      <ThemeModeToggleGroup />
-    </div>
+    <SettingsSection title="Theme" description="Choose how Floom looks. System follows your operating system.">
+      <SettingsRow title="Mode" description="Light, dark, or follow system.">
+        <ThemeModeToggleGroup />
+      </SettingsRow>
+    </SettingsSection>
   );
 }
 
@@ -1395,34 +1452,27 @@ function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser |
 
   return (
     <div className="space-y-6">
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
-        <div className="flex items-center gap-4">
+      <SettingsSection title="Profile">
+        <SettingsRow title={displayName || email} description={email}>
           <Avatar role="user" name={displayName || email || "User"} src={photoUrl} size={56} />
-          <div className="min-w-0">
-            <p className="font-medium">{displayName || email}</p>
-            <p className="text-sm text-muted-foreground">{email}</p>
-          </div>
-        </div>
-      </section>
+        </SettingsRow>
+      </SettingsSection>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Display name</h2>
-        <form onSubmit={(e) => void handleSave(e)} className="flex gap-2">
+      <SettingsSection title="Display name">
+        <SettingsRow title="Name" description="Your display name is shown in the sidebar and in activity logs.">
+        <form onSubmit={(e) => void handleSave(e)} className="flex flex-wrap justify-end gap-2">
           <Input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="Your name"
-            className="max-w-xs"
+            className="c-set-inp w-64 max-w-full"
           />
           <Button type="submit" size="sm" disabled={saving || !displayName.trim()}>
             {saving ? "Saving…" : "Save"}
           </Button>
         </form>
-        <p className="text-xs text-muted-foreground">
-          Your display name is shown in the sidebar and in activity logs.
-        </p>
-      </section>
+        </SettingsRow>
+      </SettingsSection>
     </div>
   );
 }
@@ -1444,35 +1494,40 @@ function DangerSection({
     return <ReadOnlyNotice message="Danger actions are hidden because this account cannot perform workspace-destructive operations." />;
   }
   return (
-    <div className="space-y-4">
-      <section className="space-y-4">
-        <div>
-          <p className="text-sm font-medium text-destructive">Clear run history</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+    <SettingsSection title="Danger zone">
+      <SettingsRow
+        title="Clear run history"
+        titleClassName="text-destructive"
+        description={
+          <>
             Deletes all runs, logs, artifacts, and approvals. Cannot be undone.
-          </p>
+            {" "}Type <code className="text-foreground">DELETE ALL RUNS</code> to confirm.
+          </>
+        }
+      >
+        <div className="flex flex-wrap justify-end gap-2">
+          <Label htmlFor="clear-runs-confirm" className="sr-only">
+            Type DELETE ALL RUNS to confirm.
+          </Label>
+          <Input
+            id="clear-runs-confirm"
+            value={clearConfirmText}
+            onChange={(e) => setClearConfirmText(e.target.value)}
+            placeholder="DELETE ALL RUNS"
+            className="c-set-inp w-64 max-w-full"
+          />
+          <Button
+            variant="destructive"
+            size="sm"
+            className="shrink-0"
+            onClick={() => void onClearRuns()}
+            disabled={clearing || clearConfirmText.trim() !== "DELETE ALL RUNS"}
+          >
+            {clearing ? "Clearing..." : "Delete all runs"}
+          </Button>
         </div>
-        <Label htmlFor="clear-runs-confirm" className="text-xs text-muted-foreground">
-          Type <code className="text-foreground">DELETE ALL RUNS</code> to confirm.
-        </Label>
-        <Input
-          id="clear-runs-confirm"
-          value={clearConfirmText}
-          onChange={(e) => setClearConfirmText(e.target.value)}
-          placeholder="DELETE ALL RUNS"
-          className="max-w-sm"
-        />
-        <Button
-          variant="destructive"
-          size="sm"
-          className="shrink-0"
-          onClick={() => void onClearRuns()}
-          disabled={clearing || clearConfirmText.trim() !== "DELETE ALL RUNS"}
-        >
-          {clearing ? "Clearing..." : "Delete all runs"}
-        </Button>
-      </section>
-    </div>
+      </SettingsRow>
+    </SettingsSection>
   );
 }
 
@@ -1499,18 +1554,14 @@ function ToggleRow({
   onCheckedChange?: (value: boolean) => void;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-      </div>
+    <SettingsRow title={title} description={description}>
       <Switch disabled={disabled} checked={checked} onCheckedChange={onCheckedChange} />
       {disabled ? (
         <Badge variant="outline" className="text-xs">
           View only
         </Badge>
       ) : null}
-    </div>
+    </SettingsRow>
   );
 }
 
@@ -1599,9 +1650,9 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
 
   if (values === null) return <Skeleton className="h-24 w-full" />;
   return (
-    <div className="space-y-4">
+    <SettingsSection title="Behaviour" description="Workspace defaults for approvals and run notifications.">
       {BEHAVIOUR_TOGGLES.map((t) => (
-        <div key={t.key} className="space-y-3">
+        <div key={t.key}>
           <ToggleRow
             title={t.title}
             description={t.description}
@@ -1610,27 +1661,24 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
             onCheckedChange={(v) => toggle(t.key, v)}
           />
           {t.key === "failure_email_enabled" && (
-            <div className="space-y-1.5 pl-1">
-              <Label htmlFor="failure-email-to" className="text-sm">
-                Send failure emails to
-              </Label>
+            <SettingsRow
+              title={<Label htmlFor="failure-email-to">Failure email recipients</Label>}
+              description="Required to enable failure emails. Comma-separate multiple recipients."
+            >
               <Input
                 id="failure-email-to"
                 type="text"
                 defaultValue={values.failure_email_to ?? ""}
                 placeholder="ops@acme.com, oncall@acme.com"
-                className="max-w-xs"
+                className="c-set-inp w-72 max-w-full"
                 disabled={!canEdit}
                 onBlur={(e) => saveRecipient(e.target.value)}
               />
-              <p className="text-xs text-muted-foreground">
-                Required to enable failure emails. Comma-separate multiple recipients.
-              </p>
-            </div>
+            </SettingsRow>
           )}
         </div>
       ))}
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -1683,18 +1731,17 @@ export function WorkspaceInfoSettings({ canEdit = true }: { canEdit?: boolean })
 
   if (values === null) return <Skeleton className="h-28 w-full" />;
   return (
-    <div className="space-y-4">
-      {canEdit && (
-        <p className="text-xs text-muted-foreground">Changes save automatically when you leave a field.</p>
-      )}
+    <SettingsSection
+      title="Workspace"
+      description={canEdit ? "Changes save automatically when you leave a field." : undefined}
+    >
       {WORKSPACE_INFO_FIELDS.map((f) => (
-        <div key={f.key} className="space-y-1.5">
-          <Label htmlFor={`ws-${f.key}`} className="text-sm">{f.label}</Label>
+        <SettingsRow key={f.key} title={<Label htmlFor={`ws-${f.key}`}>{f.label}</Label>} description={f.hint}>
           <Input
             id={`ws-${f.key}`}
             defaultValue={values[f.key] ?? ""}
             placeholder={f.placeholder}
-            className="max-w-xs"
+            className="c-set-inp w-64 max-w-full"
             disabled={!canEdit}
             onBlur={(e) => {
               if (!canEdit) return;
@@ -1705,10 +1752,9 @@ export function WorkspaceInfoSettings({ canEdit = true }: { canEdit?: boolean })
               }
             }}
           />
-          <p className="text-xs text-muted-foreground">{f.hint}</p>
-        </div>
+        </SettingsRow>
       ))}
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -1728,27 +1774,20 @@ export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
 
   if (values === null) return <Skeleton className="h-28 w-full" />;
   return (
-    <div className="space-y-4">
+    <SettingsSection title="Models" description="Workspace defaults used by newly created workers.">
       {MODEL_DEFAULT_FIELDS.map((f) => (
         f.key === "default_model" ? (
-          <div key={f.key} className="c-ltable">
-            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-              <div className="c-lp-tx">
-                <div className="nm">{f.label}</div>
-                <div className="sub">{f.hint}</div>
-              </div>
-              <span className="c-vpill">{modelLabel(values[f.key])}</span>
-            </div>
-          </div>
+          <SettingsRow key={f.key} title={f.label} description={f.hint}>
+            <span className="c-vpill">{modelLabel(values[f.key])}</span>
+          </SettingsRow>
         ) : (
-        <div key={f.key} className="space-y-1.5">
-          <Label htmlFor={`md-${f.key}`} className="text-sm">{f.label}</Label>
+        <SettingsRow key={f.key} title={<Label htmlFor={`md-${f.key}`}>{f.label}</Label>} description={f.hint}>
           <Input
             id={`md-${f.key}`}
             type={f.type}
             defaultValue={values[f.key] ?? ""}
             placeholder={f.placeholder}
-            className="max-w-xs"
+            className="c-set-inp w-64 max-w-full"
             disabled={!canEdit}
             onBlur={(e) => {
               if (!canEdit) return;
@@ -1759,11 +1798,10 @@ export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
               }
             }}
           />
-          <p className="text-xs text-muted-foreground">{f.hint}</p>
-        </div>
+        </SettingsRow>
         )
       ))}
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -1839,7 +1877,7 @@ function SettingsHistoryMenu({
             <DialogTitle>Restore this version?</DialogTitle>
           </DialogHeader>
           {pendingRestore && (
-            <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5 text-sm space-y-1">
+            <div className="c-set-code px-3 py-2.5 text-sm space-y-1">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs text-[var(--ink-soft)]">{pendingRestore.sha}</span>
                 {pendingRestore.author && (
@@ -1907,28 +1945,24 @@ function AssistantNameSection({ canEdit }: { canEdit: boolean }) {
   }
 
   return (
-    <section className="space-y-3">
-      <div>
-        <h3 className="text-sm font-medium">Name</h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          What your assistant is called across the app, channels, and approvals.
-        </p>
-      </div>
-      <form onSubmit={(e) => void save(e)} className="flex gap-2">
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={DEFAULT_ASSISTANT_NAME}
-          maxLength={32}
-          disabled={!canEdit}
-          className="max-w-xs"
-          aria-label="Assistant name"
-        />
-        <Button type="submit" size="sm" disabled={!canEdit || !dirty || saving}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-      </form>
-    </section>
+    <SettingsSection title="Assistant name">
+      <SettingsRow title="Name" description="What your assistant is called across the app, channels, and approvals.">
+        <form onSubmit={(e) => void save(e)} className="flex flex-wrap justify-end gap-2">
+          <Input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={DEFAULT_ASSISTANT_NAME}
+            maxLength={32}
+            disabled={!canEdit}
+            className="c-set-inp w-64 max-w-full"
+            aria-label="Assistant name"
+          />
+          <Button type="submit" size="sm" disabled={!canEdit || !dirty || saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </form>
+      </SettingsRow>
+    </SettingsSection>
   );
 }
 
@@ -2046,15 +2080,17 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
   return (
     <div className="space-y-6">
       {!canEdit ? <ReadOnlyNotice message="Assistant editing controls are hidden because this account cannot edit workspace assistant settings." /> : null}
-      <div className="flex flex-wrap items-center gap-3">
-        <EmilyAvatar size="md" />
-        <div className="min-w-0">
-          <h2 className="text-sm font-medium">{assistantName}</h2>
-          <p className="text-xs text-muted-foreground">Name, persona, workspace notes, and compiled prompt.</p>
-        </div>
-        {agent?.model ? <Badge variant="outline" className="text-xs">{modelLabel(agent.model)}</Badge> : null}
-        {agent ? (
-          <span className="ml-auto">
+      <SettingsSection title="Assistant" description="Name, persona, workspace notes, and compiled prompt.">
+        <SettingsRow
+          title={
+            <span className="inline-flex items-center gap-3">
+              <EmilyAvatar size="md" />
+              <span>{assistantName}</span>
+            </span>
+          }
+          description={agent?.model ? modelLabel(agent.model) : undefined}
+        >
+          {agent ? (
             <AssetVisibilityControl
               visibility={agent.visibility}
               canShare={canEdit && (agent.permissions?.can_share ?? true)}
@@ -2066,9 +2102,9 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
                 return updated.visibility;
               }}
             />
-          </span>
-        ) : null}
-      </div>
+          ) : null}
+        </SettingsRow>
+      </SettingsSection>
 
       <AssistantNameSection canEdit={canEdit} />
 
@@ -2081,15 +2117,12 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
         <TabsContent value="base" className="space-y-3">
           {loading ? <Skeleton className="h-80 w-full" /> : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium">{assistantName} persona</h3>
-                    <Badge variant="outline" className="text-xs">{baseIsCustom ? "Custom" : "Built-in default"}</Badge>
-                  </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{assistantName}&apos;s core identity and style.</p>
-                </div>
-                <div className="flex items-center gap-2">
+              <SettingsSection title={`${assistantName} persona`} description={`${assistantName}'s core identity and style.`}>
+                <SettingsRow
+                  title="Persona source"
+                  description={baseIsCustom ? "Custom workspace persona." : "Built-in default persona."}
+                >
+                  <Badge variant="outline" className="text-xs">{baseIsCustom ? "Custom" : "Built-in default"}</Badge>
                   <SettingsHistoryMenu
                     refreshKey={baseVersionsKey}
                     loadVersions={() => api.system.listWorkspaceBaseVersions()}
@@ -2126,13 +2159,13 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
                       <Button size="sm" variant="outline" onClick={() => setEditingBase(true)}>Edit</Button>
                     </>
                   ) : null}
-                </div>
-              </div>
+                </SettingsRow>
+              </SettingsSection>
               <Textarea
                 value={base}
                 onChange={(event) => { if (editingBase) setBase(event.target.value); }}
                 readOnly={!editingBase}
-                className="min-h-[22rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
+                className="c-set-inp min-h-[22rem] font-mono text-xs leading-relaxed read-only:bg-[var(--bg-2)]"
                 spellCheck={false}
               />
             </>
@@ -2141,12 +2174,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
         <TabsContent value="instructions" className="space-y-3">
           {loading ? <Skeleton className="h-80 w-full" /> : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-medium">Workspace notes</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Workspace-specific context and preferences.</p>
-                </div>
-                <div className="flex items-center gap-2">
+              <SettingsSection title="Workspace notes" description="Workspace-specific context and preferences.">
+                <SettingsRow title="Notes" description={dirty ? "Unsaved changes." : "Current workspace notes."}>
                   <SettingsHistoryMenu
                     refreshKey={versionsKey}
                     loadVersions={() => api.system.listWorkspaceVersions()}
@@ -2174,13 +2203,13 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
                   ) : canEdit ? (
                     <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>Edit</Button>
                   ) : null}
-                </div>
-              </div>
+                </SettingsRow>
+              </SettingsSection>
               <Textarea
                 value={instructions}
                 onChange={(event) => { if (editingInstructions) setInstructions(event.target.value); }}
                 readOnly={!editingInstructions}
-                className="min-h-[22rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
+                className="c-set-inp min-h-[22rem] font-mono text-xs leading-relaxed read-only:bg-[var(--bg-2)]"
                 spellCheck={false}
               />
             </>
@@ -2189,14 +2218,12 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
         <TabsContent value="prompt" className="space-y-3">
           {loading || !agent ? <Skeleton className="h-96 w-full" /> : (
             <>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-medium">Compiled prompt</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Read-only preview of Emily&apos;s full system prompt.</p>
-                </div>
-                <Badge variant="outline" className="text-xs">Read-only</Badge>
-              </div>
-              <pre className="max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+              <SettingsSection title="Compiled prompt" description="Read-only preview of Emily's full system prompt.">
+                <SettingsRow title="Prompt" description="Generated from the assistant persona and workspace notes.">
+                  <Badge variant="outline" className="text-xs">Read-only</Badge>
+                </SettingsRow>
+              </SettingsSection>
+              <pre className="c-set-code max-h-[36rem] overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed">
                 {agent.system_prompt}
               </pre>
             </>
@@ -2367,41 +2394,42 @@ function MembersSettingsPanel() {
       {!canManage ? <ReadOnlyNotice message="Member management controls are hidden because this account is not Owner or Admin." /> : null}
 
       {canManage ? (
-        <form onSubmit={handleInvite} className="flex flex-col gap-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] p-4 sm:flex-row sm:items-center">
-          <div className="flex flex-1 items-center gap-2">
-            <UserPlus className="size-4 shrink-0 text-[var(--ink-mute)]" />
-            <Input
-              type="email"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              placeholder="teammate@company.com"
-              className="flex-1"
-              aria-label="Invite member by email"
-              maxLength={254}
-            />
-          </div>
-          <div className="inline-flex rounded-[var(--radius-button)] bg-[var(--bg-card)] p-0.5">
-            {(["member", "admin"] as const).map((role) => (
-              <button
-                key={role}
-                type="button"
-                className={cn(
-                  "h-8 px-3 text-sm",
-                  inviteRole === role ? "rounded-[var(--radius-button)] bg-[var(--bg-2)] text-foreground" : "text-muted-foreground",
-                )}
-                onClick={() => setInviteRole(role)}
-              >
-                {ROLE_LABEL[role]}
-              </button>
-            ))}
-          </div>
-          <Button type="submit" disabled={!inviteEmail.trim() || inviting}>
-            {inviting ? "Inviting..." : "Invite"}
-          </Button>
-        </form>
+        <SettingsSection title="Invite member">
+          <SettingsRow title="Email" description="Invite a teammate and choose their starting role.">
+            <form onSubmit={handleInvite} className="flex flex-wrap justify-end gap-2">
+              <div className="flex min-w-64 flex-1 items-center gap-2">
+                <UserPlus className="size-4 shrink-0 text-[var(--ink-mute)]" />
+                <Input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="teammate@company.com"
+                  className="c-set-inp flex-1"
+                  aria-label="Invite member by email"
+                  maxLength={254}
+                />
+              </div>
+              <div className="c-set-seg">
+                {(["member", "admin"] as const).map((role) => (
+                  <button
+                    key={role}
+                    type="button"
+                    className={cn(inviteRole === role && "on")}
+                    onClick={() => setInviteRole(role)}
+                  >
+                    {ROLE_LABEL[role]}
+                  </button>
+                ))}
+              </div>
+              <Button type="submit" disabled={!inviteEmail.trim() || inviting}>
+                {inviting ? "Inviting..." : "Invite"}
+              </Button>
+            </form>
+          </SettingsRow>
+        </SettingsSection>
       ) : null}
 
-      <div className="space-y-1">
+      <SettingsSection title="Team">
         {sortedMembers.map((m) => {
           const isMe = m.user_id === data?.my_user_id;
           const isBusy = busyUser === m.user_id;
@@ -2413,19 +2441,25 @@ function MembersSettingsPanel() {
             !(effectiveMyRole === "admin" && m.role === "admin");
           const canTransfer = isOwner && m.role !== "owner" && m.status === "active";
           return (
-            <div key={m.user_id} className="flex flex-wrap items-center gap-3 [border-bottom:var(--bd-div)] py-3 last:[border-bottom:0]">
-              <div className="grid size-9 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[11px] font-medium text-foreground">
-                {memberInitial(m, currentUser, isMe)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-foreground">{memberLabel(m, currentUser, isMe)}</span>
-                  {isMe ? <span className="text-[11px] text-[var(--ink-mute)]">You</span> : null}
-                </div>
-                {m.email && m.email !== memberLabel(m, currentUser, isMe) ? (
-                  <p className="truncate text-xs text-[var(--ink-mute)]">{m.email}</p>
-                ) : null}
-              </div>
+            <SettingsRow
+              key={m.user_id}
+              title={
+                <span className="inline-flex min-w-0 items-center gap-3">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[11px] font-medium text-foreground">
+                    {memberInitial(m, currentUser, isMe)}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate">{memberLabel(m, currentUser, isMe)}</span>
+                      {isMe ? <span className="text-[11px] font-normal text-[var(--ink-mute)]">You</span> : null}
+                    </span>
+                    {m.email && m.email !== memberLabel(m, currentUser, isMe) ? (
+                      <span className="block truncate text-xs font-normal text-[var(--ink-mute)]">{m.email}</span>
+                    ) : null}
+                  </span>
+                </span>
+              }
+            >
               {m.status === "invited" ? (
                 <span className="rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-[11px] text-[var(--ink-mute)]">
                   Invited
@@ -2452,13 +2486,13 @@ function MembersSettingsPanel() {
                   Remove
                 </Button>
               ) : null}
-            </div>
+            </SettingsRow>
           );
         })}
         {sortedMembers.length === 0 ? (
           <div className="py-8 text-center text-sm text-[var(--ink-mute)]">No members yet.</div>
         ) : null}
-      </div>
+      </SettingsSection>
 
       <Dialog open={!!pendingAction} onOpenChange={(open) => { if (!open) setPendingAction(null); }}>
         <DialogContent showCloseButton={false} className="sm:max-w-sm">
@@ -2559,28 +2593,29 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
       ) : null}
 
       {canManageWorkspace ? (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border [border-color:var(--bd-div)] px-4 py-3.5">
-          <div className="min-w-0">
-            <h2 className="text-sm font-medium">Download a copy</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Downloads your workers and knowledge as a zip. Secrets and connections are not included; you&apos;ll reconnect those after restoring.
-            </p>
-          </div>
-          <Button variant="outline" onClick={() => void handleDownload()} disabled={exporting}>
-            <Download className="size-4" />
-            {exporting ? "Preparing…" : "Download workspace"}
-          </Button>
-        </section>
+        <SettingsSection title="Download">
+          <SettingsRow
+            title="Download a copy"
+            description="Downloads your workers and knowledge as a zip. Secrets and connections are not included; you'll reconnect those after restoring."
+          >
+            <Button variant="outline" onClick={() => void handleDownload()} disabled={exporting}>
+              <Download className="size-4" />
+              {exporting ? "Preparing…" : "Download workspace"}
+            </Button>
+          </SettingsRow>
+        </SettingsSection>
       ) : null}
 
-      <section className="space-y-1">
-        <h2 className="text-sm font-medium">{canManageWorkspace ? "Undo a change" : "Change history"}</h2>
-        <p className="text-xs text-muted-foreground">
-          {canManageWorkspace
+      <SettingsSection
+        title={canManageWorkspace ? "Undo a change" : "Change history"}
+        description={
+          canManageWorkspace
             ? "Every time you save your workspace notes or base persona, a restore point is created. Undo brings that item back to how it was."
-            : "A restore point is created every time the workspace notes or base persona are saved."}
-        </p>
-      </section>
+            : "A restore point is created every time the workspace notes or base persona are saved."
+        }
+      >
+        <div />
+      </SettingsSection>
 
       <VersionList
         title="Workspace notes"
@@ -2603,7 +2638,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
             <DialogTitle>Undo to this restore point?</DialogTitle>
           </DialogHeader>
           {pendingUndo && (
-            <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5 text-sm space-y-1">
+            <div className="c-set-code px-3 py-2.5 text-sm space-y-1">
               {pendingUndo.version.message && (
                 <p className="font-medium">{pendingUndo.version.message}</p>
               )}
@@ -2640,22 +2675,23 @@ function VersionList({
   canUndo: boolean;
 }) {
   return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+    <SettingsSection title={title}>
       {versions === null ? (
         <Skeleton className="h-24 w-full" />
       ) : versions.length === 0 ? (
         <p className="text-sm text-muted-foreground">No changes yet.</p>
       ) : (
-        <div className="space-y-1">
+        <div>
           {versions.map((v, index) => (
-            <div key={`${v.asset_type}-${v.id}-${index}`} className="flex items-center justify-between gap-3 [border-bottom:var(--bd-div)] py-2 text-sm last:[border-bottom:0]">
-              <div className="min-w-0">
-                <p className="truncate font-medium">{v.message}</p>
-                <p className="text-xs text-muted-foreground" title={v.sha}>
+            <SettingsRow
+              key={`${v.asset_type}-${v.id}-${index}`}
+              title={v.message}
+              description={
+                <span title={v.sha}>
                   {v.author ? `${v.author} · ` : ""}{new Date(v.timestamp).toLocaleString()}
-                </p>
-              </div>
+                </span>
+              }
+            >
               {index === 0 ? (
                 <Badge variant="outline">Current</Badge>
               ) : canUndo ? (
@@ -2670,11 +2706,11 @@ function VersionList({
                   Undo to here
                 </Button>
               ) : null}
-            </div>
+            </SettingsRow>
           ))}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -2792,22 +2828,21 @@ function SlackBindingStatus() {
   if (!binding) return null;
   if (!binding.linked) {
     return (
-      <p className="text-xs text-muted-foreground">
-        DM Emily in Slack to link your identity.
-      </p>
+      <SettingsRow title="Slack identity" description="DM Emily in Slack to link your identity." />
     );
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-foreground truncate">
+    <SettingsRow
+      title={
+        <span className="truncate">
           {binding.profile_name
             ? `${binding.profile_name} (${binding.slack_user_id})`
             : binding.slack_user_id}
-        </p>
-        <p className="text-[11px] text-muted-foreground">Team {binding.slack_team_id}</p>
-      </div>
+        </span>
+      }
+      description={`Team ${binding.slack_team_id}`}
+    >
       <Button
         variant="ghost"
         size="sm"
@@ -2817,7 +2852,7 @@ function SlackBindingStatus() {
       >
         {unlinking ? "Unlinking..." : "Unlink"}
       </Button>
-    </div>
+    </SettingsRow>
   );
 }
 
@@ -2859,22 +2894,21 @@ function WhatsAppBindingStatus() {
   if (!binding) return null;
   if (!binding.linked) {
     return (
-      <p className="text-xs text-muted-foreground">
-        Scan the QR or text the number above, then tap the link Emily sends you.
-      </p>
+      <SettingsRow title="WhatsApp number" description="Scan the QR or text the number above, then tap the link Emily sends you." />
     );
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-foreground truncate">
+    <SettingsRow
+      title={
+        <span className="truncate">
           {binding.profile_name
             ? `${binding.profile_name} (${binding.wa_id_masked})`
             : binding.wa_id_masked}
-        </p>
-        <p className="text-[11px] text-muted-foreground">Linked to this account</p>
-      </div>
+        </span>
+      }
+      description="Linked to this account"
+    >
       <Button
         variant="ghost"
         size="sm"
@@ -2884,7 +2918,7 @@ function WhatsAppBindingStatus() {
       >
         {unlinking ? "Unlinking..." : "Unlink"}
       </Button>
-    </div>
+    </SettingsRow>
   );
 }
 
@@ -2902,43 +2936,33 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           <TabsTrigger value="agent-install">Agent install</TabsTrigger>
         </TabsList>
         <TabsContent value="slack" className="space-y-4">
-          <div className="c-ltable">
-            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-              <div className="c-lp-tx">
-                <div className="nm">Slack workspace</div>
-                <div className="sub">Add Emily to Slack, then DM her to link your identity.</div>
-              </div>
+          <SettingsSection title="Slack">
+            <SettingsRow title="Slack workspace" description="Add Emily to Slack, then DM her to link your identity.">
               {canManageWorkspace ? (
                 <SlackConnect />
               ) : (
                 <span className="c-vpill">View only</span>
               )}
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+            </SettingsRow>
+          </SettingsSection>
+          <SettingsSection title="Your link status">
             <SlackBindingStatus />
-          </div>
+          </SettingsSection>
         </TabsContent>
         <TabsContent value="whatsapp" className="space-y-4">
           {WA_BOT_NUMBER ? (
             <>
-              <div className="c-ltable">
-                <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-                  <div className="c-lp-tx">
-                    <div className="nm">WhatsApp</div>
-                    <div className="sub">Scan the QR code to start a chat and bind your number.</div>
-                  </div>
+              <SettingsSection title="WhatsApp">
+                <SettingsRow title="WhatsApp" description="Scan the QR code to start a chat and bind your number.">
                   <Button type="button" variant="outline" onClick={() => setQrOpen(true)}>
                     <QrCode className="size-3.5" />
                     Show QR
                   </Button>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+                </SettingsRow>
+              </SettingsSection>
+              <SettingsSection title="Your link status">
                 <WhatsAppBindingStatus />
-              </div>
+              </SettingsSection>
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -3002,8 +3026,7 @@ const CAP_LABELS: Record<CapCell, { label: string; className: string }> = {
 function ChannelCapabilityMatrix() {
   const cols = ["Web", "Emily", "Slack", "WhatsApp"] as const;
   return (
-    <div className="mt-6 space-y-2">
-      <p className="text-xs font-medium text-muted-foreground">Channel capabilities</p>
+    <SettingsSection className="mt-6" title="Channel capabilities">
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
@@ -3031,6 +3054,6 @@ function ChannelCapabilityMatrix() {
         </table>
       </div>
       <p className="text-[11px] text-muted-foreground/60">Partial = supported via link or limited flow.</p>
-    </div>
+    </SettingsSection>
   );
 }
