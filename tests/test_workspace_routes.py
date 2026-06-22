@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi import Response
 from starlette.requests import Request
 
 import apps.api.routes.workspaces as workspace_routes
@@ -118,6 +119,79 @@ def test_scoped_pat_cannot_select_other_workspace(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "token is not valid for this workspace"
+
+
+def test_pat_workspace_create_returns_replacement_token(monkeypatch):
+    created = {
+        "id": "ws_new",
+        "name": "New workspace",
+        "owner_user_id": "user-1",
+        "created_at": "2026-01-01",
+    }
+    token_calls = []
+    delete_calls = []
+    events = []
+
+    class FakeTokenRepo:
+        def delete_cli_workspace_tokens_for_user(self, **kwargs):
+            events.append("delete")
+            delete_calls.append(kwargs)
+            return 1
+
+        def create(self, **kwargs):
+            events.append("create")
+            token_calls.append(kwargs)
+            return {"id": "tok_1", **kwargs}
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", lambda owner_user_id, name: created)
+    monkeypatch.setattr(workspace_routes, "SupabaseApiTokenRepository", lambda: FakeTokenRepo())
+    monkeypatch.setattr(workspace_routes, "_new_pat", lambda: "floom_replacement")
+    monkeypatch.setattr(workspace_routes, "_hash_pat", lambda raw: f"hash:{raw}")
+
+    response = asyncio.run(
+        workspace_routes.create_workspace(
+            workspace_routes.CreateWorkspaceRequest(name="New workspace"),
+            Response(),
+            AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="pat"),
+        )
+    )
+
+    assert response.id == "ws_new"
+    assert response.api_token == "floom_replacement"
+    assert response.header == "x-floom-token"
+    assert events == ["create", "delete"]
+    assert delete_calls == [{"user_id": "user-1", "exclude_token_hash": "hash:floom_replacement"}]
+    assert token_calls == [
+        {
+            "user_id": "user-1",
+            "name": "CLI workspace: New workspace",
+            "token_hash": "hash:floom_replacement",
+            "workspace_id": "ws_new",
+        }
+    ]
+
+
+def test_browser_workspace_create_does_not_return_raw_token(monkeypatch):
+    created = {
+        "id": "ws_new",
+        "name": "New workspace",
+        "owner_user_id": "user-1",
+        "created_at": "2026-01-01",
+    }
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", lambda owner_user_id, name: created)
+
+    response = asyncio.run(
+        workspace_routes.create_workspace(
+            workspace_routes.CreateWorkspaceRequest(name="New workspace"),
+            Response(),
+            AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="jwt"),
+        )
+    )
+
+    assert response.id == "ws_new"
+    assert response.api_token is None
+    assert response.header is None
 
 
 def test_create_share_link_returns_token_once(monkeypatch):

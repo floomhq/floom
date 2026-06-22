@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { CliAuthContent } from "@/app/cli-auth/page";
+import { CliAuthContent, cliAuthLoginRedirect } from "@/app/cli-auth/page";
 
 describe("CLI auth seams", () => {
   beforeEach(() => {
@@ -93,5 +93,11 @@ describe("CLI auth seams", () => {
     // Buttons remain available for retry.
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
+  it("builds a login redirect that preserves the CLI code", () => {
+    expect(cliAuthLoginRedirect("/app/login")).toBe(
+      "/app/login?next=%2Fcli-auth%3Fcode%3DABCD-2345",
+    );
   });
 });

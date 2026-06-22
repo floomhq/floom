@@ -4177,6 +4177,41 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
                 _repo_logger.warning("PAT cache eviction failed for token %s", token_id, exc_info=True)
         return deleted
 
+    def delete_cli_workspace_tokens_for_user(
+        self,
+        *,
+        user_id: str,
+        exclude_token_hash: str | None = None,
+    ) -> int:
+        """Delete generated CLI workspace tokens while preserving named PATs."""
+        builder = (
+            self._client.table("api_tokens")
+            .select("id,token_hash")
+            .eq("user_id", user_id)
+            .like("name", "CLI workspace:%")
+        )
+        if exclude_token_hash:
+            builder = builder.neq("token_hash", exclude_token_hash)
+        rows = _response_rows(builder.execute())
+        if not rows:
+            return 0
+        delete_builder = self._client.table("api_tokens").delete().eq("user_id", user_id).like(
+            "name", "CLI workspace:%"
+        )
+        if exclude_token_hash:
+            delete_builder = delete_builder.neq("token_hash", exclude_token_hash)
+        delete_builder.execute()
+        try:
+            from apps.api.auth.supabase_provider import evict_pat_cache
+
+            for row in rows:
+                token_hash = row.get("token_hash")
+                if token_hash:
+                    evict_pat_cache(str(token_hash))
+        except Exception:
+            _repo_logger.warning("PAT cache eviction failed for CLI workspace tokens", exc_info=True)
+        return len(rows)
+
 
 # ---------------------------------------------------------------------------
 # Version repository

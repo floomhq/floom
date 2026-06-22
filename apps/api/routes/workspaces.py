@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import io
 import copy
+import hashlib
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
@@ -28,6 +30,7 @@ from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.workspace_context import active_workspace, get_active_workspace_id, get_active_member_role
 from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, ACTIVE_WORKSPACE_HEADER
 from apps.api.config import get_cloud_settings
+from apps.api.db.supabase_repos import SupabaseApiTokenRepository
 from apps.api.db import workspaces as workspace_repo
 
 ensure_engine_api_path()
@@ -55,6 +58,11 @@ class WorkspaceOut(BaseModel):
     owner_user_id: str
     created_at: str
     role: str = "admin"  # caller's role: 'admin' for owners, 'admin'/'member' for members
+
+
+class WorkspaceCreateResponse(WorkspaceOut):
+    api_token: str | None = None
+    header: str | None = None
 
 
 class WorkspaceListResponse(BaseModel):
@@ -146,7 +154,7 @@ def _cookie_domain() -> str | None:
     return "." + ".".join(parts[-2:])
 
 
-def _set_active_cookie(response: JSONResponse, workspace_id: str) -> None:
+def _set_active_cookie(response: Response, workspace_id: str) -> None:
     response.set_cookie(
         key=ACTIVE_WORKSPACE_COOKIE,
         value=workspace_id,
@@ -157,6 +165,14 @@ def _set_active_cookie(response: JSONResponse, workspace_id: str) -> None:
         path="/",
         domain=_cookie_domain(),
     )
+
+
+def _new_pat() -> str:
+    return "floom_" + secrets.token_urlsafe(32)
+
+
+def _hash_pat(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 def _to_out(row: dict, role: str = "admin") -> WorkspaceOut:
@@ -313,14 +329,33 @@ async def list_workspaces(
     )
 
 
-@router.post("", response_model=WorkspaceOut)
+@router.post("", response_model=WorkspaceCreateResponse)
 async def create_workspace(
     payload: CreateWorkspaceRequest,
+    response: Response,
     auth: AuthContext = Depends(get_auth_context),
-) -> WorkspaceOut:
+) -> WorkspaceCreateResponse:
     created = workspace_repo.create(owner_user_id=auth.user_id, name=payload.name)
     _workspace_cache_clear(auth.user_id)
-    return _to_out(created)
+    body = WorkspaceCreateResponse(**_to_out(created).model_dump()).model_dump()
+    if auth.auth_method == "pat":
+        raw = _new_pat()
+        token_repo = SupabaseApiTokenRepository()
+        token_hash = _hash_pat(raw)
+        token_repo.create(
+            user_id=auth.user_id,
+            name=f"CLI workspace: {created['name']}",
+            token_hash=token_hash,
+            workspace_id=str(created["id"]),
+        )
+        token_repo.delete_cli_workspace_tokens_for_user(
+            user_id=auth.user_id,
+            exclude_token_hash=token_hash,
+        )
+        body["api_token"] = raw
+        body["header"] = "x-floom-token"
+    _set_active_cookie(response, str(created["id"]))
+    return WorkspaceCreateResponse(**body)
 
 
 @router.post("/{workspace_id}/select")

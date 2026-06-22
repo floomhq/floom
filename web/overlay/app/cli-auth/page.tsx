@@ -4,12 +4,13 @@ export const dynamic = "force-dynamic";
 
 import { CliAuthContent } from "@/app/cli-auth/page.engine";
 
-export { CliAuthContent } from "@/app/cli-auth/page.engine";
+export { CliAuthContent, cliAuthLoginRedirect } from "@/app/cli-auth/page.engine";
 
 export default function CloudCliAuthPage() {
   return (
     <CliAuthContent
-      endpointBase="/app/api/proxy/auth/cli"
+      endpointBase="/app/api/cli-auth"
+      loginPath="/app/login"
       clientName="workeros-cli"
     />
   );
