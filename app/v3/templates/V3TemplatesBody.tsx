@@ -138,7 +138,7 @@ export function V3TemplatesBody() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.16, ease: EASE }}
-        className="mb-7 flex flex-wrap items-center gap-2"
+        className="mb-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2"
       >
         <div className="flex flex-wrap gap-1.5">
           {pills.map((c) => (
@@ -156,7 +156,7 @@ export function V3TemplatesBody() {
             </button>
           ))}
         </div>
-        <div className="ml-auto flex min-w-[200px] items-center gap-2 rounded-[10px] bg-secondary px-3 py-2">
+        <div className="order-first flex w-full items-center gap-2 rounded-[10px] bg-secondary px-3 py-2 sm:order-none sm:ml-auto sm:w-auto sm:min-w-[200px]">
           <Search className="h-3.5 w-3.5 text-muted-foreground" />
           <input
             value={q}

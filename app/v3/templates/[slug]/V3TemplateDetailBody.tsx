@@ -22,6 +22,7 @@ import {
 } from "@/components/landing-icons";
 import { V3Shell } from "../../V3Shell";
 import { V3TemplateCard } from "../../V3TemplateCard";
+import { V3OutputPreview } from "../../V3OutputPreview";
 import "../../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -107,27 +108,29 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55, delay: 0.12, ease: EASE }}
         >
-          <div className="rounded-[22px] bg-secondary/70 p-5 sm:p-7">
-            <div className="rounded-[18px] bg-card p-6">
-              {/* LND-2: provider logos at the top of the email-draft card. */}
+          <div className="rounded-[22px] bg-secondary/60 p-4 sm:p-5">
+            <div className="rounded-[18px] bg-card p-5 sm:p-6">
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 [&_svg]:h-[15px] [&_svg]:w-[15px]" aria-label="Gmail or Outlook">
-                  <GmailLogo />
-                  <OutlookLogo />
+                <span className="flex items-center gap-2 [&_svg]:h-[16px] [&_svg]:w-[16px]">
+                  {t.tools
+                    .map((tool) => ({ tool, mark: MARKS[tool.toLowerCase()] }))
+                    .filter((m) => m.mark)
+                    .slice(0, 4)
+                    .map(({ tool, mark }) => (
+                      <span key={tool} className="opacity-80">{mark}</span>
+                    ))}
                 </span>
                 <span className="font-mono text-[11px] text-muted-foreground">{d.exampleRun.id}</span>
               </div>
               <div className="mt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                Email draft · to {d.exampleRun.email.to}
+                {t.output}
               </div>
-              <div className="mt-3 text-[16px] font-medium tracking-[-0.01em]">{d.exampleRun.email.subject}</div>
-              <p className="mt-2 whitespace-pre-line text-[13.5px] leading-relaxed text-muted-foreground">{d.exampleRun.email.body}</p>
-              <p className="mt-2 whitespace-pre-line text-[13.5px] text-muted-foreground">{d.exampleRun.email.signoff}</p>
-              <div className="mt-5 flex items-center justify-between border-t border-border-soft pt-4">
-                <span className="text-[12px] text-muted-foreground">{d.exampleRun.approvalQuestion}</span>
+              <V3OutputPreview sample={t.sample} size="lg" bare className="mt-3" />
+              <div className="mt-6 flex items-center justify-between pt-1">
+                <span className="text-[12.5px] text-muted-foreground">{d.exampleRun.approvalQuestion}</span>
                 <span className="flex gap-2">
                   <span className="rounded-[10px] px-3.5 py-1.5 text-[12.5px] font-medium text-white" style={{ background: "var(--v3-accent)" }}>Approve</span>
-                  <span className="rounded-[10px] border border-border bg-card px-3.5 py-1.5 text-[12.5px]">Edit</span>
+                  <span className="rounded-[10px] bg-secondary px-3.5 py-1.5 text-[12.5px] text-foreground/80">Edit</span>
                 </span>
               </div>
             </div>
