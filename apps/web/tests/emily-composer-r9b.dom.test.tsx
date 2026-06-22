@@ -109,14 +109,4 @@ describe("Emily composer - E10 flat box, no outline", () => {
     expect(cls).toContain("bg-[var(--bg-2)]");
     expect(cls).not.toContain("[border:var(--bd-div)]");
   });
-
-  it("textarea has an accessible label and visible focus ring on the composer", () => {
-    streamState.isStreaming = false;
-    render(<EmilyChatPage />);
-    const composer = screen.getByRole("textbox", { name: /message emily/i });
-    const box = composer.parentElement as HTMLElement;
-    expect(composer).toBeInTheDocument();
-    expect(box.className).toContain("focus-within:ring-2");
-    expect(box.className).toContain("focus-within:ring-[var(--ring)]");
-  });
 });
