@@ -1304,6 +1304,7 @@ export interface GitWorkspaceStatus {
   connected_at?: string | null;
   last_pushed_at?: string | null;
   secrets_loaded?: number;
+  versioning_disabled?: boolean;
 }
 
 export interface GitRepoItem {

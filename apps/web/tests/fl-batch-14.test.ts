@@ -30,22 +30,23 @@ describe("#616 Settings Developer section", () => {
     expect(nav).toContain('{ key: "connect", label: "Connect & automate", scope: "account"');
     const s = src("app/settings/page.tsx");
     expect(s).toContain('"connect"');
-    expect(s).toContain("function ConnectSection()");
+    expect(s).toContain("function ConnectSection({ canManageWorkspace }");
   });
 
   it("renders GitWorkspacePanel inside the Connect & automate detail", () => {
     const s = src("app/settings/page.tsx");
-    const connectSectionIdx = s.indexOf("function ConnectSection()");
+    const connectSectionIdx = s.indexOf("function ConnectSection({ canManageWorkspace }");
     expect(connectSectionIdx).toBeGreaterThanOrEqual(0);
     // Window covers the whole ConnectSection body (the API tab sits ahead of the
     // Git tab, so the Git panel is further down).
-    expect(s.slice(connectSectionIdx, connectSectionIdx + 5000)).toContain("<GitWorkspacePanel />");
+    expect(s.slice(connectSectionIdx, connectSectionIdx + 5000)).toContain("<GitWorkspacePanel canManageWorkspace={canManageWorkspace} />");
   });
 
   it("keeps GitWorkspacePanel wired to the /system/git API wrappers", () => {
     const s = src("components/GitWorkspacePanel.tsx");
     for (const method of [
       "gitStatus",
+      "gitAppInstallStart",
       "gitConnect",
       "gitListRepos",
       "gitCreateRepo",

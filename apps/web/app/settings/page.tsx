@@ -850,7 +850,7 @@ function SettingsContent() {
       case "personal_tokens":
         return <PersonalTokensSection accountName={accountName} workspaceName={workspaceName} />;
       case "connect":
-        return <ConnectSection />;
+        return <ConnectSection canManageWorkspace={isAdmin} />;
       case "appearance":
         return <AppearanceSection />;
       case "profile":
@@ -1186,14 +1186,14 @@ function PersonalTokensSection({ accountName, workspaceName }: { accountName?: s
 // sync. No token management here anymore (it moved to the two token panes); this
 // is read-only reference plus the Git workspace panel. (#616 GitWorkspacePanel
 // preserved.)
-function ConnectSection() {
+function ConnectSection({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   return (
     <Tabs defaultValue="api">
       <TabsList>
         <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
-        <TabsTrigger value="git">Git</TabsTrigger>
+        <TabsTrigger value="git">GitHub</TabsTrigger>
       </TabsList>
       <TabsContent value="api" className="space-y-4">
         <div className="space-y-1">
@@ -1269,7 +1269,7 @@ function ConnectSection() {
         />
       </TabsContent>
       <TabsContent value="git" className="space-y-4">
-        <GitWorkspacePanel />
+        <GitWorkspacePanel canManageWorkspace={canManageWorkspace} />
       </TabsContent>
     </Tabs>
   );

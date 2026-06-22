@@ -1007,6 +1007,8 @@ export const api = {
       fetchText(`/workspace/base/rollback/${versionId}`, { method: "POST" }),
     gitStatus: () =>
       fetchJson<import("./types").GitWorkspaceStatus>("/system/git"),
+    gitAppInstallStart: () =>
+      fetchJson<{ install_url: string }>("/system/git/app/install/start"),
     gitConnect: (pat: string) =>
       fetchJson<{ username: string }>("/system/git/connect", {
         method: "POST",

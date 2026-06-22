@@ -5,12 +5,63 @@ import { Check, ExternalLink, GitBranch, Loader2, Plus, RefreshCw, Unlink } from
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
-import { computeIsAdmin } from "@/lib/use-is-admin";
 import type { GitRepoItem, GitWorkspaceStatus } from "@/lib/types";
 import { formatRelative } from "@/lib/formatters";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+
+function connectionLabel(status: GitWorkspaceStatus): string {
+  return status.repo_full_name || (status.github_username ? `@${status.github_username}` : "GitHub");
+}
+
+function backupStatusLine(status: GitWorkspaceStatus): string {
+  if (status.versioning_disabled) return "Automatic workspace backups are off.";
+  if (status.last_pushed_at) return `Automatic workspace backups are on. Last backup ${formatRelative(status.last_pushed_at)}.`;
+  return "Automatic workspace backups are on. First backup has not run yet.";
+}
+
+// ---------------------------------------------------------------------------
+// Primary path - GitHub App install
+// ---------------------------------------------------------------------------
+
+function GitHubAppConnect({ canConnect }: { canConnect: boolean }) {
+  const [connecting, setConnecting] = useState(false);
+
+  async function handleConnect() {
+    if (!canConnect || connecting) return;
+    setConnecting(true);
+    try {
+      const result = await api.system.gitAppInstallStart();
+      window.location.href = result.install_url;
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to start GitHub connection");
+      setConnecting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card px-4 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium text-foreground">Connect GitHub</h3>
+          <p className="text-sm text-muted-foreground">
+            Back up your workspace to a private GitHub repo. Free.
+          </p>
+        </div>
+        <Button onClick={() => void handleConnect()} disabled={!canConnect || connecting} className="shrink-0">
+          {connecting ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
+          {connecting ? "Connecting..." : "Connect GitHub"}
+        </Button>
+      </div>
+      {!canConnect ? (
+        <p className="text-xs text-muted-foreground">
+          Workspace members can view connection status. Ask a workspace admin to connect GitHub.
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Step 1 — enter PAT
@@ -268,17 +319,17 @@ function ConnectedView({
     setPushing(true);
     try {
       const updated = await api.system.gitPush();
-      toast.success("Workspace pushed to GitHub");
+      toast.success("Workspace backed up");
       onPush(updated);
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Push failed");
+      toast.error(e instanceof Error ? e.message : "Backup failed");
     } finally {
       setPushing(false);
     }
   }
 
   async function handleDisconnect() {
-    if (!confirm("Disconnect GitHub? The local git history is kept, but Floom will stop pushing to GitHub.")) return;
+    if (!confirm("Disconnect GitHub? Floom will stop backing up this workspace to GitHub.")) return;
     setDisconnecting(true);
     try {
       await api.system.gitDisconnect();
@@ -297,53 +348,53 @@ function ConnectedView({
         <div className="space-y-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="size-2 rounded-[var(--radius-pill)] bg-green-500 shrink-0" />
-            <a
-              href={status.repo_url ?? "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-medium hover:underline flex items-center gap-1 truncate"
-            >
-              {status.repo_full_name}
-              <ExternalLink className="size-3 shrink-0" />
-            </a>
+            {status.repo_url ? (
+              <a
+                href={status.repo_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium hover:underline flex items-center gap-1 truncate"
+              >
+                Connected to {connectionLabel(status)}
+                <ExternalLink className="size-3 shrink-0" />
+              </a>
+            ) : (
+              <p className="text-sm font-medium text-foreground">Connected to {connectionLabel(status)}</p>
+            )}
           </div>
-          {status.github_username && (
-            <p className="text-xs text-muted-foreground pl-4">@{status.github_username}</p>
-          )}
-          <p className="text-xs text-muted-foreground pl-4">
-            {status.last_pushed_at
-              ? <>Last pushed {formatRelative(status.last_pushed_at)}</>
-              : "Never pushed"}
-          </p>
+          <p className="text-xs text-muted-foreground pl-4">{backupStatusLine(status)}</p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handlePush()}
-          disabled={pushing}
-          className="shrink-0"
-        >
-          {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-          {pushing ? "Pushing…" : "Push now"}
-        </Button>
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Every worker save, context edit, and workspace update is automatically committed and pushed to this repo. Secrets are encrypted and stored in the repo; a fresh install with the same GitHub connection restores them automatically.
+        Floom keeps workspace changes backed up automatically. Secrets stay encrypted.
       </p>
 
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-destructive hover:text-destructive"
-          disabled={disconnecting}
-          onClick={() => void handleDisconnect()}
-        >
-          <Unlink className="size-3.5" />
-          {disconnecting ? "Disconnecting…" : "Disconnect"}
-        </Button>
-      </div>
+      <details className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/20 px-4 py-3">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Advanced</summary>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void handlePush()}
+            disabled={pushing}
+            className="shrink-0"
+          >
+            {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+            {pushing ? "Backing up..." : "Back up now"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            disabled={disconnecting}
+            onClick={() => void handleDisconnect()}
+          >
+            <Unlink className="size-3.5" />
+            {disconnecting ? "Disconnecting..." : "Disconnect"}
+          </Button>
+        </div>
+      </details>
     </div>
   );
 }
@@ -356,7 +407,7 @@ function MemberView({ status }: { status: GitWorkspaceStatus | null }) {
   if (!status?.connected) {
     return (
       <p className="text-sm text-muted-foreground">
-        GitHub is not configured for this workspace. Ask a workspace admin to connect a GitHub repo in Settings → GitHub.
+        GitHub is not connected for this workspace. Ask a workspace admin to connect GitHub in Settings.
       </p>
     );
   }
@@ -365,24 +416,26 @@ function MemberView({ status }: { status: GitWorkspaceStatus | null }) {
       <div className="flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/30 px-4 py-3">
         <span className="size-2 rounded-[var(--radius-pill)] bg-green-500 shrink-0" />
         <div className="min-w-0">
-          <a
-            href={status.repo_url ?? "#"}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium hover:underline flex items-center gap-1 truncate"
-          >
-            {status.repo_full_name}
-            <ExternalLink className="size-3 shrink-0" />
-          </a>
+          {status.repo_url ? (
+            <a
+              href={status.repo_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium hover:underline flex items-center gap-1 truncate"
+            >
+              Connected to {connectionLabel(status)}
+              <ExternalLink className="size-3 shrink-0" />
+            </a>
+          ) : (
+            <p className="text-sm font-medium text-foreground">Connected to {connectionLabel(status)}</p>
+          )}
           <p className="text-xs text-muted-foreground">
-            {status.last_pushed_at
-              ? <>Last pushed {formatRelative(status.last_pushed_at)}</>
-              : "Never pushed"}
+            {backupStatusLine(status)}
           </p>
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        Every save you make is automatically committed and pushed to this repo. Contact a workspace admin to change the configuration.
+        Automatic workspace backups are managed by a workspace admin.
       </p>
     </div>
   );
@@ -392,39 +445,32 @@ function MemberView({ status }: { status: GitWorkspaceStatus | null }) {
 // Main panel
 // ---------------------------------------------------------------------------
 
-type Step = "loading" | "pat" | "repos" | "connected";
+type Step = "loading" | "connect" | "repos" | "connected";
 
-export function GitWorkspacePanel() {
+export function GitWorkspacePanel({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [step, setStep] = useState<Step>("loading");
   const [status, setStatus] = useState<GitWorkspaceStatus | null>(null);
   const [username, setUsername] = useState<string>("");
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      api.system.gitStatus().catch(() => null),
-      api.me().catch(() => null),
-    ]).then(([s, me]) => {
-      // Owners and admins can mutate Git workspace config; unset role is
-      // OSS/dev single-user admin access.
-      const admin = !me || computeIsAdmin(me);
-      setIsAdmin(admin);
+    api.system.gitStatus().catch(() => null).then((s) => {
       if (s?.connected) {
         setStatus(s);
         setStep("connected");
       } else {
-        setStep("pat");
+        setStatus(s);
+        setStep("connect");
       }
     });
   }, []);
 
   // Still loading
-  if (isAdmin === null) {
+  if (step === "loading") {
     return (
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <GitBranch className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-medium">GitHub workspace</h2>
+          <ExternalLink className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">GitHub</h2>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
           <Loader2 className="size-4 animate-spin" /> Loading…
@@ -434,12 +480,12 @@ export function GitWorkspacePanel() {
   }
 
   // Members get a read-only view — no config controls
-  if (!isAdmin) {
+  if (!canManageWorkspace) {
     return (
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <GitBranch className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-medium">GitHub workspace</h2>
+          <ExternalLink className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">GitHub</h2>
           {status?.connected && (
             <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
               <Check className="size-2.5" /> Connected
@@ -454,8 +500,8 @@ export function GitWorkspacePanel() {
   return (
     <section className="space-y-4">
       <div className="flex items-center gap-2">
-        <GitBranch className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium">GitHub workspace</h2>
+        <ExternalLink className="size-4 text-muted-foreground" />
+        <h2 className="text-sm font-medium">GitHub</h2>
         {step === "connected" && (
           <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
             <Check className="size-2.5" /> Connected
@@ -463,19 +509,23 @@ export function GitWorkspacePanel() {
         )}
       </div>
 
-      {step === "loading" && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-          <Loader2 className="size-4 animate-spin" /> Loading…
-        </div>
-      )}
-
-      {step === "pat" && (
-        <PATForm
-          onConnected={(u) => {
-            setUsername(u);
-            setStep("repos");
-          }}
-        />
+      {step === "connect" && (
+        <>
+          <GitHubAppConnect canConnect={canManageWorkspace} />
+          <details className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/20 px-4 py-3">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+              Advanced: use a token instead
+            </summary>
+            <div className="mt-4">
+              <PATForm
+                onConnected={(u) => {
+                  setUsername(u);
+                  setStep("repos");
+                }}
+              />
+            </div>
+          </details>
+        </>
       )}
 
       {step === "repos" && (
@@ -494,7 +544,7 @@ export function GitWorkspacePanel() {
           onPush={(s) => setStatus(s)}
           onDisconnect={() => {
             setStatus(null);
-            setStep("pat");
+            setStep("connect");
           }}
         />
       )}
