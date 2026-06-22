@@ -730,6 +730,7 @@ export default function ConnectionsCollection({
   const config: CollectionConfig<UnifiedConn> = {
     title: "Connections",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
+    restingMaxWidth: 1120,
     items,
     loading,
     error,

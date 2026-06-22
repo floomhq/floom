@@ -575,6 +575,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     items: sorted,
     loading,
     idOf: (r) => r.id,
+    invalidSelectionMessage: "Run not found. It may have been deleted or you may not have access.",
     // #1558: a run deep-linked via ?sel that isn't on the current page (Runs is
     // paginated, PAGE_SIZE=50) is hydrated on demand instead of false-toasting.
     // RunDetail is a superset of RunSummary, so we project it down for the list.

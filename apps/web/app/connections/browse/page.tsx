@@ -557,6 +557,7 @@ export default function ConnectionsBrowsePage() {
   const config: CollectionConfig<IntegrationCatalogItem> = {
     title: "Browse apps",
     subtitle: "Connect the apps your workers need to take action.",
+    restingMaxWidth: 1120,
     // Back to the unified Connections list (Browse apps is reached from the
     // Connections "Add" button, not a section tab).
     headerSlot: (

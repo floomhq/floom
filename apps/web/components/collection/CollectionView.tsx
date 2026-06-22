@@ -35,6 +35,9 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   const [creating, setCreating] = useState(false); // +Add opens in the detail pane
   const [page, setPage] = useState(0);
   const gridEnabled = config.view?.grid ?? false;
+  const restingFrameStyle = config.restingMaxWidth
+    ? { width: "100%", maxWidth: config.restingMaxWidth, marginInline: "auto" }
+    : undefined;
 
   // Items resolved on demand for deep-links absent from the (partial) list
   // (#1558). Keyed by id; merged into the working set so the detail opens
@@ -242,6 +245,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
 
   const header = config.hideTitle ? null : (
     <div style={{ padding: `22px ${PAGE_X}px 0` }}>
+      <div style={restingFrameStyle}>
       {/* #1544: c-headrow stacks at mobile (description full-width above the
           counts) and goes horizontal at ≥768px. The counts wrap instead of
           squishing the description or clipping the rightmost chip. */}
@@ -263,6 +267,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
             ))}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
@@ -437,36 +442,52 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       {header}
 
       {!isOpen && !creating && config.headerSlot && (
-        <div style={{ padding: `10px ${PAGE_X}px 0` }}>{config.headerSlot}</div>
+        <div style={{ padding: `10px ${PAGE_X}px 0` }}>
+          <div style={restingFrameStyle}>{config.headerSlot}</div>
+        </div>
       )}
 
       {!isOpen && !creating && (
         <>
           {!collectionEmpty && (
             <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>
-              {searchBox()}
-              {viewToggle}
-              <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
-                {config.toolbarActions}
-                {addButton}
+              <div
+                style={{
+                  ...restingFrameStyle,
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  minWidth: 0,
+                }}
+              >
+                {searchBox()}
+                {viewToggle}
+                <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+                  {config.toolbarActions}
+                  {addButton}
+                </div>
               </div>
             </div>
           )}
           {config.tags && !collectionEmpty && (
             <div className="c-tagbar-wrap" style={{ padding: `12px ${PAGE_X}px 2px` }}>
-              <TagBar
-                families={config.tags}
-                active={state.tags}
-                onToggle={toggleTagValue}
-                onClear={clearTags}
-              />
+              <div style={restingFrameStyle}>
+                <TagBar
+                  families={config.tags}
+                  active={state.tags}
+                  onToggle={toggleTagValue}
+                  onClear={clearTags}
+                />
+              </div>
             </div>
           )}
           <div className="c-body" style={{ marginTop: 14 }}>
             <div className="c-listcol" ref={bodyRef} style={{ padding: `0 ${PAGE_X}px 26px` }}>
-              {resolvedBanner}
-              {listOrGrid(false)}
-              {config.footer}
+              <div style={restingFrameStyle}>
+                {resolvedBanner}
+                {listOrGrid(false)}
+                {config.footer}
+              </div>
             </div>
           </div>
         </>

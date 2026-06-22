@@ -2145,6 +2145,7 @@ export default function WorkersCollection({
     loading,
     error,
     idOf: (w) => w.id,
+    invalidSelectionMessage: "Worker not found. It may have been deleted or you may not have access.",
     // #1558: the workers list is cache-first (staleTime 30s) and filters system
     // workers, so a deep-link / Emily "Open worker" to an id not in the loaded
     // list (e.g. one just created) would false-toast "not found". Hydrate it by
