@@ -1,8 +1,7 @@
 <h1 align="center">Floom</h1>
 
-<p align="center">
-  <em>Create a worker. Give it tools. Let it run. See everything.</em>
-</p>
+[![CI](https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/floom/actions/workflows/ci.yml)
+[![License: Floom Source Available](https://img.shields.io/badge/License-Floom%20Source%20Available-blue.svg)](LICENSE)
 
 <p align="center">
   <a href="https://github.com/floomhq/floom/actions/workflows/ci.yml"><img src="https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
