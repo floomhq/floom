@@ -1,4 +1,5 @@
 import { createAuthenticatedClient } from "../lib/api.js";
+import { getCommandName } from "../lib/command-name.js";
 import { maskSecret } from "../lib/credentials.js";
 import { log, printJson } from "../lib/output.js";
 
@@ -34,7 +35,7 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
       log.kv("Mode", credentials.mode);
       log.kv("API base", credentials.api_base);
       const ws = credentials.workspace_name || credentials.workspace_id;
-      log.kv("Workspace", ws ? ws : "(none, run `floom workspace switch <name>`)");
+      log.kv("Workspace", ws ? ws : `(none, run \`${getCommandName()} workspace switch <name>\`)`);
       if (credentials.mode === "cloud") {
         if (credentials.api_token) {
           log.kv("API token", maskSecret(credentials.api_token));
@@ -55,7 +56,7 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
       log.err("Not logged in.");
-      log.info("Run: floom login");
+      log.info(`Run: ${getCommandName()} login`);
       return 1;
     }
     throw error;

@@ -242,7 +242,7 @@ def current_contexts_root() -> Path:
     """
     scope = _current_scope()
     if scope is None:
-        return CONTEXTS_DIR
+        return CONTEXTS_DIR.resolve()
     return (CONTEXTS_DIR / scope).resolve()
 
 
@@ -332,7 +332,7 @@ def _relative_posix_path(path: Path, root: Path) -> str:
     return Path(os.path.relpath(str(path), str(root))).as_posix()
 
 
-def context_dir(name: str) -> Path:
+def context_dir(name: str, *, hydrate: bool = True) -> Path:
     safe_name = validate_context_name(name)
     root = current_contexts_root()
     target = (root / safe_name).resolve()
@@ -343,8 +343,13 @@ def context_dir(name: str) -> Path:
     # Supabase Storage before returning the path.  This is a no-op in OSS /
     # single-tenant mode (_hydration_hook is None) and a no-op whenever the
     # directory is already populated (idempotency guard is inside the hook).
+    #
+    # hydrate=False suppresses the hook so a caller that only needs the path
+    # string (e.g. staging a rename's removed-source path in git) never
+    # re-materializes a deliberately-moved/absent pack from remote storage
+    # (#1813).
     hook = _hydration_hook
-    if hook is not None and (not target.exists() or not any(target.iterdir())):
+    if hydrate and hook is not None and (not target.exists() or not any(target.iterdir())):
         try:
             hook(_current_scope(), safe_name, target)
         except Exception:
@@ -578,6 +583,26 @@ def delete_context_metadata(name: str) -> None:
     if safe_name in metadata:
         metadata.pop(safe_name, None)
         save_context_metadata(metadata)
+
+
+def rename_context_metadata(old_name: str, new_name: str) -> None:
+    """#1813: move a context's metadata entry from old_name to new_name.
+
+    Carries every field (writeable, owner_id, sensitive, category, summary, and
+    per-file metadata) so a folder rename preserves all pack state. No-op when
+    there is no entry for old_name. The caller guarantees new_name is free.
+    """
+    old_safe = validate_context_name(old_name)
+    new_safe = validate_context_name(new_name)
+    if old_safe == new_safe:
+        return
+    metadata = load_context_metadata()
+    entry = metadata.pop(old_safe, None)
+    if entry is None:
+        return
+    entry["updated_at"] = now_iso()
+    metadata[new_safe] = entry
+    save_context_metadata(metadata)
 
 
 def now_iso() -> str:
