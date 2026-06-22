@@ -26,6 +26,7 @@ def _load_api(monkeypatch, tmp_path, *, run_create_rate_limit: int = 30):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADER["x-floom-secret"])
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_LIMIT", str(run_create_rate_limit))
     monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60")
     monkeypatch.delenv("WORKEROS_RATE_LIMIT_DEV", raising=False)

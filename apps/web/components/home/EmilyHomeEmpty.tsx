@@ -26,7 +26,9 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
-import { Avatar } from "@/components/ui/Avatar";
+import { BrandLogo } from "@/components/connections/BrandLogo";
+import { tokenisePrompt } from "@/lib/prompt-detect";
+import { isMachineLabel } from "@/lib/workspace/display-name";
 import { resolveWorkersGate } from "./emily-home-empty";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
@@ -53,12 +55,17 @@ function useGreeting() {
       try {
         const me = await api.me();
         if (cancelled) return;
-        const source = me.display_name || me.email || "";
-        const raw = me.display_name
+        // Never greet with a machine id: a "local-user" / UUID display_name
+        // would render "Good morning, 9b1a5065…". Skip machine labels and
+        // fall back to the email's human part, else no name.
+        const display = isMachineLabel(me.display_name) ? "" : (me.display_name ?? "");
+        const email = isMachineLabel(me.email) ? "" : (me.email ?? "");
+        const source = display || email;
+        const raw = display
           ? source.trim().split(/\s+/)[0]
           : source.split("@")[0]?.split(/[._-]/)[0] ?? "";
         const name = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : null;
-        if (name) setFirstName(name);
+        if (name && !isMachineLabel(name)) setFirstName(name);
       } catch {
         // no name available, greeting renders without one
       }
@@ -100,6 +107,36 @@ function attentionToFix(item: SystemOverviewAttentionItem, idx: number): FixItem
 }
 
 // ── pills ─────────────────────────────────────────────────────────────────────
+
+// Inline tool tokens (Federico 2026-06-21): render an example prompt with its
+// tool names highlighted INLINE, each with its real brand icon — the same
+// register as the marketing landing prompt box (PromptText/tokenisePrompt), NOT
+// a separate "Uses [pill] [pill]" row. Matched tool terms get a faint --bg-3
+// token + the BrandLogo sprite; plain text renders as-is. The button's
+// accessible name stays the full prompt string so seeding + a11y are unchanged.
+function PromptTokens({ text }: { text: string }) {
+  const segments = tokenisePrompt(text);
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.kind === "plain") {
+          return <span key={i}>{seg.text}</span>;
+        }
+        return (
+          <span
+            key={i}
+            className="inline-flex items-baseline gap-[3px] rounded-[var(--radius-ui)] bg-[var(--bg-3)] px-[5px] py-px mx-px align-baseline text-ink"
+          >
+            {seg.brand && (
+              <BrandLogo icon={seg.brand} className="size-[13px] shrink-0 translate-y-[1px]" />
+            )}
+            <span>{seg.text}</span>
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 function Pill({
   children,
@@ -213,9 +250,6 @@ export function EmilyHomeEmpty({
       {/* greeting / hero */}
       {isFirstWorker ? (
         <div className="flex flex-col items-center pb-[22px]">
-          <div className="mb-4">
-            <Avatar role="emily" size={46} />
-          </div>
           <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
             Let&apos;s hire your first worker
           </div>
@@ -262,7 +296,7 @@ export function EmilyHomeEmpty({
           <div className="flex flex-wrap justify-center gap-2">
             {CREATE_PILLS.map((p) => (
               <Pill key={p} onClick={() => onSeed(p)}>
-                {p}
+                <PromptTokens text={p} />
               </Pill>
             ))}
             <Pill accent onClick={onPickMcp}>

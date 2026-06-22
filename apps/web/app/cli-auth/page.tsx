@@ -13,6 +13,7 @@ const DEFAULT_CLI_CLIENT_NAME = "floom-cli";
 export type CliAuthContentProps = {
   endpointBase?: string;
   clientName?: string;
+  loginPath?: string;
 };
 
 // Explicit state machine. A terminal state (approved/denied) NEVER renders the
@@ -24,6 +25,11 @@ function cliAuthEndpoint(endpointBase: string, action: "approve" | "deny") {
   return `${endpointBase.replace(/\/$/, "")}/${action}`;
 }
 
+export function cliAuthLoginRedirect(loginPath: string): string {
+  const next = `${window.location.pathname}${window.location.search}`;
+  return `${loginPath}?next=${encodeURIComponent(next)}`;
+}
+
 export default function CliAuthPage() {
   return <CliAuthContent />;
 }
@@ -31,6 +37,7 @@ export default function CliAuthPage() {
 export function CliAuthContent({
   endpointBase = DEFAULT_CLI_AUTH_ENDPOINT_BASE,
   clientName = DEFAULT_CLI_CLIENT_NAME,
+  loginPath = "/login",
 }: CliAuthContentProps = {}) {
   const [code, setCode] = useState("");
   const [state, setState] = useState<AuthState>("idle");
@@ -58,6 +65,10 @@ export function CliAuthContent({
       });
       const body = (await response.json().catch(() => ({}))) as { detail?: string };
       if (!response.ok) {
+        if (response.status === 401) {
+          window.location.assign(cliAuthLoginRedirect(loginPath));
+          return;
+        }
         setErrorText(body.detail || "Authorization failed");
         setState("error");
         return;
