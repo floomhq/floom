@@ -1,4 +1,6 @@
 import open from "open";
+import { mkdir, open as openFile, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
   FloomApiClient,
   FloomApiError,
@@ -53,6 +55,59 @@ type WorkspaceListResponse = {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function loginLockPath(): string {
+  return join(dirname(credentialsPath()), "login.lock");
+}
+
+function processAppearsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function acquireLoginLock(): Promise<() => Promise<void>> {
+  const path = loginLockPath();
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const payload = {
+    pid: process.pid,
+    started_at: new Date().toISOString(),
+  };
+  try {
+    const handle = await openFile(path, "wx", 0o600);
+    await handle.writeFile(JSON.stringify(payload, null, 2) + "\n", "utf8");
+    await handle.close();
+  } catch (error) {
+    const existing: { pid?: unknown; started_at?: unknown } = await readFile(path, "utf8").then(
+      (raw) => JSON.parse(raw) as { pid?: unknown; started_at?: unknown },
+      () => ({}),
+    );
+    const pid = typeof existing.pid === "number" ? existing.pid : 0;
+    if (processAppearsAlive(pid)) {
+      throw new Error(
+        `Another ${getCommandName()} login is already running (pid ${pid}). ` +
+          "Finish it or stop that process before starting a new device code.",
+      );
+    }
+    await rm(path, { force: true });
+    const handle = await openFile(path, "wx", 0o600);
+    await handle.writeFile(JSON.stringify(payload, null, 2) + "\n", "utf8");
+    await handle.close();
+  }
+  return async () => {
+    const existing: { pid?: unknown } = await readFile(path, "utf8").then(
+      (raw) => JSON.parse(raw) as { pid?: unknown },
+      () => ({}),
+    );
+    if (existing.pid === process.pid) {
+      await rm(path, { force: true });
+    }
+  };
 }
 
 function retryAfterSecondsFromBody(body: unknown): number | null {
@@ -136,6 +191,8 @@ async function fetchCloudBootstrap(apiBase: string): Promise<CloudBootstrap | nu
 }
 
 export async function runLoginCommand(options: LoginOptions = {}): Promise<number> {
+  const releaseLoginLock = await acquireLoginLock();
+  try {
   log.heading("Login");
   log.step("Requesting device authorization...");
 
@@ -267,6 +324,9 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
   log.err("Timed out waiting for CLI approval.");
   log.info(`Run: ${getCommandName()} login to try again`);
   return 1;
+  } finally {
+    await releaseLoginLock();
+  }
 }
 
 async function pollCloudExchange(args: {

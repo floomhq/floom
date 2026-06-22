@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Upload, Users } from "lucide-react";
@@ -176,107 +176,19 @@ function slugifyContextName(raw: string): string {
     .slice(0, 63) || "";
 }
 
-function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> }) {
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const slug = slugifyContextName(name);
-  const showSlugHint = name.trim() !== "" && name.trim() !== slug;
-
-  const submit = async () => {
-    if (!slug) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // #1241/#1243: user-created folders must default to writeable=true so the
-      // drop-zone and upload affordances are available immediately after creation.
-      await api.contexts.create(slug, true);
-      toast.success(`Created "${slug}"`);
-      await onCreated();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create the folder.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 420 }}>
-      <label style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Folder name</label>
-      <input
-        className="c-srch"
-        style={{ maxWidth: "none" }}
-        autoFocus
-        value={name}
-        onChange={(e) => { setName(e.target.value); setError(null); }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") void submit();
-        }}
-        placeholder="e.g. company-facts or Walk Test Folder"
-      />
-      {showSlugHint && (
-        <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
-          Saved as: <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink)" }}>{slug}</span>
-        </div>
-      )}
-      {error && (
-        <div style={{ fontSize: 12, color: "var(--negative)", padding: "6px 10px", background: "var(--bg-2)", borderRadius: 8 }}>
-          {error}
-        </div>
-      )}
-      <button type="button" className="c-addbtn" disabled={busy || !slug} onClick={() => void submit()}>
-        {busy ? "Creating…" : "Create folder"}
-      </button>
-    </div>
-  );
-}
-
-// Secondary create-folder path (drop is primary). Reuses NewFolderForm in a
-// centered modal, matching DropCreateFolderOverlay's surface treatment.
-function NewFolderModal({
-  onCreated,
-  onCancel,
-}: {
-  onCreated: () => void | Promise<void>;
-  onCancel: () => void;
-}) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 50,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "rgba(0,0,0,.35)",
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div
-        style={{
-          background: "var(--bg-card)",
-          border: "var(--bd-card)",
-          borderRadius: "var(--radius-card)",
-          padding: 24,
-          minWidth: 340,
-          maxWidth: 440,
-          boxShadow: "var(--shadow-pop)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Folder size={16} style={{ color: "var(--ink-soft)" }} />
-          <span style={{ fontWeight: 600, fontSize: 14 }}>New folder</span>
-        </div>
-        <NewFolderForm onCreated={onCreated} />
-      </div>
-    </div>
-  );
+/** Auto-name a new folder without prompting (the operator 2026-06-22: "just
+ *  choose one, I can change it later"). Picks the first free `new-folder`,
+ *  `new-folder-2`, … so creation never blocks on a name dialog. An optional
+ *  seed (e.g. a dropped file's base name) is preferred when it is free. */
+function autoFolderName(existing: string[], seed?: string): string {
+  const taken = new Set(existing);
+  const base = (seed && slugifyContextName(seed)) || "new-folder";
+  if (!taken.has(base)) return base;
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = slugifyContextName(`${base}-${i}`) || `new-folder-${i}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return slugifyContextName(`new-folder-${Date.now()}`);
 }
 
 // #1813: rename an auto-named folder. Mirrors NewFolderForm: free-typed name,
@@ -414,154 +326,38 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
   );
 }
 
-// #1112: When files are dropped on the brain list, prompt for a folder name,
-// create the folder, then upload the dropped files into it.
-function DropCreateFolderOverlay({
-  files,
-  onDone,
-  onCancel,
-}: {
-  files: File[];
-  onDone: () => void;
-  onCancel: () => void;
-}) {
-  const firstFile = files[0];
-  const defaultName = firstFile
-    ? slugifyContextName(firstFile.name.replace(/\.[^/.]+$/, ""))
-    : "new-folder";
-  const [name, setName] = useState(defaultName);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.select();
-  }, []);
-
-  const slug = slugifyContextName(name);
-  const showSlugHint = name.trim() !== "" && name.trim() !== slug;
-
-  const submit = useCallback(async () => {
-    if (!slug || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // #1241/#1243: writeable=true so the created folder accepts uploads.
-      await api.contexts.create(slug, true);
-      await api.contexts.upload(slug, files, undefined);
-      toast.success(
-        files.length === 1
-          ? `Created "${slug}" and added 1 file`
-          : `Created "${slug}" and added ${files.length} files`,
-      );
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create folder.");
-      setBusy(false);
-    }
-  }, [slug, busy, files, onDone]);
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 50,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "rgba(0,0,0,.35)",
-      }}
-    >
-      <div
-        style={{
-          background: "var(--bg-card)",
-          border: "var(--bd-card)",
-          borderRadius: "var(--radius-card)",
-          padding: 24,
-          minWidth: 340,
-          maxWidth: 440,
-          boxShadow: "var(--shadow-pop)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Upload size={16} style={{ color: "var(--ink-soft)" }} />
-          <span style={{ fontWeight: 600, fontSize: 14 }}>
-            Create folder &amp; upload {files.length === 1 ? "1 file" : `${files.length} files`}
-          </span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <label style={{ fontSize: 12, color: "var(--ink-soft)" }}>Folder name</label>
-          <input
-            ref={inputRef}
-            className="c-srch"
-            style={{ maxWidth: "none" }}
-            value={name}
-            onChange={(e) => { setName(e.target.value); setError(null); }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void submit();
-              if (e.key === "Escape") onCancel();
-            }}
-            disabled={busy}
-          />
-          {showSlugHint && (
-            <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>
-              Saved as:{" "}
-              <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink)" }}>{slug}</span>
-            </div>
-          )}
-        </div>
-        {error && (
-          <div style={{ fontSize: 12, color: "var(--red, #c0392b)", background: "var(--bg-2)", borderRadius: 8, padding: "6px 10px" }}>
-            {error}
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button type="button" className="c-vpill" style={{ padding: "6px 14px" }} onClick={onCancel} disabled={busy}>
-            Cancel
-          </button>
-          <button type="button" className="c-addbtn" disabled={busy || !slug} onClick={() => void submit()}>
-            {busy ? "Creating…" : "Create folder"}
-          </button>
-        </div>
-      </div>
-    </div>
+// #1112 / the operator 2026-06-22: dropping files on the Library creates a
+// folder and uploads into it WITHOUT a blocking name prompt. The folder is
+// auto-named (seeded from the first dropped file, falling back to `new-folder`),
+// and can be renamed later. No modal — the create+upload runs immediately.
+async function createFolderFromDrop(files: File[], existing: string[]): Promise<string> {
+  const seed = files[0]?.name.replace(/\.[^/.]+$/, "");
+  const slug = autoFolderName(existing, seed);
+  // #1241/#1243: writeable=true so the created folder accepts uploads.
+  await api.contexts.create(slug, true);
+  await api.contexts.upload(slug, files, undefined);
+  toast.success(
+    files.length === 1
+      ? `Created "${slug}" and added 1 file`
+      : `Created "${slug}" and added ${files.length} files`,
   );
+  return slug;
 }
 
-// Empty-state actions: drop is the headline (in EmptyState.help); here we offer
-// the two clickable paths under it. "Browse files" mirrors a drop (primary,
-// filled button); "New folder" is the secondary, quieter path. (#1709: canonical name)
-function EmptyStateActions({
-  onBrowse,
-  onNewFolder,
-}: {
-  onBrowse: () => void;
-  onNewFolder: () => void;
-}) {
+// Empty-state action: the standard centered empty state shows ONE action
+// (matching Run history etc.). Drop-anywhere is the primary affordance (the help
+// text says so + the whole page is a drop target); "Browse files" is the single
+// clickable fallback. Folder-creation stays in the toolbar.
+function EmptyStateActions({ onBrowse }: { onBrowse: () => void }) {
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 4 }}>
-      <button type="button" className="c-addbtn" onClick={onBrowse}>
-        <Upload size={14} /> Browse files
-      </button>
-      <button
-        type="button"
-        onClick={onNewFolder}
-        style={{
-          background: "none",
-          border: "none",
-          padding: "6px 4px",
-          fontSize: 13,
-          color: "var(--ink-soft)",
-          cursor: "pointer",
-        }}
-      >
-        New folder
-      </button>
-    </div>
+    <button
+      type="button"
+      className="c-addbtn"
+      onClick={onBrowse}
+      style={{ display: "inline-flex", marginTop: 8 }}
+    >
+      <Upload size={14} /> Browse files
+    </button>
   );
 }
 
@@ -572,15 +368,15 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
   // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
   // Cached revisits bypass this because the query already has data.
   const loading = foldersQuery.isLoading && !foldersQuery.data;
-  // #1112: dropped files pending folder creation
-  const [pendingDropFiles, setPendingDropFiles] = useState<File[] | null>(null);
   const [listDragOver, setListDragOver] = useState(false);
-  // Secondary path: create an empty folder (drop is the primary affordance).
-  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  // Guards the auto-create folder paths against double-fires.
+  const [creating, setCreating] = useState(false);
   // #1813: folder being renamed (drives the rename modal).
   const [renameTarget, setRenameTarget] = useState<ContextSummary | null>(null);
   // Browse-files trigger for the empty state (same flow as a drop).
   const browseInputRef = useRef<HTMLInputElement>(null);
+
+  const existingNames = useMemo(() => folders.map((f) => f.name), [folders]);
 
   const refresh = async () => {
     try {
@@ -600,7 +396,38 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     }
   };
 
-  const openNewFolder = () => setNewFolderOpen(true);
+  // #1112 / the operator 2026-06-22: dropping files auto-creates an auto-named
+  // folder and uploads into it — no blocking name prompt.
+  const handleDroppedFiles = async (dropped: File[]) => {
+    if (dropped.length === 0 || creating) return;
+    setCreating(true);
+    try {
+      await createFolderFromDrop(dropped, existingNames);
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create folder.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // Toolbar "New folder": auto-name and create immediately (the operator
+  // 2026-06-22: "just choose one, I can change it later"). No name dialog.
+  const createEmptyFolder = async () => {
+    if (creating) return;
+    setCreating(true);
+    const slug = autoFolderName(existingNames);
+    try {
+      await api.contexts.create(slug, true); // writeable so it accepts uploads
+      toast.success(`Created "${slug}"`);
+      await refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create the folder.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const openBrowse = () => browseInputRef.current?.click();
 
   const folderTitle = (c: ContextSummary) => (
@@ -660,7 +487,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       { value: folders.length, label: "folders" },
       { value: folders.reduce((n, c) => n + (c.file_count ?? 0), 0), label: "files" },
     ],
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     columns: {
       template: "1.8fr 1fr 1fr 40px",
       headers: ["Folder", "Files", "Updated", ""],
@@ -717,37 +544,35 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       ],
     }),
     // No prominent toolbar "+ New folder" addButton (the operator 2026-06-15):
-    // dropping files is the primary affordance, so folder-creation is demoted to
-    // a quiet secondary text button in the toolbar (config.toolbarActions) and
-    // a secondary action under the empty-state drop CTA.
+    // dropping files is the primary affordance, so folder-creation is a quiet
+    // secondary text button in the toolbar. It auto-names + creates immediately
+    // (no name dialog — the operator 2026-06-22); rename later.
     toolbarActions: (
-      <button type="button" className="c-vpill" onClick={openNewFolder}>
+      <button type="button" className="c-vpill" disabled={creating} onClick={() => void createEmptyFolder()}>
         New folder
       </button>
     ),
     states: {
-      // Default state LEADS with drop, not "+ New folder" (the operator
-      // 2026-06-15). The whole wrapper is already a drop zone (outer onDrop →
-      // DropCreateFolderOverlay), so the empty state is a big, obvious "drop
-      // files here" affordance. Creating a folder is the secondary path, a
-      // plain text button under the drop CTA. Upload icon, not Inbox.
+      // Standard centered empty state (the operator 2026-06-22): clean icon +
+      // title + subtext + ONE action, matching Run history and every other
+      // surface. NO dashed drop-zone box — the whole page is the drop target
+      // (outer onDrop → auto-named folder), with a single drag-over overlay, so
+      // a heavy bounded box at rest is redundant chrome. Upload icon, not Inbox.
       // Copy uses colons not em-dashes (lint:emdash).
       empty: {
         icon: Upload,
-        title: "Drop files here to get started",
-        help: "Drag any docs, PDFs, or notes onto this page and a folder is created for them automatically. Your workers read these before they act.",
-        action: <EmptyStateActions onBrowse={openBrowse} onNewFolder={openNewFolder} />,
-        // B6: the empty state is itself a clearly-bounded dashed drop-zone box,
-        // so the drop target is visible at rest (not only on drag-over).
-        dropzone: true,
+        title: "Your Library is empty",
+        help: "Drag any docs onto this page and a folder is created for them automatically. Your workers read these before they act.",
+        action: <EmptyStateActions onBrowse={openBrowse} />,
       },
     },
   };
 
   return (
-    // #1112: Outer drop zone — dropping files on the brain list triggers folder
-    // creation instead of an upload error.
+    // #1112: Outer drop zone — dropping files anywhere on the Library page
+    // auto-creates a folder for them (no name prompt) instead of erroring.
     <div
+      data-testid="library-dropzone"
       style={{ position: "relative", flex: 1, minHeight: 0 }}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes("Files")) {
@@ -764,35 +589,42 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       onDrop={(e) => {
         e.preventDefault();
         setListDragOver(false);
-        const dropped = Array.from(e.dataTransfer.files);
-        if (dropped.length > 0) setPendingDropFiles(dropped);
+        void handleDroppedFiles(Array.from(e.dataTransfer.files));
       }}
     >
+      {/* FIX 2 (the operator 2026-06-22): ONE clean drag-over overlay — a subtle
+          page highlight with a single "Drop to add to your Library" message.
+          No competing affordances (no second box, no Browse button) during a
+          drag. */}
       {listDragOver && (
         <div
+          data-testid="library-drag-overlay"
           style={{
             position: "absolute",
             inset: 0,
-            zIndex: 10,
+            zIndex: 20,
             pointerEvents: "none",
             borderRadius: "var(--radius-card)",
-            outline: "2px dashed var(--ink-soft)",
-            outlineOffset: 4,
+            outline: "2px solid var(--primary)",
+            outlineOffset: -2,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            background: "var(--bg-card)/80",
+            background: "color-mix(in srgb, var(--primary) 8%, var(--bg-card))",
+            transition: "background .12s ease",
           }}
         >
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-            <Upload size={22} style={{ color: "var(--ink-soft)" }} />
-            <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>Drop to create a new folder</span>
+            <Upload size={22} style={{ color: "var(--primary)" }} />
+            <span style={{ fontSize: 14, fontWeight: 500, color: "var(--ink)" }}>
+              Drop to add to your Library
+            </span>
           </div>
         </div>
       )}
       <Collection config={config} />
       {/* Hidden picker: "Browse files" in the empty state opens the OS file
-          dialog, then routes the chosen files through the same create-folder
+          dialog, then routes the chosen files through the same auto-create
           flow as a drop. */}
       <input
         ref={browseInputRef}
@@ -801,30 +633,11 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         style={{ display: "none" }}
         onChange={(e) => {
           const chosen = Array.from(e.target.files ?? []);
-          if (chosen.length > 0) setPendingDropFiles(chosen);
+          void handleDroppedFiles(chosen);
           // Reset so picking the same file again still fires onChange.
           e.target.value = "";
         }}
       />
-      {pendingDropFiles && (
-        <DropCreateFolderOverlay
-          files={pendingDropFiles}
-          onDone={async () => {
-            setPendingDropFiles(null);
-            await refresh();
-          }}
-          onCancel={() => setPendingDropFiles(null)}
-        />
-      )}
-      {newFolderOpen && (
-        <NewFolderModal
-          onCreated={async () => {
-            setNewFolderOpen(false);
-            await refresh();
-          }}
-          onCancel={() => setNewFolderOpen(false)}
-        />
-      )}
       {renameTarget && (
         <RenameFolderModal
           folder={renameTarget}

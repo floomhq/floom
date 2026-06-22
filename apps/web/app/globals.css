@@ -982,12 +982,12 @@ html.dark .grain {
    R9: lives in the panel BODY below both tab rows, not between them. */
 .c-ops-frame { display:flex; align-items:center; gap:8px; padding:14px 0 4px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-foreground); }
 .c-dbody { flex:1; min-width:0; overflow:auto; padding:18px 20px; }
-/* R9 FIX 1: "Advanced ▾" group on the primary tab row — right-aligned, quiet,
-   findable. Not accent (accent is links-only); reads as a secondary tab group. */
-.c-dtabs-trailing { margin-left:auto; display:flex; align-items:center; padding-left:8px; }
+/* "Advanced" inline disclosure — sits directly after operator tabs, no spacer.
+   A thin left separator visually groups it from the primary tabs. */
+.c-dtabs-trailing { display:flex; align-items:center; border-left:1px solid var(--bd-div); margin-left:4px; padding-left:4px; }
 .c-dtab-adv { color:var(--muted-foreground); font-size:13px; padding:5px 9px 6px; border-radius:8px; white-space:nowrap; }
 .c-dtab-adv:hover { background:var(--bg-2); color:var(--ink); }
-.c-dtab-adv[data-state="open"] { background:var(--bg-2); color:var(--ink); }
+.c-dtab-adv.open { color:var(--ink); }
 
 /* states (SPEC §7) */
 .c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }

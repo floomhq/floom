@@ -48,9 +48,12 @@ describe("#1544 tablet shell breakpoint = 1024 (lg), not 768 (md)", () => {
     expect(src).not.toContain("md:w-[560px]");
   });
 
-  it("floating desktop alerts bell shows at lg, not md", () => {
+  // The global alerts bell was removed from the chrome (replaced by contextual
+  // count badges on the sidebar nav). AppShell no longer renders it; assert the
+  // shell carries no `md:block` breakpoint coupling regression.
+  it("AppShell does not render the alerts bell and has no md:block coupling", () => {
     const src = read("components/layout/AppShell.tsx");
-    expect(src).toContain("lg:block");
+    expect(src).not.toContain("AlertsBell");
     expect(src).not.toContain("md:block");
   });
 });

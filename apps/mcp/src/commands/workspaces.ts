@@ -9,6 +9,8 @@ type WorkspaceRow = {
   name: string;
   owner_user_id?: string;
   created_at?: string;
+  api_token?: string;
+  token?: string;
 };
 
 type WorkspaceListResponse = {
@@ -80,9 +82,15 @@ export async function workspacesCreateCommand(name: string, options: { json?: bo
     const created = (await client.requestJson("POST", "/workspaces", {
       body: { name: trimmed },
     })) as WorkspaceRow;
+    const replacementToken = typeof created.api_token === "string"
+      ? created.api_token
+      : typeof created.token === "string"
+        ? created.token
+        : undefined;
     await updateCredentials({
       workspace_id: created.id,
       workspace_name: created.name,
+      ...(replacementToken ? { api_token: replacementToken } : {}),
     });
     if (options.json) {
       printJson(created);
