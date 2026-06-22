@@ -1,7 +1,8 @@
 <h1 align="center">Floom</h1>
 
-[![CI](https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/floom/actions/workflows/ci.yml)
-[![License: Floom Source Available](https://img.shields.io/badge/License-Floom%20Source%20Available-blue.svg)](LICENSE)
+<p align="center">
+  <em>Create a worker. Give it tools. Let it run. See everything.</em>
+</p>
 
 <p align="center">
   <a href="https://github.com/floomhq/floom/actions/workflows/ci.yml"><img src="https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
@@ -17,12 +18,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/hero.gif" alt="Describe a worker in plain English, approve the draft, and watch it run on the record" width="900">
+  <img src="docs/media/hero.gif" alt="Describe a worker in plain English, approve the draft, and watch it run on the record" width="860">
 </p>
-
-New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
-short path from "why Floom exists" to your first worker and a safe self-hosted
-deployment checklist.
 
 ---
 
@@ -176,31 +173,13 @@ data/         SQLite DB + run artifacts
 
 ## Docs
 
-- [Getting started](docs/GETTING-STARTED.md) - why Floom exists, first run,
-  first worker, and safe self-hosting checklist.
-- [Authoring workers](docs/AUTHORING.md) - full `worker.yml` schema, execution
-  modes, secrets, connections, triggers, and approvals.
-- [Agent cookbook](docs/AGENT-COOKBOOK.md) - agent-assisted worker authoring
-  recipes.
-- [API overview](docs/API.md) - curated endpoint map plus the OpenAPI location.
-- [Troubleshooting](docs/TROUBLESHOOTING.md) - setup, runtime, and test fixes.
-- [Project history](HISTORY.md) - what was scrubbed and how the public history is
-  preserved.
-- [v1.0.0 release notes](docs/releases/v1.0.0.md) - launch highlights, limits,
-  and provenance.
-- [Contributing](CONTRIBUTING.md) - local checks, first-contribution map, and PR
-  expectations.
-- [Licensing](docs/LICENSING.md) - what the Floom Source Available License
-  allows and what needs a commercial agreement.
-- [Third-party licenses](docs/THIRD-PARTY-LICENSES.md) - dependency inventory
-  and SBOM release process.
-- [Generated SBOM](docs/sbom/floom-sbom.spdx.json) - SPDX inventory generated
-  from the checked-in dependency manifests.
-
-## API
-
-For a curated endpoint map, see [docs/API.md](docs/API.md). For the exhaustive
-reference, start the API and open `http://localhost:8000/docs`.
+- [Getting started](docs/GETTING-STARTED.md) &mdash; why Floom exists, first run, first worker, safe self-hosting checklist.
+- [Authoring workers](docs/AUTHORING.md) &mdash; full `worker.yml` schema, execution modes, secrets, connections, triggers, approvals.
+- [Agent cookbook](docs/AGENT-COOKBOOK.md) &mdash; agent-assisted worker authoring recipes.
+- [Architecture](ARCHITECTURE.md) &mdash; runtime topology and the sandbox trust model. Read before filing security findings.
+- [API overview](docs/API.md) &mdash; curated endpoint map; full reference at `http://localhost:8000/docs`.
+- [Troubleshooting](docs/TROUBLESHOOTING.md) · [Roadmap](ROADMAP.md) · [Project history](HISTORY.md) · [v1.0.0 release notes](docs/releases/v1.0.0.md)
+- [Licensing](docs/LICENSING.md) &mdash; what the Floom Source Available License allows and what needs a commercial agreement.
 
 ## Contributing
 
