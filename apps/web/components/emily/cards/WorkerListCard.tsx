@@ -6,23 +6,23 @@ export function WorkerListCard({ card }: { card: WorkerListCardType }) {
   const { workers } = card;
   if (!workers || workers.length === 0) {
     return (
-      <div className="rounded-lg [border:var(--bd-card)] bg-card/60 px-3.5 py-3 text-xs text-muted-foreground">
+      <div className="rounded-lg bg-card px-3.5 py-3 text-xs text-muted-foreground">
         No workers found.
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg [border:var(--bd-card)] bg-card/60 overflow-hidden text-sm">
-      <div className="flex items-center gap-2 px-3.5 py-2.5 [border-bottom:var(--bd-div)]/50">
+    <div className="rounded-lg bg-card overflow-hidden text-sm">
+      <div className="flex items-center gap-2 px-3.5 py-2.5 bg-muted/40">
         <Box className="size-3.5 text-muted-foreground" />
         <span className="font-medium text-xs text-muted-foreground uppercase tracking-wide">
           Workers ({workers.length})
         </span>
       </div>
-      <ul className="[&>*+*]:[border-top:var(--bd-div)]/50">
+      <ul>
         {workers.map((w) => (
-          <li key={w.id} className="flex items-center gap-2.5 px-3.5 py-2">
+          <li key={w.id} className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-muted/30 transition-colors">
             <span
               className={cn(
                 "size-1.5 rounded-[var(--radius-pill)] shrink-0",
