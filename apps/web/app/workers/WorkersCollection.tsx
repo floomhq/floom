@@ -2197,7 +2197,7 @@ export default function WorkersCollection({
         label: "needs attention",
       },
     ],
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     columns: {
       template: "1.9fr 1fr 1fr 130px 40px", // #895: wireframe pageWorkers grid
       headers: ["Worker", "Tools", "Last run", "Status", ""],
