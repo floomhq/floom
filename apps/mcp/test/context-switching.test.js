@@ -65,7 +65,7 @@ const TEST_RESULTS = {
 };
 
 // Minimal OSS API stub: /workspaces, /workspaces/:id/select, /connections.
-async function withStubServer(fn, { cloud = false } = {}) {
+async function withStubServer(fn, { cloud = false, workersStatus = 200 } = {}) {
   const calls = [];
   const bodies = [];
   const server = createServer((req, res) => {
@@ -77,6 +77,13 @@ async function withStubServer(fn, { cloud = false } = {}) {
       const parsedBody = raw ? JSON.parse(raw) : null;
       bodies.push({ method: req.method, url: req.url, body: parsedBody });
       res.setHeader("content-type", "application/json");
+      // Workspace-access probe target (#1829): a workspace-scoped token returns
+      // 403 here when the active workspace header is one it isn't minted for.
+      if (req.method === "GET" && req.url === `${prefix}/workers`) {
+        res.statusCode = workersStatus;
+        res.end(JSON.stringify(workersStatus === 200 ? [] : { detail: "forbidden" }));
+        return;
+      }
       if (req.method === "GET" && req.url === `${prefix}/workspaces`) {
         res.end(JSON.stringify({ workspaces: WORKSPACES, active_id: "local-default" }));
         return;
@@ -268,6 +275,55 @@ test("workspace create works against cloud /api/workspaces", async () => {
       assert.equal(creds.workspace_name, "Cloud Customer");
       assert.ok(calls.includes("POST /api/workspaces"));
     }, { cloud: true });
+  });
+});
+
+// #1829: a workspace-scoped hosted api_token 403s on the now-active workspace
+// once create/switch repoints it. The CLI must probe access first and leave the
+// active workspace intact instead of wedging into a 403 loop that only a
+// hand-edit of credentials.json recovers from.
+test("cloud workspace switch refuses to de-scope a workspace-scoped token (#1829)", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "pat-token",
+        workspace_id: "local-default",
+        workspace_name: "Local",
+        authed_at: new Date().toISOString(),
+      });
+      const code = await workspacesSwitchCommand("ws_0123456789abcd");
+      assert.equal(code, 1);
+      const creds = await readCredentials();
+      // Active workspace unchanged — no hand-edit of credentials.json needed.
+      assert.equal(creds.workspace_id, "local-default");
+      assert.equal(creds.workspace_name, "Local");
+      assert.ok(calls.includes("GET /api/workers"), "switch probes workspace access");
+    }, { cloud: true, workersStatus: 403 });
+  });
+});
+
+test("cloud workspace create does not repoint to an inaccessible workspace (#1829)", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "pat-token",
+        workspace_id: "local-default",
+        workspace_name: "Local",
+        authed_at: new Date().toISOString(),
+      });
+      const code = await workspacesCreateCommand("New Team", { json: true });
+      // Creation succeeded server-side, but the active workspace stays usable.
+      assert.equal(code, 0);
+      const creds = await readCredentials();
+      assert.equal(creds.workspace_id, "local-default");
+      assert.equal(creds.workspace_name, "Local");
+      assert.ok(calls.includes("POST /api/workspaces"));
+      assert.ok(calls.includes("GET /api/workers"), "create probes workspace access");
+    }, { cloud: true, workersStatus: 403 });
   });
 });
 

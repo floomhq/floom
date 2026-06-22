@@ -1,4 +1,4 @@
-import { createAuthenticatedClient, FloomApiError, type FloomApiClient } from "../lib/api.js";
+import { createAuthenticatedClient, FloomApiClient, FloomApiError } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
 import { getCommandName } from "../lib/command-name.js";
 import { updateCredentials, type StoredCredentials } from "../lib/credentials.js";
@@ -33,6 +33,30 @@ async function fetchWorkspaces(client: FloomApiClient): Promise<WorkspaceListRes
 
 function activeWorkspaceId(credentials: StoredCredentials, data: WorkspaceListResponse): string {
   return credentials.workspace_id || data.active_id || "";
+}
+
+// Hosted api_tokens are workspace-scoped (4.2.4+): a token minted for workspace
+// A returns 403 on every call the moment the active workspace header points at
+// a different workspace. Before a create/switch repoints the active workspace,
+// probe the candidate with the current credential so the CLI can never silently
+// wedge itself into a 403 loop that only a hand-edit of credentials.json
+// recovers from (#1829). Only a 403 means "de-scoped"; any other outcome (200,
+// 404, 5xx, network) must not block the operation — proceed and let the real
+// command surface it, preserving prior behavior for non-scoped credentials.
+async function credentialCanAccessWorkspace(
+  credentials: StoredCredentials,
+  workspaceId: string,
+): Promise<boolean> {
+  const probe = new FloomApiClient(credentials.api_base, {
+    ...credentials,
+    workspace_id: workspaceId,
+  });
+  try {
+    await probe.requestJson("GET", "/workers");
+    return true;
+  } catch (error) {
+    return !(error instanceof FloomApiError && error.status === 403);
+  }
 }
 
 export async function workspacesListCommand(options: { json?: boolean }): Promise<number> {
@@ -76,10 +100,25 @@ export async function workspacesCreateCommand(name: string, options: { json?: bo
       log.err("workspace name is required");
       return 1;
     }
-    const { client } = await createAuthenticatedClient();
+    const { client, credentials } = await createAuthenticatedClient();
     const created = (await client.requestJson("POST", "/workspaces", {
       body: { name: trimmed },
     })) as WorkspaceRow;
+    // A workspace-scoped hosted token can create a workspace it cannot then act
+    // on. Don't repoint the active workspace to one the current credential 403s
+    // against — that is exactly the #1829 wedge.
+    if (credentials.mode === "cloud" && !(await credentialCanAccessWorkspace(credentials, created.id))) {
+      if (options.json) {
+        printJson(created);
+      } else {
+        log.ok(`Created workspace ${created.name} (${created.id}).`);
+        log.warn(
+          "Your current api_token is scoped to another workspace, so the active workspace was left unchanged.",
+        );
+        log.step(`Re-authenticate to use the new workspace: ${getCommandName()} login --cloud`);
+      }
+      return 0;
+    }
     await updateCredentials({
       workspace_id: created.id,
       workspace_name: created.name,
@@ -162,6 +201,17 @@ export async function workspacesSwitchCommand(target: string): Promise<number> {
         }
         throw error;
       }
+    }
+    if (credentials.mode === "cloud" && !(await credentialCanAccessWorkspace(credentials, match.id))) {
+      // Hosted api_tokens are scoped to a single workspace; switching the header
+      // to one the token isn't minted for would 403 every subsequent call. Keep
+      // the active workspace intact so the user is never stranded (#1829).
+      log.err(`Your current credential is not authorized for workspace ${match.name} (${match.id}).`);
+      process.stderr.write(
+        "Hosted api_tokens are scoped to a single workspace, so the active workspace was left unchanged.\n" +
+        `Re-authenticate to get a token for it: ${getCommandName()} login --cloud\n`,
+      );
+      return 1;
     }
     await updateCredentials({
       workspace_id: match.id,
