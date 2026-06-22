@@ -18,26 +18,21 @@ describe("guessDomain", () => {
 });
 
 describe("companyLogoUrl", () => {
-  it("returns a DuckDuckGo favicon URL only for dot-qualified domain inputs", () => {
-    // Dot-qualified input (real domain) → DuckDuckGo favicon URL.
-    expect(companyLogoUrl("acme.com")).toContain("icons.duckduckgo.com");
-    expect(companyLogoUrl("acme.com")).toContain("acme.com.ico");
-    expect(companyLogoUrl("https://acme.io/about")).toContain("acme.io.ico");
+  it("builds a favicon URL only for dot-qualified domain inputs", () => {
+    // Explicit domain → favicon URL (real company logo likely exists).
+    expect(companyLogoUrl("acme.com")).toContain("domain=acme.com");
+    expect(companyLogoUrl("https://acme.io/about")).toContain("domain=acme.io");
     // Empty → null.
     expect(companyLogoUrl("")).toBeNull();
   });
-  it("returns null for plain workspace names — no slug guessing", () => {
-    // Plain names (no dot) must return null. The workspace mark renders the
-    // clean generated mark. Slug guessing ("Nova Search" → novasearch.com) is
-    // forbidden because favicon services return generic placeholder icons for
-    // unknown domains, which look like a broken logo (gray globe/DDG icon).
-    expect(companyLogoUrl("Nova Search")).toBeNull();
+  it("returns null for plain slugs without a dot (personal/non-company names)", () => {
+    // These workspace names would only produce a generic globe favicon from the
+    // favicon service — return null so the caller falls back to the gradient squircle.
+    expect(companyLogoUrl("depontefede")).toBeNull();
+    expect(companyLogoUrl("fede-production")).toBeNull();
     expect(companyLogoUrl("content-pipeline")).toBeNull();
-    expect(companyLogoUrl("Floom Admin")).toBeNull();
     expect(companyLogoUrl("Acme")).toBeNull();
-    expect(companyLogoUrl("reltix")).toBeNull();
-    expect(companyLogoUrl("Heidi Health")).toBeNull();
-    expect(companyLogoUrl("   ")).toBeNull();
+    expect(companyLogoUrl("My Workspace")).toBeNull();
   });
 });
 
