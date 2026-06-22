@@ -612,7 +612,11 @@ def rename_context(
                 safe_name, new_name, exc_info=True,
             )
             try:
-                new_root.rename(context_dir(safe_name))
+                # Resolve the original source path WITHOUT hydration: the dir was
+                # just moved away, so a hosted hook would otherwise re-materialize
+                # the old pack at `safe_name`, making this rename-back fail on an
+                # already-existing destination and leaving the move half-applied.
+                new_root.rename(context_dir(safe_name, hydrate=False))
                 rename_context_metadata(new_name, safe_name)
             except Exception:
                 logger.error(

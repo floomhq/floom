@@ -295,6 +295,72 @@ def test_rename_rolls_back_when_rename_asset_raises(client, monkeypatch):
     assert row == ("ws-other", "other-user", "workspace")
 
 
+def test_rename_rollback_does_not_rehydrate_source(client, monkeypatch):
+    """#1813 P2: when the access-row re-key RAISES and the rename rolls back, the
+    source path is resolved WITHOUT hydration. In hosted mode the source dir has
+    just been moved away, so a naive `context_dir(safe_name)` lookup would invoke
+    the registered hydration hook, re-materialize the old pack, and then the
+    rename-back would fail on an already-existing destination -- leaving the move
+    half-applied while still returning 409. The hook must NOT fire for the source
+    during rollback, and the source must be restored on disk.
+    """
+    import os
+    import sqlite3
+
+    import contexts as contexts_mod
+    import db as db_mod
+
+    repos = db_mod.get_repositories()
+    # Foreign-workspace destination row -> real rename_asset hits the global-PK
+    # collision and RAISES, driving the rollback path.
+    repos.asset_access.ensure_brain_pack(
+        pack_id="taken",
+        workspace_id="ws-other",
+        owner_id="other-user",
+        name="taken",
+        default_visibility="workspace",
+    )
+    monkeypatch.setattr(repos.asset_access, "asset_id_conflict", lambda **k: False)
+
+    assert client.post("/contexts/draft", json={"writeable": True, "sensitive": False}).status_code in (200, 201)
+    # Give the source real content so the LEGITIMATE pre-move resolution
+    # (`context_dir("draft")` before the move) sees a populated dir and never
+    # hydrates -- isolating the rollback path as the only place "draft" could be
+    # re-materialized from remote storage.
+    client.put("/contexts/draft/files/keep.md", json={"content": "real source content"})
+
+    calls: list[str] = []
+
+    def _hook(scope, name, dest):
+        # Only re-materialize the SOURCE pack: the destination "taken" must stay
+        # absent on disk so the route reaches rename_asset (not the on-disk 409).
+        if name != "draft":
+            return
+        calls.append(name)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "rehydrated.md").write_text("pulled from remote", encoding="utf-8")
+
+    contexts_mod.set_context_hydration_hook(_hook)
+    try:
+        resp = client.post("/contexts/draft/rename", json={"new_name": "taken"})
+    finally:
+        contexts_mod.set_context_hydration_hook(None)
+
+    assert resp.status_code == 409, resp.text
+    # Rollback restored the source without the hook fabricating a stale dir.
+    assert "draft" not in calls, f"source was rehydrated during rollback: {calls}"
+    assert client.get("/contexts/draft").status_code == 200
+    assert client.get("/contexts/taken").status_code == 404
+
+    # The foreign workspace's mirror row is byte-for-byte intact (no fallback ran).
+    with sqlite3.connect(os.environ["WORKEROS_DB"]) as conn:
+        row = conn.execute(
+            "SELECT workspace_id, owner_id, visibility FROM brain_packs WHERE id = ?",
+            ("taken",),
+        ).fetchone()
+    assert row == ("ws-other", "other-user", "workspace")
+
+
 def test_rename_to_existing_name_conflicts(client):
     assert client.post("/contexts/other", json={"writeable": True}).status_code in (200, 201)
     resp = client.post("/contexts/facts/rename", json={"new_name": "other"})
