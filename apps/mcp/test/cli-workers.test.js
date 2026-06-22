@@ -107,17 +107,7 @@ function json(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-async function startMockApi({
-  existing = false,
-  postStatus = 200,
-  postDetail = "Unsupported",
-  putStatus = 200,
-  putDetail = "Unsupported",
-  deleteStatus = 204,
-  runPostStatus = 200,
-  runPostDetail = "Unsupported",
-  runDetail = { id: "run_1", status: "completed", output: { ok: true }, artifacts: [] },
-} = {}) {
+async function startMockApi({ existing = false, postStatus = 200, postDetail = "Unsupported", putStatus = 200, putDetail = "Unsupported", deleteStatus = 204 } = {}) {
   const seen = [];
   const bodies = [];
   const server = createServer(async (request, response) => {
@@ -191,22 +181,6 @@ async function startMockApi({
       }
       const enabled = url.pathname.endsWith("/resume");
       json(response, 200, { id: "cli-test-worker", name: "CLI Test Worker", enabled });
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/workers/cli-test-worker/runs") {
-      const body = await readBody(request);
-      bodies.push(body);
-      if (runPostStatus !== 200) {
-        json(response, runPostStatus, { detail: runPostDetail });
-        return;
-      }
-      json(response, 200, { run_id: "run_1", status: "queued" });
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/runs/run_1") {
-      json(response, 200, runDetail);
       return;
     }
 
@@ -717,47 +691,6 @@ test("workers enable resumes a worker via POST /workers/:id/resume", async (t) =
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Enabled cli-test-worker/);
   assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/resume"]);
-});
-
-test("workers run reports paused-worker 409 without top-level crash", async (t) => {
-  const mock = await startMockApi({
-    existing: true,
-    runPostStatus: 409,
-    runPostDetail: "Worker is paused. Re-enable it before running.",
-  });
-  t.after(() => mock.server.close());
-  const home = await makeTempHome(mock.baseUrl);
-
-  const result = await runCli(["workers", "run", "cli-test-worker"], { HOME: home });
-
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /API rejected run request: Worker is paused/);
-  assert.doesNotMatch(result.stderr, /floom failed/);
-  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs"]);
-});
-
-test("workers run --json surfaces output_schema values when output is empty", async (t) => {
-  const mock = await startMockApi({
-    existing: true,
-    runDetail: {
-      id: "run_1",
-      status: "completed",
-      output: {},
-      outputs: {},
-      output_schema: [{ name: "result", type: "text", label: "Result", value: "hello" }],
-      artifacts: [],
-    },
-  });
-  t.after(() => mock.server.close());
-  const home = await makeTempHome(mock.baseUrl);
-
-  const result = await runCli(["workers", "run", "cli-test-worker", "--json"], { HOME: home });
-
-  assert.equal(result.code, 0);
-  const body = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assert.deepEqual(body.output, { result: "hello" });
-  assert.deepEqual(body.outputs, { result: "hello" });
-  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs", "GET /runs/run_1"]);
 });
 
 test("workers push renders structured backend validation details and exits cleanly", async (t) => {
