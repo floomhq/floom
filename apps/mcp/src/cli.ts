@@ -40,6 +40,17 @@ import {
   connectionsListCommand,
 } from "./commands/connections.js";
 import {
+  contextsCreateCommand,
+  contextsDeleteCommand,
+  contextsDeleteFileCommand,
+  contextsListCommand,
+  contextsReadCommand,
+  contextsRollbackCommand,
+  contextsUploadCommand,
+  contextsVersionsCommand,
+  contextsWriteCommand,
+} from "./commands/contexts.js";
+import {
   mcpInstallCommand,
   mcpListCommand,
   mcpSwitchCommand,
@@ -254,6 +265,74 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .option("--json", "Print raw JSON")
     .action(async (path: string, options: { json?: boolean }) =>
       runAction(connectionsImportMcpConfigCommand(path, options)));
+
+  const contexts = program.command("contexts")
+    .alias("context")
+    .description("Manage brain pack context folders");
+  contexts.command("list")
+    .description("List brain packs")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(contextsListCommand(options)));
+  contexts.command("create")
+    .description("Create a brain pack")
+    .argument("<name>", "Brain pack name")
+    .option("--writeable", "Allow workers to write to this brain pack")
+    .option("--no-sensitive", "Enable git version history for this brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { writeable?: boolean; sensitive?: boolean; json?: boolean }) =>
+      runAction(contextsCreateCommand(name, options)));
+  contexts.command("read")
+    .description("Read a UTF-8 file from a brain pack")
+    .argument("<name>", "Brain pack name")
+    .argument("<path>", "File path inside the brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, path: string, options: { json?: boolean }) =>
+      runAction(contextsReadCommand(name, path, options)));
+  contexts.command("write")
+    .description("Write a UTF-8 file into a brain pack")
+    .argument("<name>", "Brain pack name")
+    .argument("<path>", "File path inside the brain pack")
+    .option("--content <text>", "Text content to write")
+    .option("--file <path>", "Read text content from a local file")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, path: string, options: { content?: string; file?: string; json?: boolean }) =>
+      runAction(contextsWriteCommand(name, path, options)));
+  contexts.command("upload")
+    .description("Upload a local file into a brain pack")
+    .argument("<name>", "Brain pack name")
+    .argument("<file>", "Local file to upload")
+    .option("--path <path>", "Destination path inside the brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, file: string, options: { path?: string; json?: boolean }) =>
+      runAction(contextsUploadCommand(name, file, options)));
+  contexts.command("delete")
+    .description("Delete a brain pack")
+    .argument("<name>", "Brain pack name")
+    .option("--force", "Delete even when workers reference this brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { force?: boolean; json?: boolean }) =>
+      runAction(contextsDeleteCommand(name, options)));
+  contexts.command("delete-file")
+    .description("Delete one file from a brain pack")
+    .argument("<name>", "Brain pack name")
+    .argument("<path>", "File path inside the brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, path: string, options: { json?: boolean }) =>
+      runAction(contextsDeleteFileCommand(name, path, options)));
+  contexts.command("versions")
+    .description("List brain pack version history")
+    .argument("<name>", "Brain pack name")
+    .option("--limit <n>", "Number of versions", (value: string) => Number(value), 50)
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { limit?: number; json?: boolean }) =>
+      runAction(contextsVersionsCommand(name, options)));
+  contexts.command("rollback")
+    .description("Restore a brain pack to a previous version")
+    .argument("<name>", "Brain pack name")
+    .argument("<version-id>", "Version id or git SHA")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, versionId: string, options: { json?: boolean }) =>
+      runAction(contextsRollbackCommand(name, versionId, options)));
 
   const mcp = program.command("mcp").description("Manage MCP servers and client config");
   mcp.command("list")
