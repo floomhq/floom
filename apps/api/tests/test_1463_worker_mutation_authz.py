@@ -26,6 +26,50 @@ def _repos():
     return SimpleNamespace(workers=workers)
 
 
+def test_worker_for_mutation_allows_admin_member_of_worker_workspace():
+    import services.worker_access as access
+
+    row = {
+        "id": "shared-worker",
+        "owner_id": "owner-user",
+        "visibility": "workspace",
+        "workspace_id": "ws-a",
+    }
+    repos = SimpleNamespace(
+        workers=SimpleNamespace(
+            get=lambda **_kwargs: None,
+            get_any=lambda **_kwargs: row,
+        ),
+        members=SimpleNamespace(
+            get_role=lambda *, workspace_id, user_id: "admin"
+            if workspace_id == "ws-a" and user_id == "admin-user"
+            else None,
+        ),
+    )
+
+    assert access._worker_for_mutation("shared-worker", _admin_auth(), repos) == row
+
+
+def test_worker_for_mutation_denies_admin_outside_worker_workspace():
+    import services.worker_access as access
+
+    row = {
+        "id": "shared-worker",
+        "owner_id": "owner-user",
+        "visibility": "workspace",
+        "workspace_id": "ws-other",
+    }
+    repos = SimpleNamespace(
+        workers=SimpleNamespace(
+            get=lambda **_kwargs: None,
+            get_any=lambda **_kwargs: row,
+        ),
+        members=SimpleNamespace(get_role=lambda **_kwargs: None),
+    )
+
+    assert access._worker_for_mutation("shared-worker", _admin_auth(), repos) is None
+
+
 def test_pause_resume_denies_workspace_member_without_owner_or_admin(monkeypatch):
     import services.worker_mutation as mutation
 
