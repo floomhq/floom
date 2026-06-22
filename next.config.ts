@@ -27,6 +27,25 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  async redirects() {
+    return [
+      {
+        source: "/",
+        has: [
+          { type: "query", key: "create", value: "(?<create>.+)" },
+          { type: "query", key: "prime", value: "(?<prime>.+)" },
+        ],
+        destination: "/app?create=:create&prime=:prime",
+        permanent: false,
+      },
+      {
+        source: "/",
+        has: [{ type: "query", key: "create", value: "(?<create>.+)" }],
+        destination: "/app?create=:create",
+        permanent: false,
+      },
+    ];
+  },
   async rewrites() {
     return [
       // Rewrite bare /product, /docs, /about → /v3/* (no collision with existing routes)

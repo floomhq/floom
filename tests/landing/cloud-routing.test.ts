@@ -11,7 +11,22 @@ describe("Cloud app routing", () => {
     process.env.CLOUD_DASHBOARD_URL = "https://cloud-dashboard.example.com";
     const config = (await import("../../next.config")).default;
 
-    expect(config.redirects).toBeUndefined();
+    const redirects = config.redirects ? await config.redirects() : [];
+    expect(redirects).toContainEqual({
+      source: "/",
+      has: [
+        { type: "query", key: "create", value: "(?<create>.+)" },
+        { type: "query", key: "prime", value: "(?<prime>.+)" },
+      ],
+      destination: "/app?create=:create&prime=:prime",
+      permanent: false,
+    });
+    expect(redirects).toContainEqual({
+      source: "/",
+      has: [{ type: "query", key: "create", value: "(?<create>.+)" }],
+      destination: "/app?create=:create",
+      permanent: false,
+    });
     const rewrites = config.rewrites ? await config.rewrites() : [];
     expect(rewrites).toContainEqual({
       source: "/app",

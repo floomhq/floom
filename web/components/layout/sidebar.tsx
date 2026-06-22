@@ -19,6 +19,7 @@ import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
 import { Avatar } from "@/components/ui/Avatar";
@@ -293,12 +294,12 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
     <div className="px-3 pt-3 pb-3 space-y-1.5">
       {/* #902 (wireframe newbtn): creating a worker = a conversation with
           Emily. Federico 2026-06-19: it is the SAME fullscreen Emily as the home
-          (the dock-fullscreen surface), primed for create via `/?create=1`, not a
+          (the dock-fullscreen surface), primed for create via `create=1`, not a
           separate full-page chat with its own header. */}
       {/* Global primary CTA: canonical Button (size lg = h-9) rendered as the
           create-worker Link. Same primary token + label everywhere. */}
       <Link
-        href="/?create=1"
+        href={createWorkerHref()}
         onClick={() => onNavigate?.()}
         className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
