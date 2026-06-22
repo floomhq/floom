@@ -1,4 +1,4 @@
-// WorkerOS identity mark — the ONE shared avatar component.
+// Floom identity mark — the ONE shared avatar component.
 // SPEC: /root/workeros-design-baseline/SPEC.md (locked 2026-06-22).
 //
 // Shape encodes ROLE:
