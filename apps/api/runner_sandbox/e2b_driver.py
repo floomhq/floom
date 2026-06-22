@@ -513,8 +513,30 @@ def _requirement_name(line: str) -> str | None:
     return match.group(1).lower().replace("_", "-")
 
 
+def _is_staged_input_file(path: Path, allowed_root: Path) -> bool:
+    """True only if *path* is an existing file living under *allowed_root*.
+
+    Resolves symlinks (``strict=True``) before the containment check so a staged
+    path cannot symlink-escape the per-run inputs directory. Used to ensure only
+    files staged by ``_resolve_file_input_references`` are uploaded into the
+    sandbox — never arbitrary host paths a caller smuggled into the inputs.
+    """
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    if not resolved.is_file():
+        return False
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError:
+        return False
+    return True
+
+
 def _plan_input_file_uploads(
     inputs: dict,
+    allowed_root: Path,
 ) -> tuple[list[tuple[Path, str]], dict]:
     """Plan how staged file inputs map into the sandbox ``inputs/`` directory.
 
@@ -526,16 +548,21 @@ def _plan_input_file_uploads(
     - grouped episode (list of absolute paths) -> ``[inputs/<key>/<basename>, ...]``
       in upload order, each clip in a per-input subdir to avoid collisions.
 
-    Non-file values (and paths that are not absolute existing files) are passed
-    through unchanged. Pure function so the remap is unit-testable without a
-    live sandbox.
+    Only absolute paths that resolve to an existing file **under**
+    *allowed_root* (the per-run staged-inputs directory produced by
+    ``_resolve_file_input_references``) are uploaded and remapped. Every other
+    value — non-file scalars, relative paths, and any absolute path string a
+    caller injected that points outside the staged dir (e.g. ``/etc/hosts``) —
+    is passed through unchanged so host files can never be exfiltrated into the
+    sandbox. Pure function so the remap is unit-testable without a live sandbox.
     """
+    allowed_root = allowed_root.resolve()
     uploads: list[tuple[Path, str]] = []
     sandbox_inputs: dict = {}
     for key, value in inputs.items():
         if isinstance(value, str):
             local_path = Path(value)
-            if local_path.is_absolute() and local_path.is_file():
+            if local_path.is_absolute() and _is_staged_input_file(local_path, allowed_root):
                 remote_relpath = f"inputs/{local_path.name}"
                 uploads.append((local_path, remote_relpath))
                 sandbox_inputs[key] = remote_relpath
@@ -547,7 +574,7 @@ def _plan_input_file_uploads(
             for member in value:
                 if isinstance(member, str):
                     member_path = Path(member)
-                    if member_path.is_absolute() and member_path.is_file():
+                    if member_path.is_absolute() and _is_staged_input_file(member_path, allowed_root):
                         remote_relpath = f"inputs/{key}/{member_path.name}"
                         uploads.append((member_path, remote_relpath))
                         remapped.append(remote_relpath)
@@ -2093,7 +2120,11 @@ class E2BSandboxDriver(SandboxDriver):
             # reads inside the sandbox.
             e2b_inputs_dir = f"{workdir}/inputs"
             made_subdirs: set[str] = set()
-            uploads, sandbox_inputs = _plan_input_file_uploads(inputs)
+            # Only files staged under this run's inputs dir by
+            # _resolve_file_input_references are eligible for upload; arbitrary
+            # host paths smuggled into inputs are passed through, never uploaded.
+            staged_inputs_root = ARTIFACTS_DIR / run_id / "inputs"
+            uploads, sandbox_inputs = _plan_input_file_uploads(inputs, staged_inputs_root)
             if uploads and e2b_inputs_dir not in made_subdirs:
                 # Create the base inputs/ dir first so grouped subdirs have a parent.
                 sandbox.files.make_dir(e2b_inputs_dir)

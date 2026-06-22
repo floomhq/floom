@@ -267,7 +267,8 @@ def test_plan_input_file_uploads_remaps_single_and_grouped(tmp_path):
             "clips": [str(clip0), str(clip1)],
             "text": "plain-scalar",
             "missing": "/nonexistent/relative-not-uploaded",
-        }
+        },
+        tmp_path,
     )
 
     # Single file -> inputs/<basename>; grouped -> inputs/<key>/<basename> in order.
@@ -282,3 +283,42 @@ def test_plan_input_file_uploads_remaps_single_and_grouped(tmp_path):
         "inputs/clips/000_clips.txt",
         "inputs/clips/001_clips.txt",
     ]
+
+
+def test_plan_input_file_uploads_rejects_paths_outside_staged_root(tmp_path):
+    """Host paths smuggled into inputs must never be uploaded into the sandbox.
+
+    Only files staged under the per-run inputs root are eligible; any absolute
+    path pointing elsewhere (e.g. /etc/hosts) is passed through verbatim so it
+    is written to inputs.json as a literal string, not exfiltrated as a file.
+    """
+    from runner_sandbox.e2b_driver import _plan_input_file_uploads
+
+    staged_root = tmp_path / "run-abc" / "inputs"
+    staged_root.mkdir(parents=True)
+    staged = staged_root / "doc.txt"
+    staged.write_text("legit")
+
+    # A real host file that exists but lives OUTSIDE the staged root.
+    outside = tmp_path / "secret.txt"
+    outside.write_text("host-secret")
+
+    uploads, sandbox_inputs = _plan_input_file_uploads(
+        {
+            "doc": str(staged),
+            "evil_scalar": str(outside),
+            "evil_list": [str(outside), str(staged)],
+        },
+        staged_root,
+    )
+
+    # Only the staged file is uploaded/remapped.
+    assert sandbox_inputs["doc"] == "inputs/doc.txt"
+    # Out-of-root scalar passes through as a literal, never uploaded.
+    assert sandbox_inputs["evil_scalar"] == str(outside)
+    # In the list, only the staged member is remapped; the host path stays literal.
+    assert sandbox_inputs["evil_list"] == [str(outside), "inputs/evil_list/doc.txt"]
+
+    uploaded_locals = [str(p) for p, _ in uploads]
+    assert str(outside) not in uploaded_locals
+    assert uploaded_locals == [str(staged), str(staged)]
