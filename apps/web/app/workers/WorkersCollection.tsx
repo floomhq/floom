@@ -16,12 +16,10 @@ import type {
   VersionSummary,
   RunSummary,
   TriggerSpec,
-  WorkerInput,
   WorkerAlert,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import {
-  WORKER_DETAIL_TABS,
   type WorkerDetailTab,
   SETUP_SUBTABS,
   type SetupSubtab,
@@ -60,7 +58,6 @@ import {
   ChevronDown,
   Lock,
   Mail,
-  MoreHorizontal,
   Plus,
   Trash2,
   Webhook,
@@ -201,7 +198,6 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
       alive = false;
       clearTimeout(timeout);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   const apply = useCallback(
     (d: WorkerDetail) => {
@@ -301,51 +297,6 @@ function friendlyToken(value?: string | null): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-// SPEC §4 + rule #4: Overview is OUTPUT-FIRST — latest result/artifacts and an
-// "All runs →" link lead; the "what it does" flow follows. The actual output
-// text/artifact preview needs `last_run.output_preview` (#815); until then we
-// surface the latest run's status/time and link into Runs for the full output.
-function LatestOutput({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
-  const last: RunSummary | undefined = d?.recent_runs?.[0] ?? w.last_run;
-  return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 9 }}>
-        <h4 className="c-dgl" style={{ margin: 0 }}>Latest output</h4>
-        <Link
-          href={`/runs?worker_id=${w.id}`}
-          className="c-vpill"
-          style={{ marginLeft: "auto", padding: "5px 9px" }}
-        >
-          All runs →
-        </Link>
-      </div>
-      {last ? (
-        <Link
-          href={`/runs?worker_id=${w.id}&sel=${last.id}`}
-          className="c-ltable"
-          style={{ display: "block", textDecoration: "none", color: "inherit" }}
-        >
-          <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto auto", gap: 12 }}>
-            <div className="c-lprimary">
-              <div className="c-lp-tx">
-                <div className="nm">Run #{last.id}</div>
-                <div className="sub">{last.status}</div>
-              </div>
-            </div>
-            <span className="c-cell m">{formatDuration(last.duration_ms)}</span>
-            <span className="c-cell m">{rel(last.created_at)}</span>
-          </div>
-        </Link>
-      ) : (
-        <div className="c-ltable" style={{ padding: 14, ...muted }}>
-          No runs yet. Run this worker to see its latest output here.
-        </div>
-      )}
-      {/* TODO(#815): render last_run.output_preview (result text + artifact chips) inline. */}
-    </div>
-  );
 }
 
 function OverviewTab({ w }: { w: WorkerSummary }) {

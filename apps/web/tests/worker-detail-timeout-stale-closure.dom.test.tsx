@@ -134,9 +134,9 @@ describe("useWorkerDetail stale-closure timeout bug (P0)", () => {
       fireEvent.click(await screen.findByRole("tab", { name: "Limits" }));
 
       // While the API is still pending, the panel shows a loading state (spinner).
-      // "Spend cap" is NOT yet shown.
+      // The redesign "Spend" group is NOT yet shown.
       expect(
-        screen.queryByText("Spend cap"),
+        screen.queryByText("Spend"),
       ).not.toBeInTheDocument();
 
       // Now resolve the detail. This simulates the API returning after 1-2 seconds
@@ -149,7 +149,7 @@ describe("useWorkerDetail stale-closure timeout bug (P0)", () => {
       // After resolution, the loaded limits content should appear.
       await waitFor(
         () => {
-          expect(screen.getByText("Spend cap")).toBeInTheDocument();
+          expect(screen.getByText("Spend")).toBeInTheDocument();
         },
         { timeout: 5_000 },
       );
@@ -173,7 +173,7 @@ describe("useWorkerDetail stale-closure timeout bug (P0)", () => {
       expect(
         screen.queryByText("Could not load details. Check your connection and try again."),
       ).not.toBeInTheDocument();
-      expect(screen.getByText("Spend cap")).toBeInTheDocument();
+      expect(screen.getByText("Spend")).toBeInTheDocument();
     },
     30_000,
   );
