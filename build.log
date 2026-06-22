@@ -2,17 +2,18 @@
 > workeros-cloud@0.0.1 build
 > node scripts/guard_vercel_project.mjs && next build
 
-⨯ Another next build process is already running.
+▲ Next.js 16.2.6 (Turbopack)
 
-  This could be:
-  - A next build still in progress
-  - A previous build that didn't   Finished TypeScript in 12.5s ...
+  Creating an optimized production build ...
+✓ Compiled successfully in 13.8s
+  Running TypeScript ...
+  Finished TypeScript in 9.3s ...
   Collecting page data using 11 workers ...
-  Generating static pages using 11 workers (0/47) ...
-  Generating static pages using 11 workers (11/47) 
-  Generating static pages using 11 workers (23/47) 
-  Generating static pages using 11 workers (35/47) 
-✓ Generating static pages using 11 workers (47/47) in 1516ms
+  Generating static pages using 11 workers (0/49) ...
+  Generating static pages using 11 workers (12/49) 
+  Generating static pages using 11 workers (24/49) 
+  Generating static pages using 11 workers (36/49) 
+✓ Generating static pages using 11 workers (49/49) in 1682ms
   Finalizing page optimization ...
 
 Route (app)
@@ -20,6 +21,8 @@ Route (app)
 ├ ○ /_not-found
 ├ ƒ /api/auth/email
 ├ ƒ /api/auth/password
+├ ƒ /api/marketplace/reviews
+├ ƒ /api/marketplace/reviews/summary
 ├ ƒ /api/session
 ├ ƒ /api/slack/install/claim
 ├ ƒ /api/waitlist

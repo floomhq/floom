@@ -15,6 +15,7 @@ import { TEMPLATES } from "@/components/landing-ref/data";
 import { V3Shell } from "../../V3Shell";
 import { V3TemplateCard, MARKS, toolLabel } from "../../V3TemplateCard";
 import { V3OutputPreview } from "../../V3OutputPreview";
+import { V3Reviews } from "../../V3Reviews";
 import "../../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -178,6 +179,9 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
           </div>
         </motion.div>
       </div>
+
+      {/* reviews */}
+      <V3Reviews itemKind="worker" itemSlug={t.slug} />
 
       {/* never dead-end: three other workers */}
       <div className="pb-6">

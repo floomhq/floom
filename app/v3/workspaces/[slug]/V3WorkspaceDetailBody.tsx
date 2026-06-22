@@ -19,6 +19,7 @@ import {
 import { V3Shell } from "../../V3Shell";
 import { V3TemplateCard } from "../../V3TemplateCard";
 import { V3WorkspaceCard } from "../../V3WorkspaceCard";
+import { V3Reviews } from "../../V3Reviews";
 import "../../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -146,6 +147,9 @@ export function V3WorkspaceDetailBody({ w }: { w: Workspace }) {
           ))}
         </div>
       </div>
+
+      {/* reviews */}
+      <V3Reviews itemKind="workspace" itemSlug={w.slug} />
 
       {/* never dead-end: other workspaces */}
       <div className="pb-6">
