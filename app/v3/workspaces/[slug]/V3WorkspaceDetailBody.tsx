@@ -8,11 +8,12 @@
 
 import Link from "next/link";
 import { motion } from "motion/react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import {
   WORKSPACES,
   getWorkspaceWorkers,
   getWorkspaceTools,
+  getWorkspaceOutcome,
   type Workspace,
 } from "@/components/landing-ref/data";
 import { V3Shell } from "../../V3Shell";
@@ -80,6 +81,37 @@ export function V3WorkspaceDetailBody({ w }: { w: Workspace }) {
             Hire this workspace
           </Link>
         </motion.div>
+      </div>
+
+      {/* how it runs together — orchestration */}
+      <div className="pb-20">
+        <h2 className="text-[22px] font-semibold tracking-[-0.018em]">How it runs together</h2>
+        <p className="mt-2 max-w-[560px] text-[14px] leading-relaxed text-foreground/75">
+          {getWorkspaceOutcome(w)}
+        </p>
+        <div className="mt-6 flex flex-wrap items-center gap-2">
+          <span className="rounded-[10px] bg-secondary px-3 py-2 text-[12.5px] font-medium text-foreground/80">
+            {workers[0]?.triggers[0] ?? "Trigger"}
+          </span>
+          {workers.map((t) => (
+            <span key={t.slug} className="flex items-center gap-2">
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+              <Link
+                href={`/templates/${t.slug}`}
+                className="rounded-[10px] bg-secondary px-3 py-2 text-[12.5px] text-foreground/80 transition-colors hover:bg-secondary/70"
+              >
+                {t.name}
+              </Link>
+            </span>
+          ))}
+          <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+          <span
+            className="rounded-[10px] px-3 py-2 text-[12.5px] font-medium"
+            style={{ background: "var(--v3-sel)", color: "var(--v3-accent)" }}
+          >
+            Reviewed output
+          </span>
+        </div>
       </div>
 
       {/* the team: member workers */}

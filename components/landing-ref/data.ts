@@ -484,6 +484,27 @@ export function getWorkspace(slug: string): Workspace | undefined {
   return WORKSPACES.find((w) => w.slug === slug);
 }
 
+// The combined outcome — what the whole team delivers together (why hire the
+// workspace, not three separate workers).
+const WORKSPACE_OUTCOMES: Record<string, string> = {
+  "recruiting-desk": "A ranked shortlist, each candidate written up, your CRM kept warm — end to end.",
+  "founder-cockpit": "Your numbers, your update, and a clean inbox — every week, hands-off.",
+  "growth-studio": "Keywords found, articles written, competitors watched — a full content engine.",
+  "sales-engine": "Every lead researched, every call followed up, the CRM always current.",
+  "engineering-ops": "Bugs triaged, meetings turned into tickets, the repo digested — daily.",
+  "inbox-zero": "Noise archived, every reply drafted, a morning brief — inbox at zero.",
+  "content-engine": "From keyword to published article, grounded in real research.",
+  "chief-of-staff": "Inbox, metrics, and replies handled — a chief of staff that never sleeps.",
+  "talent-pipeline": "Companies hiring found, candidates sourced and written up — a full pipeline.",
+  "revenue-ops": "Leads researched, CRM clean, numbers reported — revenue ops on autopilot.",
+  "competitive-intel": "The news watched, the moves briefed, the keyword gaps found.",
+  "support-desk": "Every reply drafted, every bug routed, every answer looked up.",
+};
+
+export function getWorkspaceOutcome(w: Workspace): string {
+  return WORKSPACE_OUTCOMES[w.slug] ?? w.pitch;
+}
+
 // Resolve a workspace's worker slugs to full Template objects (skips unknowns).
 export function getWorkspaceWorkers(w: Workspace): Template[] {
   return w.workers
