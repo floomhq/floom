@@ -6,19 +6,22 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
+import { useNavBadgeCounts } from "@/lib/useSelfOverviewItems";
 import { useQueryClient } from "@tanstack/react-query";
-import { prefetchRouteData, prefetchIdleRoutes } from "@/lib/query/prefetch";
+import { prefetchRouteData, prefetchIdleRoutes, prefetchMainRoutesEager } from "@/lib/query/prefetch";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
-import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import type { CurrentUser } from "@/lib/types";
-import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
+import { Avatar } from "@/components/ui/Avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,43 +55,14 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 
 // #1305: the app is WHITE-LABELED — the workspace IS the brand. The mark must
 // be the WORKSPACE logo/avatar, never the Floom play-triangle.
-// DiceBear `shapes` avatar deterministically seeded by workspace name —
-// geometric, non-cartoonish, fits a serious B2B product.
-// Container uses var(--radius-button) (squircle), NOT a circle.
+// Generated identity mark deterministically seeded by workspace name —
+// squircle shape (workspace = non-human). Logo override handled where a
+// company logo is available; the sidebar header mark uses the generated mark.
 function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
-  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
-  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      aria-hidden="true"
-      width={size}
-      height={size}
-      className="shrink-0 rounded-[var(--radius-button)] object-cover"
-      style={{ width: size, height: size }}
-    />
-  );
+  const seed = resolveWorkspaceName(name) || name || "workspace";
+  return <Avatar role="workspace" name={seed} size={size} />;
 }
 
-// #1306: user profile avatar fallback when /me returns no OAuth photo.
-// DiceBear `glass` style deterministically seeded by the user's email/name:
-// a calm geometric mark (no cartoon faces), consistent with the workspace
-// mark's squircle, flat, no-border treatment.
-function UserDiceBearAvatar({ seed, size }: { seed: string; size: number }) {
-  const safeSeed = encodeURIComponent(seed || "user");
-  const src = `https://api.dicebear.com/9.x/glass/svg?seed=${safeSeed}&radius=0`;
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt="Profile avatar"
-      className="shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
-      style={{ width: size, height: size }}
-    />
-  );
-}
 
 /** Active workspace name, resolved once from the workspace list (shared shape
  *  with UserProfileFooter so the mark + footer stay in sync). */
@@ -165,30 +139,74 @@ function MobileWorkspaceName() {
 // nav has no room for a permanent subtitle without a redesign, so the
 // employee-model microcopy ("Workers run on triggers") lives in the tooltip
 // instead (the operator 2026-06-02).
+// Each badge is sourced from one shared, polled fetch (see below):
+//  - approvals  → pending-approvals count   (neutral tone)
+//  - connections → connections needing re-auth / expired (amber attention)
+//  - runs       → recent failed runs        (amber attention)
+type NavBadgeKey = "approvals" | "connections" | "runs";
+
 type NavItem = {
   href: string;
   label: string;
   icon: React.ElementType;
   hint?: string;
-  badge?: boolean;
+  badge?: NavBadgeKey;
 };
 
 // Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is gone,
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
-// Integrations. (MCP is a pinned item above the profile footer, see below.)
+// Connections. (MCP is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
-  { href: "/runs", label: "Runs", icon: Clock },
-  { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
-  { href: "/connections", label: "Integrations", icon: Plug },
+  { href: "/runs", label: "Runs", icon: Clock, badge: "runs" },
+  { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: "approvals" },
+  { href: "/connections", label: "Connections", icon: Plug, badge: "connections" },
 ];
 
+// Subtle amber attention treatment (Floom DS: red is NOT a Floom color — amber
+// #C98A1A == var(--warning)). Mirrors the .c-pill.err token in globals.css.
+const AMBER_BADGE_CLASS =
+  "bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] text-[color-mix(in_srgb,var(--warning)_82%,var(--ink))]";
+
+/** Resolve a nav item's badge count + tone from the shared badge sources.
+ *  Pure helper (no hooks) so it is safe to call inside the nav .map(). */
+function resolveNavBadge(key: NavBadgeKey | undefined, counts: NavBadgeCounts) {
+  if (!key) return null;
+  if (key === "approvals") {
+    return counts.pendingApprovals > 0
+      ? { count: counts.pendingApprovals, tone: "neutral" as const }
+      : null;
+  }
+  if (key === "connections") {
+    return counts.connectionsExpired > 0
+      ? { count: counts.connectionsExpired, tone: "amber" as const }
+      : null;
+  }
+  return counts.failedRuns > 0
+    ? { count: counts.failedRuns, tone: "amber" as const }
+    : null;
+}
+
+type NavBadgeCounts = {
+  pendingApprovals: number;
+  connectionsExpired: number;
+  failedRuns: number;
+};
+
+/** Pull all three badge counts from one shared overview fetch + the shared
+ *  approvals source. Used by both the expanded nav and the collapsed rail. */
+function useNavBadgeSources(): NavBadgeCounts {
+  const pendingApprovals = useApprovalsCount();
+  const { connectionsExpired, failedRuns } = useNavBadgeCounts();
+  return { pendingApprovals, connectionsExpired, failedRuns };
+}
+
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
-  // Shared source with /approvals: revalidates on focus + after any
-  // approve/reject so the badge never drifts from the list (G5 P2).
-  const pendingCount = useApprovalsCount();
+  // Badge counts from one shared, polled overview fetch (+ the shared approvals
+  // source, which revalidates on focus + after any approve/reject — G5 P2).
+  const badgeCounts = useNavBadgeSources();
   // Data prefetch: warm the destination route's TanStack cache on hover/focus
   // so the tab switch is instant. Link already prefetches the route's JS/RSC;
   // this adds the DATA. Cache-first + idempotent (see prefetch.ts).
@@ -203,13 +221,14 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
     <nav className="flex-1 px-3 space-y-0.5">
       {nav.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
-        const showBadge = item.badge && pendingCount > 0;
+        const badge = resolveNavBadge(item.badge, badgeCounts);
         return (
           <Link
             key={item.href}
             href={item.href}
             prefetch
             onMouseEnter={() => warm(item.href)}
+            onPointerDown={() => warm(item.href)}
             onFocus={() => warm(item.href)}
             onClick={onNavigate}
             title={item.hint}
@@ -222,10 +241,17 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
           >
             <item.icon className="w-4 h-4" />
             {item.label}
-            {showBadge && (
-              <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
-                {pendingCount}
-              </span>
+            {badge && (
+              <Badge
+                variant={badge.tone === "amber" ? "default" : "secondary"}
+                aria-hidden="true"
+                className={cn(
+                  "ml-auto h-4 min-w-4 px-1 text-[10px] font-semibold leading-none tabular-nums",
+                  badge.tone === "amber" && AMBER_BADGE_CLASS,
+                )}
+              >
+                {badge.count > 99 ? "99+" : badge.count}
+              </Badge>
             )}
           </Link>
         );
@@ -269,10 +295,12 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
           Emily. Federico 2026-06-19: it is the SAME fullscreen Emily as the home
           (the dock-fullscreen surface), primed for create via `/?create=1`, not a
           separate full-page chat with its own header. */}
+      {/* Global primary CTA: canonical Button (size lg = h-9) rendered as the
+          create-worker Link. Same primary token + label everywhere. */}
       <Link
         href="/?create=1"
         onClick={() => onNavigate?.()}
-        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-text)] transition-colors duration-150 hover:opacity-90"
+        className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
@@ -346,7 +374,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
     setOpen(false);
   }, [pathname]);
 
-  const pendingCount = useApprovalsCount();
+  const badgeCounts = useNavBadgeSources();
   const mcpModal = useMcpModal();
   // Data prefetch (collapsed icon rail uses this `warm`; the expanded nav warms
   // inside NavLinks). After first paint, warm the highest-value routes once on
@@ -358,16 +386,20 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
     router.prefetch(href);
   };
   useEffect(() => {
+    // Warm ALL main routes' data immediately (parallel, cache-first/idempotent)
+    // so the first tab switch hits the cache = instant; then warm the remaining
+    // secondary routes on idle. Run once after mount; pathname/queryClient are
+    // stable enough for a one-shot warm (re-running on every nav would be a
+    // refetch storm).
+    prefetchMainRoutesEager(queryClient, pathname);
     prefetchIdleRoutes(queryClient, pathname);
-    // Run once after mount; pathname/queryClient are stable enough for a
-    // one-shot idle warm (re-running on every nav would be a refetch storm).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <>
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 lg:hidden">
         {/* #1305: white-label, workspace mark + name, not the Floom brand. */}
         <Link href="/overview" className="flex items-center gap-2 min-w-0">
           <WorkspaceMark size={22} />
@@ -382,10 +414,6 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           >
             <Search className="w-5 h-5" />
           </button>
-          {/* #1292: global alerts bell on mobile (AppShell's pane-anchored bell
-              is desktop-only). Self-fetches needs-attention; dropdown opens
-              below-right of the trigger. */}
-          <AlertsBell />
           <ThemeModeButton className="theme-mode-button-compact" />
           <button
             type="button"
@@ -401,7 +429,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
       {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
       <aside
         className={cn(
-          "sticky top-0 z-20 hidden h-screen flex-col [border-right:var(--bd-div)] bg-[var(--bg-app)] transition-[width] duration-200 md:flex overflow-hidden",
+          "sticky top-0 z-20 hidden h-screen flex-col [border-right:var(--bd-div)] bg-[var(--bg-app)] transition-[width] duration-200 lg:flex overflow-hidden",
           collapsed ? "w-[62px]" : "w-[228px]"
         )}
         aria-label="Main navigation"
@@ -462,13 +490,14 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
             {nav.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
-              const showBadge = item.badge && pendingCount > 0;
+              const badge = resolveNavBadge(item.badge, badgeCounts);
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   prefetch
                   onMouseEnter={() => warm(item.href)}
+                  onPointerDown={() => warm(item.href)}
                   onFocus={() => warm(item.href)}
                   title={item.label}
                   className={cn(
@@ -479,9 +508,17 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                   )}
                 >
                   <item.icon className="w-4 h-4" />
-                  {showBadge && (
-                    <span className="absolute -top-0.5 -right-0.5 size-3.5 rounded-[var(--radius-pill)] bg-[var(--primary)] flex items-center justify-center text-[8px] font-bold text-[var(--primary-text)]">
-                      {pendingCount > 9 ? "9+" : pendingCount}
+                  {badge && (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute -top-0.5 -right-0.5 size-3.5 rounded-[var(--radius-pill)] flex items-center justify-center text-[8px] font-bold",
+                        badge.tone === "amber"
+                          ? AMBER_BADGE_CLASS
+                          : "bg-[var(--bg-2)] text-[var(--ink-soft)]",
+                      )}
+                    >
+                      {badge.count > 9 ? "9+" : badge.count}
                     </span>
                   )}
                 </Link>
@@ -529,7 +566,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
 
       {/* ── Mobile drawer ───────────────────────────────────────────────────── */}
       {open && (
-        <div className="md:hidden fixed inset-0 z-40 flex">
+        <div className="lg:hidden fixed inset-0 z-40 flex">
           <div
             className="absolute inset-0 bg-black/30"
             onClick={() => setOpen(false)}
@@ -584,7 +621,10 @@ export function UserProfileFooter({
 }: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
-  const [workspaceName, setWorkspaceName] = useState("Floom workspace");
+  // #1709: canonical fallback is "My workspace" (resolveWorkspaceName), NOT the
+  // brand-specific "Floom workspace" — the app is white-labeled and the OSS /me
+  // has no workspace yet on first paint.
+  const [workspaceName, setWorkspaceName] = useState("My workspace");
 
   useEffect(() => {
     let active = true;
@@ -609,16 +649,24 @@ export function UserProfileFooter({
         if (active && current) setWorkspaceName(resolveWorkspaceName(current.name));
       })
       .catch(() => {
-        if (active) setWorkspaceName("Floom workspace");
+        if (active) setWorkspaceName("My workspace");
       });
     return () => {
       active = false;
     };
   }, []);
 
-  // Multi-member: prefer username, then email, then display_name
-  const primary = (user as (typeof user & { username?: string | null }) | null)?.username
-    || user?.email || user?.display_name || "Local user";
+  // Multi-member: prefer username, then email, then display_name. #1728: skip
+  // UUID-shaped candidates so a raw user/owner id never leaks as the identity
+  // line (the OSS /me can return an id-only username).
+  const primary = resolveUserLabel(
+    [
+      (user as (typeof user & { username?: string | null }) | null)?.username,
+      user?.email,
+      user?.display_name,
+    ],
+    "Local user",
+  );
   const secondary = workspaceName;
   // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
   // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this
@@ -652,24 +700,10 @@ export function UserProfileFooter({
           )}
           aria-label="Profile menu"
         >
-          {/* #1306 / M36: profile photo (Google/GitHub) when available, else
-              initials. Squared (rounded-square via the app radius token), no
-              border. */}
-          {photoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={photoUrl}
-              alt="Profile avatar"
-              className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            // #1306: no OAuth photo (OSS /me returns none): fall back to a
-            // DiceBear avatar deterministically seeded by the user's
-            // email/name, NOT bare initials. Squircle container, no border,
-            // matching the workspace mark approach.
-            <UserDiceBearAvatar seed={primary} size={28} />
-          )}
+          {/* #1306 / M36: profile photo (Google/GitHub) beats generated mark.
+              Avatar handles the override ladder: src present → real photo
+              cropped to the circle (user = human); absent → generated mark. */}
+          <Avatar role="user" name={primary} src={photoUrl} size={28} />
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
             <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>

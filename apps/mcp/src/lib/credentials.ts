@@ -1,6 +1,7 @@
-﻿import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { getCommandName } from "./command-name.js";
 
 // AuthMode determines how the CLI hits the API:
 // - "oss" -> single-tenant OSS engine, x-floom-secret header, no workspaces
@@ -20,7 +21,10 @@ export type StoredCredentials = {
   supabase_url?: string;
   // Hosted mode: Supabase anon key (needed for the /auth/v1/token refresh call).
   supabase_anon_key?: string;
-  // Currently-active workspace id (hosted or OSS). Sent as X-Workeros-Workspace.
+  // OSS mode: identity sent as x-floom-user when the engine has user-header
+  // scope enabled. Comes from WORKEROS_USER / FLOOM_USER / --user.
+  user?: string;
+  // Currently-active workspace id (hosted or OSS). Sent as x-workeros-workspace.
   workspace_id?: string;
   // Human-readable workspace name (for `floom workspaces show`).
   workspace_name?: string;
@@ -31,9 +35,17 @@ export type StoredCredentials = {
 
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
 const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
+const LEGACY_PLACEHOLDER_CLOUD_API_BASES = new Set([
+  "https://api.workeros.example.com",
+  "https://api.floom.example.com",
+]);
 
 function envApiBase(defaultBase: string): string {
   return (process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE || defaultBase).replace(/\/+$/, "");
+}
+
+function envUser(): string | undefined {
+  return (process.env.WORKEROS_USER || process.env.FLOOM_USER || "").trim() || undefined;
 }
 
 function envCloudRequested(): boolean {
@@ -41,11 +53,28 @@ function envCloudRequested(): boolean {
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
+function normalizeStoredApiBase(mode: AuthMode, value: string | undefined): string {
+  const fallback = mode === "cloud" ? DEFAULT_CLOUD_API_BASE : DEFAULT_OSS_API_BASE;
+  const normalized = (value || fallback).replace(/\/+$/, "");
+  if (mode === "cloud" && LEGACY_PLACEHOLDER_CLOUD_API_BASES.has(normalized)) {
+    return DEFAULT_CLOUD_API_BASE;
+  }
+  return normalized;
+}
+
 function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
 }
 
 export function credentialsPath(): string {
+  const home = resolveHomeDir();
+  if (!home) {
+    throw new Error("HOME is required to read CLI credentials");
+  }
+  return join(home, ".config", "floom", "credentials.json");
+}
+
+function legacyCredentialsPath(): string {
   const home = resolveHomeDir();
   if (!home) {
     throw new Error("HOME is required to read CLI credentials");
@@ -72,13 +101,14 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
       api_base: envApiBase(DEFAULT_OSS_API_BASE),
       mode: "oss",
       api_secret: envOssSecret,
+      user: envUser(),
       workspace_id: process.env.WORKEROS_WORKSPACE_ID?.trim() || undefined,
       workspace_name: process.env.WORKEROS_WORKSPACE_NAME?.trim() || undefined,
       authed_at: new Date().toISOString(),
     };
   }
 
-  const path = credentialsPath();
+  const path = existsSync(credentialsPath()) ? credentialsPath() : legacyCredentialsPath();
   if (!existsSync(path)) {
     return null;
   }
@@ -102,13 +132,15 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     return null;
   }
   return {
-    api_base: (parsed.api_base || (mode === "cloud" ? DEFAULT_CLOUD_API_BASE : DEFAULT_OSS_API_BASE)).replace(/\/+$/, ""),
+    api_base: normalizeStoredApiBase(mode, parsed.api_base),
     mode,
     api_secret: parsed.api_secret,
     api_token: parsed.api_token,
     refresh_token: parsed.refresh_token,
     supabase_url: parsed.supabase_url ? parsed.supabase_url.replace(/\/+$/, "") : undefined,
     supabase_anon_key: parsed.supabase_anon_key,
+    // Env/flag wins so `--user` overrides a saved OSS creds file on a single call.
+    user: envUser() || parsed.user,
     workspace_id: parsed.workspace_id,
     workspace_name: parsed.workspace_name,
     active_mcp_label: parsed.active_mcp_label,
@@ -129,7 +161,7 @@ export async function updateCredentials(
 ): Promise<StoredCredentials> {
   const current = await readCredentials();
   if (!current) {
-    throw new Error("Not logged in. Run floom login first.");
+    throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
   }
   const next: StoredCredentials = { ...current, ...partial };
   await writeCredentials(next);
@@ -137,12 +169,10 @@ export async function updateCredentials(
 }
 
 export async function clearCredentials(): Promise<boolean> {
-  const path = credentialsPath();
-  if (!existsSync(path)) {
-    return false;
-  }
-  await rm(path, { force: true });
-  return true;
+  const paths = [credentialsPath(), legacyCredentialsPath()];
+  const existing = paths.filter((path) => existsSync(path));
+  await Promise.all(existing.map((path) => rm(path, { force: true })));
+  return existing.length > 0;
 }
 
 export function maskSecret(secret: string): string {

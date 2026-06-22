@@ -1,4 +1,4 @@
-// REFERENCE ONLY — staged for later, NOT wired into the Workeros app.
+// REFERENCE ONLY — staged for later, NOT wired into the Floom app.
 // Source: gate-app/lettersnap-agents src/services/whatsapp-webhook.ts.
 // Meta WhatsApp Cloud API inbound webhook payload normalizer. LetterSnap-specific
 // Cloudinary upload was removed; media is returned as a base64 data URL plus an

@@ -1,7 +1,7 @@
 """Regression: the worker path-traversal guard must not fire on legit paths.
 
 Root cause (2026-06-14 cloud audit, Issue 10): on hosted platform, FLOOM_WORKERS_DIR was
-`/opt/workeros/var/workers` where a parent segment is a symlink. The old
+`/opt/floom/var/workers` where a parent segment is a symlink. The old
 `_safe_path` did `WORKERS_DIR.joinpath(id).resolve()` then
 `relative_to(WORKERS_DIR)` — `.resolve()` follows symlinks, so a valid
 `<WORKERS_DIR>/<worker_id>` could resolve to a realpath that is no longer

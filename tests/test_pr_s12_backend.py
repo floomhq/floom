@@ -1,6 +1,7 @@
 import importlib
 import json
 import sys
+import time
 import types
 import uuid
 import zipfile
@@ -51,6 +52,7 @@ def api_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_SECRET", "s12-secret")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
 
     for name in list(sys.modules):
         if name in {"main", "models", "run_service", "worker_registry", "runner_utils", "scheduler"} or name == "db" or name.startswith("db."):
@@ -153,11 +155,17 @@ def test_runtime_snapshot_created_and_persisted(api_ctx):
     worker_id = _create_worker(client, headers)
     run_id = _start_run(client, headers, worker_id, {"text": "hello"})
 
-    with main.get_db() as conn:
-        row = conn.execute(
-            "SELECT bundle_snapshot_path FROM runs WHERE id = ?",
-            (run_id,),
-        ).fetchone()
+    row = None
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        with main.get_db() as conn:
+            row = conn.execute(
+                "SELECT bundle_snapshot_path FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        if row is not None and row["bundle_snapshot_path"]:
+            break
+        time.sleep(0.05)
     assert row is not None
     assert row["bundle_snapshot_path"] == f"run-bundles/{run_id}"
 

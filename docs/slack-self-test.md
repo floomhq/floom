@@ -1,6 +1,6 @@
 # Slack Self-Test Checklist
 
-Use this checklist to verify the Workeros Slack Agent in a real Slack workspace.
+Use this checklist to verify the Floom Slack Agent in a real Slack workspace.
 
 ## Current Gate
 
@@ -17,7 +17,7 @@ Before the Slack app can verify its Request URL, configure the production API en
 - optional: `SLACK_ALLOWED_TEAM_IDS`
 - optional: `SLACK_WORKEROS_USER_ID`
 
-Do not paste Slack tokens or signing secrets into chat. Add them through the server environment path used by `workeros-api.service`, then restart the service.
+Do not paste Slack tokens or signing secrets into chat. Add them through the server environment path used by `floom-api.service`, then restart the service.
 
 ## Slack App Setup
 
@@ -48,7 +48,7 @@ the operator that channel access isn't enabled yet and how the owner enables it
 To grant Emily access to a specific channel, run in that channel:
 
 ```text
-/invite @Workeros
+/invite @Floom
 ```
 
 ## Smoke Test
@@ -56,10 +56,10 @@ To grant Emily access to a specific channel, run in that channel:
 1. In a channel where the bot is present, send:
 
 ```text
-@Workeros summarize my active workers
+@Floom summarize my active workers
 ```
 
-Expected: Workeros replies in the Slack thread.
+Expected: Floom replies in the Slack thread.
 
 2. Run:
 
@@ -85,19 +85,19 @@ Expected: Slack returns `Working on it...`, then posts the workspace-agent reply
 
 Expected: Slack renders pending approvals with Approve, Reject, and Dismiss buttons. If there are no pending approvals, Slack returns `No pending approvals.`
 
-5. Open the Workeros app DM or AI App thread and send:
+5. Open the Floom app DM or AI App thread and send:
 
 ```text
 List pending approvals
 ```
 
-Expected: Workeros sets assistant status and replies in the thread.
+Expected: Floom sets assistant status and replies in the thread.
 
 6. Click Approve and Reject on a real pending approval card.
 
-Expected: the Slack message is replaced with the decision result, and the corresponding Workeros run leaves `pending_approval`.
+Expected: the Slack message is replaced with the decision result, and the corresponding Floom run leaves `pending_approval`.
 
-7. In the Workeros app DM or AI App thread, send:
+7. In the Floom app DM or AI App thread, send:
 
 ```text
 List the Slack channels you can read
@@ -110,11 +110,11 @@ channel access isn't enabled yet and how the owner enables it (no error).
 8. In a channel where Emily is invited, ask her to summarize it:
 
 ```text
-@Workeros summarize #launch
+@Floom summarize #launch
 ```
 
 Expected: Emily calls `slack__read_channel` and summarizes the recent messages.
-If she isn't in the channel, she replies "Invite me with /invite @Workeros in
+If she isn't in the channel, she replies "Invite me with /invite @Floom in
 #launch and I'll read it." If scopes aren't granted, she explains how the owner
 enables channel access.
 
@@ -122,19 +122,19 @@ enables channel access.
 
 - Slack Event Subscriptions URL verification success screen.
 - Slack app install success screen.
-- Screenshot of `@Workeros` threaded reply.
+- Screenshot of `@Floom` threaded reply.
 - Screenshot of `/floom help`.
 - Screenshot of `/floom approvals` Block Kit buttons or `No pending approvals.`
 - Screenshot of approval decision result.
 - API logs around each request:
 
 ```bash
-journalctl -u workeros-api --since "10 minutes ago" --no-pager | rg -n "slack|Slack|/slack"
+journalctl -u floom-api --since "10 minutes ago" --no-pager | rg -n "slack|Slack|/slack"
 ```
 
 ## Deterministic Regression
 
-Run from the Workeros repo:
+Run from the Floom repo:
 
 ```bash
 python3 -m pytest tests/test_slack_events.py tests/test_slack_listener.py tests/test_composio_triggers.py tests/test_pr231_correctness.py -q

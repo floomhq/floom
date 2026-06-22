@@ -1,17 +1,17 @@
-# Workeros Backend Deploy Runbook
+# Floom Backend Deploy Runbook
 
 ## How to deploy the backend
 
 ```bash
-cd /opt/workeros
+cd /opt/floom
 ./ops/deploy-api.sh
 ```
 
 That is the complete command. It handles everything: DB backup, source sync, dependency install into the service venv, service restart, health gate, schema check.
 
 For unattended deploys, install `ops/autodeploy-api.sh` through
-`workeros-api-autodeploy.service`.
-This OSS repo intentionally documents only the self-hosted Workeros API unit;
+`floom-api-autodeploy.service`.
+This OSS repo intentionally documents only the self-hosted Floom API unit;
 managed cloud API deploy/autodeploy configuration is maintained in the cloud
 deployment repo.
 The autodeploy wrapper is intentionally stricter than this manual command: it
@@ -73,7 +73,7 @@ the worker service private except for health checks.
 5. `git checkout origin/main -- apps/api apps/mcp workers docs` — syncs only tracked source files. Does NOT touch `data/`, `.env`, `workspace.md`, `contexts/`, or any other runtime state.
 6. Removes `*.rej` and `*.bak` patch-failed cruft under `apps/`.
 7. Installs `$WORKEROS_ROOT/apps/api/requirements.txt` into the actual service venv at `$WORKEROS_ROOT/apps/api/venv` using `$WORKEROS_ROOT/apps/api/venv/bin/python -m pip install -r ...`, then runs `pip check`.
-8. `systemctl restart workeros-api`.
+8. `systemctl restart floom-api`.
 9. Polls `/health` every 2 s until `status=ok` or 90 s timeout. Fails loudly on timeout.
 10. Asserts HTTP 200 on: `/healthz`, `/health`, `/workspace`, `/conversations`, `/approvals`, `/workers`.
 11. Runs `ops/verify-schema.py` — fails deploy if any expected table is missing.
@@ -81,7 +81,7 @@ the worker service private except for health checks.
 
 ### API dependency install path
 
-The production service runs from `/opt/workeros/apps/api/venv`. The deploy script installs the tracked deployed requirements file `/opt/workeros/apps/api/requirements.txt` into that venv before restart, so dependency changes take effect without a manual pip install. Operators can override the paths for a different host with:
+The production service runs from `/opt/floom/apps/api/venv`. The deploy script installs the tracked deployed requirements file `/opt/floom/apps/api/requirements.txt` into that venv before restart, so dependency changes take effect without a manual pip install. Operators can override the paths for a different host with:
 
 ```bash
 WORKEROS_API_VENV=/path/to/apps/api/venv \
@@ -100,17 +100,17 @@ WORKEROS_API_REQUIREMENTS=/path/to/apps/api/requirements.txt \
 ls /root/backups/manual/
 
 # Restore (API must be stopped first)
-systemctl stop workeros-api
-sqlite3 /opt/workeros/data/floom.db ".restore '/root/backups/manual/floom-predeploy-<ts>.db'"
-systemctl start workeros-api
+systemctl stop floom-api
+sqlite3 /opt/floom/data/floom.db ".restore '/root/backups/manual/floom-predeploy-<ts>.db'"
+systemctl start floom-api
 ```
 
 ### Roll back the code
 
 ```bash
-cd /opt/workeros
+cd /opt/floom
 git checkout <previous-sha> -- apps/api apps/mcp workers docs
-systemctl restart workeros-api
+systemctl restart floom-api
 ```
 
 Find the previous SHA with `git log --oneline`.
@@ -122,9 +122,9 @@ Find the previous SHA with `git log --oneline`.
 Run manually at any time:
 
 ```bash
-python3 /opt/workeros/ops/verify-schema.py
+python3 /opt/floom/ops/verify-schema.py
 # or with an explicit DB path:
-python3 /opt/workeros/ops/verify-schema.py /opt/workeros/data/floom.db
+python3 /opt/floom/ops/verify-schema.py /opt/floom/data/floom.db
 ```
 
 Exit 0 = all expected tables present. Exit 1 = drift detected (lists missing tables).
@@ -165,7 +165,7 @@ This is the brutally-simple fix: detect drift immediately, fail deploy, restore 
 
 ## CRITICAL: Never `git reset --hard` the prod checkout
 
-`/opt/workeros` is the production working tree. It contains untracked runtime files that are NOT in git:
+`/opt/floom` is the production working tree. It contains untracked runtime files that are NOT in git:
 
 - `data/floom.db` — the production SQLite database
 - `data/artifacts/` — run artifact files
@@ -178,9 +178,9 @@ This is the brutally-simple fix: detect drift immediately, fail deploy, restore 
 
 **Never run:**
 ```bash
-git reset --hard   # FORBIDDEN on /opt/workeros
-git checkout .     # FORBIDDEN on /opt/workeros
-git clean -f       # FORBIDDEN on /opt/workeros
+git reset --hard   # FORBIDDEN on /opt/floom
+git checkout .     # FORBIDDEN on /opt/floom
+git clean -f       # FORBIDDEN on /opt/floom
 ```
 
 **Always use the deploy script** which uses `git checkout origin/main -- <paths>` to sync only specific tracked files.
@@ -190,12 +190,12 @@ git clean -f       # FORBIDDEN on /opt/workeros
 ## Checking deploy logs
 
 ```bash
-journalctl -u workeros-api -n 100 -f
-journalctl -u workeros-api --since "5 minutes ago"
+journalctl -u floom-api -n 100 -f
+journalctl -u floom-api --since "5 minutes ago"
 ```
 
 ## Checking current migration version
 
 ```bash
-sqlite3 /opt/workeros/data/floom.db "SELECT version, applied_at FROM schema_version ORDER BY version"
+sqlite3 /opt/floom/data/floom.db "SELECT version, applied_at FROM schema_version ORDER BY version"
 ```

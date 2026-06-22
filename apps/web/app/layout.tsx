@@ -75,7 +75,7 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className="flex h-screen overflow-hidden flex-col bg-transparent text-foreground md:flex-row">
+      <body className="flex h-screen overflow-hidden flex-col bg-transparent text-foreground lg:flex-row">
         <QueryProvider>
           <AppShell>{children}</AppShell>
         </QueryProvider>

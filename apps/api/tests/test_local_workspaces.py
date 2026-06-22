@@ -179,6 +179,17 @@ def test_local_workspaces_list_create_and_select(client_and_db):
     assert scoped.json()["active_id"] == workspace_id
 
 
+def test_local_workspaces_accept_floom_workspace_header(client_and_db):
+    client, _db = client_and_db
+    created = client.post("/workspaces", json={"name": "Floom header"})
+    assert created.status_code == 200, created.text
+    workspace_id = created.json()["id"]
+
+    scoped = client.get("/workspaces", headers={"x-floom-workspace": workspace_id})
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["active_id"] == workspace_id
+
+
 def test_local_workspace_contexts_are_isolated(client_and_db):
     client, _db = client_and_db
     created = client.post("/workspaces", json={"name": "Isolated"})
@@ -411,3 +422,29 @@ def test_rename_workspace(client_and_db):
 
     assert client.patch("/workspaces/ws_doesnotexist", json={"name": "x"}).status_code == 404
     assert client.patch(f"/workspaces/{wid}", json={"name": ""}).status_code == 422
+
+
+def test_create_workspace_rejects_duplicate_name(client_and_db):
+    # #1738 — a retried create (e.g. after a transient session death) must not
+    # silently make a SECOND identically-named workspace; reject with 409.
+    client, _db = client_and_db
+    first = client.post("/workspaces", json={"name": "fede-secretary"})
+    assert first.status_code == 200, first.text
+
+    dup = client.post("/workspaces", json={"name": "fede-secretary"})
+    assert dup.status_code == 409, dup.text
+    assert "already exists" in dup.json()["detail"]
+
+    # case-insensitive
+    dup_ci = client.post("/workspaces", json={"name": "Fede-Secretary"})
+    assert dup_ci.status_code == 409, dup_ci.text
+
+    # only one such workspace exists
+    names = [w["name"] for w in client.get("/workspaces").json()["workspaces"]]
+    assert names.count("fede-secretary") == 1
+
+
+def test_create_workspace_allows_distinct_names(client_and_db):
+    client, _db = client_and_db
+    assert client.post("/workspaces", json={"name": "alpha"}).status_code == 200
+    assert client.post("/workspaces", json={"name": "beta"}).status_code == 200

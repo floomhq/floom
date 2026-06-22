@@ -12,7 +12,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 
-def _config(runtime_type: str, *, resources=None, bundle_baked: bool = False):
+def _config(runtime_type: str, *, resources=None, bundle_baked: bool = False, template_profile=None):
     from models import WorkerConfig, WorkerRuntime, WorkerTrigger
 
     return WorkerConfig(
@@ -22,6 +22,7 @@ def _config(runtime_type: str, *, resources=None, bundle_baked: bool = False):
         runtime=WorkerRuntime(type=runtime_type, command="python run.py", bundle_baked=bundle_baked),
         memory=False,
         resources=resources or {},
+        template_profile=template_profile,
         outputs=[],
     )
 
@@ -242,6 +243,149 @@ def test_schema_03_accepts_exec_bundle_baked_flag():
     config = worker_contract_to_worker_config(contract, "baked-worker")
 
     assert config.runtime.bundle_baked is True
+
+
+# ---------------------------------------------------------------------------
+# #1764 - operator-approved per-worker template profiles
+# ---------------------------------------------------------------------------
+
+
+def test_template_profile_resolves_to_configured_template(monkeypatch):
+    from runner_sandbox.e2b_driver import _e2b_template_for_config
+
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_PROFILE_WORKEROS_DEV", "tpl-workeros-dev")
+
+    assert (
+        _e2b_template_for_config(_config("python311", template_profile="workeros-dev"))
+        == "tpl-workeros-dev"
+    )
+
+
+def test_template_profile_takes_precedence_over_resource_and_runtime_templates(monkeypatch):
+    from runner_sandbox.e2b_driver import _e2b_template_for_config
+
+    # Even with runtime-kind and resource-bucket envs set, the explicit profile wins.
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_2048", "tpl-python-2gb")
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_PROFILE_WORKEROS_DEV", "tpl-workeros-dev")
+
+    config = _config("python311", resources={"memory_mb": 2048}, template_profile="workeros-dev")
+
+    assert _e2b_template_for_config(config) == "tpl-workeros-dev"
+
+
+def test_unknown_template_profile_fails_clearly_by_default(monkeypatch):
+    from runner_sandbox.e2b_driver import TemplateProfileError, _e2b_template_for_config
+
+    monkeypatch.delenv("WORKEROS_E2B_TEMPLATE_PROFILE_FALLBACK", raising=False)
+    monkeypatch.delenv("WORKEROS_E2B_TEMPLATE_PROFILE_MISSING", raising=False)
+    # Resource/runtime fallbacks exist, but strict policy must NOT silently use them.
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")
+
+    import pytest
+
+    with pytest.raises(TemplateProfileError) as excinfo:
+        _e2b_template_for_config(_config("python311", template_profile="missing"))
+
+    message = str(excinfo.value)
+    assert "missing" in message
+    assert "WORKEROS_E2B_TEMPLATE_PROFILE_MISSING" in message
+    # The error must guide the operator without exposing a raw template id value.
+    assert "tpl-python-fast" not in message
+
+
+def test_unconfigured_template_profile_falls_back_when_policy_is_default(monkeypatch):
+    from runner_sandbox.e2b_driver import _e2b_template_for_config
+
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_PROFILE_FALLBACK", "default")
+    monkeypatch.delenv("WORKEROS_E2B_TEMPLATE_PROFILE_MISSING", raising=False)
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")
+
+    assert (
+        _e2b_template_for_config(_config("python311", template_profile="missing"))
+        == "tpl-python-fast"
+    )
+
+
+def test_template_profile_env_key_normalizes_separators(monkeypatch):
+    from runner_sandbox.e2b_driver import _profile_template_env_key
+
+    assert _profile_template_env_key("workeros-dev") == "WORKEROS_E2B_TEMPLATE_PROFILE_WORKEROS_DEV"
+    assert _profile_template_env_key("browser_worker") == "WORKEROS_E2B_TEMPLATE_PROFILE_BROWSER_WORKER"
+
+
+def test_template_profile_run_log_reports_custom_profile_without_template_id(monkeypatch, tmp_path):
+    from runner_sandbox.e2b_driver import _e2b_template_for_run
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_PROFILE_WORKEROS_DEV", "tpl-workeros-dev")
+    config = _config("python311", template_profile="workeros-dev")
+    logs: list[tuple[str, str]] = []
+
+    template, baked = _e2b_template_for_run(
+        worker_dir, config, log_fn=lambda msg, level="info": logs.append((level, msg))
+    )
+
+    assert (template, baked) == ("tpl-workeros-dev", False)
+    profile_logs = [msg for _level, msg in logs if "template profile" in msg]
+    assert profile_logs and any("'workeros-dev'" in msg for msg in profile_logs)
+    # #1700: never leak the raw template id into run logs.
+    assert all("tpl-workeros-dev" not in msg for _level, msg in logs)
+
+
+def test_schema_03_accepts_exec_template_profile():
+    from models import parse_worker_manifest, worker_contract_to_worker_config
+
+    contract = parse_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "dev-worker",
+            "title": "Dev Worker",
+            "description": "Coding agent worker.",
+            "version": "0.1.0",
+            "entrypoint": "run.py",
+            "exec": {
+                "runtime": "python311",
+                "runner": "e2b",
+                "entry": "run.py",
+                "command": "python run.py",
+                "template_profile": "workeros-dev",
+            },
+            "trigger": {"type": "manual"},
+        }
+    )
+
+    config = worker_contract_to_worker_config(contract, "dev-worker")
+
+    assert config.template_profile == "workeros-dev"
+
+
+def test_exec_template_profile_rejects_unsafe_names():
+    import pytest
+
+    from models import parse_worker_manifest
+
+    with pytest.raises(Exception):
+        parse_worker_manifest(
+            {
+                "schema_version": "0.3",
+                "name": "bad-worker",
+                "title": "Bad Worker",
+                "description": "Invalid profile name.",
+                "version": "0.1.0",
+                "entrypoint": "run.py",
+                "exec": {
+                    "runtime": "python311",
+                    "runner": "e2b",
+                    "entry": "run.py",
+                    "command": "python run.py",
+                    "template_profile": "../evil profile",
+                },
+                "trigger": {"type": "manual"},
+            }
+        )
 
 
 def test_node_template_builder_defaults_to_2gb(monkeypatch):

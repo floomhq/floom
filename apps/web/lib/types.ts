@@ -413,6 +413,37 @@ export interface WorkerFeedback {
   created_at: string;
 }
 
+export interface RunFeedback {
+  id: string;
+  run_id: string;
+  worker_id: string;
+  author_id: string;
+  author_name?: string | null;
+  content: string;
+  rating?: string | null;
+  issue_id?: string | null;
+  created_at: string;
+}
+
+// A registered per-worker alert (email and/or outbound webhook) fired on run
+// terminal events. Maps to GET/POST/DELETE /workers/{id}/alerts.
+export interface WorkerAlert {
+  id: string;
+  worker_id: string;
+  url?: string | null;
+  email_to?: string[] | null;
+  on: string[]; // events: "failed" | "completed"
+  description?: string | null;
+  created_at: string;
+}
+
+export interface WorkerAlertCreate {
+  url?: string;
+  email_to?: string[];
+  on: string[];
+  description?: string;
+}
+
 // Read-only allow-list projection of a worker returned by
 // GET /workers/public/{id}?token=. Strictly a subset of WorkerDetail: no
 // secrets, source files, run history, owner id, or webhook url.
@@ -604,6 +635,37 @@ export interface ReloadResponse {
 export interface ActionResponse {
   status: string;
   run_id?: string;
+}
+
+// #1781 git-backed workspace issue (subset surfaced to the run feedback flow).
+export interface WorkspaceIssue {
+  id: string;
+  status: string;
+  title: string;
+  body: string;
+  asset_type?: string | null;
+  asset_id?: string | null;
+  source?: string | null;
+  labels: string[];
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  comment_count: number;
+}
+
+// #1807 explicit, opt-in conversion of actionable run feedback into an issue.
+export interface RunFeedbackIssueRequest {
+  feedback_text?: string | null;
+  rating?: string | null;
+  title?: string | null;
+  feedback_id?: string | null;
+}
+
+export interface RunFeedbackIssueResponse {
+  issue_id: string;
+  created: boolean;
+  issue: WorkspaceIssue;
+  feedback?: RunFeedback | null;
 }
 
 export interface ApprovalRow {
@@ -912,6 +974,7 @@ export interface WorkspaceAgentInfo {
 export interface WorkspaceImportResult {
   workers_imported: string[];
   contexts_imported: string[];
+  issues_imported: string[];
   skipped: { type: string; id: string; reason: string }[];
   id_remaps: Record<string, string>;
   required_secrets: string[];

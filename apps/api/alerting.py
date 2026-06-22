@@ -121,7 +121,7 @@ def _notify(worker_id: str, worker_name: str, reason: str, details: str) -> None
 
     # Email notification (if configured)
     if _ALERT_EMAIL:
-        subject = f"[Workeros] Worker alert: {worker_name or worker_id}"
+        subject = f"[Floom] Worker alert: {worker_name or worker_id}"
         body = (
             f"Worker: {worker_name or worker_id}\n"
             f"ID: {worker_id}\n"

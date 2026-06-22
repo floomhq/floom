@@ -222,26 +222,81 @@ def auth_issue_magic_link(
     return {"url": url, "expires_in": 900}
 
 
+def _is_browser_navigation(request: Request) -> bool:
+    """True when this request is a top-level browser navigation (not a fetch/XHR).
+
+    The web app consumes /auth/magic/{token} via fetch() and reads the JSON
+    body, so we must keep returning JSON for it. But a user clicking an expired
+    or already-consumed link directly (or a deployment whose link points at the
+    API host) navigates the browser to this endpoint and must NOT see raw JSON
+    (#1702) — we redirect those to the login page instead.
+    """
+    sec_fetch_mode = (request.headers.get("sec-fetch-mode") or "").lower()
+    if sec_fetch_mode:
+        # fetch() sends "cors" / "same-origin" / "no-cors"; a navigation sends
+        # "navigate". Trust this header when present (all modern browsers send it).
+        return sec_fetch_mode == "navigate"
+    # Fallback for clients that omit Sec-Fetch-Mode: treat an HTML-preferring
+    # Accept as a browser navigation.
+    accept = (request.headers.get("accept") or "").lower()
+    return "text/html" in accept
+
+
+def _magic_link_failure(request: Request, *, error: str, status_code: int, detail: str):
+    """Browser navigations get a redirect to the login page with an error code;
+    fetch()/API callers keep the JSON error contract (#1702)."""
+    if _is_browser_navigation(request):
+        from fastapi.responses import RedirectResponse
+
+        login_url = f"{_frontend_base_url()}/login?error={error}"
+        # 303 so the follow-up is always a GET, regardless of original method.
+        return RedirectResponse(url=login_url, status_code=303)
+    raise HTTPException(status_code=status_code, detail=detail)
+
+
 @auth_router.get("/auth/magic/{token}")
 def auth_consume_magic_link(
     token: str,
+    request: Request,
     response: Response,
     repos: Repositories = Depends(get_repos),
-) -> dict:
+):
     """Consume a magic-link token and create a session (multi-member mode only)."""
-    user_id, nonce, exp = _validate_magic_link_full(token)
+    try:
+        user_id, nonce, exp = _validate_magic_link_full(token)
+    except HTTPException as exc:
+        # Invalid / expired / malformed token. For a direct browser hit, redirect
+        # to login with a human error instead of dumping raw JSON (#1702).
+        return _magic_link_failure(
+            request, error="expired_link", status_code=exc.status_code, detail=str(exc.detail)
+        )
     try:
         user_repo, session_repo, _ = _require_multi_member_repos(repos)
     except HTTPException:
-        raise HTTPException(status_code=400, detail="Magic links require multi-member auth mode")
+        return _magic_link_failure(
+            request,
+            error="expired_link",
+            status_code=400,
+            detail="Magic links require multi-member auth mode",
+        )
     # F4: enforce one-time use. Claim the nonce before issuing a session so a
     # replay of the same link cannot mint a second session.
-    _consume_magic_link_nonce(nonce, exp)
+    try:
+        _consume_magic_link_nonce(nonce, exp)
+    except HTTPException as exc:
+        # Already-consumed / replayed link.
+        return _magic_link_failure(
+            request, error="expired_link", status_code=exc.status_code, detail=str(exc.detail)
+        )
     user = user_repo.get(user_id=user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        return _magic_link_failure(
+            request, error="expired_link", status_code=404, detail="User not found"
+        )
     if user.get("disabled"):
-        raise HTTPException(status_code=403, detail="Account disabled")
+        return _magic_link_failure(
+            request, error="account_disabled", status_code=403, detail="Account disabled"
+        )
     _prune_expired_sessions(session_repo)  # #849
     from datetime import datetime, timedelta, timezone as _tz
     session_id = pysecrets.token_urlsafe(32)
@@ -251,7 +306,9 @@ def auth_consume_magic_link(
     except ValueError:
         # #848: user was disabled between the check above and the session
         # insert (TOCTOU) — the atomic guard in create() caught it.
-        raise HTTPException(status_code=403, detail="Account disabled")
+        return _magic_link_failure(
+            request, error="account_disabled", status_code=403, detail="Account disabled"
+        )
     _set_session_cookie(response, session_id)
     return {"ok": True, "redirect_to": "/overview"}
 

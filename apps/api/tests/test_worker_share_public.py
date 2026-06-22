@@ -40,7 +40,7 @@ _WORKER = {
             "type": "skill",
             "entrypoint": "run.py",
             # Sensitive internals that must never reach the public response:
-            "bundle_path": "/opt/workeros/workers/weekly-digest",
+            "bundle_path": "/opt/floom/workers/weekly-digest",
             "system_prompt": "INTERNAL SYSTEM PROMPT — do not leak",
             "model": "claude-opus",
         },
@@ -130,7 +130,7 @@ def test_valid_token_returns_only_safe_allowlisted_fields():
     for needle in (
         "OPENAI_API_KEY", "INTERNAL_TOKEN", "sk-super-secret", "sk-leak-me",
         "secret-internal.example.com", "INTERNAL SYSTEM PROMPT",
-        "/opt/workeros/workers", "local-user", "bundle_path", "system_prompt",
+        "/opt/floom/workers", "local-user", "bundle_path", "system_prompt",
     ):
         assert needle not in blob, f"leaked: {needle}"
 

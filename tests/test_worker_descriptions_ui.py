@@ -84,7 +84,7 @@ def _build_new_worker_yaml(
     lines.append('schema_version: "0.3"')
     lines.append(f"name: {slug}")
     lines.append(f"title: {_yaml_string(title)}")
-    lines.append(f"description: {_yaml_string(description or 'Custom Workeros worker.')}")
+    lines.append(f"description: {_yaml_string(description or 'Custom Floom worker.')}")
     lines.append("long_description: |")
     lines.extend(_yaml_block(f"  Explain what {title} does, when to run it, and what a trustworthy result looks like."))
     lines.append("use_cases:")

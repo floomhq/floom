@@ -15,7 +15,7 @@ export default function PrivacyPage() {
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>
-          Floom is open-source software that runs AI workers on
+          Floom is source-available software that runs AI workers on
           infrastructure operated by whoever deploys it. This instance is a
           single-tenant deployment: it stores data for one account owner and
           is not a multi-user service collecting third-party personal data.
@@ -34,7 +34,7 @@ export default function PrivacyPage() {
             through the API: values are never returned to the browser.
           </li>
           <li>
-            <strong>Integrations</strong>: OAuth connections (via Composio) and
+            <strong>Connections</strong>: OAuth connections (via Composio) and
             MCP endpoints you authorize, referenced by internal identifiers.
             OAuth access tokens are held by the connection provider, not in this
             database.

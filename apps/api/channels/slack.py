@@ -1,4 +1,4 @@
-﻿"""Slack Events API channel — routes, OAuth helpers, and message handlers.
+"""Slack Events API channel — routes, OAuth helpers, and message handlers.
 
 All route paths are identical to those previously defined directly on the
 ``app`` FastAPI instance in main.py.  The router is included in main.py via
@@ -893,7 +893,7 @@ def _slack_legacy_single_user_mode() -> bool:
 
 
 def _slack_binding_user_id(team_id: str, slack_user_id: str) -> Optional[str]:
-    """Return the Workeros user_id for a bound (team_id, slack_user_id) pair, or None.
+    """Return the Floom user_id for a bound (team_id, slack_user_id) pair, or None.
 
     Also updates last_seen_at on a hit so the binding stays warm.
     """
@@ -1060,7 +1060,7 @@ def claim_slack_sender(
     auth: AuthContext = Depends(get_auth_context),
 ) -> Dict[str, Any]:
     """Consume a Slack claim token and bind the (team_id, slack_user_id) to the
-    authenticated Workeros user.
+    authenticated Floom user.
 
     Hardening:
     - Token is single-use: cleared (set to NULL) after successful claim.
@@ -1570,7 +1570,7 @@ async def _handle_slack_direct_message(
 ) -> None:
     """Handle an inbound Slack DM.
 
-    Resolves the sender's Workeros user_id via the claim-link binding.
+    Resolves the sender's Floom user_id via the claim-link binding.
     Unbound senders receive a claim link and no agent is run.
     Bound senders run as their linked user.
     """
@@ -1612,7 +1612,7 @@ async def _handle_slack_direct_message(
                 logger.exception("Slack unbound sender claim prompt failed")
             return
 
-    # Feature #1383: "help" keyword in DM → ephemeral help card (short-circuit, no agent run).
+    # Feature #1383: "help" keyword in DM ? ephemeral help card (short-circuit, no agent run).
     if prompt.lower().strip() in {"help", "/help", "floom help", "/floom help"}:
         try:
             _help = _slack_help_response()
@@ -1814,7 +1814,7 @@ def _slack_interactivity_response_from_form(form: Dict[str, str]) -> Response:
     slack_user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
     slack_user_id = str(slack_user.get("id") or "unknown")
 
-    # Resolve the clicker's Workeros user_id from their binding.
+    # Resolve the clicker's Floom user_id from their binding.
     # Unbound clickers get an ephemeral claim-link prompt and no action is taken.
     user_id = _slack_binding_user_id(team_id, slack_user_id) if slack_user_id != "unknown" else None
     if not user_id:
@@ -2084,7 +2084,7 @@ async def slack_interactivity(request: Request) -> Response:
     """Receive Slack Block Kit action payloads.
 
     Delegates to _slack_interactivity_response_from_form which resolves the
-    clicker's Workeros user_id via per-user binding. Unbound clickers receive
+    clicker's Floom user_id via per-user binding. Unbound clickers receive
     an ephemeral claim-link message and no action is taken.
     """
     if not _slack_events_enabled():

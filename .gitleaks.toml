@@ -11,7 +11,7 @@ description = "Benign test fixtures, example constants, and CI-only test keys."
 
 # Test fixtures legitimately contain fake/sample credentials.
 paths = [
-  '''(^|/)tests?/''',
+  '''(^|[\\/])tests?[\\/]''',
   '''.*\.test\.[a-z]+$''',
 ]
 

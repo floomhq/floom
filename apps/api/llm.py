@@ -1,4 +1,4 @@
-"""Provider-agnostic LLM access for the workerOS backend.
+"""Provider-agnostic LLM access for the Floom backend.
 
 A single seam so every model call can target OpenAI (the zero-config default) or
 any litellm-supported provider (e.g. AWS Bedrock / Anthropic Claude) chosen purely
@@ -180,7 +180,7 @@ def completion(
     import litellm
 
     msgs = with_prompt_cache(messages, model) if cache_prompt else list(messages)
-    # Bridge workerOS's reserved platform key name onto the standard OPENAI_API_KEY
+    # Bridge Floom's reserved platform key name onto the standard OPENAI_API_KEY
     # that litellm reads. Bedrock / other providers authenticate via their own env
     # credentials (e.g. AWS creds + AWS_REGION_NAME) and need no api_key here.
     if not is_litellm_model(model) and "api_key" not in kwargs:

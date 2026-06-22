@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "apps", "api"))
 
 # Use a fresh temp DB; dev mode (no auth).
 # Set FLOOM_SECRET="" BEFORE importing main so load_dotenv(override=False)
-# won't overwrite it with the value from /etc/workeros/api.env.
+# won't overwrite it with the value from /etc/floom/api.env.
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["FLOOM_DB"] = _tmp_db.name

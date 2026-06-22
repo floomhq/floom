@@ -1,4 +1,4 @@
-﻿"""Run-scoped capability tokens for sandbox workers.
+"""Run-scoped capability tokens for sandbox workers.
 
 Every run that executes inside a sandbox (E2B micro-VM) receives a short-lived
 HMAC-signed token via the WORKEROS_RUN_TOKEN environment variable.  The token:
@@ -64,7 +64,7 @@ def verify_run_token(token: str, *, secret: str | None = None) -> str | None:
     """Verify a run capability token.
 
     Args:
-        token: Token string (from X-Workeros-Run-Token header).
+        token: Token string (from X-Floom-Run-Token header).
         secret: FLOOM_SECRET value.  Defaults to os.environ["FLOOM_SECRET"].
 
     Returns:

@@ -829,7 +829,7 @@ function FilesEditorEdit({
   }
 
   function deleteFile(path: string) {
-    if (path === "worker.yml") { toast.error("Cannot delete worker.yml"); return; }
+    if (path === "worker.yml") { toast.error("Cannot delete the worker file"); return; } /* #1708: soften jargon */
     if (!confirm(`Delete "${path}"?`)) return;
     const updated = files.filter((f) => f.path !== path);
     onChange(updated);

@@ -96,7 +96,7 @@ def _seed_running_run(db, run_id: str = "run-managed", worker_id: str = "managed
 def _run_headers(run_id: str) -> dict[str, str]:
     from run_token import make_run_token
 
-    return {"X-Workeros-Run-Token": make_run_token(run_id, secret="test-secret")}
+    return {"X-Floom-Run-Token": make_run_token(run_id, secret="test-secret")}
 
 
 def _mounted_client(main) -> TestClient:

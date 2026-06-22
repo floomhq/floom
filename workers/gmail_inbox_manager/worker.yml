@@ -4,7 +4,7 @@ name: gmail-inbox-manager
 title: Gmail Inbox Manager
 description: Daily Gmail cleaner that applies inbox rules, archives low-value messages, labels matching mail, and writes a markdown digest.
 long_description: |
-  Fetches unread and recent Gmail messages, applies local rule definitions when present, performs safe batch label updates through the Workeros Composio proxy, and writes a daily inbox digest.
+  Fetches unread and recent Gmail messages, applies local rule definitions when present, performs safe batch label updates through the Floom Composio proxy, and writes a daily inbox digest.
 use_cases:
 - Archive or mark routine inbox messages as read before the workday starts.
 - Separate important unread mail from FYI messages in a daily digest.

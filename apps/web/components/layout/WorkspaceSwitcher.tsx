@@ -6,9 +6,11 @@ import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, 
 import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
+import { groupPostHogWorkspace } from "@/lib/posthog";
 import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { Avatar } from "@/components/ui/Avatar";
 import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
 import { computeIsAdmin } from "@/lib/use-is-admin";
 import type { LocalWorkspace } from "@/lib/types";
@@ -41,24 +43,19 @@ type WorkspaceState = {
   activeId: string;
 };
 
-/** DiceBear `shapes` avatar — deterministically seeded by workspace name/id.
- *  Geometric, non-cartoonish, fits a serious B2B product.
- *  Container uses var(--radius-button) (squircle), NOT a circle. */
-function WorkspaceAvatar({ name, size }: { name: string; size: number }) {
-  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
-  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      aria-hidden="true"
-      width={size}
-      height={size}
-      className="shrink-0 rounded-[var(--radius-button)] object-cover"
-      style={{ width: size, height: size }}
-    />
-  );
+/** Identity mark for a workspace — squircle (non-human), seeded by name.
+ *  Company logo/favicon overrides the generated mark when available. */
+function WorkspaceAvatar({
+  name,
+  size,
+  logoUrl,
+}: {
+  name: string;
+  size: number;
+  logoUrl?: string | null;
+}) {
+  const seed = resolveWorkspaceName(name) || name || "workspace";
+  return <Avatar role="workspace" name={seed} src={logoUrl ?? undefined} size={size} />;
 }
 
 export function WorkspaceSwitcher() {
@@ -99,6 +96,11 @@ export function WorkspaceSwitcher() {
           workspaces: data.workspaces ?? [],
           activeId,
         });
+        // Attach the active workspace as the PostHog `workspace` group with its
+        // name, so client events are workspace-attributed with readable group
+        // props. (Switching reloads the page, so this re-runs per workspace.)
+        const activeWorkspace = data.workspaces?.find((w) => w.id === activeId);
+        groupPostHogWorkspace(activeId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
         setCanExportWorkspace(computeIsAdmin(me));
       })
       .catch((err: Error) => {
@@ -184,7 +186,10 @@ export function WorkspaceSwitcher() {
     setImporting(true);
     try {
       const result = await api.workspace.importTemplate(file);
-      const imported = result.workers_imported.length + result.contexts_imported.length;
+      const imported =
+        result.workers_imported.length +
+        result.contexts_imported.length +
+        (result.issues_imported?.length ?? 0);
       toast.success(
         `Imported ${imported} item${imported === 1 ? "" : "s"}${
           result.skipped.length ? ` · ${result.skipped.length} skipped` : ""
@@ -277,8 +282,8 @@ export function WorkspaceSwitcher() {
           aria-label="Switch workspace"
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {/* Workspace mark: DiceBear shapes avatar, seeded by workspace name */}
-          <WorkspaceAvatar name={active.name} size={24} />
+          {/* Workspace mark: generative avatar, seeded by workspace name */}
+          <WorkspaceAvatar name={active.name} size={24} logoUrl={companyLogoUrl(active.name)} />
           <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
           <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
@@ -308,7 +313,7 @@ export function WorkspaceSwitcher() {
                   className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
                 >
-                  <WorkspaceAvatar name={w.name} size={20} />
+                  <WorkspaceAvatar name={w.name} size={20} logoUrl={companyLogoUrl(w.name)} />
                   <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
                   {isActive ? <Check className="size-4 opacity-80" /> : null}
                 </DropdownMenuItem>

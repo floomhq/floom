@@ -1,4 +1,4 @@
-"""Pydantic models for Workeros request, response, and domain types."""
+"""Pydantic models for Floom request, response, and domain types."""
 
 import ipaddress
 import os
@@ -37,6 +37,29 @@ def default_worker_agent_model() -> str:
 # that need a literal default; live dispatch paths MUST use
 # default_worker_agent_model() instead (see agent_driver / contract builders).
 DEFAULT_WORKER_AGENT_MODEL = default_worker_agent_model()
+
+_SELF_HOSTED_RUNNER_RE = re.compile(r"^self-hosted(?::[A-Za-z0-9][A-Za-z0-9_-]*)?$")
+
+
+def normalize_worker_runner(value: str) -> str:
+    """Normalize accepted worker runner selectors.
+
+    ``self-hosted`` and ``self-hosted:<name>`` are valid manifest intent, but
+    dispatch still fails fast until a connected self-hosted runner exists.
+    """
+    runner = (value or "").strip()
+    if runner == "local":
+        return "e2b"
+    if runner == "e2b" or _SELF_HOSTED_RUNNER_RE.fullmatch(runner):
+        return runner
+    raise ValueError(
+        "runner must be 'e2b', 'self-hosted', or 'self-hosted:<name>' "
+        f"(got {value!r})"
+    )
+
+
+def is_self_hosted_runner(value: object) -> bool:
+    return isinstance(value, str) and _SELF_HOSTED_RUNNER_RE.fullmatch(value.strip()) is not None
 
 
 def _model_data(value: Any) -> Any:
@@ -1191,14 +1214,7 @@ class WorkerRuntime(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, v: str) -> str:
-        # In-process execution was removed in PR #28; only E2B is supported.
-        # Coerce legacy `local` declarations to `e2b` for backward-compat
-        # with old worker.yml files, but reject anything else.
-        if v == "local":
-            return "e2b"
-        if v != "e2b":
-            raise ValueError(f"runner must be 'e2b' (got {v!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
-        return v
+        return normalize_worker_runner(v)
 
 
 class WorkerConfig(BaseModel):
@@ -1219,6 +1235,10 @@ class WorkerConfig(BaseModel):
     contexts: List[WorkerContextMountSpec] = []
     memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
     resources: Optional[WorkerResources] = None
+    # #1764: operator-approved E2B template profile resolved by the runner before
+    # sandbox creation (see runner_sandbox.e2b_driver). None = legacy
+    # runtime-kind/resource-bucket selection.
+    template_profile: Optional[str] = None
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
@@ -1435,6 +1455,11 @@ class WorkerContractExec(BaseModel):
     # was removed in PR #28).
     runner: str = "e2b"
     bundle_baked: bool = False
+    # #1764: operator-approved E2B template profile. An explicit toolchain
+    # selector (e.g. "workeros-dev") that the runtime maps to an operator-owned
+    # template id via WORKEROS_E2B_TEMPLATE_PROFILE_<NAME>. Profiles are logical
+    # names, not raw template ids, so hosted infra controls stay operator-owned.
+    template_profile: Optional[str] = None
     # PR S11: `entry` is the canonical mode signal. `.md` -> agent, `.py/.sh/.js` -> script.
     # `mode` is a deprecated alias retained for back-compat; if both are absent we infer
     # from `command` / `runtime` (legacy path).
@@ -1468,14 +1493,24 @@ class WorkerContractExec(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, value: str) -> str:
-        # Coerce legacy `local` to `e2b` (PR #28 removed the in-process
-        # executor; this guard prevents misleading manifests). Reject any
-        # other value with a clear message.
-        if value == "local":
-            return "e2b"
-        if value != "e2b":
-            raise ValueError(f"runner must be 'e2b' (got {value!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
-        return value
+        return normalize_worker_runner(value)
+
+    @field_validator("template_profile")
+    @classmethod
+    def validate_template_profile(cls, value: Optional[str]) -> Optional[str]:
+        # #1764: profile names are author-supplied logical selectors that map to an
+        # operator env key, so constrain them to a safe slug shape and treat blank
+        # as unset for backward-compat with manifests that omit the field.
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", text):
+            raise ValueError(
+                "exec.template_profile must be alphanumeric and may contain '-' or '_'"
+            )
+        return text
 
     @field_validator("entry")
     @classmethod
@@ -1636,7 +1671,7 @@ class WorkerContract(BaseModel):
     @classmethod
     def fill_missing_description(cls, value: Any) -> Any:
         if isinstance(value, dict) and not str(value.get("description") or "").strip():
-            fallback = str(value.get("title") or value.get("name") or "Workeros worker").strip()
+            fallback = str(value.get("title") or value.get("name") or "Floom worker").strip()
             value = {**value, "description": fallback[:500]}
         if isinstance(value, dict) and "resources" not in value:
             exec_block = value.get("exec")
@@ -1946,6 +1981,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         ],
         memory=contract.memory,
         resources=contract.exec.resources or contract.resources,
+        template_profile=contract.exec.template_profile,
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
@@ -2034,7 +2070,7 @@ def _legacy_output_to_contract_field(field: WorkerOutput) -> WorkerContractField
 
 
 def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0") -> WorkerContract:
-    """Convert a legacy Workeros worker.yml config into WorkerContract shape."""
+    """Convert a legacy Floom worker.yml config into WorkerContract shape."""
     return WorkerContract(
         schema_version="0.3",
         name=_slug_from_worker_id(config.id),
@@ -2171,7 +2207,7 @@ class Artifact(BaseModel):
     name: str
     type: Optional[str] = None
     # PATH-1 (2026-05-29): `path` must NOT expose the absolute host path
-    # (/opt/workeros/data/artifacts/...). It now carries the path RELATIVE to
+    # (/opt/floom/data/artifacts/...). It now carries the path RELATIVE to
     # the artifacts root (e.g. "run_x/out/sorted.csv"); the download endpoint
     # resolves the real on-disk path server-side from the artifact id.
     path: str
@@ -2204,6 +2240,10 @@ class ApprovalEntry(BaseModel):
     decided_at: Optional[str] = None
     reason: Optional[str] = None
     follow_up_run_id: Optional[str] = None
+    # #1732: tokenised /approvals/review deep link the operator (or the CLI) can
+    # open to approve/reject. None when no signer secret is configured. Same link
+    # the chat tool + approvals list emit (built via core.approval_signing).
+    link: Optional[str] = None
 
 
 class RunDetail(BaseModel):
@@ -2619,6 +2659,11 @@ class WorkerResult(BaseModel):
     # S47 HITL: present when a worker requests human approval before executing.
     # Contains {label: str, preview: str} as emitted by the worker in result.json.
     decision_required: Optional[Dict[str, Any]] = None
+    # Track A LLM-obs: trace-derived run rollup (generation_count, span_count,
+    # total_tokens, total_cost_usd, p95_step_latency_ms, ai_trace_id). Present
+    # only for agent-mode runs; the runner uses it to persist real cost/tokens
+    # summed from per-generation captures instead of a flat blended estimate.
+    ai_summary: Optional[Dict[str, Any]] = None
 
 
 class StructuredLog(BaseModel):
@@ -2660,7 +2705,7 @@ class NotifyConfig(BaseModel):
     email_to: Optional[List[str]] = None
     # Events to fire on: "failed", "completed", or both
     on: List[str] = Field(default_factory=lambda: ["failed"])
-    # Optional HMAC secret for webhook — sent as X-Workeros-Signature header
+    # Optional HMAC secret for webhook — sent as X-Floom-Signature header
     secret: Optional[str] = None
     # Optional custom email subject (supports {worker_name} and {status} placeholders)
     email_subject: Optional[str] = None
@@ -2725,8 +2770,16 @@ class WorkerStats(BaseModel):
     runs_30d: int = 0
     success_rate_30d: Optional[float] = None
     avg_duration_ms: Optional[float] = None
+    median_duration_ms: Optional[float] = None
     p95_duration_ms: Optional[float] = None
+    # How many orphaned/never-closed runs were excluded from the duration
+    # aggregate (duration > absolute timeout ceiling). Surfaced so the headline
+    # is honest about a stuck-run long tail rather than silently dropping it.
+    duration_outliers_excluded: int = 0
     total_failures: int = 0
+    # Failed runs grouped by failure category (timeout/crash/config/auth/
+    # network/resource/validation/quality/cancelled/unknown). Empty when none.
+    failures_by_category: Dict[str, int] = Field(default_factory=dict)
     last_error: Optional[str] = None
     last_error_at: Optional[str] = None
 
@@ -2739,6 +2792,10 @@ class WorkspaceStats(BaseModel):
     total_runs_7d: int = 0
     success_rate_7d: Optional[float] = None
     avg_duration_ms: Optional[float] = None
+    median_duration_ms: Optional[float] = None
+    p95_duration_ms: Optional[float] = None
+    duration_outliers_excluded: int = 0
+    failures_by_category: Dict[str, int] = Field(default_factory=dict)
     most_active_worker_id: Optional[str] = None
     most_active_worker_name: Optional[str] = None
 
@@ -2868,6 +2925,10 @@ class ContextFileMoveRequest(BaseModel):
     new_path: str  # #770: destination path within the same context
 
 
+class ContextRenameRequest(BaseModel):
+    new_name: str  # #1813: new folder/context name (validated server-side)
+
+
 class ContextSecretScanFile(BaseModel):
     path: str
     secret_warnings: List[SecretWarning] = Field(default_factory=list)
@@ -2977,6 +3038,7 @@ class WorkspaceShareLinkResponse(BaseModel):
 class WorkspaceImportResponse(BaseModel):
     workers_imported: List[str] = []
     contexts_imported: List[str] = []
+    issues_imported: List[str] = []
     skipped: List[Dict[str, str]] = []
     id_remaps: Dict[str, str] = {}
     required_secrets: List[str] = []
@@ -3133,3 +3195,110 @@ class DraftAndCreateResponse(BaseModel):
 class WorkerListSummary(WorkerSummary):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Workspace issues (git-backed, stored under .floom/issues/) — #1781
+# asset_type is left as a plain string (not a Literal) so the schema stays open
+# for connection/approval/mcp bindings beyond the worker/context/run MVP set.
+# ---------------------------------------------------------------------------
+
+class WorkspaceIssueComment(BaseModel):
+    id: str
+    body: str
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class WorkspaceIssueOut(BaseModel):
+    id: str
+    status: str = "open"
+    title: str
+    body: str = ""
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    source: Optional[str] = None
+    labels: List[str] = []
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    comment_count: int = 0
+
+
+class WorkspaceIssueDetail(WorkspaceIssueOut):
+    comments: List[WorkspaceIssueComment] = []
+
+
+class WorkspaceIssuesResponse(BaseModel):
+    issues: List[WorkspaceIssueOut]
+
+
+class WorkspaceIssueCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    body: str = ""
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    source: Optional[str] = None
+    labels: List[str] = []
+
+
+class WorkspaceIssueUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    status: Optional[Literal["open", "closed"]] = None
+    labels: Optional[List[str]] = None
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    clear_asset: bool = False
+
+
+class WorkspaceIssueCommentRequest(BaseModel):
+    body: str = Field(..., min_length=1, max_length=20000)
+
+
+# ---------------------------------------------------------------------------
+# Run feedback -> workspace issue (#1807)
+# ---------------------------------------------------------------------------
+# Run feedback stays a lightweight quality signal. This is the explicit, opt-in
+# bridge that turns one actionable feedback item into a git-backed workspace
+# issue (#1781) bound to the run (asset_type=run, asset_id=<run_id>).
+
+class RunFeedback(BaseModel):
+    """A lightweight feedback note left on a specific run."""
+
+    id: str
+    run_id: str
+    worker_id: str
+    author_id: str
+    author_name: Optional[str] = None
+    content: str
+    rating: Optional[str] = None
+    issue_id: Optional[str] = None
+    created_at: str
+
+
+class RunFeedbackCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+    rating: Optional[str] = Field(None, max_length=120)
+
+
+class RunFeedbackIssueRequest(BaseModel):
+    """Convert an actionable run feedback item into a tracked workspace issue."""
+
+    # Required for legacy direct-create callers; optional when feedback_id points
+    # at a stored run-feedback row.
+    feedback_text: Optional[str] = Field(None, min_length=1, max_length=10000)
+    # Free-form thumb/rating value as the UI captured it (e.g. "down", "up", "2").
+    rating: Optional[str] = Field(None, max_length=120)
+    # Optional operator-supplied title; defaulted from worker/run when omitted.
+    title: Optional[str] = Field(None, max_length=300)
+    # Stable client feedback id; when present a second submit for the same id
+    # returns the existing issue instead of creating a duplicate.
+    feedback_id: Optional[str] = Field(None, max_length=200)
+
+
+class RunFeedbackIssueResponse(BaseModel):
+    issue_id: str
+    created: bool
+    issue: WorkspaceIssueOut
+    feedback: Optional[RunFeedback] = None

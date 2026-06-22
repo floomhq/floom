@@ -47,6 +47,10 @@ const PUBLIC_PAGE_PREFIXES = [
   //       Trailing slash keeps this from matching e.g. /startup-foo (OW-02).
   "/auth/magic/", // #1447: magic-link token consumption. A logged-out visitor follows
   //       the email link here to establish a session, so it must stay public.
+  "/cli-auth", // #1789: device-login approval page; the user clicking the terminal
+  //       link is NOT yet logged into the web dashboard. The page renders publicly
+  //       and handles auth inline (approve/deny buttons call the proxy; a 401 from
+  //       the proxy causes an in-page login redirect, not a middleware gate).
 ];
 
 // Pages reachable WITHOUT a session cookie, matched EXACTLY (not by prefix).
@@ -74,6 +78,10 @@ const PUBLIC_PROXY_PREFIXES = [
   // public. The token in the path is the secret. Issuance (POST
   // /auth/magic-link) stays gated - it has no logged-out caller.
   "/api/proxy/auth/magic/",
+  // #1789: cli-auth approve/deny calls. The page is public (see PUBLIC_PAGE_PREFIXES
+  //       above); its API calls must also be public so the browser can reach them
+  //       before a session exists. The backend validates the user_code as the secret.
+  "/api/proxy/cli-auth/",
 ];
 
 function isPublicPage(pathname: string): boolean {
@@ -155,10 +163,17 @@ function isCsrfSafe(req: NextRequest): boolean {
 // #926 — per-request nonce CSP. script-src drops 'unsafe-inline' and the broad
 // https: allowance; 'strict-dynamic' lets nonce'd Next bootstrap scripts load
 // their chunk graph. connect-src is same-origin (client API calls go through
-// /api/proxy); CSP_EXTRA_CONNECT_SRC is the documented seam for self-hosted
-// instances that talk to a cross-origin API from the browser. style-src keeps
-// 'unsafe-inline' (Next/Tailwind inline styles; explicitly acceptable per the
-// audit). img/font keep https: for remote logos/fonts — they cannot execute.
+// /api/proxy). PostHog needs NO connect-src entry: ingestion is same-origin via
+// the /ingest/* reverse proxy (next.config.ts), so 'self' covers it and the
+// session-replay recorder loads as a nonce'd 'strict-dynamic' script from the
+// same origin. This SUPERSEDES the earlier #1724 plan to allowlist
+// us.i.posthog.com / us-assets.i.posthog.com via CSP_EXTRA_CONNECT_SRC — the
+// proxy is the preferred path (same-origin + ad-blocker resistant), so no
+// PostHog domain belongs in connect-src. CSP_EXTRA_CONNECT_SRC remains the
+// documented seam for self-hosted instances that talk to a genuinely
+// cross-origin API from the browser (it is NOT needed for PostHog). style-src
+// keeps 'unsafe-inline' (Next/Tailwind inline styles; explicitly acceptable per
+// the audit). img/font keep https: for remote logos/fonts — they cannot execute.
 export function buildCsp(nonce: string): string {
   const isDev = process.env.NODE_ENV === "development";
   const extraConnect = (process.env.CSP_EXTRA_CONNECT_SRC || "").trim();
@@ -169,7 +184,7 @@ export function buildCsp(nonce: string): string {
     "object-src 'none'",
     "form-action 'self'",
     "img-src 'self' data: blob: https:",
-    "media-src 'self' blob:",
+    "media-src 'self' blob: https:",
     "frame-src 'self' blob:",
     "font-src 'self' data: https:",
     "style-src 'self' 'unsafe-inline'",
@@ -180,7 +195,7 @@ export function buildCsp(nonce: string): string {
   ].join("; ");
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Per-request CSP nonce, threaded to Next via the request headers so SSR
@@ -277,8 +292,14 @@ export async function middleware(req: NextRequest) {
 // Run on everything EXCEPT Next internals and common static assets. The matcher
 // keeps the middleware off the static pipeline (favicon, _next, images, fonts),
 // which both avoids redirect loops on assets and keeps it fast.
+//
+// `ingest` is excluded too: it is the PostHog first-party reverse proxy
+// (next.config.ts rewrites /ingest/* -> PostHog). Those requests are anonymous
+// telemetry POSTs from logged-out and logged-in visitors alike — they must NOT
+// be auth-redirected to /login, CSRF-blocked, or have a CSP nonce injected.
+// Letting the rewrite forward them untouched is both correct and faster.
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico|woff|woff2|ttf|otf|css|js|map)$).*)",
+    "/((?!ingest|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico|woff|woff2|ttf|otf|css|js|map)$).*)",
   ],
 };

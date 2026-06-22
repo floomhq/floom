@@ -1,9 +1,9 @@
-# Security Data Map — Workeros
+# Security Data Map — Floom
 
 Last updated: 2026-06-09
 
 Where user data lives, how it is protected at rest, and how long it is kept.
-Workeros OS is a single-tenant deployment: one account owner, no third-party
+Floom OS is a single-tenant deployment: one account owner, no third-party
 end users. "User" below means that owner.
 
 ## 1. SQLite database (`FLOOM_DB`, default `data/floom.db`)
@@ -57,7 +57,7 @@ added via the secrets API are stored in the DB `secrets` table, not here.
 
 ## 5. Worker execution topology
 
-Workeros has two execution paths:
+Floom has two execution paths:
 
 - Pure-script workers (`.py`, `.sh`, `.js`, or `runtime.mode: pure-script`) run
   in E2B microVMs.

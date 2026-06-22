@@ -13,7 +13,8 @@ from db import get_db, now_iso
 from .context import AuthContext
 
 
-ACTIVE_WORKSPACE_HEADER = "x-workeros-workspace"
+ACTIVE_WORKSPACE_HEADER = "x-floom-workspace"
+LEGACY_ACTIVE_WORKSPACE_HEADER = "x-workeros-workspace"
 DEFAULT_WORKSPACE_ID = "local-default"
 _WORKSPACE_ID_RE = re.compile(r"^(?:local-default|ws_[a-f0-9]{14})$")
 _DERIVED_USER_RE = re.compile(r"^(?P<base>.+)__ws_[a-f0-9]{14}$")
@@ -127,6 +128,13 @@ def create_local_workspace(owner_user_id: str, name: str) -> dict[str, Any]:
     ensure_default_workspace(owner_user_id)
     workspace_id = "ws_" + uuid.uuid4().hex[:14]
     clean_name = _strip_html_tags((name or "").strip()) or "Untitled"
+    # #1738 — reject a duplicate name (case-insensitive) for this owner. A
+    # transient create failure (e.g. the #1687 session death) used to be retried
+    # into a SECOND identically-named workspace, leaving an ambiguous switcher and
+    # orphaned duplicates. A clear conflict lets the caller reuse the existing one.
+    for existing in list_local_workspaces(owner_user_id):
+        if str(existing.get("name", "")).strip().lower() == clean_name.lower():
+            raise ValueError(f"a workspace named '{clean_name}' already exists")
     created_at = now_iso()
     with get_db() as conn:
         conn.execute(
@@ -198,7 +206,10 @@ def rename_local_workspace(owner_user_id: str, workspace_id: str, name: str) -> 
 
 
 def requested_local_workspace_id(request: Request) -> str | None:
-    header_value = request.headers.get(ACTIVE_WORKSPACE_HEADER)
+    header_value = (
+        request.headers.get(ACTIVE_WORKSPACE_HEADER)
+        or request.headers.get(LEGACY_ACTIVE_WORKSPACE_HEADER)
+    )
     query_value = request.query_params.get("workspace_id")
     return _valid_workspace_id(header_value) or _valid_workspace_id(query_value)
 

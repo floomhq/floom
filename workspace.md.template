@@ -1,5 +1,5 @@
 # Workspace Custom Instructions
 
 Add tenant-specific preferences, standing context, and operating rules here.
-Emily's base identity and Chief-of-Staff behavior live in the Workeros engine,
+Emily's base identity and Chief-of-Staff behavior live in the Floom engine,
 not in this editable file.

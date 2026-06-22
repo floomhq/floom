@@ -1,6 +1,6 @@
-# Workeros History
+# Floom History
 
-Workeros is being released as a source-available repository after a long
+Floom is being released as a source-available repository after a long
 development and hardening cycle. The public repository keeps the useful project
 history so contributors, security reviewers, and operators can inspect how the
 runtime evolved.

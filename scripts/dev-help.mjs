@@ -1,4 +1,4 @@
-console.log(`WorkerOS local development
+console.log(`Floom local development
 
 Use the OS-native scripts so the backend venv and both dev servers are managed
 cleanly:

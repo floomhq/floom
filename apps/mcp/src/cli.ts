@@ -1,8 +1,8 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import { readFileSync, realpathSync } from "node:fs";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { runLoginCommand } from "./commands/login.js";
 import { runLogoutCommand } from "./commands/logout.js";
 import { runWhoamiCommand } from "./commands/whoami.js";
@@ -40,6 +40,17 @@ import {
   connectionsListCommand,
 } from "./commands/connections.js";
 import {
+  contextsCreateCommand,
+  contextsDeleteCommand,
+  contextsDeleteFileCommand,
+  contextsListCommand,
+  contextsReadCommand,
+  contextsRollbackCommand,
+  contextsUploadCommand,
+  contextsVersionsCommand,
+  contextsWriteCommand,
+} from "./commands/contexts.js";
+import {
   mcpInstallCommand,
   mcpListCommand,
   mcpSwitchCommand,
@@ -49,13 +60,14 @@ import {
 import { completionCommand } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { main as runServer } from "./server.js";
+import {
+  type CommandName,
+  getCommandName,
+  resolveCommandName,
+  setCommandName,
+} from "./lib/command-name.js";
 
 type RunResult = Promise<number> | number;
-
-function inferCommandName(argv = process.argv): "workeros" | "floom" {
-  const invoked = argv[1] ? basename(argv[1]) : "";
-  return invoked === "floom" ? "floom" : "workeros";
-}
 
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -71,17 +83,29 @@ async function runAction(result: RunResult): Promise<void> {
   }
 }
 
-export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"): Command {
+export function buildCliProgram(commandName: CommandName = "floom"): Command {
   const program = new Command();
   program
     .name(commandName)
-    .description("Workeros CLI")
+    .description(commandName === "workeros" ? "Workeros CLI" : "Floom CLI")
     .version(getPackageVersion())
-    .showHelpAfterError();
+    .showHelpAfterError()
+    // OSS/self-hosted: identity sent as x-floom-user (engines with user-header
+    // scope require it). Also settable via WORKEROS_USER / FLOOM_USER.
+    .option("--user <user>", "OSS self-hosted: send x-floom-user header");
+
+  // A global --user must reach readCredentials(), which reads from env. Mirror
+  // the flag into WORKEROS_USER before any subcommand action runs.
+  program.hook("preSubcommand", (thisCommand) => {
+    const user = thisCommand.opts().user;
+    if (typeof user === "string" && user.trim()) {
+      process.env.WORKEROS_USER = user.trim();
+    }
+  });
 
   program.command("login")
     .description("Login via browser device authorization")
-    .option("--cloud", "Authenticate against a hosted Workeros instance")
+    .option("--cloud", "Authenticate against a hosted Floom instance")
     .action(async (options: { cloud?: boolean }) => runAction(runLoginCommand(options)));
 
   program.command("logout")
@@ -129,7 +153,7 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
     .action(async (dir: string) => runAction(workersPushCommand(dir)));
   workers.command("run")
-    .description("Trigger a worker run (alias for `floom run`)")
+    .description(`Trigger a worker run (alias for \`${commandName} run\`)`)
     .argument("<id>", "Worker id")
     .option("--input <key=value>", "Input key/value (repeatable)", (value: string, acc: string[]) => [...acc, value], [])
     .option("-f, --inputs-file <path>", "Path to JSON inputs object")
@@ -242,6 +266,74 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .action(async (path: string, options: { json?: boolean }) =>
       runAction(connectionsImportMcpConfigCommand(path, options)));
 
+  const contexts = program.command("contexts")
+    .alias("context")
+    .description("Manage brain pack context folders");
+  contexts.command("list")
+    .description("List brain packs")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(contextsListCommand(options)));
+  contexts.command("create")
+    .description("Create a brain pack")
+    .argument("<name>", "Brain pack name")
+    .option("--writeable", "Allow workers to write to this brain pack")
+    .option("--no-sensitive", "Enable git version history for this brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { writeable?: boolean; sensitive?: boolean; json?: boolean }) =>
+      runAction(contextsCreateCommand(name, options)));
+  contexts.command("read")
+    .description("Read a UTF-8 file from a brain pack")
+    .argument("<name>", "Brain pack name")
+    .argument("<path>", "File path inside the brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, path: string, options: { json?: boolean }) =>
+      runAction(contextsReadCommand(name, path, options)));
+  contexts.command("write")
+    .description("Write a UTF-8 file into a brain pack")
+    .argument("<name>", "Brain pack name")
+    .argument("<path>", "File path inside the brain pack")
+    .option("--content <text>", "Text content to write")
+    .option("--file <path>", "Read text content from a local file")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, path: string, options: { content?: string; file?: string; json?: boolean }) =>
+      runAction(contextsWriteCommand(name, path, options)));
+  contexts.command("upload")
+    .description("Upload a local file into a brain pack")
+    .argument("<name>", "Brain pack name")
+    .argument("<file>", "Local file to upload")
+    .option("--path <path>", "Destination path inside the brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, file: string, options: { path?: string; json?: boolean }) =>
+      runAction(contextsUploadCommand(name, file, options)));
+  contexts.command("delete")
+    .description("Delete a brain pack")
+    .argument("<name>", "Brain pack name")
+    .option("--force", "Delete even when workers reference this brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { force?: boolean; json?: boolean }) =>
+      runAction(contextsDeleteCommand(name, options)));
+  contexts.command("delete-file")
+    .description("Delete one file from a brain pack")
+    .argument("<name>", "Brain pack name")
+    .argument("<path>", "File path inside the brain pack")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, path: string, options: { json?: boolean }) =>
+      runAction(contextsDeleteFileCommand(name, path, options)));
+  contexts.command("versions")
+    .description("List brain pack version history")
+    .argument("<name>", "Brain pack name")
+    .option("--limit <n>", "Number of versions", (value: string) => Number(value), 50)
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { limit?: number; json?: boolean }) =>
+      runAction(contextsVersionsCommand(name, options)));
+  contexts.command("rollback")
+    .description("Restore a brain pack to a previous version")
+    .argument("<name>", "Brain pack name")
+    .argument("<version-id>", "Version id or git SHA")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, versionId: string, options: { json?: boolean }) =>
+      runAction(contextsRollbackCommand(name, versionId, options)));
+
   const mcp = program.command("mcp").description("Manage MCP servers and client config");
   mcp.command("list")
     .description("List configured MCP servers and mark the active one")
@@ -258,7 +350,7 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .action(async (target: string | undefined, options: { json?: boolean }) =>
       runAction(mcpTestCommand(target, options)));
   mcp.command("add")
-    .description("Add Workeros to an MCP client config")
+    .description("Add workeros/floom to an MCP client config")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
     .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
       runAction(mcpInstallCommand(options)));
@@ -296,10 +388,19 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
 }
 
 export async function main(argv = process.argv): Promise<void> {
-  const commandName = inferCommandName(argv);
+  const commandName = resolveCommandName(argv);
+  setCommandName(commandName);
   const program = buildCliProgram(commandName);
   const args = argv.slice(2);
   if (args.length === 0) {
+    // MCP clients launch the server with a piped stdin (no TTY). A human running
+    // the bare command in a terminal instead gets help and a non-zero exit,
+    // rather than a silently-hanging stdio server.
+    if (process.stdin.isTTY) {
+      program.outputHelp();
+      process.exitCode = 1;
+      return;
+    }
     await runServer();
     return;
   }
@@ -309,7 +410,7 @@ export async function main(argv = process.argv): Promise<void> {
 function resolveExecutedPath(argv1?: string): string {
   if (!argv1) return "";
   const absolute = resolve(argv1);
-  // npm installs bins as symlinks (node_modules/.bin/workeros -> ../@floomhq/workeros/dist/cli.js).
+  // npm installs bins as symlinks (node_modules/.bin/floom -> ../@floomhq/floom/dist/cli.js).
   // import.meta.url is always the real module path, so compare against the resolved symlink target.
   try {
     return realpathSync(absolute);
@@ -322,7 +423,7 @@ const executedPath = resolveExecutedPath(process.argv[1]);
 if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`${inferCommandName()} failed: ${message}`);
+    console.error(`${getCommandName()} failed: ${message}`);
     process.exit(1);
   });
 }

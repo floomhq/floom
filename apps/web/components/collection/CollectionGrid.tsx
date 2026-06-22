@@ -2,6 +2,7 @@
 
 import { Star } from "lucide-react";
 import type { CardSpec } from "@/lib/collection/types";
+import { IconButton } from "@/components/ui/icon-button";
 import { StatusPill } from "./StatusPill";
 
 interface CollectionGridProps<T> {
@@ -41,18 +42,25 @@ export function CollectionGrid<T>({
             }}
           >
             {spec.star && (
-              <button
-                type="button"
-                aria-label="Toggle star"
-                aria-pressed={spec.star.on}
-                className={`star ${spec.star.on ? "on" : ""}`}
+              <IconButton
+                label={spec.star.on ? "Unstar" : "Star"}
+                tooltip={null}
+                pressed={spec.star.on}
+                size="icon-sm"
+                // Card-context affordance: absolute top-right, hover-revealed
+                // (the `c-gcard:hover .star-btn` rule), accent when starred.
+                className={`star-btn absolute top-2.5 right-2.5 ${spec.star.on ? "on" : ""}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   spec.star!.onToggle();
                 }}
-              >
-                <Star size={16} fill={spec.star.on ? "currentColor" : "none"} />
-              </button>
+                icon={
+                  <Star
+                    size={16}
+                    fill={spec.star.on ? "currentColor" : "none"}
+                  />
+                }
+              />
             )}
             <div className="c-gtop">
               {spec.leading}

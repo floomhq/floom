@@ -1,10 +1,10 @@
-﻿"""Tests for OSS multi-member support (migration 59).
+"""Tests for OSS multi-member support (migration 59).
 
 Covers:
   - Backwards compat: x-floom-secret keeps working
-  - Dev mode: empty users table â†’ pass-through
+  - Dev mode: empty users table → pass-through
   - /auth/setup: creates first admin, blocks second call
-  - /auth/login: correct creds â†’ session cookie, wrong creds â†’ 401
+  - /auth/login: correct creds → session cookie, wrong creds → 401
   - /auth/logout: clears session
   - /auth/me: returns current user info
   - /auth/setup-required: public endpoint
@@ -403,7 +403,7 @@ def test_admin_deletes_member(admin_client):
 
 
 # ---------------------------------------------------------------------------
-# Worker visibility â€” member vs admin
+# Worker visibility — member vs admin
 # ---------------------------------------------------------------------------
 
 
@@ -442,7 +442,7 @@ def test_member_sees_workspace_workers(monkeypatch, tmp_path):
 
         workers = c.get("/workers").json()
         # Bob should see the shared worker (if it was created successfully)
-        # In test env without real worker files, creation may fail â€” so just verify
+        # In test env without real worker files, creation may fail — so just verify
         # the endpoint works without 403
         assert isinstance(workers, list)
 
@@ -495,7 +495,7 @@ def test_disabled_user_session_rejected(monkeypatch, tmp_path):
         users = c.get("/users").json()
         frank = next(u for u in users if u["username"] == "frank")
 
-        # Frank logs in â€” gets a session
+        # Frank logs in — gets a session
         c2 = TestClient(main.app, base_url="https://testserver")
         c2.post("/auth/login", json={"username": "frank", "password": "velvet-canyon-9"})
 

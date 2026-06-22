@@ -1,4 +1,4 @@
-﻿import importlib
+import importlib
 import sys
 import types
 import urllib.parse
@@ -22,7 +22,7 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(env_file))
     monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADERS["x-floom-secret"])
     monkeypatch.setenv("WORKEROS_USER_ID", "slack-setup-user")
-    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://api.workeros.example.test")
+    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://api.floom.example.test")
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.example.test")
     for name in [
         "SLACK_CLIENT_ID",
@@ -100,7 +100,7 @@ def test_slack_oauth_callback_persists_team_install_without_leaking_token(monkey
         assert data["client_id"] == "123.abc"
         assert data["client_secret"] == "client-secret"
         assert data["code"] == "oauth-code"
-        assert data["redirect_uri"] == "https://api.workeros.example.test/slack/oauth/callback"
+        assert data["redirect_uri"] == "https://api.floom.example.test/slack/oauth/callback"
         return FakeResponse({
             "ok": True,
             "access_token": "xoxb-installed-token",

@@ -130,7 +130,11 @@ class TestRunTokenMiddleware:
             from run_token import verify_run_token
             if request.method == "OPTIONS":
                 return await call_next(request)
-            run_token_header = request.headers.get("x-workeros-run-token", "")
+            run_token_header = (
+                request.headers.get("x-floom-run-token")
+                or request.headers.get("x-workeros-run-token")
+                or ""
+            )
             if run_token_header:
                 run_id = verify_run_token(run_token_header, secret=secret)
                 if run_id is None:
@@ -178,6 +182,19 @@ class TestRunTokenMiddleware:
         token = make_run_token("run-abc", secret=secret)
         r = client.post(
             "/runs/run-abc/composio-execute/GMAIL_FETCH_EMAILS",
+            headers={"X-Floom-Run-Token": token},
+        )
+        assert r.status_code == 200
+
+    def test_legacy_run_token_header_allowed_on_composio_path(self):
+        from run_token import make_run_token
+        from fastapi.testclient import TestClient
+
+        secret = "my-secret"
+        client = TestClient(self._make_app(secret), raise_server_exceptions=False)
+        token = make_run_token("run-abc", secret=secret)
+        r = client.post(
+            "/runs/run-abc/composio-execute/GMAIL_FETCH_EMAILS",
             headers={"X-Workeros-Run-Token": token},
         )
         assert r.status_code == 200
@@ -190,7 +207,7 @@ class TestRunTokenMiddleware:
         secret = "my-secret"
         client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
-        r = client.get("/workers", headers={"X-Workeros-Run-Token": token})
+        r = client.get("/workers", headers={"X-Floom-Run-Token": token})
         assert r.status_code == 403
 
     def test_run_token_blocked_on_patch_worker(self):
@@ -200,7 +217,7 @@ class TestRunTokenMiddleware:
         secret = "my-secret"
         client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
-        r = client.patch("/workers/some-worker", headers={"X-Workeros-Run-Token": token})
+        r = client.patch("/workers/some-worker", headers={"X-Floom-Run-Token": token})
         assert r.status_code == 403
 
     def test_run_token_blocked_on_create_worker(self):
@@ -210,7 +227,7 @@ class TestRunTokenMiddleware:
         secret = "my-secret"
         client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
-        r = client.post("/workers", headers={"X-Workeros-Run-Token": token})
+        r = client.post("/workers", headers={"X-Floom-Run-Token": token})
         assert r.status_code == 403
 
     def test_run_token_blocked_on_delete_worker(self):
@@ -221,7 +238,7 @@ class TestRunTokenMiddleware:
         secret = "my-secret"
         client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
-        r = client.delete("/workers/some-worker", headers={"X-Workeros-Run-Token": token})
+        r = client.delete("/workers/some-worker", headers={"X-Floom-Run-Token": token})
         assert r.status_code == 403
         assert "composio proxy" in r.json()["detail"].lower()
 
@@ -231,7 +248,7 @@ class TestRunTokenMiddleware:
         client = TestClient(self._make_app("my-secret"), raise_server_exceptions=False)
         r = client.post(
             "/runs/run-abc/composio-execute/SOME_TOOL",
-            headers={"X-Workeros-Run-Token": "not-a-valid-token"},
+            headers={"X-Floom-Run-Token": "not-a-valid-token"},
         )
         assert r.status_code == 401
 
@@ -264,7 +281,7 @@ class TestRunTokenMiddleware:
         sig = _hmac.new(secret.encode(), data.encode(), hashlib.sha256).hexdigest()
         token = f"{data}.{sig}"
 
-        r = client.get("/workers", headers={"X-Workeros-Run-Token": token})
+        r = client.get("/workers", headers={"X-Floom-Run-Token": token})
         assert r.status_code == 401
 
 

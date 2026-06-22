@@ -38,7 +38,7 @@ function makeConfig(over: Partial<CollectionConfig<Item>> = {}): CollectionConfi
         { value: "recruiting", label: "recruiting" },
       ],
     },
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     columns: { template: "1fr 120px 40px", headers: ["Worker", "Status", ""] },
     row: (i) => ({
       leading: <Avatar name={i.name} />,
@@ -72,20 +72,31 @@ function Harness({
   config: CollectionConfig<Item>;
   initial?: CollectionState;
 }) {
-  const [state, setState] = useState<CollectionState>(initial ?? emptyState("grid"));
+  const [state, setState] = useState<CollectionState>(initial ?? emptyState("list"));
   return <CollectionView config={config} state={state} onChange={setState} />;
 }
 
 describe("CollectionView — list & grid (§8e)", () => {
-  it("renders grid by default and toggles to list (showing headers)", async () => {
+  it("renders list by default (no stored preference) and toggles to grid", async () => {
     const user = userEvent.setup();
     const { container } = render(<Harness config={makeConfig()} />);
-    expect(container.querySelector(".c-grid")).toBeInTheDocument();
-    expect(screen.queryByText("Worker")).not.toBeInTheDocument(); // no list header yet
-
-    await user.click(screen.getByRole("button", { name: "List view" }));
+    // List view is the default: column headers visible, no grid.
     expect(container.querySelector(".c-grid")).not.toBeInTheDocument();
     expect(screen.getByText("Worker")).toBeInTheDocument(); // list header column
+
+    await user.click(screen.getByRole("button", { name: "Grid view" }));
+    expect(container.querySelector(".c-grid")).toBeInTheDocument();
+    expect(screen.queryByText("Worker")).not.toBeInTheDocument(); // no list header in grid
+  });
+
+  it("emptyState() defaults view to list when no preference is stored", () => {
+    const state = emptyState();
+    expect(state.view).toBe("list");
+  });
+
+  it("emptyState('list') defaults view to list", () => {
+    const state = emptyState("list");
+    expect(state.view).toBe("list");
   });
 });
 
@@ -118,7 +129,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
     render(<Harness config={makeConfig()} />);
     expect(screen.getByText("DACH Compliance")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "ok" }));
     expect(screen.queryByText("DACH Compliance")).not.toBeInTheDocument(); // failing filtered out
     expect(screen.getByText("Weekly Update")).toBeInTheDocument();
@@ -129,7 +140,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
     const user = userEvent.setup();
     render(<Harness config={makeConfig()} />);
 
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "dach" }));
     await user.click(screen.getByRole("button", { name: "recruiting" }));
     expect(screen.getByText("DACH Compliance")).toBeInTheDocument();
@@ -143,7 +154,7 @@ describe("CollectionView — tag filtering (§8e)", () => {
   it("ANDs search with the active tag filter", async () => {
     const user = userEvent.setup();
     render(<Harness config={makeConfig()} />);
-    await user.click(screen.getByRole("button", { name: /filters/i }));
+    await user.click(screen.getByRole("button", { name: /Add filter/i }));
     await user.click(screen.getByRole("button", { name: "ok" }));
     await user.type(screen.getByRole("searchbox", { name: "Search" }), "gmail");
     expect(screen.getByText("Gmail Intake")).toBeInTheDocument();
@@ -278,7 +289,7 @@ describe("CollectionView — split detail (§8e)", () => {
     render(
       <CollectionView
         config={makeConfig()}
-        state={{ ...emptyState("grid"), sel: "does-not-exist" }}
+        state={{ ...emptyState("list"), sel: "does-not-exist" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -301,7 +312,7 @@ describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => 
       <CollectionView
         config={makeConfig({ resolveMissing })}
         // "99" is not in ITEMS — it only exists via resolveMissing.
-        state={{ ...emptyState("grid"), sel: "99" }}
+        state={{ ...emptyState("list"), sel: "99" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -319,7 +330,7 @@ describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => 
     render(
       <CollectionView
         config={makeConfig({ resolveMissing })}
-        state={{ ...emptyState("grid"), sel: "ghost-id" }}
+        state={{ ...emptyState("list"), sel: "ghost-id" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -338,7 +349,7 @@ describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => 
     render(
       <CollectionView
         config={makeConfig({ resolveMissing })}
-        state={{ ...emptyState("grid"), sel: "boom-id" }}
+        state={{ ...emptyState("list"), sel: "boom-id" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -358,7 +369,7 @@ describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => 
     render(
       <CollectionView
         config={makeConfig({ resolveMissing })}
-        state={{ ...emptyState("grid"), sel: "once-id" }}
+        state={{ ...emptyState("list"), sel: "once-id" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -385,5 +396,36 @@ describe("CollectionView — states (§7)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("boom");
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalled();
+  });
+
+  // #1726/#1709 polish pass 2: a truly-empty collection hides the toolbar
+  // (search + view toggle + add button) and tag filters — the empty state owns
+  // the screen — so there is no duplicate "Add"/"New worker" CTA or useless
+  // filter chrome with zero items.
+  it("hides the search/filter/view-toggle toolbar when the collection is empty", () => {
+    const { container } = render(<Harness config={makeConfig({ items: [] })} />);
+    expect(screen.getByText("No workers yet")).toBeInTheDocument();
+    // No search box, view toggle, tag bar, or toolbar add button on the empty surface.
+    expect(container.querySelector(".c-toolbar")).not.toBeInTheDocument();
+    expect(container.querySelector(".c-srch")).not.toBeInTheDocument();
+    expect(container.querySelector(".c-tagbar-wrap")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View mode" })).not.toBeInTheDocument();
+    // The empty-state fallback action (the page's add) is still reachable once,
+    // not duplicated by a toolbar button.
+    expect(screen.getAllByRole("button", { name: /Add/ })).toHaveLength(1);
+  });
+
+  // When a search/filter narrows a NON-empty list to zero, the toolbar STAYS so
+  // the user can clear the query (only a genuinely empty collection hides it).
+  it("keeps the toolbar when a filter narrows a non-empty list to zero", () => {
+    const { container } = render(
+      <Harness
+        config={makeConfig()}
+        initial={{ ...emptyState("list"), q: "zzz-no-match" }}
+      />,
+    );
+    expect(screen.getByText("No workers yet")).toBeInTheDocument();
+    expect(container.querySelector(".c-toolbar")).toBeInTheDocument();
+    expect(container.querySelector(".c-srch")).toBeInTheDocument();
   });
 });

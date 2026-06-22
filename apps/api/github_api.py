@@ -1,4 +1,4 @@
-"""Thin GitHub REST API client for WorkerOS git workspace integration.
+"""Thin GitHub REST API client for Floom git workspace integration.
 
 Uses stdlib urllib only — no extra dependencies.
 """
@@ -32,7 +32,7 @@ def _call(method: str, path: str, pat: str, body: dict | None = None, timeout: i
             # mercy-preview header makes GitHub include topics in repo list responses
             "Accept": "application/vnd.github.mercy-preview+json",
             "Content-Type": "application/json",
-            "User-Agent": "WorkerOS/1.0",
+            "User-Agent": "Floom/1.0",
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
@@ -57,7 +57,7 @@ def validate_pat(pat: str) -> dict:
 
 
 def list_workeros_repos(pat: str) -> list[dict]:
-    """List repos owned by the authed user that look like WorkerOS workspaces.
+    """List repos owned by the authed user that look like Floom workspaces.
 
     Matches by name prefix (workeros-*) OR by the workeros-workspace topic.
     Only returns repos the token owner can push to.
@@ -79,7 +79,7 @@ def create_workeros_repo(pat: str, name: str) -> dict:
     repo = _call("POST", "/user/repos", pat, {
         "name": name,
         "private": True,
-        "description": "WorkerOS workspace — workers, contexts, and instructions",
+        "description": "Floom workspace — workers, contexts, and instructions",
         "auto_init": False,
     })
     # Add the topic so future listing picks it up even if name changes
@@ -106,7 +106,7 @@ def _repo_summary(r: dict) -> dict:
 # GitHub Actions Variables API
 #
 # Variables are readable via the API (unlike Secrets which are write-only).
-# We use a repo variable to store the WorkerOS secrets encryption key so that:
+# We use a repo variable to store the Floom secrets encryption key so that:
 #   - Any valid PAT with repo access can read it (PAT rotation safe)
 #   - Two installs pointing at the same repo share the same key
 #   - The key lives in the repo, not derived from the token

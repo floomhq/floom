@@ -1,6 +1,6 @@
 # WhatsApp integration — reference code (staged, NOT active)
 
-**Status: staged for later. None of this is wired into the Workeros app.**
+**Status: staged for later. None of this is wired into the Floom app.**
 These files are inert reference primitives. Nothing in the live app imports them.
 
 ## Source

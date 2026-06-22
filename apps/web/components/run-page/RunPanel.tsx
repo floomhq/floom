@@ -20,7 +20,7 @@ import { StackTrace } from "@/components/ai-elements/stack-trace";
 import { useRunStream } from "@/lib/useRunStream";
 import { api } from "@/lib/api";
 import { humanizeRunError } from "@/lib/run-format";
-import { stripCitationTokens } from "@/lib/strip-citations";
+import { sanitizeOutputText } from "@/lib/strip-citations";
 import type { RunDetail, RunPart } from "@/lib/types";
 
 // Infer output type from a raw value when no schema is declared.
@@ -145,7 +145,7 @@ function LiveTranscript({
                 {part.type === "reasoning" ? "Reasoning" : "Text"}
               </p>
               <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                {stripCitationTokens(part.text)}
+                {sanitizeOutputText(part.text)}
               </p>
             </div>
           );
@@ -185,7 +185,7 @@ function LiveTranscript({
             <StackTrace
               key={`finish-${index}`}
               error={
-                run?.error ||
+                humanizeRunError(run?.error) ||
                 humanizeRunError(part.error) ||
                 "Run failed"
               }
@@ -198,7 +198,7 @@ function LiveTranscript({
       {/* Trailing error when run failed but no finish part arrived */}
       {status === "failed" &&
         !parts.some((p) => p.type === "finish") &&
-        run?.error && <StackTrace error={run.error} />}
+        run?.error && <StackTrace error={humanizeRunError(run.error)} />}
     </div>
   );
 }
@@ -207,7 +207,7 @@ function LiveTranscript({
 
 function DoneOutput({ run }: { run: RunDetail }) {
   if (run.status === "failed") {
-    return <StackTrace error={run.error} />;
+    return <StackTrace error={humanizeRunError(run.error)} />;
   }
   const hasSchema = run.output_schema && run.output_schema.length > 0;
   const hasRaw = Object.keys(run.output || {}).length > 0;

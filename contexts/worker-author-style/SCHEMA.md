@@ -202,7 +202,7 @@ connections:
       - GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID
 ```
 
-Connection selection is account-aware. Check the current workspace inventory before choosing an app: `connections__list` reports app slug, account label, status, scopes, and MCP allowed tools. `allowed_tools` is enforced by the Workeros Composio proxy for E2B workers. It limits what this worker can execute even when the underlying OAuth connection has broader scopes. If the token itself must be read-only, use a separate Composio readonly auth config such as `gmail.readonly`.
+Connection selection is account-aware. Check the current workspace inventory before choosing an app: `connections__list` reports app slug, account label, status, scopes, and MCP allowed tools. `allowed_tools` is enforced by the Floom Composio proxy for E2B workers. It limits what this worker can execute even when the underlying OAuth connection has broader scopes. If the token itself must be read-only, use a separate Composio readonly auth config such as `gmail.readonly`.
 
 ## Secrets
 

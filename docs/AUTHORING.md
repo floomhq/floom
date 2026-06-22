@@ -2,7 +2,7 @@
 
 > **If you are an agent (Claude Code / Cursor) authoring via the MCP, read [AGENT-COOKBOOK.md](AGENT-COOKBOOK.md) first** - it has the per-tool examples + end-to-end recipes. This doc is the schema + concept reference.
 
-This is the canonical guide for writing, deploying, and updating workers on Workeros. It covers:
+This is the canonical guide for writing, deploying, and updating workers on Floom. It covers:
 
 1. What a worker is
 2. The two execution modes (script vs agent / SKILL.md)
@@ -379,7 +379,7 @@ contexts:
     source: git+https://github.com/example/notes.git
 ```
 
-Local packs are copied from the workspace context store. Git-backed packs are cloned into the E2B sandbox at run time; they are read-only from Workeros' perspective. Add `writeable: true` only for local packs that the worker is allowed to persist back after a successful run.
+Local packs are copied from the workspace context store. Git-backed packs are cloned into the E2B sandbox at run time; they are read-only from Floom' perspective. Add `writeable: true` only for local packs that the worker is allowed to persist back after a successful run.
 
 For large packs, use `when` to mount them only for run inputs that actually need them. This keeps lightweight operations from paying the sandbox upload cost for data they never read.
 
@@ -514,7 +514,7 @@ When `approvals.required: true`, runs use a **two-phase respawn model**:
 #### Run 2 inputs
 
 ```python
-# Workeros passes inputs as an inputs.json FILE in the working dir - NOT an env var.
+# Floom passes inputs as an inputs.json FILE in the working dir - NOT an env var.
 with open("inputs.json") as f:
     inputs = json.load(f)
 decision = inputs.get("decision")        # "approved"
@@ -601,12 +601,12 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
    ```
 3. Validate and deploy the local bundle:
    ```bash
-   workeros workers validate workers/my-skill
-   workeros workers push workers/my-skill
+   floom workers validate workers/my-skill
+   floom workers push workers/my-skill
    ```
 4. Run from the UI, CLI, or MCP to smoke-test:
    ```bash
-   workeros run my-skill --input topic="Smoke test"
+   floom run my-skill --input topic="Smoke test"
    ```
 
 **Gotchas:**
@@ -615,7 +615,7 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
 - Skills that depend on Claude-Code-only tools (Read, Edit, Bash that hits the host filesystem) won't work - the runner exposes a different tool set. Audit the skill's tool calls before porting.
 - Heavy Python deps (torch, transformers) won't fit in the E2B template. Trim dependencies or split the worker into smaller sandboxed steps.
 
-`workeros workers push` creates a new worker id with `POST /workers` and updates
+`floom workers push` creates a new worker id with `POST /workers` and updates
 an existing worker id with `PUT /workers/<id>` when the target API supports
 in-place source updates. If the API returns "does not support in-place worker
 source updates", keep the validated bundle and deploy it under a new worker id
@@ -628,22 +628,22 @@ or upgrade the API.
 ### CLI
 
 ```bash
-npm i -g @floomhq/workeros
-workeros login                              # browser/device auth flow
-workeros doctor
-workeros workers list
-workeros workers validate ./workers/<id>
-workeros workers push ./workers/<id>
-workeros run <id> --input topic="AI tools"
+npm i -g @floomhq/floom
+floom login                              # browser/device auth flow
+floom doctor
+floom workers list
+floom workers validate ./workers/<id>
+floom workers push ./workers/<id>
+floom run <id> --input topic="AI tools"
 ```
 
-The package also installs `floom` as a compatible alias. Use `workeros` when a
+The package also installs `floom` as a compatible alias. Use `floom` when a
 separate Floom CLI is already present on the machine.
 
 ### MCP (for Claude Code / Cursor agents)
 
 ```bash
-npx -y @floomhq/workeros mcp install --target claude
+npx -y @floomhq/floom mcp install --target claude
 ```
 
 Exposes tools the agent can call to create, update settings, run, watch, and
@@ -651,7 +651,7 @@ delete workers without leaving the chat. Use `WORKEROS_API_SECRET` env var to
 skip the install-time prompt.
 
 Current MCP source creation accepts `worker_yml` plus `run_py`. Use CLI
-`workeros workers push <dir>` for local `SKILL.md` agent-mode bundles and for
+`floom workers push <dir>` for local `SKILL.md` agent-mode bundles and for
 source edits after the first deploy. MCP `workers.update` is for trigger,
 cron, saved input defaults, documented capabilities, and webhook secret
 rotation.
@@ -659,7 +659,7 @@ rotation.
 ### API direct (for scripts / CI)
 
 ```bash
-SECRET=$(cat ~/.workeros/secret)
+SECRET=$(cat ~/.floom/secret)
 curl -X POST http://localhost:8000/workers/<id>/runs \
   -H "x-floom-secret: $SECRET" \
   -H "Content-Type: application/json" \
@@ -677,7 +677,7 @@ through the normal encrypted secrets path.
 Store a Playwright `storage_state` JSON blob as a secret:
 
 ```bash
-workeros secrets set MEDIUM_STORAGE_STATE_JSON < storage-state.json
+floom secrets set MEDIUM_STORAGE_STATE_JSON < storage-state.json
 ```
 
 Declare both the browser-session connection metadata and the secret in

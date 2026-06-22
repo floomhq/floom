@@ -1,5 +1,5 @@
-﻿#!/usr/bin/env python3
-"""Live MCP parity checks for Workeros workspace-agent MCP.
+#!/usr/bin/env python3
+"""Live MCP parity checks for Floom workspace-agent MCP.
 
 Defaults to production. Override with:
   MCP_BASE_URL=http://127.0.0.1:8011/api/mcp
@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 
-BASE_URL = os.environ.get("MCP_BASE_URL", "https://api.workeros.example.com/api/mcp")
+BASE_URL = os.environ.get("MCP_BASE_URL", "https://api.floom.example.com/api/mcp")
 API_KEY = (
     os.environ.get("MCP_API_KEY")
     or os.environ.get("WORKSPACE_AGENT_MCP_TOKEN")
@@ -104,12 +104,12 @@ def assert_tool_call() -> None:
 
 
 def main() -> int:
-    print(f"Testing Workeros MCP endpoint: {BASE_URL}")
+    print(f"Testing Floom MCP endpoint: {BASE_URL}")
     assert_discovery()
     assert_initialize()
     assert_tools_list()
     assert_tool_call()
-    print("PASS all Workeros MCP parity checks")
+    print("PASS all Floom MCP parity checks")
     return 0
 
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=Workeros hourly data snapshot and artifact rotation
+Description=Workeros hourly data snapshot and artifact rotation (legacy compatibility unit)
 After=workeros-api.service
 
 [Service]

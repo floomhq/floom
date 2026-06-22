@@ -1,4 +1,4 @@
-// REFERENCE ONLY — staged for later, NOT wired into the Workeros app.
+// REFERENCE ONLY — staged for later, NOT wired into the Floom app.
 // Source: gate-app/lettersnap-agents src/services/whatsapp.ts (Meta WhatsApp Cloud API).
 // LetterSnap-specific business logic removed: Firestore audit log, Stripe checkout
 // CTA helper, payment button strings, response-text sanitizer dependency, German

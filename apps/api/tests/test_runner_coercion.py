@@ -21,6 +21,7 @@ if str(API_DIR) not in sys.path:
 from models import (
     WorkerContractExec,
     WorkerRuntime,
+    is_self_hosted_runner,
     parse_worker_manifest,
     worker_contract_to_worker_config,
 )
@@ -63,6 +64,16 @@ class TestWorkerRuntimeValidator:
         )
         assert rt.runner == "e2b"
 
+    def test_self_hosted_runner_declaration_allowed(self):
+        rt = WorkerRuntime(
+            type="python311",
+            entrypoint="run.py",
+            runner="self-hosted:gpu-box",
+            command="python run.py",
+        )
+        assert rt.runner == "self-hosted:gpu-box"
+        assert is_self_hosted_runner(rt.runner)
+
     def test_invalid_runner_rejected(self):
         with pytest.raises(ValidationError, match="runner must be 'e2b'"):
             WorkerRuntime(
@@ -90,6 +101,15 @@ class TestWorkerContractExecValidator:
         )
         assert exc.runner == "e2b"
 
+    def test_self_hosted_runner_declaration_allowed(self):
+        exc = WorkerContractExec(
+            runtime="python311",
+            runner="self-hosted",
+            command="python run.py",
+        )
+        assert exc.runner == "self-hosted"
+        assert is_self_hosted_runner(exc.runner)
+
     def test_invalid_runner_rejected(self):
         with pytest.raises(ValidationError, match="runner must be 'e2b'"):
             WorkerContractExec(
@@ -110,9 +130,26 @@ class TestParseManifestRunnerCoercion:
         contract = parse_worker_manifest(_manifest("e2b"))
         assert contract.exec.runner == "e2b"
 
+    def test_manifest_runner_self_hosted_preserved(self):
+        contract = parse_worker_manifest(_manifest("self-hosted:media"))
+        assert contract.exec.runner == "self-hosted:media"
+        config = worker_contract_to_worker_config(contract, "runner-coerce-test")
+        assert config.runtime.runner == "self-hosted:media"
+
     def test_worker_config_runner_e2b_after_coercion(self):
         contract = parse_worker_manifest(_manifest("local"))
         config = worker_contract_to_worker_config(contract, "runner-coerce-test")
         assert config.runtime.runner == "e2b", (
             "WorkerConfig produced from a runner:local manifest must have runner=e2b"
         )
+
+
+def test_self_hosted_runner_fails_fast_before_sandbox_dispatch():
+    source = (API_DIR / "run_service.py").read_text(encoding="utf-8")
+    source = source[source.index("def execute_run("):]
+    assert "is_self_hosted_runner(runner)" in source
+    assert "self_hosted_runner_unavailable" in source
+    gate = source.index("is_self_hosted_runner(runner)")
+    assert gate < source.index("get_secrets_for_worker(worker_id")
+    assert gate < source.index("_resolve_connections(worker_id")
+    assert gate < source.index("driver = get_sandbox_driver")

@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize, Minimize, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -22,6 +22,7 @@ import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
+import { ToolCallGroup } from "./cards/ToolCallGroup";
 import {
   Message,
   MessageAction,
@@ -40,9 +41,10 @@ import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 export { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { api } from "@/lib/api";
+import { capturePostHogEvent } from "@/lib/posthog";
 import { reportError, logError } from "@/lib/notify";
 import type { ConversationSummary, SystemOverview } from "@/lib/types";
-import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
+import type { AttachedFile, ChatMessage, MsgPart, ToolCard } from "@/lib/emily-chat-types";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { EmilyHomeEmpty } from "@/components/home/EmilyHomeEmpty";
 
@@ -228,7 +230,7 @@ function SuggestionPills({
 function TypingIndicator() {
   return (
     <div className="flex items-start gap-2">
-      <EmilyAvatar size="sm" />
+      <EmilyAvatar size="sm" active />
       <div className="flex gap-1 py-1.5 px-1">
         {[0, 1, 2].map((i) => (
           <div
@@ -290,6 +292,58 @@ function MessageCopyAction({ text }: { text: string }) {
   );
 }
 
+// Cards that demand a user decision (approve/reject, connect a service) must
+// stay visible and actionable in the thread — never buried inside a collapsed
+// "N tool calls" summary. Everything else is intermediate tool spam that
+// collapses (#FIX1).
+const INTERACTIVE_CARD_KINDS = new Set<ToolCard["kind"]>(["approval", "connect-service"]);
+
+function cardIsInFlight(card: ToolCard): boolean {
+  return (
+    card.status === "running" ||
+    card.status === "starting" ||
+    card.status === "queued" ||
+    card.status === "drafting" ||
+    card.status === "generating" ||
+    card.status === "smoke" ||
+    card.status === "loading" ||
+    card.status === "pending_approval"
+  );
+}
+
+type RenderUnit =
+  | { kind: "part"; part: MsgPart }
+  | { kind: "tool-group"; cards: ToolCard[] };
+
+// Collapse a message's parts into render units: text parts and interactive cards
+// pass through 1:1, while CONSECUTIVE non-interactive tool-call cards fold into a
+// single grouped unit. A run of exactly one collapsible card is left as a normal
+// card (no pointless "1 tool calls" summary).
+function buildRenderUnits(parts: MsgPart[]): RenderUnit[] {
+  const units: RenderUnit[] = [];
+  let run: ToolCard[] = [];
+  const flush = () => {
+    if (run.length >= 2) {
+      units.push({ kind: "tool-group", cards: run });
+    } else if (run.length === 1) {
+      units.push({ kind: "part", part: { type: "tool-card", card: run[0] } });
+    }
+    run = [];
+  };
+  for (const part of parts) {
+    const collapsible =
+      part.type === "tool-card" && !INTERACTIVE_CARD_KINDS.has(part.card.kind);
+    if (collapsible) {
+      run.push((part as { type: "tool-card"; card: ToolCard }).card);
+      continue;
+    }
+    flush();
+    units.push({ kind: "part", part });
+  }
+  flush();
+  return units;
+}
+
 function MessageRow({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
@@ -327,7 +381,14 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
       <EmilyAvatar size="sm" />
       {/* min-w-0 + overflow-hidden prevent long URLs and code from blowing out the rail */}
       <div className="flex-1 min-w-0 overflow-hidden space-y-2">
-        {msg.parts?.map((part, i) => {
+        {buildRenderUnits(msg.parts ?? []).map((unit, i) => {
+          if (unit.kind === "tool-group") {
+            // Keep the group expanded while any call in it is still in flight so
+            // progress stays visible; collapse once they all settle.
+            const hasInFlight = unit.cards.some(cardIsInFlight);
+            return <ToolCallGroup key={i} cards={unit.cards} defaultOpen={hasInFlight} />;
+          }
+          const part = unit.part;
           if (part.type === "text") {
             return (
               <MessageContent key={i}>
@@ -636,6 +697,21 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     setInput("");
   }, [autoSubmitPrime, createMode, primeInput, messages.length, isHydrating, sendMessage]);
 
+  // INTENT: the create-worker flow opened. Fire once per createMode activation
+  // (this core is mounted once for the whole app, so guard against re-fires).
+  const createStartedRef = useRef(false);
+  useEffect(() => {
+    if (!createMode) {
+      createStartedRef.current = false;
+      return;
+    }
+    if (createStartedRef.current) return;
+    createStartedRef.current = true;
+    capturePostHogEvent("worker_create_started", {
+      source: homeMode ? "home" : fullPage ? "fullpage" : "dock",
+    });
+  }, [createMode, homeMode, fullPage]);
+
   const handleExport = useCallback(() => {
     exportConversationMarkdown(messages, conversationId);
   }, [messages, conversationId]);
@@ -750,9 +826,11 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 onPickMcp={() => mcpModal.open()}
               />
               <div className="mt-6 w-full max-w-2xl px-6">
-                {/* Create mode uses the landing-style composer with a "Hire"
-                    send affordance. Normal home Emily keeps the default send
-                    control because it handles general assistant questions too. */}
+                {/* Hero composer (Federico 2026-06-21): the home/create empty
+                    state is the primary call-to-action, so it uses the FLAT,
+                    BORDERLESS landing-style composer (no "Uses" chip row) at the
+                    LARGER hero size. Tool names are highlighted INLINE inside the
+                    example pills above (PromptTokens), matching the landing box. */}
                 <PromptInput
                   value={input}
                   onChange={setInput}
@@ -761,7 +839,12 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   attachedFiles={attachedFiles}
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
-                  variant={createMode ? "landing" : "default"}
+                  variant="landing"
+                  large
+                  // #1698: "New worker" / ?create=1 must give visible feedback
+                  // from ANY route. Focus the composer when entering create mode
+                  // so the click lands a caret here instead of a dead no-op.
+                  autoFocus={createMode}
                 />
               </div>
             </div>
@@ -843,14 +926,17 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
 type DockMode = "collapsed" | "rail" | "wide";
 
 // Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px.
+// The dock only mounts on desktop (≥1024, useIsDesktop), so the fixed widths key
+// off `lg` to stay in lockstep with the shell breakpoint (#1544 tablet fix).
 const DOCK_WIDTH: Record<DockMode, string> = {
   collapsed: "w-[46px]",
-  rail: "w-full md:w-[330px]",
-  wide: "w-full md:w-[560px] md:max-w-[52vw]",
+  rail: "w-full lg:w-[330px]",
+  wide: "w-full lg:w-[560px] lg:max-w-[52vw]",
 };
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
+  const router = useRouter();
   const [mode, setMode] = useState<DockMode>("rail");
   // True fullscreen lives in shared context (AppShell hides the page pane and
   // this dock flex-grows to fill the main area — the left sidebar stays put).
@@ -932,19 +1018,29 @@ export function EmilyDock({ className }: { className?: string }) {
   // then cleared — re-renders must not keep re-seeding it.
   const [primeText, setPrimeText] = useState<string | undefined>(undefined);
   useEffect(() => {
-    if (createParam && isHomeRoute) {
-      setCreateLatched(true);
-      if (primeParam) setPrimeText(primeParam);
-      // Drop the params from the URL so create-prime is deep-linkable but not
-      // sticky across refresh/back (history.replace, no Next reload).
-      if (typeof window !== "undefined") {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("create");
-        url.searchParams.delete("prime");
-        window.history.replaceState(window.history.state, "", url.pathname + url.search);
-      }
+    if (!createParam) return;
+    // #1698: the create deep-link (`?create=1`) must open the create flow
+    // CONSISTENTLY regardless of the route it lands on. On a NON-home route it
+    // would otherwise just sit in the URL doing nothing (a broken first action),
+    // while the page's Collection keeps owning the surface. Forward it to the
+    // home create surface so create always opens the same way — and the param
+    // never lingers on a Collection route to be mistaken for view state.
+    if (!isHomeRoute) {
+      const prime = primeParam ? `&prime=${encodeURIComponent(primeParam)}` : "";
+      router.replace(`/?create=1${prime}`);
+      return;
     }
-  }, [createParam, isHomeRoute, primeParam]);
+    setCreateLatched(true);
+    if (primeParam) setPrimeText(primeParam);
+    // Drop the params from the URL so create-prime is deep-linkable but not
+    // sticky across refresh/back (history.replace, no Next reload).
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("create");
+      url.searchParams.delete("prime");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    }
+  }, [createParam, isHomeRoute, primeParam, router]);
   // Reset the create latch when the user navigates away from the home route so
   // the next visit shows the home greeting (not a stale create hero).
   useEffect(() => {
@@ -989,6 +1085,28 @@ export function EmilyDock({ className }: { className?: string }) {
       setFullscreen(false);
     }
   }, [isHomeRoute, setFullscreen, userCollapsedHome, createMode]);
+
+  // FIX2 — auto-collapse fullscreen Emily on NAVIGATION. When Emily is in
+  // fullscreen on a non-home route (e.g. the user manually maximized it on
+  // /workers) and then clicks a link to ANOTHER route, the fullscreen would
+  // otherwise stay latched over the destination page (AppShell hides <main>),
+  // hiding wherever they navigated to. Detect the actual pathname CHANGE (not a
+  // re-render) and, when the new route is a real non-home destination, dock
+  // Emily back to the rail so the destination is visible. Home→* and *→home are
+  // already handled by the effect above; this only fills the non-home→non-home
+  // gap. Navigating WITHIN the chat/home surface never collapses.
+  const prevPathForCollapseRef = useRef<string | null>(pathname);
+  useEffect(() => {
+    const prev = prevPathForCollapseRef.current;
+    prevPathForCollapseRef.current = pathname;
+    if (prev === null || prev === pathname) return; // no real navigation
+    // The home effect already collapses on any transition leaving home, and we
+    // never collapse when landing back on home/overview (the home owns its own
+    // fullscreen). Only act on navigation BETWEEN non-home routes.
+    const wasHome = prev === "/" || prev === "/overview";
+    if (wasHome || isHomeRoute) return;
+    setFullscreen(false);
+  }, [pathname, isHomeRoute, setFullscreen]);
 
   // Collapse the home fullscreen Emily into the right rail (shows the Workers
   // list in the main pane). Maximize returns to fullscreen Emily.
@@ -1076,10 +1194,10 @@ export function EmilyDock({ className }: { className?: string }) {
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={toggleFull}
-              title={isFull ? `Exit full screen` : `Full screen ${assistantName}`}
-              aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
+              title={isFull ? "Exit full screen" : "Full screen"}
+              aria-label={isFull ? "Exit full screen" : "Full screen"}
             >
-              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {isFull ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           ) : (
             <Button
@@ -1087,10 +1205,10 @@ export function EmilyDock({ className }: { className?: string }) {
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={isFull ? collapseHome : maximizeHome}
-              title={isFull ? `Minimize ${assistantName}` : `Full screen ${assistantName}`}
-              aria-label={isFull ? `Minimize ${assistantName}` : `Expand ${assistantName}`}
+              title={isFull ? "Exit full screen" : "Full screen"}
+              aria-label={isFull ? "Exit full screen" : "Full screen"}
             >
-              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              {isFull ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           )}
           {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,

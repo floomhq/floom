@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Hourly Workeros data backup.
+# Hourly Floom data backup.
 #
 # Writes one directory per backup:
-#   /root/backups/workeros-YYYY-MM-DD-HHMM/
+#   /root/backups/floom-YYYY-MM-DD-HHMM/
 #     floom.db.gz       (gzip-compressed SQLite online backup)
 #     artifacts.tar.gz
 #     manifest.json
@@ -16,7 +16,7 @@
 #   - 4 weekly restore points
 #
 # Override via env:
-#   WORKEROS_ROOT            repo root (default: /opt/workeros)
+#   WORKEROS_ROOT            repo root (default: /opt/floom)
 #   WORKEROS_API_DIR         API dir for relative FLOOM_DB paths (default: $WORKEROS_ROOT/apps/api)
 #   FLOOM_DB                 SQLite path (default: $WORKEROS_ROOT/data/floom.db)
 #   FLOOM_ARTIFACTS_DIR      artifacts dir (default: $WORKEROS_ROOT/data/artifacts)
@@ -27,7 +27,15 @@
 
 set -euo pipefail
 
-WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/workeros}"
+detect_default_root() {
+  if [[ -d /opt/floom || ! -d /opt/workeros ]]; then
+    echo "/opt/floom"
+  else
+    echo "/opt/workeros"
+  fi
+}
+
+WORKEROS_ROOT="${WORKEROS_ROOT:-$(detect_default_root)}"
 WORKEROS_API_DIR="${WORKEROS_API_DIR:-$WORKEROS_ROOT/apps/api}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 ARTIFACTS_DIR="${FLOOM_ARTIFACTS_DIR:-$WORKEROS_ROOT/data/artifacts}"
@@ -65,9 +73,9 @@ fi
 mkdir -p "$BACKUP_ROOT"
 
 TIMESTAMP="$(date -u +%Y-%m-%d-%H%M)"
-DEST="$BACKUP_ROOT/workeros-$TIMESTAMP"
+DEST="$BACKUP_ROOT/floom-$TIMESTAMP"
 if [[ -e "$DEST" ]]; then
-  DEST="$BACKUP_ROOT/workeros-$TIMESTAMP-$(date -u +%S)"
+  DEST="$BACKUP_ROOT/floom-$TIMESTAMP-$(date -u +%S)"
 fi
 mkdir -p "$DEST"
 
@@ -142,7 +150,7 @@ root = Path(sys.argv[1])
 hourly_keep = int(sys.argv[2])
 daily_keep = int(sys.argv[3])
 weekly_keep = int(sys.argv[4])
-pattern = re.compile(r"^workeros-(\d{4}-\d{2}-\d{2}-\d{4})(?:-\d{2})?$")
+pattern = re.compile(r"^(?:floom|workeros)-(\d{4}-\d{2}-\d{2}-\d{4})(?:-\d{2})?$")
 
 
 @dataclass(frozen=True)

@@ -47,6 +47,43 @@ _worker_create_locks_guard = threading.Lock()
 _worker_create_locks: Dict[str, threading.Lock] = {}
 
 
+def _emit_worker_created(*, worker_id: str, owner_id: str, config: Any) -> None:
+    """Emit the worker_created PostHog event after a successful create.
+
+    Single chokepoint: every create route (HTTP / MCP / chat) funnels through
+    _create_worker_from_parsed_payload. Sends counts/flags only, never the
+    worker body. No-op when analytics is disabled; never raises."""
+    try:
+        from services import analytics_posthog
+        from db import derive_workspace_id
+    except Exception:  # pragma: no cover
+        return
+    if not analytics_posthog.is_enabled():
+        return
+    try:
+        has_schedule = bool(getattr(getattr(config, "trigger", None), "cron", None))
+        tool_count = len(getattr(config, "connections", None) or []) + len(
+            getattr(config, "calls", None) or []
+        )
+        runner = None
+        runtime = getattr(config, "runtime", None)
+        if runtime is not None:
+            runner = getattr(runtime, "runner", None)
+        analytics_posthog.capture_event(
+            distinct_id=owner_id or "",
+            event="worker_created",
+            properties={
+                "worker_id": worker_id,
+                "has_schedule": has_schedule,
+                "tool_count": tool_count,
+                "runner": runner or None,
+            },
+            groups={"workspace": derive_workspace_id(owner_id)},
+        )
+    except Exception:  # pragma: no cover
+        logger.debug("PostHog worker_created emit failed for %s", worker_id, exc_info=True)
+
+
 def _acquire_worker_create_lock(worker_id: str) -> threading.Lock:
     with _worker_create_locks_guard:
         lock = _worker_create_locks.get(worker_id)
@@ -119,7 +156,7 @@ def _write_worker_bundle_files(
         (target_dir / "SKILL.md").write_text(
             f"# {config.name}\n\n"
             "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
-            "Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+            "Current Floom execution uses `exec.command` from `worker.yml`.\n",
             encoding="utf-8",
         )
 
@@ -184,7 +221,7 @@ def _reject_raw_local_runner_on_create(worker_yml: str) -> None:
         raise HTTPException(
             status_code=400,
             detail=(
-                "exec.runner: local is not supported by the hosted Workeros API. "
+                "exec.runner: local is not supported by the hosted Floom API. "
                 "Set exec.runner: e2b for workers created through the API or MCP."
             ),
         )
@@ -272,6 +309,10 @@ def _create_worker_from_parsed_payload(
                 author_email=author_email,
             )
             create_complete = True
+            # PostHog: worker created (single chokepoint for all create routes).
+            _emit_worker_created(
+                worker_id=worker_id, owner_id=auth.user_id, config=config
+            )
             return detail
         except sqlite3.IntegrityError as exc:
             raise HTTPException(

@@ -25,7 +25,7 @@ labels: bug
 
 ## Environment
 
-- Workeros version / commit:
+- Floom version / commit:
 - Component: [ ] api  [ ] web  [ ] mcp  [ ] worker runtime
 - OS / Python / Node version:
 - Deploy mode: [ ] local (SQLite)  [ ] cloud

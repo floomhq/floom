@@ -1,10 +1,11 @@
-﻿import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, dirname } from "node:path";
+import { getCommandName } from "./command-name.js";
 import { readCredentials, updateCredentials, type StoredCredentials } from "./credentials.js";
 
 const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 
-export class WorkerosApiError extends Error {
+export class FloomApiError extends Error {
   constructor(
     message: string,
     readonly status?: number,
@@ -12,17 +13,17 @@ export class WorkerosApiError extends Error {
     readonly headers?: Headers,
   ) {
     super(message);
-    this.name = "WorkerosApiError";
+    this.name = "FloomApiError";
   }
 }
 
-export class WorkerosConnectionError extends Error {
+export class FloomConnectionError extends Error {
   constructor(
     message: string,
     readonly apiBase: string,
   ) {
     super(message);
-    this.name = "WorkerosConnectionError";
+    this.name = "FloomConnectionError";
   }
 }
 
@@ -49,13 +50,13 @@ function buildUrl(base: string, path: string, query?: Record<string, QueryValue>
   return url.toString();
 }
 
-async function fetchWorkeros(apiBase: string, input: string, init: RequestInit): Promise<Response> {
+async function fetchFloom(apiBase: string, input: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(input, init);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new WorkerosConnectionError(
-      `Cannot reach Workeros API at ${normalizeBase(apiBase)}: ${message}`,
+    throw new FloomConnectionError(
+      `Cannot reach Floom API at ${normalizeBase(apiBase)}: ${message}`,
       normalizeBase(apiBase),
     );
   }
@@ -117,7 +118,7 @@ async function refreshSupabaseJwt(
   };
   if (!response.ok || !parsed.access_token) {
     const detail = parsed.error_description || parsed.msg || JSON.stringify(parsed);
-    throw new WorkerosApiError(
+    throw new FloomApiError(
       `Supabase token refresh failed (HTTP ${response.status}): ${detail}`,
       response.status,
       parsed,
@@ -133,7 +134,7 @@ async function refreshSupabaseJwt(
 async function getCloudJwt(creds: StoredCredentials): Promise<string> {
   if (!creds.refresh_token || !creds.supabase_url || !creds.supabase_anon_key) {
     throw new Error(
-      "Hosted credentials incomplete (missing refresh_token / supabase_url / supabase_anon_key). Run floom login --cloud again.",
+      `Hosted credentials incomplete (missing refresh_token / supabase_url / supabase_anon_key). Run ${getCommandName()} login --cloud again.`,
     );
   }
   const cacheKey = `${creds.supabase_url}|${creds.refresh_token.slice(-12)}`;
@@ -164,13 +165,13 @@ async function getCloudJwt(creds: StoredCredentials): Promise<string> {
   return refreshed.access_token;
 }
 
-export class WorkerosApiClient {
+export class FloomApiClient {
   constructor(
     readonly apiBase: string,
     readonly credentials?: StoredCredentials,
   ) {}
 
-  // In hosted mode the workeros engine is mounted under /api on the cloud
+  // In hosted mode the Floom engine is mounted under /api on the cloud
   // FastAPI app, so engine paths like "/workers" become "/api/workers".
   // Paths the cloud owns directly (/auth/*, /api/workspaces, /healthz)
   // already start with /api or /auth and are NOT rewritten.
@@ -184,7 +185,7 @@ export class WorkerosApiClient {
 
   async authHeaders(): Promise<Record<string, string>> {
     if (!this.credentials) {
-      throw new Error("Not logged in. Run floom login first.");
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
     }
     if (this.credentials.mode === "cloud") {
       if (this.credentials.api_token) {
@@ -206,11 +207,16 @@ export class WorkerosApiClient {
       return headers;
     }
     if (!this.credentials.api_secret) {
-      throw new Error("Not logged in. Run floom login first.");
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
     }
     const headers: Record<string, string> = { "x-floom-secret": this.credentials.api_secret };
     if (this.credentials.workspace_id) {
       headers["x-workeros-workspace"] = this.credentials.workspace_id;
+    }
+    // Self-hosted engines with user-header scope require x-floom-user alongside
+    // the shared secret; otherwise they 401. Only meaningful in OSS mode.
+    if (this.credentials.user) {
+      headers["x-floom-user"] = this.credentials.user;
     }
     return headers;
   }
@@ -229,7 +235,7 @@ export class WorkerosApiClient {
       headers["content-type"] = "application/json";
       body = JSON.stringify(options.body);
     }
-    const response = await fetchWorkeros(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path), options.query), {
+    const response = await fetchFloom(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path), options.query), {
       method,
       headers,
       body,
@@ -237,7 +243,7 @@ export class WorkerosApiClient {
     const parsed = await parseResponse(response);
     if (!response.ok) {
       const detail = responseDetail(parsed);
-      throw new WorkerosApiError(
+      throw new FloomApiError(
         `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
@@ -256,14 +262,14 @@ export class WorkerosApiClient {
     if (auth) {
       Object.assign(headers, await this.authHeaders());
     }
-    const response = await fetchWorkeros(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path), options.query), {
+    const response = await fetchFloom(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path), options.query), {
       method,
       headers,
     });
     if (!response.ok) {
       const parsed = await parseResponse(response);
       const detail = responseDetail(parsed);
-      throw new WorkerosApiError(
+      throw new FloomApiError(
         `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
@@ -275,12 +281,12 @@ export class WorkerosApiClient {
 
   async uploadFile(inputName: string, filePath: string): Promise<string> {
     if (!this.credentials) {
-      throw new Error("Not logged in. Run floom login first.");
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
     }
     const bytes = await readFile(filePath);
     const form = new FormData();
     form.append("file", new File([bytes], basename(filePath)));
-    const response = await fetchWorkeros(this.apiBase, buildUrl(this.apiBase, this.resolvePath("/uploads")), {
+    const response = await fetchFloom(this.apiBase, buildUrl(this.apiBase, this.resolvePath("/uploads")), {
       method: "POST",
       headers: {
         accept: "application/json",
@@ -291,7 +297,7 @@ export class WorkerosApiClient {
     const parsed = await parseResponse(response);
     if (!response.ok) {
       const detail = responseDetail(parsed);
-      throw new WorkerosApiError(
+      throw new FloomApiError(
         `Upload for input ${inputName} failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
@@ -304,26 +310,61 @@ export class WorkerosApiClient {
     }
     return uploadId;
   }
+
+  async uploadContextFile(contextName: string, filePath: string, targetPath?: string): Promise<unknown> {
+    if (!this.credentials) {
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
+    }
+    const relPath = (targetPath || basename(filePath)).replace(/\\/g, "/").replace(/^\/+/, "");
+    const prefix = dirname(relPath);
+    const filename = basename(relPath);
+    const bytes = await readFile(filePath);
+    const form = new FormData();
+    form.append("files", new File([bytes], filename));
+    if (prefix && prefix !== ".") {
+      form.append("path_prefix", prefix);
+    }
+    const path = `/contexts/${encodeURIComponent(contextName)}/upload`;
+    const response = await fetchFloom(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path)), {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        ...(await this.authHeaders()),
+      },
+      body: form,
+    });
+    const parsed = await parseResponse(response);
+    if (!response.ok) {
+      const detail = responseDetail(parsed);
+      throw new FloomApiError(
+        `API POST ${path} failed with HTTP ${response.status}: ${detail}`,
+        response.status,
+        parsed,
+        response.headers,
+      );
+    }
+    return parsed;
+  }
 }
 
 export async function createAuthenticatedClient(): Promise<{
-  client: WorkerosApiClient;
+  client: FloomApiClient;
   credentials: StoredCredentials;
 }> {
   const credentials = await readCredentials();
   if (!credentials) {
-    throw new Error("Not logged in. Run floom login first.");
+    throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
   }
   return {
-    client: new WorkerosApiClient(credentials.api_base, credentials),
+    client: new FloomApiClient(credentials.api_base, credentials),
     credentials,
   };
 }
 
 export function createPublicClient(
   base = process.env.WORKEROS_API_BASE || "https://localhost:8000",
-): WorkerosApiClient {
-  return new WorkerosApiClient(normalizeBase(base));
+): FloomApiClient {
+  return new FloomApiClient(normalizeBase(base));
 }
 
 // Used by `floom login [--cloud]` to talk to the API base before any
