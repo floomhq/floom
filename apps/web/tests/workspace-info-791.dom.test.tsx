@@ -10,18 +10,34 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/settings",
 }));
-vi.mock("@/lib/api", () => ({ API_BASE: "/api/proxy", api: { workspace: { getSettings, setSetting } } }));
+vi.mock("@/lib/api", () => ({
+  API_BASE: "/api/proxy",
+  api: {
+    me: vi.fn().mockResolvedValue({ role: "admin", is_admin: true }),
+    workspace: {
+      list: vi.fn().mockResolvedValue({ active_id: "w1", workspaces: [{ id: "w1", name: "Floom" }] }),
+      getSettings,
+      setSetting,
+      tokens: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), revoke: vi.fn() },
+    },
+    system: {
+      info: vi.fn().mockResolvedValue({ version: "1", started_at: "now", python_version: "3", runner: "local" }),
+      platformConfig: vi.fn().mockResolvedValue({ required_count: 0, set_count: 0, all_required_set: true, missing: [] }),
+    },
+  },
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, "", "/settings?sel=system&tab=workspace");
   getSettings.mockResolvedValue({ timezone: "America/New_York" });
   setSetting.mockResolvedValue(null);
 });
 
 describe("WorkspaceInfoSettings (#791)", () => {
   it("prefills and saves region on blur", async () => {
-    const { WorkspaceInfoSettings } = await import("@/components/settings/SettingsPageClient");
-    render(<WorkspaceInfoSettings />);
+    const { default: SettingsPage } = await import("@/app/settings/page");
+    render(<SettingsPage />);
 
     const tz = (await screen.findByLabelText("Timezone")) as HTMLInputElement;
     expect(tz.value).toBe("America/New_York");

@@ -28,7 +28,22 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/settings",
 }));
-vi.mock("@/lib/api", () => ({ API_BASE: "/api/proxy", api: { workspace: { getSettings, setSetting } } }));
+vi.mock("@/lib/api", () => ({
+  API_BASE: "/api/proxy",
+  api: {
+    me: vi.fn().mockResolvedValue({ role: "admin", is_admin: true }),
+    workspace: {
+      list: vi.fn().mockResolvedValue({ active_id: "w1", workspaces: [{ id: "w1", name: "Floom" }] }),
+      getSettings,
+      setSetting,
+      tokens: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), revoke: vi.fn() },
+    },
+    system: {
+      info: vi.fn().mockResolvedValue({ version: "1", started_at: "now", python_version: "3", runner: "local" }),
+      platformConfig: vi.fn().mockResolvedValue({ required_count: 0, set_count: 0, all_required_set: true, missing: [] }),
+    },
+  },
+}));
 
 // sonner is used for the validation error surfaced to the operator.
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
@@ -38,22 +53,26 @@ vi.mock("sonner", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, "", "/settings?sel=system&tab=behaviour");
   getSettings.mockResolvedValue({});
   setSetting.mockResolvedValue(null);
 });
 
+async function renderBehaviourTab() {
+  const { default: SettingsPage } = await import("@/app/settings/page");
+  render(<SettingsPage />);
+}
+
 describe("Failure-email recipient (Round-09 silent no-op #2)", () => {
   it("renders the recipient input alongside the failure-email toggle", async () => {
-    const { BehaviourSettings } = await import("@/components/settings/SettingsPageClient");
-    render(<BehaviourSettings />);
+    await renderBehaviourTab();
     await screen.findByText("Email me on run failures");
     expect(screen.getByLabelText(/failure.*recipient|notify.*email|send failure emails to/i)).toBeInTheDocument();
   });
 
   it("blocks enabling the toggle when no recipient is set (no silent no-op)", async () => {
     getSettings.mockResolvedValue({ failure_email_enabled: "false" });
-    const { BehaviourSettings } = await import("@/components/settings/SettingsPageClient");
-    render(<BehaviourSettings />);
+    await renderBehaviourTab();
     await screen.findByText("Email me on run failures");
 
     // The failure-email toggle is the 3rd switch (approval, auto_pause, failure).
@@ -68,8 +87,7 @@ describe("Failure-email recipient (Round-09 silent no-op #2)", () => {
 
   it("persists the recipient (failure_email_to) and then allows enabling", async () => {
     getSettings.mockResolvedValue({ failure_email_enabled: "false" });
-    const { BehaviourSettings } = await import("@/components/settings/SettingsPageClient");
-    render(<BehaviourSettings />);
+    await renderBehaviourTab();
     await screen.findByText("Email me on run failures");
 
     const recipient = screen.getByLabelText(/failure.*recipient|notify.*email|send failure emails to/i) as HTMLInputElement;

@@ -18,11 +18,24 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/api", () => ({
   API_BASE: "/api/proxy",
-  api: { workspace: { tokens: { list, create, revoke } } },
+  api: {
+    me: vi.fn().mockResolvedValue({ role: "admin", is_admin: true }),
+    workspace: {
+      list: vi.fn().mockResolvedValue({ active_id: "w1", workspaces: [{ id: "w1", name: "Floom" }] }),
+      getSettings: vi.fn().mockResolvedValue({}),
+      setSetting: vi.fn(),
+      tokens: { list, create, revoke },
+    },
+    system: {
+      info: vi.fn().mockResolvedValue({ version: "1", started_at: "now", python_version: "3", runner: "local" }),
+      platformConfig: vi.fn().mockResolvedValue({ required_count: 0, set_count: 0, all_required_set: true, missing: [] }),
+    },
+  },
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, "", "/settings?sel=workspace_token");
   list.mockResolvedValue([
     {
       id: "wt1",
@@ -43,10 +56,14 @@ beforeEach(() => {
   revoke.mockResolvedValue(null);
 });
 
+async function renderWorkspaceTokenTab() {
+  const { default: SettingsPage } = await import("@/app/settings/page");
+  render(<SettingsPage />);
+}
+
 describe("WorkspaceTokensPanel", () => {
   it("lists workspace tokens by name", async () => {
-    const { WorkspaceTokensPanel } = await import("@/components/settings/SettingsPageClient");
-    render(<WorkspaceTokensPanel />);
+    await renderWorkspaceTokenTab();
     expect(await screen.findByText("shared-runner")).toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(1);
     // Explainer copy is present.
@@ -56,8 +73,7 @@ describe("WorkspaceTokensPanel", () => {
   });
 
   it("create flow shows the one-time token value", async () => {
-    const { WorkspaceTokensPanel } = await import("@/components/settings/SettingsPageClient");
-    render(<WorkspaceTokensPanel />);
+    await renderWorkspaceTokenTab();
     await screen.findByText("shared-runner");
 
     fireEvent.change(screen.getByPlaceholderText(/Token name/), {
@@ -71,8 +87,7 @@ describe("WorkspaceTokensPanel", () => {
   });
 
   it("revoke calls the api with the token id", async () => {
-    const { WorkspaceTokensPanel } = await import("@/components/settings/SettingsPageClient");
-    render(<WorkspaceTokensPanel />);
+    await renderWorkspaceTokenTab();
     await screen.findByText("shared-runner");
 
     fireEvent.click(screen.getByRole("button", { name: "Revoke shared-runner" }));
@@ -81,8 +96,7 @@ describe("WorkspaceTokensPanel", () => {
 
   it("403 from list shows the admins-only message", async () => {
     list.mockRejectedValue(new Error("Admin role required"));
-    const { WorkspaceTokensPanel } = await import("@/components/settings/SettingsPageClient");
-    render(<WorkspaceTokensPanel />);
+    await renderWorkspaceTokenTab();
     expect(
       await screen.findByText("Only workspace admins can manage the workspace token.")
     ).toBeInTheDocument();

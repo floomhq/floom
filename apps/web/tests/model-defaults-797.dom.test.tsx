@@ -14,18 +14,34 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/settings",
 }));
-vi.mock("@/lib/api", () => ({ API_BASE: "/api/proxy", api: { workspace: { getSettings, setSetting } } }));
+vi.mock("@/lib/api", () => ({
+  API_BASE: "/api/proxy",
+  api: {
+    me: vi.fn().mockResolvedValue({ role: "admin", is_admin: true }),
+    workspace: {
+      list: vi.fn().mockResolvedValue({ active_id: "w1", workspaces: [{ id: "w1", name: "Floom" }] }),
+      getSettings,
+      setSetting,
+      tokens: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), revoke: vi.fn() },
+    },
+    system: {
+      info: vi.fn().mockResolvedValue({ version: "1", started_at: "now", python_version: "3", runner: "local" }),
+      platformConfig: vi.fn().mockResolvedValue({ required_count: 0, set_count: 0, all_required_set: true, missing: [] }),
+    },
+  },
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, "", "/settings?sel=system&tab=models");
   getSettings.mockResolvedValue({ default_model: "claude-opus-4-8" });
   setSetting.mockResolvedValue(null);
 });
 
 describe("ModelDefaults (#797)", () => {
   it("prefills from settings and saves on blur", async () => {
-    const { ModelDefaults } = await import("@/components/settings/SettingsPageClient");
-    render(<ModelDefaults />);
+    const { default: SettingsPage } = await import("@/app/settings/page");
+    render(<SettingsPage />);
 
     expect(await screen.findByText("Claude Opus 4.8")).toBeInTheDocument();
 
