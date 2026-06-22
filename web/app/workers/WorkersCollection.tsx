@@ -76,14 +76,6 @@ import { WorkerToolsEditor, type ToolAppOption } from "@/components/worker/Worke
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   connectionSpecApp,
   contextSpecName,
   patchBrainContexts,
@@ -102,12 +94,8 @@ import {
 } from "@/lib/workers/derive";
 import { getFavorites, saveFavorites } from "@/lib/workers/favorites";
 import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
-import {
-  ADVANCED_DETAIL_TABS,
-  BASE_DETAIL_TABS,
-  getPinnedTabs,
-  savePinnedTabs,
-} from "@/lib/workers/pinned-tabs";
+import { ADVANCED_DETAIL_TABS, BASE_DETAIL_TABS } from "@/lib/workers/pinned-tabs";
+import { ADVANCED_MODE_STORAGE_KEY } from "@/lib/workers/tabs";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 
 function rel(ts?: string | null): string {
@@ -1753,80 +1741,33 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
 };
 
 /**
- * R8 "Customize" control — a quiet, muted affordance next to the worker-detail
- * tab row that lets a user pin the advanced tabs (Source / Versions / Brain / Tools)
- * into their tab bar. Pins are a per-user GLOBAL preference (every worker), not
- * per-worker. Checking an item pins the tab AND selects it; unchecking removes
- * it. Uses the shared DropdownMenu checkbox primitives (flat, tokens, squircle,
- * no borders, no accent — accent is links-only).
+ * Inline "Advanced" disclosure button — sits directly after the operator tabs
+ * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Brain, Tools).
+ * One click reveals all; clicking again collapses all. No dropdown, no pin, no
+ * per-item checkmark. Replaces the pick-one dropdown (kills the #1680 bug class).
  */
-function CustomizeTabsMenu({
-  workerId,
-  pinned,
-  activeTab,
+function AdvancedDisclosure({
+  open,
   onToggle,
-  onSelectTab,
 }: {
-  workerId: string;
-  pinned: Set<WorkerDetailTab>;
-  /** The currently active detail-tab key (drives the single, mutually-exclusive checkmark). */
-  activeTab?: string;
-  onToggle: (key: WorkerDetailTab) => void;
-  onSelectTab: (workerId: string, key: WorkerDetailTab) => void;
+  open: boolean;
+  onToggle: () => void;
 }) {
-  // R9: the advanced group is a clearly-visible affordance ON the primary tab
-  // row (an "Advanced ▾" button) — not a header-overflow control. The menu is a
-  // VIEW SWITCHER: the checkmark marks the currently ACTIVE advanced view, so it
-  // is mutually exclusive (at most one, #1680 — previously it showed the pinned
-  // SET, lighting up Source AND Versions at once). Picking an item opens it (and
-  // pins it onto the row if it was not already pinned); re-picking the active
-  // tab unpins it (the only unpin affordance), falling back to the base tabs.
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className="c-dtab-adv inline-flex items-center gap-1"
-        aria-label="Advanced tabs"
-        title="Open Source, Versions, Brain or Tools"
-      >
-        Advanced
-        <ChevronDown className="size-3.5" aria-hidden="true" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48 p-1">
-        {/* base-ui MenuPrimitive.GroupLabel REQUIRES a Menu.Group ancestor —
-            rendering DropdownMenuLabel bare crashes the detail pane. Wrap the
-            label + items in DropdownMenuGroup. */}
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>Advanced tabs</DropdownMenuLabel>
-          {ADVANCED_DETAIL_TABS.map((key) => {
-            const isActive = activeTab === key;
-            return (
-              <DropdownMenuCheckboxItem
-                key={key}
-                // Checkmark = ACTIVE view, not the pinned set → exactly one (or
-                // none) is ever checked.
-                checked={isActive}
-                // base-ui fires onClick before state churn; closeOnClick stays open so
-                // the user can pin several tabs without reopening the menu.
-                closeOnClick={false}
-                onCheckedChange={() => {
-                  if (isActive) {
-                    // Re-picking the active advanced tab removes its pin (the
-                    // only unpin path); the view falls back to the first tab.
-                    if (pinned.has(key)) onToggle(key);
-                    return;
-                  }
-                  // Open the view; pin it onto the row first if it is not there yet.
-                  if (!pinned.has(key)) onToggle(key);
-                  onSelectTab(workerId, key);
-                }}
-              >
-                {key}
-              </DropdownMenuCheckboxItem>
-            );
-          })}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <button
+      type="button"
+      className={`c-dtab-adv inline-flex items-center gap-1${open ? " open" : ""}`}
+      aria-label={open ? "Hide developer tabs" : "Show developer tabs"}
+      aria-expanded={open}
+      onClick={onToggle}
+    >
+      Advanced
+      <ChevronDown
+        className="size-3.5"
+        aria-hidden="true"
+        style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms" }}
+      />
+    </button>
   );
 }
 
@@ -2129,33 +2070,19 @@ export default function WorkersCollection({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
-  // R8 — pinnable advanced tabs (replaces the binary Advanced toggle): the
-  // default tab bar stays Overview · Runs; the power-user tabs (Config, Source,
-  // Versions) are pinned per-user (global, all workers) via the "Customize"
-  // control. Persisted to localStorage so a user who pins Source always sees it.
-  const [pinnedTabs, setPinnedTabs] = useState<Set<WorkerDetailTab>>(new Set());
+  // Advanced disclosure — single boolean persisted to localStorage so the
+  // user's preference (expanded / collapsed) survives page reloads.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   useEffect(() => {
-    setPinnedTabs(getPinnedTabs());
+    setAdvancedOpen(safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY) === "true");
   }, []);
-  const togglePinnedTab = useCallback((key: WorkerDetailTab) => {
-    setPinnedTabs((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      savePinnedTabs(next);
+  const toggleAdvanced = useCallback(() => {
+    setAdvancedOpen((prev) => {
+      const next = !prev;
+      safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, next ? "true" : "false");
       return next;
     });
   }, []);
-  // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
-  // `tab` URL param to drive the active tab. replace() avoids a history entry.
-  const selectWorkerTab = useCallback(
-    (workerId: string, key: WorkerDetailTab) => {
-      router.replace(
-        `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
-      );
-    },
-    [router],
-  );
 
   useEffect(() => {
     if (workersQuery.data) {
@@ -2270,7 +2197,7 @@ export default function WorkersCollection({
         label: "needs attention",
       },
     ],
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     columns: {
       template: "1.9fr 1fr 1fr 130px 40px", // #895: wireframe pageWorkers grid
       headers: ["Worker", "Tools", "Last run", "Status", ""],
@@ -2323,7 +2250,7 @@ export default function WorkersCollection({
         quickActions: [],
       };
     },
-    detail: (w, activeTab) => {
+    detail: (w) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
         <>
@@ -2365,17 +2292,14 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // R9: operator-focused tab set — Overview/Runs/Operations always visible;
-        // the advanced tabs (Source / Versions / Brain / Tools) live in the
-        // "Advanced ▾" group ON the tab row (tabsTrailing). Picking one pins it
-        // onto the row (per-user GLOBAL preference, localStorage) and opens it,
-        // so an already-pinned advanced tab also renders inline after the base
-        // tabs. WORKER_DETAIL_TABS (typed constant) stays the full contract; the
-        // UI filters at render time without touching it.
+        // Inline disclosure: BASE_DETAIL_TABS always visible; ADVANCED_DETAIL_TABS
+        // appear after them when advancedOpen=true. CollectionView already handles
+        // the "active tab no longer in tab set" case by falling back to tabs[0],
+        // so collapsing while an advanced tab is active gracefully switches to Overview.
         tabs: (() => {
           const visibleKeys: WorkerDetailTab[] = [
             ...BASE_DETAIL_TABS,
-            ...ADVANCED_DETAIL_TABS.filter((t) => pinnedTabs.has(t)),
+            ...(advancedOpen ? ADVANCED_DETAIL_TABS : []),
           ];
           return visibleKeys.map((key) => {
             const Tab = WORKER_TAB_COMPONENT[key];
@@ -2395,17 +2319,11 @@ export default function WorkersCollection({
             };
           });
         })(),
-        // R9 FIX 1: the advanced group is a clearly-visible affordance ON the
-        // primary tab row (right-aligned), not a header-overflow "Customize"
-        // pill — Federico couldn't find the advanced tabs at all.
+        // Advanced disclosure sits inline directly after the operator tabs —
+        // no far-right spacer. One click reveals ALL advanced tabs; clicking
+        // again collapses them. Replaces the pick-one dropdown (#1680 bug class).
         tabsTrailing: (
-          <CustomizeTabsMenu
-            workerId={w.id}
-            pinned={pinnedTabs}
-            activeTab={activeTab}
-            onToggle={togglePinnedTab}
-            onSelectTab={selectWorkerTab}
-          />
+          <AdvancedDisclosure open={advancedOpen} onToggle={toggleAdvanced} />
         ),
       };
     },

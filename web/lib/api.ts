@@ -492,6 +492,23 @@ export const api = {
       fetchJson<import("@/lib/types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
       }),
+    feedback: {
+      list: (id: string) =>
+        fetchJson<import("@/lib/types").RunFeedback[]>(`/runs/${encodeURIComponent(id)}/feedback`),
+      create: (id: string, content: string, rating?: string | null) =>
+        fetchJson<import("@/lib/types").RunFeedback>(`/runs/${encodeURIComponent(id)}/feedback`, {
+          method: "POST",
+          body: JSON.stringify({ content, rating: rating ?? null }),
+        }),
+    },
+    createFeedbackIssue: (
+      id: string,
+      payload: import("@/lib/types").RunFeedbackIssueRequest,
+    ) =>
+      fetchJson<import("@/lib/types").RunFeedbackIssueResponse>(
+        `/runs/${encodeURIComponent(id)}/feedback/issue`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
     // #765: mint a read-only public share link for a run (cloud overlay parity).
     shareLink: (id: string) =>
       fetchJson<import("@/lib/types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, {
@@ -771,6 +788,11 @@ export const api = {
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
         { method: "DELETE" }
+      ),
+    rename: (name: string, newName: string) =>
+      fetchJson<import("@/lib/types").ContextDetail>(
+        `/contexts/${encodeURIComponent(name)}/rename`,
+        { method: "POST", body: JSON.stringify({ new_name: newName }) }
       ),
     saveTextFile: async (name: string, path: string, content: string, tags?: string[]) => {
       const file = await fetchJson<import("@/lib/types").ContextFileItem>(

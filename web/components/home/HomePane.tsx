@@ -17,7 +17,7 @@
 import { useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { useIsDesktop } from "@/lib/use-is-desktop";
 import WorkersCollection from "@/app/workers/WorkersCollection";
-import { EmilyRadarMark } from "./EmilyRadarMark";
+import { Avatar } from "@/components/ui/Avatar";
 
 export function HomePane() {
   const { fullscreen } = useEmilyFullscreen();
@@ -44,7 +44,7 @@ export function HomePane() {
   // Desktop-only: on mobile we returned the Workers list above.
   return (
     <div className="flex h-full w-full items-center justify-center" aria-hidden="true">
-      <EmilyRadarMark size={46} variant="ink" />
+      <Avatar role="emily" size={46} />
     </div>
   );
 }
