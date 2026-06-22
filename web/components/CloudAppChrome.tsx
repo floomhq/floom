@@ -8,7 +8,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { IconSprite } from "@/components/IconSprite";
 import { TelemetryProvider } from "@/components/TelemetryProvider";
 import { CloudAccountFooter } from "@/components/CloudAccountFooter";
-import { EmilyDock } from "@/components/emily/EmilyChat";
+import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -16,12 +16,12 @@ import { Toaster } from "@/components/ui/sonner";
 
 // Mirror of the engine AppShell useIsDesktop: render exactly one Emily surface
 // and gate true-fullscreen to desktop (the dock is a flex sibling of the page
-// pane on desktop only). Defaults to desktop to match SSR (no hydration
-// mismatch), corrected on mount.
+// pane on desktop only). Defaults to mobile so small viewports always get the
+// mobile Emily affordance, then syncs to the real breakpoint on mount.
 function useIsDesktop(): boolean {
-  const [isDesktop, setIsDesktop] = useState(true);
+  const [isDesktop, setIsDesktop] = useState(false);
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
+    const mq = window.matchMedia("(min-width: 1024px)");
     const sync = () => setIsDesktop(mq.matches);
     sync();
     mq.addEventListener("change", sync);
@@ -197,7 +197,7 @@ function CloudShellBody({
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col min-h-full">{children}</div>
         </main>
       )}
-      <EmilyDock className="hidden md:flex" />
+      {isDesktop ? <EmilyDock /> : <EmilyMobileSheet />}
     </>
   );
 }
