@@ -234,6 +234,13 @@ export function V3TemplatesBody() {
         <div className="mt-6">
           <V3Composer placeholder="Describe the job…" />
         </div>
+        <p className="mt-5 text-[13px] text-muted-foreground">
+          Built a worker others would hire?{" "}
+          <Link href="/templates/submit" className="font-medium" style={{ color: "var(--v3-accent)" }}>
+            Publish it
+          </Link>{" "}
+          — we review before it goes live.
+        </p>
       </div>
     </V3Shell>
   );

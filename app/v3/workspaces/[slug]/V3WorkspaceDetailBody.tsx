@@ -75,7 +75,7 @@ export function V3WorkspaceDetailBody({ w }: { w: Workspace }) {
           className="mt-6"
         >
           <Link
-            href={`/login?workspace=${w.slug}`}
+            href={`/templates/hire?workspace=${w.slug}`}
             className="inline-flex h-9 items-center whitespace-nowrap rounded-[10px] px-4 text-[13.5px] font-medium text-white"
             style={{ background: "var(--v3-accent)" }}
           >

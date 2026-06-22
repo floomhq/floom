@@ -67,7 +67,7 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
             className="mt-6 flex flex-nowrap items-center gap-3"
           >
             <Link
-              href="/login"
+              href={`/templates/hire?worker=${t.slug}`}
               className="inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-[10px] px-4 text-[13.5px] font-medium text-white"
               style={{ background: "var(--v3-accent)" }}
             >
