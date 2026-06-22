@@ -43,7 +43,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ActionMenu } from "@/components/ui/action-menu";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection } from "@/components/collection";
+import {
+  Collection,
+  DetailChips,
+  DetailActions,
+  DetailEmpty,
+  DetailGroup,
+  DetailNote,
+  DetailRow,
+  DetailSummary,
+} from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import {
   ArrowRight,
@@ -294,19 +303,6 @@ function friendlyToken(value?: string | null): string {
     .join(" ");
 }
 
-function ConfigInfoGrid({ rows }: { rows: Array<[string, React.ReactNode]> }) {
-  return (
-    <div className="grid grid-cols-[minmax(96px,140px)_minmax(0,1fr)] gap-x-4 gap-y-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3 text-sm">
-      {rows.map(([key, value]) => (
-        <div key={key} className="contents">
-          <span className="text-[12.5px] text-muted-foreground">{key}</span>
-          <span className="min-w-0 break-words text-foreground">{value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // SPEC §4 + rule #4: Overview is OUTPUT-FIRST — latest result/artifacts and an
 // "All runs →" link lead; the "what it does" flow follows. The actual output
 // text/artifact preview needs `last_run.output_preview` (#815); until then we
@@ -316,7 +312,7 @@ function LatestOutput({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 9 }}>
-        <h4 style={{ ...h4, margin: 0 }}>Latest output</h4>
+        <h4 className="c-dgl" style={{ margin: 0 }}>Latest output</h4>
         <Link
           href={`/runs?worker_id=${w.id}`}
           className="c-vpill"
@@ -354,17 +350,28 @@ function LatestOutput({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 
 function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
+  const stats = w.recent_stats;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+    <div>
       {/* #1290: "Latest output" removed — its purpose was unclear to operators
           (Federico: "why is latest output shown?") and it only showed run status +
           ID with no actual output text. The History tab shows the run list. */}
-      <div>
-        <h4 style={h4}>WHAT IT DOES</h4>
-        {/* #1279: useWorkerDetail can now return null (load failed); the overview
-            treats that the same as "not loaded yet" — AboutBody renders its empty state. */}
-        <AboutBody w={w} d={d ?? undefined} />
-      </div>
+      <DetailSummary
+        items={[
+          { key: "last-run", label: "Last run", value: rel(stats?.last_run_at ?? w.last_run?.created_at) },
+          { key: "runs", label: "Runs", value: stats?.runs_7d ?? (w.last_run ? 1 : 0) },
+          {
+            key: "success",
+            label: "Success",
+            value: typeof stats?.success_rate_7d === "number"
+              ? `${Math.round(stats.success_rate_7d * 100)}%`
+              : "Not set",
+          },
+        ]}
+      />
+      {/* #1279: useWorkerDetail can now return null (load failed); the overview
+          treats that the same as "not loaded yet" — AboutBody renders its empty state. */}
+      <AboutBody w={w} d={d ?? undefined} />
     </div>
   );
 }
@@ -397,45 +404,53 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
   const description = displayBrandCopy(w.long_description || w.description) || "No description yet.";
   const contexts = d?.config?.contexts ?? [];
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <WorkerAsciiDiagram
-        workerName={w.name}
-        worker={{ id: w.id, name: w.name, connections: w.connections, tags: w.tags }}
-        connections={w.connections}
-        triggerType={w.trigger_type}
-        inputs={(d?.config?.inputs ?? []).map((i) => ({ name: i.name, label: i.label, type: i.type }))}
-        outputs={(d?.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
-      />
-      <p style={{ margin: 0 }}>{description}</p>
+    <div>
+      <DetailGroup label="What it does">
+        <p style={{ margin: 0, color: "var(--ink-soft)", fontSize: 13 }}>{description}</p>
+      </DetailGroup>
+      <DetailGroup label="Flow">
+        <p className="c-dctx">
+          {(w.connections ?? []).length > 0 ? w.connections.join(" -> ") : friendlyToken(w.trigger_type)}
+        </p>
+        <WorkerAsciiDiagram
+          workerName={w.name}
+          worker={{ id: w.id, name: w.name, connections: w.connections, tags: w.tags }}
+          connections={w.connections}
+          triggerType={w.trigger_type}
+          inputs={(d?.config?.inputs ?? []).map((i) => ({ name: i.name, label: i.label, type: i.type }))}
+          outputs={(d?.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
+        />
+      </DetailGroup>
       {contexts.length > 0 && (
-        <div>
-          <h4 style={h4}>
+        <DetailGroup
+          label={(
+            <>
             <Brain className="inline-block size-[11px] align-[-1px] mr-1" aria-hidden="true" />
             Company brain it uses
-          </h4>
+            </>
+          )}
+        >
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {contexts.map((spec) => {
               const name = contextSpecName(spec);
               return <BrainContextChip key={name} name={name} />;
             })}
           </div>
-        </div>
+        </DetailGroup>
       )}
       {d?.use_cases && d.use_cases.length > 0 && (
-        <div>
-          <h4 style={h4}>Use cases</h4>
+        <DetailGroup label="Use cases">
           <ul style={{ margin: 0, paddingLeft: 18, color: "var(--ink-soft)" }}>
             {d.use_cases.map((u, i) => (
               <li key={i}>{displayBrandCopy(u)}</li>
             ))}
           </ul>
-        </div>
+        </DetailGroup>
       )}
       {d?.how_it_works && (
-        <div>
-          <h4 style={h4}>How it works</h4>
+        <DetailGroup label="How it works">
           <p style={{ margin: 0, color: "var(--ink-soft)" }}>{displayBrandCopy(d.how_it_works)}</p>
-        </div>
+        </DetailGroup>
       )}
     </div>
   );
@@ -488,34 +503,53 @@ function RunsTab({ w }: { w: WorkerSummary }) {
   // Until the worker-scoped fetch resolves, fall back to the summary's last_run
   // so the tab is never momentarily empty for a worker that has run.
   const runs = fetched ?? (w.last_run ? [w.last_run] : []);
+  const stats = w.recent_stats;
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 9 }}>
-        <h4 style={{ ...h4, margin: 0 }}>Recent runs</h4>
-        <Link href={`/runs?worker_id=${w.id}`} className="c-vpill" style={{ marginLeft: "auto", padding: "5px 9px" }}>
-          All runs →
-        </Link>
-      </div>
-      <div className="c-ltable">
-        {runs.map((r) => (
-          <Link
-            key={r.id}
-            href={`/runs?worker_id=${w.id}&sel=${r.id}`}
-            className="c-lrow"
-            style={{ gridTemplateColumns: "1fr auto auto", gap: 12, textDecoration: "none", color: "inherit" }}
-          >
-            <div className="c-lprimary">
-              <div className="c-lp-tx">
-                <div className="nm">#{r.id}</div>
-                <div className="sub">{r.status}</div>
+      <DetailSummary
+        items={[
+          { key: "last-run", label: "Last run", value: rel(stats?.last_run_at ?? w.last_run?.created_at) },
+          { key: "runs-7d", label: "Runs", value: stats?.runs_7d ?? runs.length },
+          {
+            key: "success",
+            label: "Success",
+            value: typeof stats?.success_rate_7d === "number"
+              ? `${Math.round(stats.success_rate_7d * 100)}%`
+              : "Not set",
+          },
+        ]}
+      />
+      <DetailGroup
+        label={(
+          <span className="flex items-center gap-2">
+            <span>Recent runs</span>
+            <Link href={`/runs?worker_id=${w.id}`} className="c-vpill normal-case" style={{ padding: "4px 8px", letterSpacing: 0 }}>
+              All runs →
+            </Link>
+          </span>
+        )}
+      >
+        <div className="c-ltable">
+          {runs.map((r) => (
+            <Link
+              key={r.id}
+              href={`/runs?worker_id=${w.id}&sel=${r.id}`}
+              className="c-lrow"
+              style={{ gridTemplateColumns: "1fr auto auto", gap: 12, textDecoration: "none", color: "inherit" }}
+            >
+              <div className="c-lprimary">
+                <div className="c-lp-tx">
+                  <div className="nm">#{r.id}</div>
+                  <div className="sub">{r.status}</div>
+                </div>
               </div>
-            </div>
-            <span className="c-cell m">{formatDuration(r.duration_ms)}</span>
-            <span className="c-cell m">{rel(r.created_at)}</span>
-          </Link>
-        ))}
-        {runs.length === 0 && <div style={{ ...muted, padding: 14 }}>No runs yet.</div>}
-      </div>
+              <span className="c-cell m">{formatDuration(r.duration_ms)}</span>
+              <span className="c-cell m">{rel(r.created_at)}</span>
+            </Link>
+          ))}
+          {runs.length === 0 && <DetailEmpty>No runs yet.</DetailEmpty>}
+        </div>
+      </DetailGroup>
     </div>
   );
 }
@@ -553,7 +587,13 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
   }, [w.id]);
 
   if (versions === null) return <Loading />;
-  if (versions.length === 0) return <div style={muted}>No version history yet.</div>;
+  if (versions.length === 0) {
+    return (
+      <DetailGroup label="Version history">
+        <DetailEmpty>No version history yet.</DetailEmpty>
+      </DetailGroup>
+    );
+  }
   const rows = formatVersionRows(versions, now);
 
   const showDiff = async (id: string) => {
@@ -591,37 +631,40 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
 
   return (
     <div>
-      <div className="c-ltable">
-        {rows.map((r) => (
-          <div key={r.id} className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
-            <div className="c-lprimary">
-              <div className="c-lp-tx">
-                <div className="nm">
-                  {r.message}
-                  {r.isCurrent && <span className="c-vpill" style={{ marginLeft: 8 }}>current</span>}
+      <DetailGroup label="Version history">
+        <p className="c-dctx">{rows.length} versions · current diff state preserved</p>
+        <div className="c-ltable">
+          {rows.map((r) => (
+            <div key={r.id} className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
+              <div className="c-lprimary">
+                <div className="c-lp-tx">
+                  <div className="nm">
+                    {r.message}
+                    {r.isCurrent && <span className="c-vpill" style={{ marginLeft: 8 }}>current</span>}
+                  </div>
+                  <div className="sub">{r.meta}</div>
                 </div>
-                <div className="sub">{r.meta}</div>
               </div>
-            </div>
-            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button type="button" className="c-vpill" style={pillBtn} onClick={() => void showDiff(r.id)}>
-                Diff
-              </button>
-              {editable && !r.isCurrent && (
-                <button
-                  type="button"
-                  className="c-vpill"
-                  style={pillBtn}
-                  disabled={busy}
-                  onClick={() => void restore(r.id)}
-                >
-                  Restore
+              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button type="button" className="c-vpill" style={pillBtn} onClick={() => void showDiff(r.id)}>
+                  Diff
                 </button>
-              )}
-            </span>
-          </div>
-        ))}
-      </div>
+                {editable && !r.isCurrent && (
+                  <button
+                    type="button"
+                    className="c-vpill"
+                    style={pillBtn}
+                    disabled={busy}
+                    onClick={() => void restore(r.id)}
+                  >
+                    Restore
+                  </button>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      </DetailGroup>
       {/* #1249: replaced CodeBlock (read-only full-file view) with VersionDiffPanel
           which shows a proper line-level diff between this version and current. */}
       <Dialog open={!!diff} onOpenChange={(o) => !o && setDiff(null)}>
@@ -661,7 +704,13 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   if (d === null) return <DetailError />;
 
   const ordered = orderedSourceFiles(d.files ?? []);
-  if (ordered.length === 0) return <div style={muted}>No source files.</div>;
+  if (ordered.length === 0) {
+    return (
+      <DetailGroup label="Source">
+        <DetailEmpty>No source files.</DetailEmpty>
+      </DetailGroup>
+    );
+  }
 
   const editable = can("edit", d);
   // Default selected path to first file if not yet set.
@@ -702,21 +751,27 @@ function SourceTab({ w }: { w: WorkerSummary }) {
 
   return (
     <>
-      {editable && (
-        <div className="mb-3 flex justify-end">
-          <button type="button" className="c-vpill" style={pillBtn} onClick={openEditor}>
-            Edit source
-          </button>
-        </div>
-      )}
-      {/* §3.2: full two-pane file-rail + syntax-highlighted viewer (FilesEditor view mode).
-          This replaces the prior compact SourceFileTabs + CodeBlock layout. */}
-      <FilesEditor
-        mode="view"
-        files={ordered as WorkerFile[]}
-        selectedPath={activePath}
-        onSelect={(path) => setSelectedPath(path)}
-      />
+      <DetailGroup label="Source">
+        <p className="c-dctx">
+          {ordered.map((file) => file.path).slice(0, 4).join(" · ")}
+          {ordered.length > 4 ? ` · +${ordered.length - 4} more` : ""}
+        </p>
+        {editable && (
+          <div className="mb-3 flex justify-end">
+            <button type="button" className="c-vpill" style={pillBtn} onClick={openEditor}>
+              Edit source
+            </button>
+          </div>
+        )}
+        {/* §3.2: full two-pane file-rail + syntax-highlighted viewer (FilesEditor view mode).
+            This replaces the prior compact SourceFileTabs + CodeBlock layout. */}
+        <FilesEditor
+          mode="view"
+          files={ordered as WorkerFile[]}
+          selectedPath={activePath}
+          onSelect={(path) => setSelectedPath(path)}
+        />
+      </DetailGroup>
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-h-[90vh] sm:max-w-6xl overflow-y-auto">
           <DialogHeader>
@@ -798,15 +853,20 @@ function BrainTab({ w }: { w: WorkerSummary }) {
     }
   };
   return (
-    <WorkerBrainEditor
-      contexts={contexts}
-      availablePacks={packs}
-      editable={editable}
-      busy={busy}
-      onChange={(next) => void save(next)}
-      memoryFolderName={memoryFolderName}
-      onAttachMemory={attachMemory}
-    />
+    <DetailGroup label="Attached folders">
+      <p className="c-dctx">
+        {contexts.length} folder{contexts.length === 1 ? "" : "s"} · memory folder {contexts.includes(memoryFolderName) ? "attached" : "available"}
+      </p>
+      <WorkerBrainEditor
+        contexts={contexts}
+        availablePacks={packs}
+        editable={editable}
+        busy={busy}
+        onChange={(next) => void save(next)}
+        memoryFolderName={memoryFolderName}
+        onAttachMemory={attachMemory}
+      />
+    </DetailGroup>
   );
 }
 
@@ -898,14 +958,19 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
     }
   };
   return (
-    <WorkerToolsEditor
-      connections={d.config?.connections ?? []}
-      editable={editable}
-      busy={busy}
-      availableApps={availableApps}
-      toolsForApp={toolsForApp}
-      onChange={(next) => void save(next)}
-    />
+    <DetailGroup label="Connected tools">
+      <p className="c-dctx">
+        {(d.config?.connections ?? []).length} connection{(d.config?.connections ?? []).length === 1 ? "" : "s"} · allowlist editor unchanged
+      </p>
+      <WorkerToolsEditor
+        connections={d.config?.connections ?? []}
+        editable={editable}
+        busy={busy}
+        availableApps={availableApps}
+        toolsForApp={toolsForApp}
+        onChange={(next) => void save(next)}
+      />
+    </DetailGroup>
   );
 }
 
@@ -953,23 +1018,15 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
   // Read-only view: list the configured trigger(s) without editing chrome.
   if (!editable) {
     return (
-      <div className="flex flex-col gap-4">
-        <ConfigInfoGrid
-          rows={[
-            ["Trigger", friendlyToken(d.config?.trigger?.type ?? w.trigger_type)],
-            ...(d.config?.trigger?.cron
-              ? [["Schedule", d.config.trigger.cron] as [string, React.ReactNode]]
-              : []),
-            ...(d.config?.trigger?.timezone
-              ? [["Timezone", d.config.trigger.timezone] as [string, React.ReactNode]]
-              : []),
-            ...(d.webhook_url
-              ? [["Webhook", <span key="webhook" className="font-mono text-xs">{d.webhook_url}</span>] as [string, React.ReactNode]]
-              : []),
-            ...scheduleStatusRows(d),
-          ]}
-        />
-      </div>
+      <DetailGroup label="Trigger">
+        <DetailRow label="Type" value={friendlyToken(d.config?.trigger?.type ?? w.trigger_type)} />
+        {d.config?.trigger?.cron && <DetailRow label="Cron" value={d.config.trigger.cron} mono />}
+        {d.config?.trigger?.timezone && <DetailRow label="Timezone" value={d.config.trigger.timezone} />}
+        {d.webhook_url && <DetailRow label="Webhook" value={d.webhook_url} mono />}
+        {scheduleStatusRows(d).map(([label, value]) => (
+          <DetailRow key={label} label={label} value={value} />
+        ))}
+      </DetailGroup>
     );
   }
 
@@ -993,7 +1050,13 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {statusRows.length > 0 && <ConfigInfoGrid rows={statusRows} />}
+      {statusRows.length > 0 && (
+        <DetailGroup label="Schedule status">
+          {statusRows.map(([label, value]) => (
+            <DetailRow key={label} label={label} value={value} />
+          ))}
+        </DetailGroup>
+      )}
       <TriggersEditor
         rows={rows}
         onChange={setRows}
@@ -1022,10 +1085,9 @@ function stripRowId(row: TriggerRow): Omit<TriggerRow, "id"> {
 function WorkerFeedbackSection({ w }: { w: WorkerSummary }) {
   if (!FEEDBACK_BACKEND_AVAILABLE) return null;
   return (
-    <section>
-      <h4 style={h4}>Feedback</h4>
+    <DetailGroup label="Feedback">
       <WorkerFeedbackPanel workerId={w.id} canLeave={canLeaveFeedback(w)} canModerate={can("edit", w)} />
-    </section>
+    </DetailGroup>
   );
 }
 
@@ -1034,7 +1096,7 @@ function WorkerFeedbackSection({ w }: { w: WorkerSummary }) {
 //   Inputs · Alerts & webhooks · Triggers · Limits
 // framed as a "Visual editor of worker.yml" with a "View as YAML" deep-link into
 // Source. Each panel REUSES the real editors/primitives (WorkerInputForm,
-// TriggersEditor via TriggersTab, ConfigInfoGrid) — no hand-rolled chrome.
+// TriggersEditor via TriggersTab) — no hand-rolled chrome.
 
 /** Persisted named input templates (per-user, per-worker, localStorage). A
  *  worker carries one declared-input schema; an operator saves multiple named
@@ -1133,20 +1195,18 @@ function OpsInputsPanel({ w }: { w: WorkerSummary }) {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div>
       {/* gap #1 callout: makes the operator-blocking truth explicit. */}
-      <div
-        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
-        style={{ fontSize: 12.5, color: "var(--ink-soft)" }}
-      >
-        <strong style={{ color: "var(--ink)" }}>Default inputs</strong> are what
-        scheduled and automated (webhook / app-event) runs use. Save them here so an
-        unattended run never fires with an empty required field.
-      </div>
+      <DetailGroup>
+        <DetailNote>
+          <strong style={{ color: "var(--ink)" }}>Default inputs</strong> are what
+          scheduled and automated (webhook / app-event) runs use. Save them here so an
+          unattended run never fires with an empty required field.
+        </DetailNote>
+      </DetailGroup>
 
       {/* Segmented named-template picker (Default + saved templates + New). */}
-      <div>
-        <h4 style={h4}>Input templates</h4>
+      <DetailGroup label="Template">
         <div className="flex flex-wrap items-center gap-2">
           {["Default", ...templates.map((t) => t.name)].map((name, idx) => (
             <button
@@ -1175,22 +1235,27 @@ function OpsInputsPanel({ w }: { w: WorkerSummary }) {
             <Plus className="size-3" aria-hidden="true" /> New template
           </button>
         </div>
-      </div>
+      </DetailGroup>
 
       {/* The REAL schema-driven input form (same component the run dialog uses). */}
-      <WorkerInputForm
-        inputs={inputs}
-        values={values}
-        fileNames={fileNames}
-        onInputChange={(name, value) => setValues((prev) => ({ ...prev, [name]: value }))}
-        onFileUploaded={(name, sha256, fileName) => {
-          setValues((prev) => ({ ...prev, [name]: sha256 }));
-          setFileNames((prev) => ({ ...prev, [name]: fileName }));
-        }}
-      />
+      <DetailGroup>
+        <p className="c-dctx">
+          {inputs.length > 0 ? inputs.map((input) => input.label || input.name).join(" · ") : "No declared inputs"}
+        </p>
+        <WorkerInputForm
+          inputs={inputs}
+          values={values}
+          fileNames={fileNames}
+          onInputChange={(name, value) => setValues((prev) => ({ ...prev, [name]: value }))}
+          onFileUploaded={(name, sha256, fileName) => {
+            setValues((prev) => ({ ...prev, [name]: sha256 }));
+            setFileNames((prev) => ({ ...prev, [name]: fileName }));
+          }}
+        />
+      </DetailGroup>
 
       {inputs.length > 0 && (
-        <div className="flex items-center gap-3 pt-1">
+        <DetailActions separated>
           <span style={{ ...muted, fontSize: 12.5 }}>
             Editing {activeName ? `"${activeName}"` : "Default"}
           </span>
@@ -1220,7 +1285,7 @@ function OpsInputsPanel({ w }: { w: WorkerSummary }) {
               Save template
             </button>
           )}
-        </div>
+        </DetailActions>
       )}
     </div>
   );
@@ -1253,23 +1318,19 @@ function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
   }, [reload]);
 
   return (
-    <div className="flex flex-col gap-6">
-      <section>
-        <h4 style={h4}>Configured alerts</h4>
+    <div>
+      <DetailGroup label="Configured alerts">
         {alerts === undefined ? (
           <Loading />
         ) : alerts === null ? (
           <DetailError />
         ) : alerts.length === 0 ? (
-          <div
-            className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
-            style={{ ...muted, fontSize: 12.5 }}
-          >
+          <DetailEmpty>
             No alerts yet. Add one below to be notified when this worker&apos;s runs
             fail or complete.
-          </div>
+          </DetailEmpty>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="c-ltable">
             {alerts.map((a) => (
               <AlertRow
                 key={a.id}
@@ -1280,15 +1341,17 @@ function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
             ))}
           </div>
         )}
-      </section>
+      </DetailGroup>
 
       <AddAlertForm workerId={w.id} onCreated={() => void reload()} />
 
-      <p style={{ ...muted, fontSize: 12.5 }}>
-        Webhook POSTs are signed with <code>X-Floom-Signature</code> and legacy{" "}
-        <code>x-workeros-signature</code> HMAC headers, and blocked from internal /
-        metadata targets. Email delivery goes to workspace members via Resend.
-      </p>
+      <DetailGroup>
+        <DetailNote>
+          Webhook POSTs are signed with <code>X-Floom-Signature</code> and legacy{" "}
+          <code>x-workeros-signature</code> HMAC headers, and blocked from internal /
+          metadata targets. Email delivery goes to workspace members via Resend.
+        </DetailNote>
+      </DetailGroup>
     </div>
   );
 }
@@ -1317,8 +1380,8 @@ function AlertRow({
   };
   return (
     <div
-      className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
-      style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+      className="c-lrow"
+      style={{ gridTemplateColumns: "1fr auto", alignItems: "flex-start" }}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -1456,8 +1519,7 @@ function AddAlertForm({
   };
 
   return (
-    <section>
-      <h4 style={h4}>Add alert</h4>
+    <DetailGroup label="Add alert">
       <div
         className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-4"
         style={{ display: "flex", flexDirection: "column", gap: 16 }}
@@ -1559,7 +1621,7 @@ function AddAlertForm({
             aria-invalid={!urlValid}
           />
           {!urlValid && (
-            <span style={{ fontSize: 11.5, color: "#C98A1A" }}>
+            <span style={{ fontSize: 11.5, color: "var(--warning)" }}>
               Enter a valid http(s) URL.
             </span>
           )}
@@ -1595,7 +1657,7 @@ function AddAlertForm({
           )}
         </div>
       </div>
-    </section>
+    </DetailGroup>
   );
 }
 
@@ -1619,47 +1681,41 @@ function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
     .map((c) => (typeof c === "string" ? c : (c as { app?: string }).app))
     .filter((s): s is string => Boolean(s));
   return (
-    <div className="flex flex-col gap-6">
-      <section>
-        <h4 style={h4}>Spend cap</h4>
-        <ConfigInfoGrid
-          rows={[
-            ["Per run", lim("max_cost_usd")],
-            ["Per day", lim("max_cost_usd_per_day")],
-          ]}
+    <div>
+      <DetailSummary
+        items={[
+          { key: "per-day", label: "Cap", value: lim("max_cost_usd_per_day") },
+          { key: "timeout", label: "Timeout", value: lim("timeout_seconds") },
+          { key: "retries", label: "Retries", value: lim("max_retries") },
+        ]}
+      />
+      <DetailGroup label="Spend">
+        <DetailRow label="Per run" value={lim("max_cost_usd")} />
+        <DetailRow label="Per day" value={lim("max_cost_usd_per_day")} />
+      </DetailGroup>
+      <DetailGroup label="Runtime">
+        <DetailRow label="Timeout" value={lim("timeout_seconds")} />
+        <DetailRow
+          label="Engine"
+          value={runtimeSummary({ runner: runtime?.runner ?? d.runner ?? w.runner, runtime: runtime?.type ?? w.runtime })}
         />
-      </section>
-      <section>
-        <h4 style={h4}>Reliability</h4>
-        <ConfigInfoGrid rows={[["Retries", lim("max_retries")]]} />
-      </section>
-      <section>
-        <h4 style={h4}>Runtime</h4>
-        <ConfigInfoGrid
-          rows={[
-            ["Timeout", lim("timeout_seconds")],
-            ["Engine", runtimeSummary({ runner: runtime?.runner ?? d.runner ?? w.runner, runtime: runtime?.type ?? w.runtime })],
-          ]}
+      </DetailGroup>
+      <DetailGroup label="Reliability">
+        <DetailRow label="Retries" value={lim("max_retries")} />
+      </DetailGroup>
+      <DetailGroup label="Approvals">
+        <DetailRow
+          label="Require approval"
+          value={approvalConns > 0 ? `${approvalConns} connection${approvalConns === 1 ? "" : "s"}` : "Never"}
         />
-      </section>
-      <section>
-        <h4 style={h4}>Approvals</h4>
-        <ConfigInfoGrid
-          rows={[["Require approval", approvalConns > 0 ? `${approvalConns} connection${approvalConns === 1 ? "" : "s"}` : "Never"]]}
-        />
-      </section>
-      <section>
-        <h4 style={h4}>Network egress (declared)</h4>
+      </DetailGroup>
+      <DetailGroup label="Network egress">
         {egressTargets.length > 0 ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {egressTargets.map((t) => (
-              <span key={t} className="c-vpill" style={{ padding: "4px 9px" }}>{t}</span>
-            ))}
-          </div>
+          <DetailChips items={egressTargets} />
         ) : (
-          <div style={{ ...muted, fontSize: 12.5 }}>No connected apps declared.</div>
+          <DetailEmpty>No connected apps declared.</DetailEmpty>
         )}
-      </section>
+      </DetailGroup>
       {/* Preserved proven content: backend-gated worker feedback moderation. */}
       <WorkerFeedbackSection w={w} />
     </div>
@@ -1882,9 +1938,10 @@ function WorkerDetailActions({
   return (
     <>
       {(canManage || can("run", w)) && (
-        <Button
-          variant="outline"
-          size="sm"
+        <button
+          type="button"
+          className="c-addbtn"
+          style={{ ...pillBtn, cursor: "pointer" }}
           // R9: kill the jarring popup + hard-nav. The Run button routes to the
           // calm inline /run/{worker} page (schema-driven inputs + live
           // output-first run panel), the same standalone runnable surface — no
@@ -1893,7 +1950,7 @@ function WorkerDetailActions({
           title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
-        </Button>
+        </button>
       )}
       {(canManage || can("edit", w)) && (
         <ActionMenu
@@ -2325,8 +2382,13 @@ export default function WorkersCollection({
     },
     detail: (w, activeTab) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
+      const stage = workerStageKey(w);
       const actions = (
         <>
+          <span className={stage === "live" ? "c-pill run" : "c-pill idle"}>
+            <span className="dot" aria-hidden="true" />
+            {stage === "live" ? "Live" : "Draft"}
+          </span>
           <WorkerDetailActions
             w={w}
             canManage={canManageWorkers}
@@ -2350,9 +2412,6 @@ export default function WorkersCollection({
           actions,
           sub: (
             <>
-              {workerStageKey(w) === "draft" && (
-                <span className="c-vpill" style={{ color: "var(--muted-foreground)" }}>Draft</span>
-              )}
               <span className="c-vpill">{visibilityLabel(w.visibility)}</span>
               {viewOnly && (
                 <span className="c-vpill" style={{ color: "var(--warning)", borderColor: "var(--warning)" }}>
@@ -2472,11 +2531,4 @@ export default function WorkersCollection({
 }
 
 const muted: React.CSSProperties = { color: "var(--muted-foreground)" };
-const h4: React.CSSProperties = {
-  fontSize: 11,
-  letterSpacing: ".05em",
-  textTransform: "uppercase",
-  color: "var(--muted-foreground)",
-  margin: "0 0 9px",
-};
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
