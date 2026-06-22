@@ -13,7 +13,7 @@ Verified fixed:
 - `workers-api.floom.dev` health is reachable: public `GET /healthz` returns `200 {"status":"ok"}`.
 - Browser CORS preflight is reachable: `OPTIONS /workers` with `Origin: https://workers.floom.dev` and `Access-Control-Request-Method: GET` returns `200` with CORS headers.
 - OSS versioning routes are live behind Cloudflare with the production `x-floom-secret`: `/workspace/versions`, `/workers/weekly_update/versions`, and `/contexts/rocketlist-seo-reports/versions` each return `200 []`.
-- The OSS API service now runs GitHub source from `/opt/workeros-api-main` at `floomhq/workeros@04e1591`, replacing the stale detached `/opt/workeros-live` source that caused Vivek's 404s.
+- The OSS API service now runs GitHub source from `/opt/workeros-api-main` at `floomhq/floom@04e1591`, replacing the stale detached `/opt/workeros-live` source that caused Vivek's 404s.
 - The Cloud API service now runs `/opt/workeros-cloud` at `floomhq/workeros-cloud@985eea6` with engine submodule `04e1591`.
 - Cloud versioning route aliases exist at both root and `/api`; unauthenticated requests now return `401`, not `404`.
 - Both backend API services have systemd auto-deploy timers from GitHub `main`. The units live at `/etc/systemd/system/workeros-api-autodeploy.*` and `/etc/systemd/system/workeros-cloud-api-autodeploy.*`; scripts live at `/usr/local/bin/workeros-api-autodeploy` and `/usr/local/bin/workeros-cloud-api-autodeploy`. The timers fired at 18:19 CEST and both one-shot services exited `0/SUCCESS`.
@@ -34,7 +34,7 @@ Products:
 
 | Surface | Repo | Live app | API | Current local evidence |
 | --- | --- | --- | --- | --- |
-| Workeros OSS app | `/tmp/workeros-ui-round2` / `floomhq/workeros` | `https://workers.floom.dev` | `https://workers-api.floom.dev` | local HEAD `7d820b1` |
+| Workeros OSS app | `/tmp/workeros-ui-round2` / `floomhq/floom` | `https://workers.floom.dev` | `https://workers-api.floom.dev` | local HEAD `7d820b1` |
 | Workeros Cloud wrapper | `/root/workeros-cloud` / `floomhq/workeros-cloud` | `https://workeros.floom.dev/app` | `https://workeros-api.floom.dev` | local HEAD `d635005`, `engine` submodule `7d820b1` |
 
 Product boundary: Workeros is the information worker OS app. Workeros Cloud is only the hosted wrapper around that app, adding OAuth, Supabase, workspaces, and Cloud routing. The Cloud repo must stay in sync with Workeros without overwriting Cloud-specific overlay features.

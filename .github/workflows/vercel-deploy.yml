@@ -184,7 +184,7 @@ jobs:
           if [ -z "${TOKEN:-}" ]; then
             echo "::error::No gh token available on the self-hosted runner."
             echo "::error::Run 'gh auth login' as the runner user (github-runner)"
-            echo "::error::with read access to floomhq/workeros."
+            echo "::error::with read access to floomhq/floom."
             exit 1
           fi
           git config --global \

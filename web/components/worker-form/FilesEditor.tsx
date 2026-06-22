@@ -19,7 +19,7 @@ import { CodeBlock } from "@/components/file-viewer/code-block";
 // CLOUD OVERLAY DELTA (security #190): sanitize markdown link hrefs to block
 // javascript:/data: XSS in user-authored worker source previews. This is the
 // ONLY divergence from engine/apps/web FilesEditor — keep it minimal so the
-// overlay tracks the engine. Upstream candidate: floomhq/workeros.
+// overlay tracks the engine. Upstream candidate: floomhq/floom.
 import { sanitizeHref } from "@/lib/safe-url";
 
 // ---------------------------------------------------------------------------

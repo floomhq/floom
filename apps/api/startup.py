@@ -447,7 +447,7 @@ def _override_run_executor_workspace_context() -> None:
     after that request is gone). Without it the Supabase repos fall back to the
     default scope and the engine resolves contexts/git to the wrong (empty)
     workspace tree (runs "can't find workers"/contexts). We register the engine's
-    run-execution context provider (floomhq/workeros#1026): given a run_id, look
+    run-execution context provider (floomhq/floom#1026): given a run_id, look
     up its workspace_id (stamped on the row at create time) and return
     active_workspace(...). The engine enters it around execution — the single
     chokepoint for manual + scheduled + webhook + MCP + retry runs.
@@ -1044,7 +1044,7 @@ def _override_workers_git_prefix_for_cloud() -> None:
     (the commit path's _dispatch_write writes 'workers/<id>' either way). Force
     the correct 'workers' prefix whenever a cloud workspace is active.
 
-    TODO(engine): upstream to floomhq/workeros services/git_service.py.
+    TODO(engine): upstream to floomhq/floom services/git_service.py.
     """
     from apps.api.auth.workspace_context import get_active_workspace_id
     try:
@@ -1087,7 +1087,7 @@ def _override_git_commit_context_for_cloud() -> None:
     hold credentials). Wrap _git_commit_context so a sensitive context still
     uploads to Storage on write; non-sensitive contexts keep the original path.
 
-    TODO(engine): upstream to floomhq/workeros (sensitive contexts should always
+    TODO(engine): upstream to floomhq/floom (sensitive contexts should always
     back up to the durable store).
     """
     from pathlib import Path as _Path

@@ -78,7 +78,7 @@ def _hash_token(raw: str) -> str:
 # (via Set-Cookie on .floom.dev). HttpOnly + Secure, 30d lifetime.
 ACTIVE_WORKSPACE_COOKIE = "workeros_active_workspace"
 
-# Header used by the @floomhq/workeros CLI (cloud mode) to scope a request
+# Header used by the @floomhq/floom CLI (cloud mode) to scope a request
 # to a specific workspace. Mirrors the cookie-based dashboard flow.
 # Ownership is validated by workspace_repo.resolve_active_workspace, exactly
 # like the cookie path; an attacker can NOT scope themselves into another

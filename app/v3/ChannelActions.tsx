@@ -17,7 +17,7 @@ const MCP_CONFIG = `{
   "mcpServers": {
     "floom": {
       "command": "npx",
-      "args": ["-y", "@floomhq/workeros", "mcp"]
+      "args": ["-y", "@floomhq/floom", "mcp"]
     }
   }
 }`;

@@ -27,7 +27,7 @@ const CHANNELS: Record<
     title: "Floom from any MCP agent",
     lead: "Claude Code, Cursor, Codex — if it speaks MCP, it can hire and run your workers.",
     steps: [
-      ["Install the server", "npm i -g @floomhq/workeros — ships the workeros-mcp stdio server."],
+      ["Install the server", "npm i -g @floomhq/floom — ships the workeros-mcp stdio server."],
       ["Point your agent at it", "Copy the config below into Claude Code, Cursor, Codex, or any MCP client."],
       ["Drive workers from your editor", "“Run client-follow-up for the Acme call.” The run lands in your workspace like any other."],
     ],

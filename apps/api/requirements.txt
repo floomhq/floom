@@ -8,7 +8,7 @@ supabase==2.31.0
 # google.auth to mint tokens (incl. the AWS->GCP Workload Identity Federation
 # external_account flow). The engine requirements don't ship it, so litellm
 # raises ModuleNotFoundError: google.auth on any Vertex call. TEMPORARY here to
-# unblock prod; remove once floomhq/workeros adds it to engine requirements and
+# unblock prod; remove once floomhq/floom adds it to engine requirements and
 # the submodule is bumped. google-cloud-aiplatform is NOT needed (REST + token).
 google-auth>=2.49,<3
 

@@ -106,7 +106,7 @@ export function V3AboutBody() {
               Hire your first worker
             </Link>
             <a
-              href="https://github.com/floomhq/workeros"
+              href="https://github.com/floomhq/floom"
               target="_blank"
               rel="noopener noreferrer"
               className="text-[13px] text-muted-foreground transition-colors hover:text-foreground"

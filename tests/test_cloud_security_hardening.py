@@ -395,7 +395,7 @@ def test_cloud_webhook_filters_github_issue_actions_before_run(monkeypatch, tmp_
         json={
             "action": "labeled",
             "issue": {"number": 1781},
-            "repository": {"full_name": "floomhq/workeros"},
+            "repository": {"full_name": "floomhq/floom"},
         },
     )
 
@@ -435,7 +435,7 @@ def test_cloud_webhook_allows_configured_github_issue_action(monkeypatch, tmp_pa
         json={
             "action": "opened",
             "issue": {"number": 1781},
-            "repository": {"full_name": "floomhq/workeros"},
+            "repository": {"full_name": "floomhq/floom"},
         },
     )
 
@@ -471,7 +471,7 @@ def test_cloud_webhook_filters_claude_codex_issue_labels_by_default(monkeypatch,
         json={
             "action": "labeled",
             "issue": {"number": 1781},
-            "repository": {"full_name": "floomhq/workeros"},
+            "repository": {"full_name": "floomhq/floom"},
         },
     )
 

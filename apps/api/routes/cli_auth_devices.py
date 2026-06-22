@@ -164,6 +164,6 @@ def poll_cli_device(device_code: str) -> dict[str, Any]:
         status_code=410,
         detail=(
             "This Workeros Cloud endpoint replaced the OSS /cli-auth/poll flow. "
-            "Upgrade to @floomhq/workeros>=0.2.0 (which polls /auth/cli-exchange)."
+            "Upgrade to @floomhq/floom>=0.2.0 (which polls /auth/cli-exchange)."
         ),
     )

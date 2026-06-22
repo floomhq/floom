@@ -136,7 +136,7 @@ export function V3Shell({
             <Link href="/templates" className="transition-colors hover:text-foreground">Templates</Link>
             <Link href="/integrations" className="transition-colors hover:text-foreground">Integrations</Link>
             <Link href="/docs" className="transition-colors hover:text-foreground">Docs</Link>
-            <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">GitHub</a>
+            <a href="https://github.com/floomhq/floom" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">GitHub</a>
             <Link href="/privacy" className="transition-colors hover:text-foreground">Privacy</Link>
             <Link href="/terms" className="transition-colors hover:text-foreground">Terms</Link>
           </nav>

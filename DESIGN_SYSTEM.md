@@ -1,10 +1,10 @@
 # Workeros Design System
 
-> **Synced copy from `floomhq/workeros` engine.**  
-> This file is copied from the engine repo root. Do not edit here — update `floomhq/workeros/DESIGN_SYSTEM.md` first, then re-sync.
+> **Synced copy from `floomhq/floom` engine.**  
+> This file is copied from the engine repo root. Do not edit here — update `floomhq/floom/DESIGN_SYSTEM.md` first, then re-sync.
 
 > Source of truth for the visual system deployed at `workers.floom.dev`.  
-> Engine repo: `floomhq/workeros` (`apps/web/app/globals.css`).
+> Engine repo: `floomhq/floom` (`apps/web/app/globals.css`).
 
 ---
 

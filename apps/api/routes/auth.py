@@ -1048,7 +1048,7 @@ def cli_exchange(payload: CliExchangeRequest):
 
 @router.get("/cli-bootstrap")
 def cli_bootstrap():
-    """Public bootstrap endpoint for the @floomhq/workeros CLI.
+    """Public bootstrap endpoint for the @floomhq/floom CLI.
 
     SECURITY (audit 2026-05-29, CRIT-1 — ACCEPTED, intentionally public):
     This endpoint is unauthenticated BY DESIGN and returns ONLY public

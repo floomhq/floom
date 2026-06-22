@@ -8,7 +8,7 @@ There are two products and two production API backends.
 
 | Surface | Repo | Public app URL | API backend | Auth model |
 | --- | --- | --- | --- | --- |
-| Workeros OSS app | `floomhq/workeros` | `https://workers.floom.dev` | `https://workers-api.floom.dev` | `x-floom-secret` / OSS token |
+| Workeros OSS app | `floomhq/floom` | `https://workers.floom.dev` | `https://workers-api.floom.dev` | `x-floom-secret` / OSS token |
 | Workeros Cloud wrapper | `floomhq/workeros-cloud` | `https://workeros.floom.dev/app` | `https://workeros-api.floom.dev` | Supabase session JWT + workspace header |
 
 The OSS app is the information-worker OS. The Cloud repo is the hosted wrapper around that app: OAuth, Supabase auth, workspaces, billing-ready user/account boundaries, and Cloud-specific routing.
@@ -123,7 +123,7 @@ AttributeError: 'NoneType' object has no attribute 'get'
 
 Root cause: one worker contained a malformed/null connection entry. The worker-detail endpoint still worked, but the list-card projection assumed every non-string connection was a dict with an MCP object.
 
-Fix landed in `floomhq/workeros`:
+Fix landed in `floomhq/floom`:
 
 ```text
 33b43be fix(api): tolerate malformed worker connections in list
@@ -153,7 +153,7 @@ Verified result:
 
 ## Deployment Notes
 
-`floomhq/workeros-cloud` vendors the app from `floomhq/workeros` through the `engine` submodule plus overlay files.
+`floomhq/workeros-cloud` vendors the app from `floomhq/floom` through the `engine` submodule plus overlay files.
 
 When syncing Cloud with the app:
 

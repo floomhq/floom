@@ -33,14 +33,14 @@ jobs:
           submodules: false
 
       - name: Initialise engine submodule (runner-local gh auth)
-        # Identical to ci.yml: the private floomhq/workeros submodule is cloned
+        # Identical to ci.yml: the private floomhq/floom submodule is cloned
         # with the runner user's gh credentials, so `railway up` ships a complete
         # working tree (engine files present) — no GIT_TOKEN build-arg dance.
         run: |
           set -euo pipefail
           TOKEN="$(gh auth token)"
           if [ -z "${TOKEN:-}" ]; then
-            echo "::error::No gh token on the self-hosted runner. Run 'gh auth login' as the runner user with read access to floomhq/workeros."
+            echo "::error::No gh token on the self-hosted runner. Run 'gh auth login' as the runner user with read access to floomhq/floom."
             exit 1
           fi
           git config --global \
