@@ -902,7 +902,11 @@ export async function workersDeleteCommand(workerId: string, options: { yes?: bo
     const confirmed = options.yes
       || await promptYesNo(`Delete worker ${workerId}? This removes its runs and artifacts and cannot be undone. [y/N] `, false);
     if (!confirmed) {
-      log.info("Cancelled.");
+      if (options.json) {
+        printJson({ id: workerId, deleted: false, cancelled: true });
+      } else {
+        log.info("Cancelled.");
+      }
       return 0;
     }
     await client.requestJson("DELETE", `/workers/${encodeURIComponent(workerId)}`);

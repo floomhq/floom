@@ -595,6 +595,22 @@ test("workers delete without --yes or a TTY cancels and does not call DELETE", a
   assert.deepEqual(mock.seen, []);
 });
 
+test("workers delete --json cancellation keeps stdout machine-readable", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "delete", "cli-test-worker", "--json"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    id: "cli-test-worker",
+    deleted: false,
+    cancelled: true,
+  });
+  assert.deepEqual(mock.seen, []);
+});
+
 test("workers delete reports a missing worker as not found", async (t) => {
   const mock = await startMockApi({ existing: false });
   t.after(() => mock.server.close());
