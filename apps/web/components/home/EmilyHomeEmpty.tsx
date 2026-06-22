@@ -26,7 +26,7 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
-import { EmilyRadarMark } from "./EmilyRadarMark";
+import { Avatar } from "@/components/ui/Avatar";
 import { resolveWorkersGate } from "./emily-home-empty";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ export function EmilyHomeEmpty({
       {isFirstWorker ? (
         <div className="flex flex-col items-center pb-[22px]">
           <div className="mb-4">
-            <EmilyRadarMark size={46} variant="ink" />
+            <Avatar role="emily" size={46} />
           </div>
           <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
             Let&apos;s hire your first worker

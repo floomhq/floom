@@ -50,6 +50,7 @@ import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/Cl
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import { Avatar } from "@/components/ui/Avatar";
 import {
   useAssistantName,
   setCachedAssistantName,
@@ -1323,16 +1324,15 @@ function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser |
   }
 
   const email = currentUser?.email ?? "";
-  const initials = email ? email.slice(0, 2).toUpperCase() : "?";
+  // User photo (Google/GitHub) when the host /me supplies it; else generated.
+  const photoUrl = currentUser?.picture ?? currentUser?.avatar_url ?? null;
 
   return (
     <div className="space-y-6">
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
         <div className="flex items-center gap-4">
-          <div className="size-14 shrink-0 rounded-[var(--radius-card)] bg-muted text-foreground grid place-items-center text-lg font-medium">
-            {initials}
-          </div>
+          <Avatar role="user" name={displayName || email || "User"} src={photoUrl} size={56} />
           <div className="min-w-0">
             <p className="font-medium">{displayName || email}</p>
             <p className="text-sm text-muted-foreground">{email}</p>
