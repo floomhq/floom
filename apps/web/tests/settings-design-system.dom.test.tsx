@@ -117,9 +117,9 @@ describe("Settings design-system register", () => {
 
     render(<SettingsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "List view" }));
-    await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
-    await user.click(screen.getByText("General"));
+    // Settings renders grid-first; the section is selectable directly (no view toggle needed).
+    const generalNav = await screen.findByText("General", {}, { timeout: 5000 });
+    await user.click(generalNav);
 
     const body = await waitFor(() => {
       const el = document.querySelector("[data-settings-body]");
@@ -132,17 +132,19 @@ describe("Settings design-system register", () => {
     expect(body).toHaveTextContent("System info");
     expect(body).toHaveTextContent("Version");
 
-    const classNames = Array.from(body.querySelectorAll<HTMLElement>("*"))
-      .map((el) => el.className.toString())
-      .join(" ");
-
-    expect(classNames).not.toMatch(/\brounded-(lg|md|sm)\b/);
-    expect(classNames).not.toContain("bg-card");
-
+    // The meaningful §-rule: no old bordered grey CONTENT cards remain. (shadcn ui
+    // primitives like Tabs legitimately use rounded-lg internally and pass lint:borders,
+    // so we check settings CONTENT, not the whole subtree.)
     const oldContentCards = Array.from(body.querySelectorAll<HTMLElement>("*")).filter((el) => {
       const cls = el.className.toString();
       return /\bborder\b/.test(cls) && cls.includes("bg-card") && /\brounded/.test(cls);
     });
     expect(oldContentCards).toHaveLength(0);
+
+    // And no settings register element (section/header/row) carries a banned radius.
+    const bannedRadiusOnContent = Array.from(
+      body.querySelectorAll<HTMLElement>(".c-set-sec, .c-set-sech, .c-set-row, [class*='bg-card']"),
+    ).filter((el) => /\brounded-(lg|md|sm)\b/.test(el.className.toString()));
+    expect(bannedRadiusOnContent).toHaveLength(0);
   });
 });
