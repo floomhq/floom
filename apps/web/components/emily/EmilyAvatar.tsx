@@ -1,19 +1,23 @@
 import { cn } from "@/lib/utils";
-import { GenerativeAvatar } from "@/components/GenerativeAvatar";
+import { Avatar } from "@/components/ui/Avatar";
 
 /**
- * EmilyAvatar — the Emily assistant identity mark.
+ * EmilyAvatar — the Emily assistant identity mark (locked SPEC).
  *
- * Generative avatar with a fixed seed "Emily" and a pinned blue palette
- * (product accent #3E6FE0). Squircle shape: Emily is an AI worker, not a
- * human user.
+ * Solid accent-blue squircle + the fixed A4 mark (white core disc + two
+ * white@55% energy arcs). Emily is an AI worker, not a human, so the shape is
+ * a squircle. No letters, no icon, no emoji, no radar/orbit glyph.
  *
- * No letter monogram, no icon, no emoji.
+ * `active` makes the energy arcs gently pulse while Emily is working
+ * (reduced-motion safe — see globals.css). Pass it from the typing indicator.
  */
-
-const EMILY_PALETTE: [string, string, string] = ["#3E6FE0", "#22D3EE", "#6D5DF6"];
-
-export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
+export function EmilyAvatar({
+  size = "md",
+  active = false,
+}: {
+  size?: "sm" | "md";
+  active?: boolean;
+}) {
   const isSmall = size === "sm";
   const pxSize = isSmall ? 24 : 32;
   return (
@@ -24,12 +28,7 @@ export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
       )}
       aria-label="Emily, Chief of Staff"
     >
-      <GenerativeAvatar
-        seed="Emily"
-        shape="squircle"
-        size={pxSize}
-        palette={EMILY_PALETTE}
-      />
+      <Avatar role="emily" size={pxSize} active={active} />
     </span>
   );
 }

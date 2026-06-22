@@ -20,7 +20,7 @@ import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-st
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
-import { GenerativeAvatar } from "@/components/GenerativeAvatar";
+import { Avatar } from "@/components/ui/Avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,10 +54,12 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 
 // #1305: the app is WHITE-LABELED — the workspace IS the brand. The mark must
 // be the WORKSPACE logo/avatar, never the Floom play-triangle.
-// Generative avatar deterministically seeded by workspace name — squircle shape.
+// Generated identity mark deterministically seeded by workspace name —
+// squircle shape (workspace = non-human). Logo override handled where a
+// company logo is available; the sidebar header mark uses the generated mark.
 function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
   const seed = resolveWorkspaceName(name) || name || "workspace";
-  return <GenerativeAvatar seed={seed} shape="squircle" size={size} />;
+  return <Avatar role="workspace" name={seed} size={size} />;
 }
 
 
@@ -636,16 +638,10 @@ export function UserProfileFooter({
           )}
           aria-label="Profile menu"
         >
-          {/* #1306 / M36: profile photo (Google/GitHub) beats generated default.
-              GenerativeAvatar handles the override ladder: avatarUrl present
-              → real photo cropped to circle; absent → generative default. */}
-          <GenerativeAvatar
-            seed={primary}
-            shape="circle"
-            size={28}
-            avatarUrl={photoUrl}
-            alt="Profile avatar"
-          />
+          {/* #1306 / M36: profile photo (Google/GitHub) beats generated mark.
+              Avatar handles the override ladder: src present → real photo
+              cropped to the circle (user = human); absent → generated mark. */}
+          <Avatar role="user" name={primary} src={photoUrl} size={28} />
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
             <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>

@@ -229,7 +229,7 @@ function SuggestionPills({
 function TypingIndicator() {
   return (
     <div className="flex items-start gap-2">
-      <EmilyAvatar size="sm" />
+      <EmilyAvatar size="sm" active />
       <div className="flex gap-1 py-1.5 px-1">
         {[0, 1, 2].map((i) => (
           <div
