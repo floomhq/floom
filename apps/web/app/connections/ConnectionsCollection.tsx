@@ -8,7 +8,15 @@ import { api } from "@/lib/api";
 import { useConnections, useMembers, useSecrets, useWorkers } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection } from "@/components/collection";
+import {
+  Collection,
+  DetailChips,
+  DetailEmpty,
+  DetailGroup,
+  DetailPair,
+  DetailRow,
+  DetailSummary,
+} from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { RunStatusBadge } from "@/components/RunStatus";
@@ -61,19 +69,6 @@ function Logo({ item }: { item: UnifiedConn }) {
     <span className="c-logo">
       {item.kind === "mcp" ? <Server size={16} /> : <KeyRound size={16} />}
     </span>
-  );
-}
-
-function KV({ rows }: { rows: [string, React.ReactNode][] }) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" }}>
-      {rows.map(([k, v], i) => (
-        <span key={i} style={{ display: "contents" }}>
-          <span style={{ color: "var(--muted-foreground)", fontSize: 12.5 }}>{k}</span>
-          <span>{v}</span>
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -160,6 +155,30 @@ function formatLastUsed(connection: ConnectionItem) {
   return connection.last_used_by ? `${when} · ${connection.last_used_by}` : when;
 }
 
+function formatDate(value: string | null | undefined) {
+  if (!value) return "Not set";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
+
+function detailStatusSpec(item: UnifiedConn) {
+  if (item.kind === "secret") {
+    return item.statusKey === "active"
+      ? { tone: "ok" as const, label: "Set" }
+      : { tone: "err" as const, label: "Error" };
+  }
+  if (item.statusKey === "active") return { tone: "ok" as const, label: "Connected" };
+  if (item.statusKey === "reauth") return { tone: "warn" as const, label: "Reconnect" };
+  return { tone: "err" as const, label: "Error" };
+}
+
+function toolChipItems(items: string[], mono = true) {
+  return items.map((item) => ({
+    key: item,
+    label: mono ? <span style={{ fontFamily: "var(--font-mono)" }}>{item}</span> : item,
+  }));
+}
+
 function EmailPeekPanel({ connectionId }: { connectionId: string }) {
   const [emailPeek, setEmailPeek] = useState<
     Array<{ subject: string; from_name: string; from_email: string; date: string }>
@@ -216,7 +235,7 @@ function EmailPeekPanel({ connectionId }: { connectionId: string }) {
           <span className="c-cell m">{email.date ? new Date(email.date).toLocaleDateString() : ""}</span>
         </div>
       ))}
-      {emailPeek.length === 0 && <div style={pad}>No recent emails available.</div>}
+      {emailPeek.length === 0 && <DetailEmpty>No recent emails available.</DetailEmpty>}
     </div>
   );
 }
@@ -264,7 +283,7 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
           <RunStatusBadge status={run.status} showSuccess />
         </Link>
       ))}
-      {activity.length === 0 && <div style={pad}>No recent activity.</div>}
+      {activity.length === 0 && <DetailEmpty>No recent activity.</DetailEmpty>}
     </div>
   );
 }
@@ -280,30 +299,11 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
 //             scope for new workers — the real allowlist is per-worker
 //             (WorkerConnectionSpec.allowed_tools), so each worker can narrow it.
 // ---------------------------------------------------------------------------
-function ToolChips({ items, mono = true }: { items: string[]; mono?: boolean }) {
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-      {items.map((t) => (
-        <span
-          key={t}
-          className="c-vpill"
-          style={{ fontFamily: mono ? "var(--font-mono)" : undefined, fontSize: 11.5 }}
-        >
-          {t}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function ToolSection({ label, items, mono }: { label: string; items: string[]; mono?: boolean }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 11, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted-foreground)" }}>
-        {label} · {items.length}
-      </div>
-      {items.length > 0 ? <ToolChips items={items} mono={mono} /> : <div style={pad}>None.</div>}
-    </div>
+    <DetailGroup label={`${label} · ${items.length}`}>
+      {items.length > 0 ? <DetailChips items={toolChipItems(items, mono)} /> : <DetailEmpty>None.</DetailEmpty>}
+    </DetailGroup>
   );
 }
 
@@ -343,12 +343,14 @@ function McpToolsPanel({ connection }: { connection: ConnectionItem }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <ToolSection label="Allowed for workers" items={allowed} />
       {unreachable ? (
-        <div style={pad}>
+        <DetailGroup label="Available but not allowed">
+          <DetailEmpty>
           Server unreachable: showing the configured allowlist only. Test the
           connection to enumerate live tools.
-        </div>
+          </DetailEmpty>
+        </DetailGroup>
       ) : (
-        <ToolSection label="Available but not allowed · live from server" items={available} />
+        <ToolSection label="Available but not allowed - live from server" items={available} />
       )}
     </div>
   );
@@ -383,26 +385,30 @@ function OAuthToolsPanel({ connection }: { connection: ConnectionItem }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "inline-flex", gap: 2, alignSelf: "flex-start", background: "var(--bg-2)", padding: 3, borderRadius: "var(--radius-pill)" }}>
-        {TOOL_PRESET_SCOPES.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setScope(s)}
-            className={scope === s ? "c-addbtn" : "c-vpill"}
-            style={{ padding: "4px 12px", fontSize: 12, border: "none" }}
-          >
-            {s === "All" ? `All ${scopes.length}` : s}
-          </button>
-        ))}
-      </div>
-      <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-        Default tool scope for new workers. Each worker can narrow this further.
-      </div>
+      <DetailGroup label="Scope">
+        <div style={{ display: "inline-flex", gap: 2, alignSelf: "flex-start", background: "var(--bg-2)", padding: 3, borderRadius: "var(--radius-pill)" }}>
+          {TOOL_PRESET_SCOPES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setScope(s)}
+              className={scope === s ? "c-addbtn" : "c-vpill"}
+              style={{ padding: "4px 12px", fontSize: 12, border: "none" }}
+            >
+              {s === "All" ? `All ${scopes.length}` : s}
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 8 }}>
+          Default tool scope for new workers. Each worker can narrow this further.
+        </div>
+      </DetailGroup>
       {scope === "Custom" ? (
-        <div style={pad}>Configure the exact tool list on each worker (Setup → Tools).</div>
+        <DetailGroup label="Enabled tools">
+          <DetailEmpty>Configure the exact tool list on each worker (Setup - Tools).</DetailEmpty>
+        </DetailGroup>
       ) : (
-        <ToolSection label="Granted scopes" items={shown} mono={false} />
+        <ToolSection label="Enabled tools" items={shown} mono={false} />
       )}
     </div>
   );
@@ -514,7 +520,7 @@ function ConnSecretsPanel({
             </div>
           );
         })}
-        {related.length === 0 && <div style={pad}>No secrets stored for this connection.</div>}
+        {related.length === 0 && <DetailEmpty>No secrets stored for this connection.</DetailEmpty>}
       </div>
       {adding ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 460 }}>
@@ -582,7 +588,7 @@ function UsedByPanel({ connection, workers }: { connection: ConnectionItem; work
             </div>
           </Link>
         ))}
-        {using.length === 0 && <div style={pad}>No workers use this connection yet.</div>}
+        {using.length === 0 && <DetailEmpty>No workers use this connection yet.</DetailEmpty>}
       </div>
     </div>
   );
@@ -727,6 +733,18 @@ export default function ConnectionsCollection({
     }
   };
 
+  const rotateSecret = async (secret: SecretItem) => {
+    const value = window.prompt(`New value for ${secret.name} (write-only, overwrites the old value):`);
+    if (value == null || value === "") return;
+    try {
+      await api.secrets.upsert(secret.name, value);
+      toast.success(`${secret.name} rotated`);
+      await refresh();
+    } catch {
+      toast.error(`Could not rotate ${secret.name}`);
+    }
+  };
+
   const config: CollectionConfig<UnifiedConn> = {
     title: "Connections",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
@@ -789,18 +807,24 @@ export default function ConnectionsCollection({
       // The two highest-value actions inline (Test + Reconnect for managed
       // connections), with disconnect demoted into a More ▾ menu so the
       // destructive action is never a primary button (matches worker/run detail).
+      const primaryAction = i.kind === "secret" && i.secret ? (
+        <button type="button" className="c-addbtn" style={pillBtn} onClick={() => void rotateSecret(i.secret!)}>
+          Rotate
+        </button>
+      ) : i.connection ? (
+        <Link
+          href={`/connections/connect/${encodeURIComponent(i.connection.app_name)}?return_to=${encodeURIComponent("/connections")}`}
+          className="c-addbtn"
+          style={pillBtn}
+        >
+          Reconnect
+        </Link>
+      ) : null;
       const actions = (
         <>
-          {i.kind === "connection" && i.connection && (
-            <Link
-              href={`/connections/connect/${encodeURIComponent(i.connection.app_name)}?return_to=${encodeURIComponent("/connections")}`}
-              className="c-addbtn"
-              style={pillBtn}
-            >
-              Reconnect
-            </Link>
-          )}
-          <button type="button" className="c-addbtn" style={pillBtn} onClick={() => void test(i)}>
+          <StatusPill spec={detailStatusSpec(i)} />
+          {primaryAction}
+          <button type="button" className="c-vpill" style={pillBtn} onClick={() => void test(i)}>
             Test
           </button>
           <DropdownMenu>
@@ -850,18 +874,29 @@ export default function ConnectionsCollection({
             key: "Overview",
             label: "Overview",
             render: () => (
-              <KV
-                rows={[
-                  ["App", humaniseAppName(c.app_name)],
-                  ["Account", i.account],
-                  ["Auth", "OAuth · managed token (rotates on reconnect)"],
-                  ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
-                  ["Scopes", String(c.scopes?.length ?? 0)],
-                  ["Connected", new Date(c.created_at).toLocaleDateString()],
-                  ["Last used", formatLastUsed(c)],
-                  ["Owner", resolveOwner(c.owner_id, members)],
-                ]}
-              />
+              <div>
+                <DetailGroup label="Access">
+                  <DetailRow label="App" value={humaniseAppName(c.app_name)} />
+                  <DetailRow label="Account" value={i.account} />
+                  <DetailRow label="Auth" value="OAuth" />
+                  {(c.scopes?.length ?? 0) > 0 ? (
+                    <DetailChips items={[...(c.scopes ?? []), { key: "manage-scopes", label: "+ manage scopes", add: true }]} />
+                  ) : (
+                    <DetailEmpty>No scopes granted.</DetailEmpty>
+                  )}
+                </DetailGroup>
+                <DetailGroup label="Activity">
+                  <DetailPair
+                    items={[
+                      { key: "connected", label: "Connected", value: formatDate(c.created_at) },
+                      { key: "last-used", label: "Last used", value: formatLastUsed(c) },
+                    ]}
+                  />
+                </DetailGroup>
+                <DetailGroup label="Owner">
+                  <DetailRow label="Owner" value={resolveOwner(c.owner_id, members)} />
+                </DetailGroup>
+              </div>
             ),
           },
           {
@@ -875,19 +910,29 @@ export default function ConnectionsCollection({
             label: "Secrets",
             count: related.length || undefined,
             render: () => (
-              <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
+              <DetailGroup label="Secrets">
+                <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
+              </DetailGroup>
             ),
           },
           {
             key: "Used by",
             label: "Used by",
             count: using.length || undefined,
-            render: () => <UsedByPanel connection={c} workers={workers} />,
+            render: () => (
+              <DetailGroup label={`Used by ${using.length} worker${using.length === 1 ? "" : "s"}`}>
+                <UsedByPanel connection={c} workers={workers} />
+              </DetailGroup>
+            ),
           },
           {
             key: "Activity",
             label: "Activity",
-            render: () => <ActivityPanel connectionId={c.id} />,
+            render: () => (
+              <DetailGroup label="Recent activity">
+                <ActivityPanel connectionId={c.id} />
+              </DetailGroup>
+            ),
           },
         ];
         const advancedRendered = advancedTabs
@@ -895,7 +940,11 @@ export default function ConnectionsCollection({
           .map((t) => ({
             key: t,
             label: t,
-            render: () => <EmailPeekPanel connectionId={c.id} />,
+            render: () => (
+              <DetailGroup label="Recent emails">
+                <EmailPeekPanel connectionId={c.id} />
+              </DetailGroup>
+            ),
           }));
         return {
           header,
@@ -918,22 +967,21 @@ export default function ConnectionsCollection({
             key: "Overview",
             label: "Overview",
             render: () => (
-              <KV
-                rows={[
-                  ["Server", c.mcp_label || c.app_name],
-                  [
-                    "Endpoint",
-                    <span key="ep" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                      {c.mcp_url || c.mcp_command || "—"}
-                    </span>,
-                  ],
-                  ["Transport", c.mcp_transport || "—"],
-                  ["Auth secret", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
-                  ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
-                  ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
-                  ["Last used", formatLastUsed(c)],
-                ]}
-              />
+              <div>
+                <DetailSummary
+                  items={[
+                    { key: "tools", label: "Tools", value: c.mcp_allowed_tools?.length ?? 0 },
+                    { key: "last-used", label: "Last used", value: formatLastUsed(c) },
+                  ]}
+                />
+                <DetailGroup label="Server">
+                  <DetailRow label="Endpoint" value={c.mcp_url || c.mcp_command || "Not set"} mono />
+                  <DetailRow label="Transport" value={c.mcp_transport || "Not set"} />
+                </DetailGroup>
+                <DetailGroup label="Auth">
+                  <DetailRow label="Secret" value={c.mcp_auth_secret || "None"} mono={Boolean(c.mcp_auth_secret)} />
+                </DetailGroup>
+              </div>
             ),
           },
           {
@@ -947,19 +995,29 @@ export default function ConnectionsCollection({
             label: "Secrets",
             count: related.length || undefined,
             render: () => (
-              <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
+              <DetailGroup label="Secrets">
+                <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
+              </DetailGroup>
             ),
           },
           {
             key: "Used by",
             label: "Used by",
             count: using.length || undefined,
-            render: () => <UsedByPanel connection={c} workers={workers} />,
+            render: () => (
+              <DetailGroup label={`Used by ${using.length} worker${using.length === 1 ? "" : "s"}`}>
+                <UsedByPanel connection={c} workers={workers} />
+              </DetailGroup>
+            ),
           },
           {
             key: "Activity",
             label: "Activity",
-            render: () => <ActivityPanel connectionId={c.id} />,
+            render: () => (
+              <DetailGroup label="Recent activity">
+                <ActivityPanel connectionId={c.id} />
+              </DetailGroup>
+            ),
           },
         ];
         const advancedRendered = advancedTabs
@@ -968,15 +1026,17 @@ export default function ConnectionsCollection({
             key: t,
             label: t,
             render: () => (
-              <pre style={codeBlock}>
-                {JSON.stringify(
-                  c.mcp_transport === "stdio" || c.mcp_command
-                    ? { command: c.mcp_command, args: c.mcp_args ?? [], transport: c.mcp_transport ?? "stdio" }
-                    : { url: c.mcp_url, transport: c.mcp_transport ?? "streamable_http" },
-                  null,
-                  2,
-                )}
-              </pre>
+              <DetailGroup label="Raw config">
+                <pre style={codeBlock}>
+                  {JSON.stringify(
+                    c.mcp_transport === "stdio" || c.mcp_command
+                      ? { command: c.mcp_command, args: c.mcp_args ?? [], transport: c.mcp_transport ?? "stdio" }
+                      : { url: c.mcp_url, transport: c.mcp_transport ?? "streamable_http" },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </DetailGroup>
             ),
           }));
         return {
@@ -997,44 +1057,34 @@ export default function ConnectionsCollection({
             key: "Overview",
             label: "Overview",
             render: () => (
-              <KV
-                rows={[
-                  [
-                    "Name",
-                    <span key="nm" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</span>,
-                  ],
-                  ["Value", <SecretValueField key="val" name={s.name} />],
-                  [
-                    "Status",
-                    <StatusPill
-                      key="st"
-                      spec={
-                        s.status === "set"
-                          ? { tone: "ok", label: "Set" }
-                          : { tone: "err", label: "Not set" }
-                      }
-                    />,
-                  ],
-                  [
-                    "Used by",
-                    usedByCount > 0 ? (
-                      <Link
-                        href={`?tab=Used+by`}
-                        style={{
-                          color: "var(--accent)",
-                          textDecoration: "underline",
-                          textDecorationColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
-                          textUnderlineOffset: 3,
-                        }}
-                      >
-                        {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
-                      </Link>
-                    ) : (
-                      <span style={{ color: "var(--muted-foreground)" }}>None</span>
-                    ),
-                  ],
-                ]}
-              />
+              <div>
+                <DetailGroup label="Secret">
+                  <DetailRow label="Name" value={s.name} mono />
+                  <DetailRow label="Value" value={<SecretValueField name={s.name} />} />
+                </DetailGroup>
+                <DetailGroup label="Usage">
+                  <DetailRow
+                    label="Used by"
+                    value={
+                      usedByCount > 0 ? (
+                        <Link
+                          href={`?tab=Used+by`}
+                          style={{
+                            color: "var(--accent)",
+                            textDecoration: "underline",
+                            textDecorationColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
+                            textUnderlineOffset: 3,
+                          }}
+                        >
+                          {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
+                        </Link>
+                      ) : (
+                        <span style={{ color: "var(--muted-foreground)" }}>None</span>
+                      )
+                    }
+                  />
+                </DetailGroup>
+              </div>
             ),
           },
           {
@@ -1042,34 +1092,36 @@ export default function ConnectionsCollection({
             label: "Used by",
             count: s.used_by?.length,
             render: () => (
-              <div className="c-ltable">
-                {(s.used_by ?? []).map((workerName) => {
-                  const workerId = workersByName.get(workerName);
-                  return workerId ? (
-                    <Link
-                      key={workerName}
-                      href={`/workers/${encodeURIComponent(workerId)}`}
-                      className="c-lrow"
-                      style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
-                    >
-                      <div className="c-lprimary">
-                        <div className="c-lp-tx">
-                          <div className="nm">{workerName}</div>
+              <DetailGroup label={`Used by ${usedByCount} worker${usedByCount === 1 ? "" : "s"}`}>
+                <div className="c-ltable">
+                  {(s.used_by ?? []).map((workerName) => {
+                    const workerId = workersByName.get(workerName);
+                    return workerId ? (
+                      <Link
+                        key={workerName}
+                        href={`/workers/${encodeURIComponent(workerId)}`}
+                        className="c-lrow"
+                        style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
+                      >
+                        <div className="c-lprimary">
+                          <div className="c-lp-tx">
+                            <div className="nm">{workerName}</div>
+                          </div>
+                        </div>
+                      </Link>
+                    ) : (
+                      <div key={workerName} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
+                        <div className="c-lprimary">
+                          <div className="c-lp-tx">
+                            <div className="nm">{workerName}</div>
+                          </div>
                         </div>
                       </div>
-                    </Link>
-                  ) : (
-                    <div key={workerName} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-                      <div className="c-lprimary">
-                        <div className="c-lp-tx">
-                          <div className="nm">{workerName}</div>
-                        </div>
-                      </div>
-                    </div>
-                   );
-                })}
-                {(s.used_by?.length ?? 0) === 0 && <div style={pad}>Not used by any worker yet.</div>}
-              </div>
+                    );
+                  })}
+                  {(s.used_by?.length ?? 0) === 0 && <DetailEmpty>Not used by any worker yet.</DetailEmpty>}
+                </div>
+              </DetailGroup>
             ),
           },
         ],
