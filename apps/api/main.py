@@ -2217,11 +2217,12 @@ def _resolve_file_input_references(
     with get_db() as conn:
         for inp in file_inputs:
             value = resolved_inputs.get(inp.name)
-            if value in (None, ""):
+            if value in (None, "", []):
                 # Optional file omitted for this run — leave it absent in the
                 # per-run dir so stale files from earlier runs are never visible.
                 continue
-            if not is_sha256(value):
+            raw_values = value if isinstance(value, list) else [value]
+            if any(not is_sha256(item) for item in raw_values):
                 raise HTTPException(
                     status_code=400,
                     detail=(
@@ -2231,6 +2232,72 @@ def _resolve_file_input_references(
                 )
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
                 raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
+
+            if isinstance(value, list):
+                mounted_values: List[str] = []
+                group_dir = run_inputs_dir / inp.name
+                group_dir.mkdir(parents=True, exist_ok=True)
+                for idx, file_id in enumerate(raw_values):
+                    row = conn.execute(
+                        "SELECT id, filename, media_type, size_bytes, uploaded_by FROM files WHERE id = ?",
+                        (file_id,),
+                    ).fetchone()
+                    if not row:
+                        raise HTTPException(status_code=404, detail=f"Uploaded file not found: {inp.name}")
+                    source = blob_path(row["id"])
+                    if not source.is_file():
+                        raise HTTPException(status_code=400, detail=f"Uploaded file blob missing: {inp.name}")
+                    if inp.accepts:
+                        accepted = set(inp.accepts)
+                        if row["media_type"] not in accepted:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=(
+                                    f"File input '{inp.name}': stored media_type {row['media_type']!r} "
+                                    f"is not in accepts {sorted(accepted)}"
+                                ),
+                            )
+                    if inp.max_size_mb is not None:
+                        max_bytes = int(inp.max_size_mb * 1024 * 1024)
+                        if row["size_bytes"] > max_bytes:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=(
+                                    f"File input '{inp.name}': stored size {row['size_bytes']} bytes "
+                                    f"exceeds max_size_mb={inp.max_size_mb}"
+                                ),
+                            )
+                    file_owner = row["uploaded_by"] or "anonymous"
+                    if not _user_owns_uploaded_file(conn, row["id"], bound_by):
+                        logger.info(
+                            "file_binding_audit: run=%s worker=%s input=%s sha=%s "
+                            "uploaded_by=%r bound_by=%r",
+                            run_id,
+                            worker_id,
+                            inp.name,
+                            row["id"],
+                            file_owner,
+                            bound_by,
+                        )
+                        try:
+                            conn.execute(
+                                """
+                                INSERT INTO file_binding_audit
+                                    (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
+                            )
+                        except sqlite3.OperationalError as exc:
+                            logger.debug("file_binding_audit write skipped: %s", exc)
+                        raise HTTPException(status_code=403, detail=f"Uploaded file not found: {inp.name}")
+                    ext = extension_for_file(row["filename"], row["media_type"])
+                    mounted = group_dir / f"{idx + 1:03d}{ext}"
+                    shutil.copyfile(source, mounted)
+                    mounted_values.append(str(mounted))
+                    bound_file_ids.append(row["id"])
+                resolved_inputs[inp.name] = mounted_values
+                continue
 
             row = conn.execute(
                 "SELECT id, filename, media_type, size_bytes, uploaded_by FROM files WHERE id = ?",
@@ -2314,9 +2381,10 @@ def _validate_file_input_references(
         if getattr(inp, "type", None) != "file":
             continue
         value = inputs.get(inp.name)
-        if value in (None, ""):
+        if value in (None, "", []):
             continue
-        if not is_sha256(value):
+        raw_values = value if isinstance(value, list) else [value]
+        if any(not is_sha256(item) for item in raw_values):
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -4059,6 +4127,178 @@ def reload_workers(
     repos: Repositories = Depends(get_repos),
 ) -> ReloadResponse:
     return _reload_workers_for_user(auth.user_id)
+
+
+def _parse_inbox_metadata(raw: Optional[str]) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="metadata must be a JSON object") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="metadata must be a JSON object")
+    return parsed
+
+
+def _inbox_file_input_name(config: Optional[WorkerConfig], explicit: Optional[str]) -> Optional[str]:
+    if not config:
+        return explicit
+    file_inputs = [inp for inp in getattr(config, "inputs", []) or [] if getattr(inp, "type", None) == "file"]
+    if explicit:
+        if explicit not in {inp.name for inp in file_inputs}:
+            raise HTTPException(status_code=400, detail=f"Unknown file input: {explicit}")
+        return explicit
+    if len(file_inputs) == 1:
+        return file_inputs[0].name
+    if len(file_inputs) > 1:
+        required = [inp.name for inp in file_inputs if getattr(inp, "required", False)]
+        if len(required) == 1:
+            return required[0]
+        raise HTTPException(
+            status_code=400,
+            detail="input_name is required when a worker declares multiple file inputs",
+        )
+    return None
+
+
+def _build_inbox_run_inputs(
+    *,
+    config: Optional[WorkerConfig],
+    uploaded_files: List[Dict[str, Any]],
+    input_name: Optional[str],
+    group_id: Optional[str],
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not uploaded_files:
+        raise HTTPException(status_code=400, detail="at least one file is required")
+    selected_input = _inbox_file_input_name(config, input_name)
+    inputs: Dict[str, Any] = {}
+    file_ids = [str(item["id"]) for item in uploaded_files]
+    if selected_input:
+        inputs[selected_input] = file_ids[0] if len(file_ids) == 1 else file_ids
+    else:
+        inputs["files"] = [
+            {
+                "id": str(item["id"]),
+                "sha256": str(item.get("sha256") or item["id"]),
+                "name": str(item.get("filename") or item.get("name") or item["id"]),
+                "media_type": str(item.get("media_type") or "application/octet-stream"),
+                "size": int(item.get("size") or 0),
+                "url": str(item.get("url") or ""),
+            }
+            for item in uploaded_files
+        ]
+    inputs["inbox"] = {
+        "group_id": group_id,
+        "file_count": len(uploaded_files),
+        "metadata": metadata,
+    }
+    return inputs
+
+
+_inbox_rate_lock = threading.Lock()
+_inbox_rate_store: Dict[str, collections.deque] = {}
+
+
+def _inbox_file_limit() -> int:
+    try:
+        return max(1, int(os.environ.get("FLOOM_INBOX_MAX_FILES", "25")))
+    except ValueError:
+        return 25
+
+
+def _inbox_rate_config() -> tuple[int, float]:
+    try:
+        limit = int(os.environ.get("FLOOM_INBOX_RATE_LIMIT", "10"))
+    except ValueError:
+        limit = 10
+    try:
+        window = float(os.environ.get("FLOOM_INBOX_RATE_WINDOW_SECONDS", "60"))
+    except ValueError:
+        window = 60.0
+    return max(0, limit), max(1.0, window)
+
+
+def _check_inbox_rate_limit(key: str) -> bool:
+    limit, window = _inbox_rate_config()
+    if limit <= 0:
+        return True
+    now = time.monotonic()
+    cutoff = now - window
+    with _inbox_rate_lock:
+        dq = _inbox_rate_store.setdefault(key, collections.deque())
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= limit:
+            return False
+        dq.append(now)
+    return True
+
+
+@app.post("/workers/{worker_id}/inbox", response_model=ActionResponse)
+async def upload_worker_inbox(
+    worker_id: str,
+    request: Request,
+    files: List[UploadFile] = File(...),
+    input_name: Optional[str] = Form(None),
+    group_id: Optional[str] = Form(None),
+    metadata: Optional[str] = Form(None),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Upload one grouped batch of files and enqueue one worker run."""
+    from services.uploads import _store_uploaded_blob
+
+    worker_id = _canonical_worker_id(worker_id)
+    if not files:
+        raise HTTPException(status_code=400, detail="at least one file is required")
+    max_files = _inbox_file_limit()
+    if len(files) > max_files:
+        raise HTTPException(status_code=400, detail=f"inbox uploads support at most {max_files} files")
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    rate_key = f"user:{auth.user_id or 'anonymous'}:worker:{worker_id}:inbox"
+    if not _check_inbox_rate_limit(rate_key):
+        raise HTTPException(status_code=429, detail="Inbox upload rate limit exceeded")
+    parsed_metadata = _parse_inbox_metadata(metadata)
+    config = get_worker_config_for_run(worker_id)
+    selected_input = _inbox_file_input_name(config, input_name)
+    accepted = None
+    max_size_mb = None
+    if config and selected_input:
+        for inp in getattr(config, "inputs", []) or []:
+            if inp.name == selected_input:
+                accepted = json.dumps(inp.accepts) if inp.accepts else None
+                max_size_mb = inp.max_size_mb
+                break
+    uploaded = []
+    uploader = auth.user_id or "anonymous"
+    for file in files:
+        stored = await _store_uploaded_blob(
+            request,
+            file,
+            uploader,
+            accepts=accepted,
+            max_size_mb=max_size_mb,
+        )
+        stored["filename"] = file.filename or stored["id"]
+        uploaded.append(stored)
+    inputs = _build_inbox_run_inputs(
+        config=config,
+        uploaded_files=uploaded,
+        input_name=selected_input,
+        group_id=group_id,
+        metadata=parsed_metadata,
+    )
+    return create_worker_run(
+        worker_id,
+        RunCreate(inputs=inputs, trigger_source="inbox"),
+        request,
+        auth=auth,
+        repos=repos,
+    )
 
 
 # ---------------------------------------------------------------------------

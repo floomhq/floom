@@ -60,13 +60,13 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
   return (
     <div
       className={cn(
-        "rounded-[var(--radius-card)] [border:var(--bd-card)] overflow-hidden text-sm",
+        "rounded-[var(--radius-card)] overflow-hidden text-sm",
         // Rule #9: pending is quiet grey — color only after a decision.
         isPending
-          ? "[border:var(--bd-card)] bg-muted/30"
+          ? "bg-muted/30"
           : approved
-          ? "[border:var(--bd-card)] bg-[color-mix(in_srgb,var(--positive)_8%,transparent)]"
-          : "[border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_8%,transparent)]"
+          ? "bg-[color-mix(in_srgb,var(--positive)_8%,transparent)]"
+          : "bg-[color-mix(in_srgb,var(--negative)_8%,transparent)]"
       )}
     >
       <div className="flex items-start gap-2.5 px-3.5 py-2.5">
@@ -93,7 +93,7 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
       {isPending ? (
         <div className="space-y-2 px-3.5 pb-3">
           <input
-            className="w-full rounded-[var(--radius-input)] [border:var(--bd-card)] bg-background px-2 py-1 text-xs"
+            className="w-full rounded-[var(--radius-input)] bg-background/80 px-2 py-1 text-xs outline-none focus:bg-background transition-colors"
             placeholder="Add a comment (sent with reject; approve comments land with #769)"
             value={comment}
             onChange={(e) => setComment(e.target.value)}
@@ -127,8 +127,8 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
             className={cn(
               "text-[10px] font-normal",
               approved
-                ? "bg-[color-mix(in_srgb,var(--positive)_12%,transparent)] text-[color-mix(in_srgb,var(--positive)_78%,var(--ink))] [border:var(--bd-card)]"
-                : "bg-[color-mix(in_srgb,var(--negative)_12%,transparent)] text-[color-mix(in_srgb,var(--negative)_78%,var(--ink))] [border:var(--bd-card)]"
+                ? "bg-[color-mix(in_srgb,var(--positive)_12%,transparent)] text-[color-mix(in_srgb,var(--positive)_78%,var(--ink))]"
+                : "bg-[color-mix(in_srgb,var(--negative)_12%,transparent)] text-[color-mix(in_srgb,var(--negative)_78%,var(--ink))]"
             )}
           >
             {approved ? "Approved" : "Rejected"}

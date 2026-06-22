@@ -38,7 +38,7 @@ function makeConfig(over: Partial<CollectionConfig<Item>> = {}): CollectionConfi
         { value: "recruiting", label: "recruiting" },
       ],
     },
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     columns: { template: "1fr 120px 40px", headers: ["Worker", "Status", ""] },
     row: (i) => ({
       leading: <Avatar name={i.name} />,
@@ -72,20 +72,31 @@ function Harness({
   config: CollectionConfig<Item>;
   initial?: CollectionState;
 }) {
-  const [state, setState] = useState<CollectionState>(initial ?? emptyState("grid"));
+  const [state, setState] = useState<CollectionState>(initial ?? emptyState("list"));
   return <CollectionView config={config} state={state} onChange={setState} />;
 }
 
 describe("CollectionView — list & grid (§8e)", () => {
-  it("renders grid by default and toggles to list (showing headers)", async () => {
+  it("renders list by default (no stored preference) and toggles to grid", async () => {
     const user = userEvent.setup();
     const { container } = render(<Harness config={makeConfig()} />);
-    expect(container.querySelector(".c-grid")).toBeInTheDocument();
-    expect(screen.queryByText("Worker")).not.toBeInTheDocument(); // no list header yet
-
-    await user.click(screen.getByRole("button", { name: "List view" }));
+    // List view is the default: column headers visible, no grid.
     expect(container.querySelector(".c-grid")).not.toBeInTheDocument();
     expect(screen.getByText("Worker")).toBeInTheDocument(); // list header column
+
+    await user.click(screen.getByRole("button", { name: "Grid view" }));
+    expect(container.querySelector(".c-grid")).toBeInTheDocument();
+    expect(screen.queryByText("Worker")).not.toBeInTheDocument(); // no list header in grid
+  });
+
+  it("emptyState() defaults view to list when no preference is stored", () => {
+    const state = emptyState();
+    expect(state.view).toBe("list");
+  });
+
+  it("emptyState('list') defaults view to list", () => {
+    const state = emptyState("list");
+    expect(state.view).toBe("list");
   });
 });
 
@@ -278,7 +289,7 @@ describe("CollectionView — split detail (§8e)", () => {
     render(
       <CollectionView
         config={makeConfig()}
-        state={{ ...emptyState("grid"), sel: "does-not-exist" }}
+        state={{ ...emptyState("list"), sel: "does-not-exist" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -301,7 +312,7 @@ describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => 
       <CollectionView
         config={makeConfig({ resolveMissing })}
         // "99" is not in ITEMS — it only exists via resolveMissing.
-        state={{ ...emptyState("grid"), sel: "99" }}
+        state={{ ...emptyState("list"), sel: "99" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -319,7 +330,7 @@ describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => 
     render(
       <CollectionView
         config={makeConfig({ resolveMissing })}
-        state={{ ...emptyState("grid"), sel: "ghost-id" }}
+        state={{ ...emptyState("list"), sel: "ghost-id" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -338,7 +349,7 @@ describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => 
     render(
       <CollectionView
         config={makeConfig({ resolveMissing })}
-        state={{ ...emptyState("grid"), sel: "boom-id" }}
+        state={{ ...emptyState("list"), sel: "boom-id" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -358,7 +369,7 @@ describe("CollectionView — resolveMissing deep-link hydration (#1558)", () => 
     render(
       <CollectionView
         config={makeConfig({ resolveMissing })}
-        state={{ ...emptyState("grid"), sel: "once-id" }}
+        state={{ ...emptyState("list"), sel: "once-id" }}
         onChange={() => {}}
         onInvalidSel={onInvalidSel}
       />,
@@ -410,7 +421,7 @@ describe("CollectionView — states (§7)", () => {
     const { container } = render(
       <Harness
         config={makeConfig()}
-        initial={{ ...emptyState("grid"), q: "zzz-no-match" }}
+        initial={{ ...emptyState("list"), q: "zzz-no-match" }}
       />,
     );
     expect(screen.getByText("No workers yet")).toBeInTheDocument();
