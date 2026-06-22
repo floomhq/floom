@@ -11,6 +11,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_SCRIPT = REPO_ROOT / "ops" / "deploy-api.sh"
@@ -24,7 +26,17 @@ def _bash_path(path: Path) -> str:
     return text
 
 
+def _require_usable_bash() -> None:
+    try:
+        result = subprocess.run(["bash", "-lc", "true"], capture_output=True, text=True)
+    except FileNotFoundError:
+        pytest.skip("bash is not available")
+    if result.returncode != 0:
+        pytest.skip("bash is not usable in this environment")
+
+
 def test_deploy_script_is_valid_bash():
+    _require_usable_bash()
     result = subprocess.run(
         ["bash", "-n", _bash_path(DEPLOY_SCRIPT)],
         cwd=REPO_ROOT,

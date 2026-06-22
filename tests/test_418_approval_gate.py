@@ -171,6 +171,33 @@ class Test418ApprovalGate(unittest.TestCase):
             fu_row = conn.execute("SELECT status FROM runs WHERE id = ?", (follow_up_run_id,)).fetchone()
         self.assertEqual(fu_row["status"], "completed")
 
+    def test_phase1_withholds_secrets_until_approved_follow_up(self):
+        worker = _create_worker(approvals_required=True)
+        run_id = run_service.create_run(worker["id"], {})
+        side_effects: list = []
+        decisions: list = []
+        seen_secrets: list = []
+
+        class SecretRecordingDriver(_RecordingDriver):
+            def run(self, **kwargs):
+                seen_secrets.append(dict(kwargs.get("secrets") or {}))
+                return super().run(**kwargs)
+
+        driver = SecretRecordingDriver(side_effects, decisions)
+        with (
+            patch.object(run_service, "get_sandbox_driver", return_value=driver),
+            patch.object(run_service, "get_secrets_for_worker", return_value={"API_KEY": "sekret"}) as get_secrets,
+        ):
+            run_service.execute_run(run_id, worker["id"], {})
+            r = client.post(f"/runs/{run_id}/approve")
+            self.assertEqual(r.status_code, 200, r.text)
+            follow_up_run_id = r.json()["run_id"]
+            run_service.execute_run(follow_up_run_id, worker["id"], {})
+
+        self.assertEqual(decisions, ["proposed", "approved"])
+        self.assertEqual(seen_secrets, [{}, {"API_KEY": "sekret"}])
+        self.assertEqual(get_secrets.call_count, 1)
+
     # -- (c) rejection runs the side effect zero times --
     def test_rejection_runs_side_effect_zero_times(self):
         worker = _create_worker(approvals_required=True)

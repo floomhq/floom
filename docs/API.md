@@ -39,6 +39,8 @@ the generated OpenAPI docs.
 | `/runs/{id}` | GET | Run detail, logs, tool calls, approvals, and outputs |
 | `/runs/{id}/approve` | POST | Approve a pending run |
 | `/runs/{id}/reject` | POST | Reject a pending run |
+| `/runs/{id}/feedback` | GET/POST | List or leave lightweight run feedback. Feedback remains a quality signal until explicitly promoted. |
+| `/runs/{id}/feedback/issue` | POST | Convert actionable run feedback into a workspace issue bound to the run (`asset_type=run`, `source=run_feedback`, label `run-feedback`). Opt-in; a stable `feedback_id` dedups (returns the existing issue with `created=false`, `200`). |
 | `/approvals` | GET | List pending approvals |
 
 ### Connections and secrets

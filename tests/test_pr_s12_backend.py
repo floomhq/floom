@@ -51,6 +51,7 @@ def api_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_SECRET", "s12-secret")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
 
     for name in list(sys.modules):
         if name in {"main", "models", "run_service", "worker_registry", "runner_utils", "scheduler"} or name == "db" or name.startswith("db."):

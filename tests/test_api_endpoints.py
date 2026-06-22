@@ -247,9 +247,11 @@ class TestAuthGate(unittest.TestCase):
 
     def setUp(self):
         os.environ["FLOOM_SECRET"] = "test-secret-abc"
+        os.environ["WORKEROS_SHARED_SECRET_ROLE"] = "admin"
 
     def tearDown(self):
         os.environ.pop("FLOOM_SECRET", None)
+        os.environ.pop("WORKEROS_SHARED_SECRET_ROLE", None)
 
     def _headers(self, include_secret: bool = True) -> dict:
         if include_secret:
@@ -313,11 +315,13 @@ class TestAuthGate(unittest.TestCase):
                 (f"local_{_uuid_mod.uuid4().hex[:12]}", conn_id),
             )
 
-        r = client.get(
-            f"/connections/callback?connection_id={conn_id}&status=success",
-            headers=self._headers(False),
-            follow_redirects=False,
-        )
+        with patch("routers.connections._verify_oauth_callback_state", lambda **_kwargs: None), \
+             patch("composio_client.check_status", lambda _connection_id: "active"):
+            r = client.get(
+                f"/connections/callback?connection_id={conn_id}&status=success&state=test-state",
+                headers=self._headers(False),
+                follow_redirects=False,
+            )
 
         self.assertNotEqual(r.status_code, 401, f"Expected non-401, got {r.status_code}: {r.text}")
         with get_db() as conn:
@@ -436,7 +440,9 @@ class TestContextsAPI(unittest.TestCase):
 
     def setUp(self):
         self.old_secret = os.environ.get("FLOOM_SECRET")
+        self.old_shared_secret_role = os.environ.get("WORKEROS_SHARED_SECRET_ROLE")
         os.environ["FLOOM_SECRET"] = "context-test-secret"
+        os.environ["WORKEROS_SHARED_SECRET_ROLE"] = "admin"
         get_auth_provider.cache_clear()
         self.tmpdir = Path(tempfile.mkdtemp(prefix="workeros-contexts-test-"))
         self.old_contexts_dir = contexts_module.CONTEXTS_DIR
@@ -451,6 +457,10 @@ class TestContextsAPI(unittest.TestCase):
             os.environ.pop("FLOOM_SECRET", None)
         else:
             os.environ["FLOOM_SECRET"] = self.old_secret
+        if self.old_shared_secret_role is None:
+            os.environ.pop("WORKEROS_SHARED_SECRET_ROLE", None)
+        else:
+            os.environ["WORKEROS_SHARED_SECRET_ROLE"] = self.old_shared_secret_role
         get_auth_provider.cache_clear()
         contexts_module.CONTEXTS_DIR = self.old_contexts_dir
         contexts_module.CONTEXT_METADATA_PATH = self.old_metadata_path
