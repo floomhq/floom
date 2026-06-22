@@ -26,9 +26,8 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
-import { BrandLogo } from "@/components/connections/BrandLogo";
-import { tokenisePrompt } from "@/lib/prompt-detect";
 import { isMachineLabel } from "@/lib/workspace/display-name";
+import { EmilyRadarMark } from "./EmilyRadarMark";
 import { resolveWorkersGate } from "./emily-home-empty";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
