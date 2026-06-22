@@ -207,7 +207,6 @@ describe("Settings register", () => {
   });
 
   it("uses the workspace display fallback for UUID names and renders one Settings heading", async () => {
-    const user = userEvent.setup();
     apiMock.workspaceList.mockResolvedValue({
       active_id: "w1",
       workspaces: [

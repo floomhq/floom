@@ -509,6 +509,7 @@ function SettingsContent() {
   const initialSelection = getSelectionFromLocation();
   const [activeSection, setActiveSection] = useState<SectionKey>(initialSelection.section);
   const [activeSystemTab, setActiveSystemTab] = useState<SystemSubTabKey>(initialSelection.systemTab);
+  const [selectionReady, setSelectionReady] = useState(false);
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
@@ -552,6 +553,13 @@ function SettingsContent() {
     } catch (e) {
       console.error(e);
     }
+  }, []);
+
+  useEffect(() => {
+    const next = getSelectionFromLocation();
+    setActiveSection(next.section);
+    setActiveSystemTab(next.systemTab);
+    setSelectionReady(true);
   }, []);
 
   useEffect(() => {
@@ -890,69 +898,65 @@ function SettingsContent() {
         </p>
       </div>
 
-      <Tabs value={activeSection} onValueChange={handleSectionChange} className="space-y-6">
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-muted-foreground">
+      {selectionReady ? (
+        <Tabs value={activeSection} onValueChange={handleSectionChange} className="space-y-6">
+          <TabsList className="flex !h-auto w-full flex-wrap justify-start gap-1 bg-transparent p-0">
+            <span className="basis-full px-1 pb-1 text-xs font-medium text-muted-foreground">
               {groupLabel("workspace", workspaceName)}
-            </div>
-            <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-transparent p-0">
-              {settingsGroup("workspace").map((item) => (
-                <TabsTrigger key={item.key} value={item.key} className="gap-2">
-                  <SettingsIcon icon={iconForSection(item.key)} />
-                  {item.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-muted-foreground">
+            </span>
+            {settingsGroup("workspace").map((item) => (
+              <TabsTrigger key={item.key} value={item.key} className="gap-2">
+                <SettingsIcon icon={iconForSection(item.key)} />
+                {item.label}
+              </TabsTrigger>
+            ))}
+            <span className="mt-3 basis-full px-1 pb-1 text-xs font-medium text-muted-foreground">
               {groupLabel("account", accountName)}
-            </div>
-            <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-transparent p-0">
-              {settingsGroup("account").map((item) => (
-                <TabsTrigger key={item.key} value={item.key} className="gap-2">
-                  <SettingsIcon icon={iconForSection(item.key)} />
-                  {item.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
-        </div>
+            </span>
+            {settingsGroup("account").map((item) => (
+              <TabsTrigger key={item.key} value={item.key} className="gap-2">
+                <SettingsIcon icon={iconForSection(item.key)} />
+                {item.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-        {SETTINGS_NAV.map((item) => (
-          <TabsContent key={item.key} value={item.key} className="space-y-5" data-settings-body>
-            <div className="flex flex-wrap items-center gap-2">
-              <ScopeChip scope={item.scope} name={item.scope === "workspace" ? workspaceName : accountName} />
-              <span className="text-xs text-muted-foreground">{item.description}</span>
-            </div>
-            {item.key === "system" ? (
-              <Tabs value={activeSystemTab} onValueChange={handleSystemTabChange} className="space-y-4">
-                <TabsList>
+          {SETTINGS_NAV.map((item) => (
+            <TabsContent key={item.key} value={item.key} className="space-y-5" data-settings-body>
+              <div className="flex flex-wrap items-center gap-2">
+                <ScopeChip scope={item.scope} name={item.scope === "workspace" ? workspaceName : accountName} />
+                <span className="text-xs text-muted-foreground">{item.description}</span>
+              </div>
+              {item.key === "system" ? (
+                <Tabs value={activeSystemTab} onValueChange={handleSystemTabChange} className="space-y-4">
+                  <TabsList>
+                    {SYSTEM_SUBTABS.map((tab) => (
+                      <TabsTrigger key={tab.key} value={tab.key}>
+                        {tab.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
                   {SYSTEM_SUBTABS.map((tab) => (
-                    <TabsTrigger key={tab.key} value={tab.key}>
-                      {tab.label}
-                    </TabsTrigger>
+                    <TabsContent key={tab.key} value={tab.key} className="space-y-4" data-settings-body>
+                      <SystemSubTab
+                        tab={tab.key}
+                        info={info}
+                        platformConfig={platformConfig}
+                        canEdit={isAdmin}
+                        onCopySecretName={copySecretName}
+                      />
+                    </TabsContent>
                   ))}
-                </TabsList>
-                {SYSTEM_SUBTABS.map((tab) => (
-                  <TabsContent key={tab.key} value={tab.key} className="space-y-4" data-settings-body>
-                    <SystemSubTab
-                      tab={tab.key}
-                      info={info}
-                      platformConfig={platformConfig}
-                      canEdit={isAdmin}
-                      onCopySecretName={copySecretName}
-                    />
-                  </TabsContent>
-                ))}
-              </Tabs>
-            ) : (
-              renderSection(item.key)
-            )}
-          </TabsContent>
-        ))}
-      </Tabs>
+                </Tabs>
+              ) : (
+                renderSection(item.key)
+              )}
+            </TabsContent>
+          ))}
+        </Tabs>
+      ) : (
+        <Skeleton className="h-40 w-full" />
+      )}
     </div>
   );
 }

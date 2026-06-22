@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 
 // jsdom lacks PointerEvent, which @base-ui Switch dispatches on click.
 if (typeof (globalThis as { PointerEvent?: unknown }).PointerEvent === "undefined") {
