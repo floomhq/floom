@@ -105,7 +105,7 @@ function json(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-async function startMockApi({ existing = false, postStatus = 200, postDetail = "Unsupported", putStatus = 200, putDetail = "Unsupported" } = {}) {
+async function startMockApi({ existing = false, postStatus = 200, postDetail = "Unsupported", putStatus = 200, putDetail = "Unsupported", deleteStatus = 204 } = {}) {
   const seen = [];
   const bodies = [];
   const server = createServer(async (request, response) => {
@@ -153,6 +153,30 @@ async function startMockApi({ existing = false, postStatus = 200, postDetail = "
       const body = await readBody(request);
       bodies.push(body);
       json(response, 200, { status: "set" });
+      return;
+    }
+
+    if (request.method === "DELETE" && url.pathname === "/workers/cli-test-worker") {
+      if (!existing) {
+        json(response, 404, { detail: "Worker not found" });
+        return;
+      }
+      if (deleteStatus !== 204) {
+        json(response, deleteStatus, { detail: "Forbidden" });
+        return;
+      }
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+
+    if (request.method === "POST" && (url.pathname === "/workers/cli-test-worker/pause" || url.pathname === "/workers/cli-test-worker/resume")) {
+      if (!existing) {
+        json(response, 404, { detail: "Worker not found" });
+        return;
+      }
+      const enabled = url.pathname.endsWith("/resume");
+      json(response, 200, { id: "cli-test-worker", name: "CLI Test Worker", enabled });
       return;
     }
 
@@ -543,6 +567,66 @@ test("workers push does not call non-auth 403 an expired session", async (t) => 
   assert.match(result.stderr, /Request was forbidden/);
   assert.match(result.stdout, /Stock workers cannot be modified/);
   assert.doesNotMatch(result.stderr, /session expired/i);
+});
+
+test("workers delete --yes removes a worker via DELETE", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "delete", "cli-test-worker", "--yes"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Deleted cli-test-worker/);
+  assert.deepEqual(mock.seen, ["DELETE /workers/cli-test-worker"]);
+});
+
+test("workers delete without --yes or a TTY cancels and does not call DELETE", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "delete", "cli-test-worker"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Cancelled/);
+  assert.deepEqual(mock.seen, []);
+});
+
+test("workers delete reports a missing worker as not found", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "delete", "cli-test-worker", "--yes"], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Worker 'cli-test-worker' not found/);
+  assert.deepEqual(mock.seen, ["DELETE /workers/cli-test-worker"]);
+});
+
+test("workers disable pauses a worker via POST /workers/:id/pause", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "disable", "cli-test-worker"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Disabled cli-test-worker/);
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/pause"]);
+});
+
+test("workers enable resumes a worker via POST /workers/:id/resume", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "enable", "cli-test-worker"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Enabled cli-test-worker/);
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/resume"]);
 });
 
 test("workers push renders structured backend validation details and exits cleanly", async (t) => {

@@ -5,6 +5,7 @@ import { parse as parseYaml } from "yaml";
 import { createAuthenticatedClient, FloomApiError, FloomConnectionError } from "../lib/api.js";
 import { getCommandName } from "../lib/command-name.js";
 import { log, printJson, renderTable } from "../lib/output.js";
+import { promptYesNo } from "../lib/prompt.js";
 
 type WorkerSummary = {
   id: string;
@@ -858,5 +859,91 @@ export async function workersInfoCommand(workerId: string, options: { json?: boo
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
     }
     throw error;
+  }
+}
+
+function emitLifecycleError(error: unknown, workerId: string, json?: boolean): number {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("Not logged in")) {
+    return emitError("Not authenticated.", `Run: ${getCommandName()} login`, json);
+  }
+  if (error instanceof FloomConnectionError) {
+    return emitError(
+      "Floom API is unreachable.",
+      `Tried ${error.apiBase}. Check WORKEROS_API_BASE/FLOOM_API_BASE and network connectivity.`,
+      json,
+    );
+  }
+  if (error instanceof FloomApiError && error.status === 404) {
+    return emitError(`Worker '${workerId}' not found.`, `List available workers: ${getCommandName()} workers list`, json);
+  }
+  if (error instanceof FloomApiError && isExpiredAuthError(error)) {
+    return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, json);
+  }
+  if (error instanceof FloomApiError && error.status === 403) {
+    return emitError(
+      "Request was forbidden.",
+      `API said: ${apiErrorDetail(error)}. Check that this token can manage the target worker/workspace.`,
+      json,
+    );
+  }
+  if (error instanceof FloomApiError && error.status && error.status >= 500) {
+    return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", json);
+  }
+  if (error instanceof FloomApiError && error.status && error.status >= 400) {
+    return emitError(`API rejected request: ${apiErrorDetail(error)}`, `Check the worker id and try again: ${getCommandName()} workers list`, json);
+  }
+  throw error;
+}
+
+export async function workersDeleteCommand(workerId: string, options: { yes?: boolean; json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const confirmed = options.yes
+      || await promptYesNo(`Delete worker ${workerId}? This removes its runs and artifacts and cannot be undone. [y/N] `, false);
+    if (!confirmed) {
+      log.info("Cancelled.");
+      return 0;
+    }
+    await client.requestJson("DELETE", `/workers/${encodeURIComponent(workerId)}`);
+    if (options.json) {
+      printJson({ id: workerId, deleted: true });
+    } else {
+      log.ok(`Deleted ${workerId}`);
+    }
+    return 0;
+  } catch (error) {
+    return emitLifecycleError(error, workerId, options.json);
+  }
+}
+
+export async function workersDisableCommand(workerId: string, options: { json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const worker = (await client.requestJson("POST", `/workers/${encodeURIComponent(workerId)}/pause`)) as WorkerDetail;
+    if (options.json) {
+      printJson(worker);
+    } else {
+      log.ok(`Disabled ${workerId}`);
+      log.info(`It stays in the workspace but will not run on triggers. Re-enable: ${getCommandName()} workers enable ${workerId}`);
+    }
+    return 0;
+  } catch (error) {
+    return emitLifecycleError(error, workerId, options.json);
+  }
+}
+
+export async function workersEnableCommand(workerId: string, options: { json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const worker = (await client.requestJson("POST", `/workers/${encodeURIComponent(workerId)}/resume`)) as WorkerDetail;
+    if (options.json) {
+      printJson(worker);
+    } else {
+      log.ok(`Enabled ${workerId}`);
+    }
+    return 0;
+  } catch (error) {
+    return emitLifecycleError(error, workerId, options.json);
   }
 }

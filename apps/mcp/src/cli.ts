@@ -13,6 +13,9 @@ import {
   workersInfoCommand,
   workersPushCommand,
   workersValidateCommand,
+  workersDeleteCommand,
+  workersDisableCommand,
+  workersEnableCommand,
 } from "./commands/workers.js";
 import {
   workspacesCreateCommand,
@@ -118,7 +121,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
       options: { input?: string[]; inputsFile?: string; outputDir?: string; json?: boolean },
     ) => runAction(runWorkerCommand(id, options)));
 
-  const workers = program.command("workers").description("List or inspect workers");
+  const workers = program.command("workers").description("List, inspect, and manage workers");
   workers.command("list")
     .description("List workers")
     .option("--json", "Print raw JSON")
@@ -141,6 +144,23 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .description("Create or update a worker from a local worker directory")
     .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
     .action(async (dir: string) => runAction(workersPushCommand(dir)));
+  workers.command("delete")
+    .alias("rm")
+    .description("Permanently delete a worker and its runs/artifacts")
+    .argument("<id>", "Worker id")
+    .option("-y, --yes", "Skip confirmation")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { yes?: boolean; json?: boolean }) => runAction(workersDeleteCommand(id, options)));
+  workers.command("disable")
+    .description("Disable a worker (keep it, but stop it running on triggers)")
+    .argument("<id>", "Worker id")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { json?: boolean }) => runAction(workersDisableCommand(id, options)));
+  workers.command("enable")
+    .description("Re-enable a disabled worker")
+    .argument("<id>", "Worker id")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { json?: boolean }) => runAction(workersEnableCommand(id, options)));
   workers.command("run")
     .description(`Trigger a worker run (alias for \`${commandName} run\`)`)
     .argument("<id>", "Worker id")
