@@ -982,6 +982,27 @@ html.dark .grain {
    R9: lives in the panel BODY below both tab rows, not between them. */
 .c-ops-frame { display:flex; align-items:center; gap:8px; padding:14px 0 4px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-foreground); }
 .c-dbody { flex:1; min-width:0; overflow:auto; padding:18px 20px; }
+.c-dsec + .c-dsec { border-top:var(--bd-div); padding-top:18px; }
+.c-dempty { font-size:12.5px; color:var(--muted-foreground); padding:14px 0; }
+.c-dact { display:flex; gap:8px; align-items:center; }
+.c-dsec + .c-dact { border-top:var(--bd-div); padding-top:18px; }
+.c-dact[data-sep="true"] { border-top:var(--bd-div); margin-top:18px; padding-top:18px; }
+.c-dsec + .c-dact[data-sep="true"] { margin-top:0; }
+.c-dnote { font-size:12.5px; color:var(--muted-foreground); font-style:italic; margin:0; }
+.c-dsum { display:flex; gap:22px; padding:2px 0 14px; border-bottom:var(--bd-div); margin-bottom:14px; }
+.c-dsum .s .v { font-size:17px; font-weight:600; letter-spacing:-.01em; color:var(--ink); }
+.c-dsum .s .k { font-size:11px; color:var(--muted-foreground); margin-top:1px; }
+.c-dgrp + .c-dgrp { border-top:var(--bd-div); margin-top:15px; padding-top:15px; }
+.c-drow { display:flex; justify-content:space-between; gap:14px; font-size:13px; padding:3px 0; }
+.c-drow .k { color:var(--muted-foreground); }
+.c-drow .v { color:var(--ink); text-align:right; min-width:0; overflow-wrap:anywhere; }
+.c-drow .v.mono { font-family:var(--font-mono); font-size:12px; }
+.c-d2 { display:grid; grid-template-columns:1fr 1fr; gap:10px 18px; }
+.c-d2 .k { font-size:10.5px; color:var(--muted-foreground); text-transform:uppercase; letter-spacing:.04em; }
+.c-d2 .v { font-size:13px; color:var(--ink); margin-top:1px; min-width:0; overflow-wrap:anywhere; }
+.c-dchip { display:inline-block; background:var(--bg-2); border-radius:var(--radius-squircle); padding:2px 8px; font-size:11.5px; color:var(--ink-soft); margin:0 5px 5px 0; }
+.c-dchip.add { background:none; color:var(--accent); padding-left:0; }
+.c-dctx { font-size:12px; color:var(--muted-foreground); margin:0 0 8px; }
 /* R9 FIX 1: "Advanced ▾" group on the primary tab row — right-aligned, quiet,
    findable. Not accent (accent is links-only); reads as a secondary tab group. */
 .c-dtabs-trailing { margin-left:auto; display:flex; align-items:center; padding-left:8px; }
@@ -1061,17 +1082,21 @@ html.dark .grain {
 .c-appr-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0; }
 .c-appr-grid .col-left { padding-right:28px; }
 .c-appr-grid .col-right { padding-left:28px; border-left:var(--bd-div); }
-.c-appr-sech { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); margin:0 0 11px; }
+.c-dsech, .c-dgl, .c-appr-sech { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); margin:0 0 11px; }
 
 /* LEFT: comment box, attach affordance, who/why k/v, decide buttons. */
 .c-appr-comment { width:100%; min-height:84px; resize:vertical; border-radius:var(--radius-button); background:var(--bg-2); padding:11px 13px; font-size:13.5px; color:var(--ink); line-height:1.5; }
 .c-appr-comment::placeholder { color:var(--ink-faint); }
 .c-appr-attach { display:inline-flex; align-items:center; gap:7px; margin-top:11px; font-size:12.5px; color:var(--ink-soft); }
 .c-appr-attach:hover { color:var(--ink); }
-.c-appr-kv { display:grid; grid-template-columns:96px 1fr; gap:8px 14px; margin:16px 0 0; font-size:12.5px; }
-.c-appr-kv dt { color:var(--muted-foreground); }
-.c-appr-kv dd { color:var(--ink-soft); margin:0; min-width:0; overflow-wrap:anywhere; }
-.c-appr-kv dd a { color:var(--accent); }
+.c-dkv, .c-appr-kv { display:grid; grid-template-columns:96px 1fr; gap:8px 14px; font-size:12.5px; }
+.c-dkv { margin:0; }
+.c-dkv[class*="mt-"], .c-dkv[class*="my-"], .c-dkv[class*="margin"] { margin-top:0; }
+.c-dsech + .c-dkv, .c-dgl + .c-dkv { margin-top:16px; }
+.c-appr-kv { margin:16px 0 0; }
+.c-dkv dt, .c-appr-kv dt { color:var(--muted-foreground); }
+.c-dkv dd, .c-appr-kv dd { color:var(--ink-soft); margin:0; min-width:0; overflow-wrap:anywhere; }
+.c-dkv dd a, .c-appr-kv dd a { color:var(--accent); }
 .c-appr-decide { display:flex; gap:9px; margin-top:20px; }
 
 /* RIGHT: the proposed output rendered AS ITSELF (email To/Subject/body), no box. */
