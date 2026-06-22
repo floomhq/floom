@@ -184,15 +184,28 @@ def resolve_transfer_recipient(
 def create(*, owner_user_id: str, name: str) -> dict[str, Any]:
     """Create a workspace owned by this user.
 
-    Names are NOT unique per owner; brutally-simple v1 allows duplicates.
+    Raises ``ValueError`` with message "workspace '<name>' already exists" if
+    a workspace with the same name already exists for this owner.
     """
-    workspace_id = _new_workspace_id()
+    normalized = (name or "").strip() or "Untitled"
     client = get_supabase_service_client()
+    existing = (
+        client.table("workspaces")
+        .select("id")
+        .eq("owner_user_id", owner_user_id)
+        .eq("name", normalized)
+        .eq("workspace_status", "claimed")
+        .limit(1)
+        .execute()
+    )
+    if _rows(existing):
+        raise ValueError(f"workspace '{normalized}' already exists")
+    workspace_id = _new_workspace_id()
     client.table("workspaces").insert(
         {
             "id": workspace_id,
             "owner_user_id": owner_user_id,
-            "name": (name or "").strip() or "Untitled",
+            "name": normalized,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     ).execute()

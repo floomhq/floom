@@ -335,7 +335,10 @@ async def create_workspace(
     response: Response,
     auth: AuthContext = Depends(get_auth_context),
 ) -> WorkspaceCreateResponse:
-    created = workspace_repo.create(owner_user_id=auth.user_id, name=payload.name)
+    try:
+        created = workspace_repo.create(owner_user_id=auth.user_id, name=payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _workspace_cache_clear(auth.user_id)
     body = WorkspaceCreateResponse(**_to_out(created).model_dump()).model_dump()
     if auth.auth_method == "pat":
@@ -354,7 +357,6 @@ async def create_workspace(
         )
         body["api_token"] = raw
         body["header"] = "x-floom-token"
-    _set_active_cookie(response, str(created["id"]))
     return WorkspaceCreateResponse(**body)
 
 
