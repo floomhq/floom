@@ -3,18 +3,21 @@
 /**
  * /integrations — the full catalog (~1,000+ tools) in the curated card grammar.
  *
- * Every entry from catalog.json renders as a flat card (logo + name), in the
- * same card style as /v3/templates: 16px radius, hover bg shift. A small set of
- * featured tools carry a category chip + one-line detail; the rest show logo +
- * name. Searchable across the full catalog. Hero + close keep the product-page
- * polish (Reveal motion, one <Hl>).
+ * Cards carry logo + name + primary category + a one-line blurb, in the same
+ * flat card style as /v3/templates (16px radius, hover bg shift). Curated,
+ * operator-focused category pills + search narrow the grid. Each card opens a
+ * quick-preview popover with the real catalog detail — full description, every
+ * category, action/trigger counts, auth scheme, and a product link — which is
+ * lazy-loaded so the grid stays light. All data comes from catalog.json /
+ * catalog-detail.json (sourced from the Composio /toolkits API); nothing is
+ * invented.
  */
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { X } from "lucide-react";
+import { ArrowUpRight, Search, X } from "lucide-react";
 import { Hl, V3Shell } from "@/app/v3/V3Shell";
 import "@/app/v3/theme.css";
 import catalog from "./catalog.json";
@@ -43,37 +46,149 @@ function Reveal({
   );
 }
 
-type CatalogEntry = { slug: string; name: string; logo: string };
+type CatalogEntry = {
+  slug: string;
+  name: string;
+  logo: string;
+  categories: string[];
+  blurb: string;
+};
+
+type EntryDetail = {
+  description: string;
+  toolsCount: number;
+  triggersCount: number;
+  auth: string;
+  appUrl: string;
+};
 
 const CATALOG = catalog as CatalogEntry[];
 
-/* Featured tools carry a category chip + one-line detail. Matched by slug so the
-   curated grammar surfaces for the tools workers reach for most; everything else
-   in the catalog renders as a clean logo + name card. */
-const FEATURED: Record<string, { category: string; detail: string }> = {
-  granola_mcp: { category: "Knowledge", detail: "Meeting notes and call context" },
-  gmail: { category: "Google Workspace", detail: "Read, draft, and send email" },
-  googlecalendar: { category: "Google Workspace", detail: "Meetings, schedules, and prep" },
-  googledrive: { category: "Google Workspace", detail: "Docs, files, and shared context" },
-  notion: { category: "Knowledge", detail: "Pages, playbooks, and internal docs" },
-  linear: { category: "Product", detail: "Issues, projects, and status updates" },
-  github: { category: "Product", detail: "Repos, PRs, issues, and engineering reports" },
-  hubspot: { category: "CRM", detail: "Contacts, companies, deals, and notes" },
-  salesforce: { category: "CRM", detail: "Accounts, opportunities, and CRM updates" },
-  linkedin: { category: "CRM", detail: "Prospect research and sales context" },
-  apollo: { category: "Data", detail: "Lead enrichment and prospect lists" },
-  googlesheets: { category: "Google Workspace", detail: "Reports, lists, and structured outputs" },
-  googledocs: { category: "Google Workspace", detail: "Briefs, drafts, and source documents" },
-};
+/* Detail records live in a separate file, imported on demand so the grid stays
+   light. Cache the module after the first modal open. */
+let detailCache: Record<string, EntryDetail> | null = null;
+async function loadDetailMap(): Promise<Record<string, EntryDetail> | null> {
+  try {
+    if (!detailCache) {
+      const mod = await import("./catalog-detail.json");
+      detailCache = (mod.default ?? mod) as Record<string, EntryDetail>;
+    }
+    return detailCache;
+  } catch {
+    // Detail chunk failed to load — callers fall back to the slim list data.
+    return null;
+  }
+}
+async function loadDetail(slug: string): Promise<EntryDetail | null> {
+  return (await loadDetailMap())?.[slug] ?? null;
+}
 
-function CardLogo({ entry }: { entry: CatalogEntry }) {
+/* Title-case a raw category string ("ai web scraping" -> "AI Web Scraping"). */
+const SMALL = new Set(["and", "or", "the", "of", "to", "for", "&"]);
+const ACRONYMS = new Set(["ai", "crm", "sms", "api", "seo", "hr", "it"]);
+function titleCase(s: string): string {
+  return s
+    .split(" ")
+    .map((w) => {
+      const lw = w.toLowerCase();
+      if (ACRONYMS.has(lw)) return lw.toUpperCase();
+      if (SMALL.has(lw)) return lw;
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(" ");
+}
+
+/* Human label for an auth scheme (covers every value present in the catalog). */
+const AUTH_LABELS: Record<string, string> = {
+  OAUTH2: "OAuth",
+  OAUTH1: "OAuth",
+  S2S_OAUTH2: "OAuth (S2S)",
+  DCR_OAUTH: "OAuth (DCR)",
+  API_KEY: "API key",
+  BASIC: "Basic auth",
+  BEARER_TOKEN: "Bearer token",
+  SAML: "SAML",
+  NO_AUTH: "No auth",
+};
+function authLabel(auth: string): string | null {
+  if (!auth) return null;
+  return AUTH_LABELS[auth] ?? titleCase(auth.replace(/_/g, " ").toLowerCase());
+}
+
+/* Curated, operator-focused filter buckets. Each maps a set of the raw Composio
+   categories onto the kind of work founders / sales / ops actually browse for,
+   so the pills lead with Sales/Marketing/Support rather than "Developer Tools".
+   An entry matches a bucket if any of its categories falls in that bucket. */
+const BUCKETS: { label: string; cats: string[] }[] = [
+  { label: "Sales & CRM", cats: ["crm", "sales & crm", "contact management", "ai sales tools", "fundraising"] },
+  { label: "Marketing", cats: ["marketing automation", "marketing", "social media marketing", "social media accounts", "ads & conversion", "drip emails"] },
+  { label: "Email", cats: ["email", "email newsletters", "transactional email"] },
+  { label: "Support", cats: ["customer support", "ai chatbots", "reviews", "customer appreciation"] },
+  { label: "Productivity", cats: ["productivity", "project management", "task management", "scheduling & booking", "calendar", "time tracking software", "notes", "productivity & project management", "product management", "event management"] },
+  { label: "Docs & Files", cats: ["documents", "file management & storage", "spreadsheets", "signatures", "content & files", "forms & surveys"] },
+  { label: "Communication", cats: ["communication", "team chat", "team collaboration", "phone & sms", "video conferencing", "notifications", "video & audio", "webinars"] },
+  { label: "Analytics", cats: ["analytics", "business intelligence", "dashboards"] },
+  { label: "Finance", cats: ["accounting", "payment processing", "proposal & invoice management", "taxes"] },
+  { label: "Commerce", cats: ["ecommerce", "e-commerce", "commerce"] },
+  { label: "HR & People", cats: ["hr talent & recruitment", "human resources", "education", "online courses"] },
+  { label: "Design", cats: ["images & design"] },
+  { label: "AI", cats: ["artificial intelligence", "ai models", "ai agents", "ai content generation", "ai web scraping", "ai document extraction", "ai assistants", "ai meeting assistants", "model context protocol", "transcription", "video generation"] },
+  { label: "Security", cats: ["security & identity tools"] },
+  { label: "Developer", cats: ["developer tools", "developer tools & devops", "databases", "server monitoring", "it operations", "app builder", "website builders", "internet of things"] },
+];
+
+const BUCKET_SETS: Record<string, Set<string>> = Object.fromEntries(
+  BUCKETS.map((b) => [b.label, new Set(b.cats)]),
+);
+
+function inBucket(entry: CatalogEntry, label: string): boolean {
+  const set = BUCKET_SETS[label];
+  return set ? entry.categories.some((c) => set.has(c)) : false;
+}
+
+/* Only show pills that actually match something in the current catalog. */
+const PILL_LABELS: string[] = BUCKETS.filter((b) =>
+  CATALOG.some((e) => inBucket(e, b.label)),
+).map((b) => b.label);
+
+/* Business tools workers reach for most lead the grid; the rest follow
+   alphabetically (catalog order). */
+const FEATURED = new Set([
+  "gmail",
+  "googlecalendar",
+  "googledrive",
+  "googlesheets",
+  "googledocs",
+  "slack",
+  "notion",
+  "hubspot",
+  "salesforce",
+  "linear",
+  "github",
+  "linkedin",
+  "apollo",
+]);
+
+const SORTED = [...CATALOG].sort((a, b) => {
+  const af = FEATURED.has(a.slug) ? 0 : 1;
+  const bf = FEATURED.has(b.slug) ? 0 : 1;
+  if (af !== bf) return af - bf;
+  return a.name.localeCompare(b.name);
+});
+
+function CardLogo({ entry, size = 24 }: { entry: CatalogEntry; size?: number }) {
   const [imgError, setImgError] = useState(false);
   const handleError = useCallback(() => setImgError(true), []);
+  const box = size + 16;
   return (
-    <span className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-background">
+    <span
+      className="flex items-center justify-center rounded-[10px] bg-background"
+      style={{ height: box, width: box }}
+    >
       {imgError || !entry.logo ? (
         <span
-          className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-secondary text-[11px] font-semibold text-muted-foreground"
+          className="flex items-center justify-center rounded-[6px] bg-secondary font-semibold text-muted-foreground"
+          style={{ height: size, width: size, fontSize: size * 0.46 }}
           aria-hidden="true"
         >
           {entry.name.charAt(0).toUpperCase()}
@@ -83,12 +198,13 @@ function CardLogo({ entry }: { entry: CatalogEntry }) {
           src={entry.logo}
           alt=""
           aria-hidden="true"
-          width={24}
-          height={24}
+          width={size}
+          height={size}
           loading="lazy"
           decoding="async"
           onError={handleError}
-          className="h-6 w-6 object-contain"
+          className="object-contain"
+          style={{ height: size, width: size }}
         />
       )}
     </span>
@@ -102,36 +218,40 @@ function IntegrationCard({
   entry: CatalogEntry;
   onOpen: (entry: CatalogEntry) => void;
 }) {
-  const meta = FEATURED[entry.slug];
+  const category = entry.categories[0];
   return (
     <button
       type="button"
       onClick={() => onOpen(entry)}
-      className="flex min-h-[120px] flex-col rounded-[16px] bg-card p-5 text-left transition-colors hover:bg-secondary/60 focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--v3-accent)]"
+      className="flex min-h-[124px] flex-col rounded-[16px] bg-card p-5 text-left transition-colors hover:bg-secondary/60 focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--v3-accent)]"
       aria-label={`View ${entry.name} details`}
     >
       <div className="flex w-full items-center justify-between gap-4">
         <CardLogo entry={entry} />
-        {meta ? (
-          <span className="rounded-full bg-secondary px-2.5 py-1 text-[10.5px] font-medium text-muted-foreground">
-            {meta.category}
+        {category ? (
+          <span className="truncate rounded-full bg-secondary px-2.5 py-1 text-[10.5px] font-medium text-muted-foreground">
+            {titleCase(category)}
           </span>
         ) : null}
       </div>
-      <h2 className="mt-4 w-full truncate text-[15px] font-semibold tracking-[-0.012em]" title={entry.name}>
+      <h2
+        className="mt-4 w-full truncate text-[15px] font-semibold tracking-[-0.012em]"
+        title={entry.name}
+      >
         {entry.name}
       </h2>
-      {meta ? (
-        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{meta.detail}</p>
+      {entry.blurb ? (
+        <p className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">
+          {entry.blurb}
+        </p>
       ) : null}
     </button>
   );
 }
 
 /* Detail popover — flat, hairline, squircle, near-black close, backdrop closes.
-   Shows the catalog data that exists (name, logo, category + one-line detail for
-   featured tools) and an honest note that triggers/endpoints surface on connect:
-   the catalog has no trigger/endpoint data, so we don't invent any. */
+   Real catalog data, lazy-loaded. Focus is moved in on open, trapped while open,
+   and restored to the triggering card on close; body scroll is locked. */
 function IntegrationModal({
   entry,
   onClose,
@@ -139,40 +259,108 @@ function IntegrationModal({
   entry: CatalogEntry;
   onClose: () => void;
 }) {
-  const meta = FEATURED[entry.slug];
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [detail, setDetail] = useState<EntryDetail | null>(null);
 
   useEffect(() => {
+    let active = true;
+    loadDetail(entry.slug).then((d) => {
+      if (active) setDetail(d);
+    });
+    return () => {
+      active = false;
+    };
+  }, [entry.slug]);
+
+  // Focus management + scroll lock + focus trap.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusables = () =>
+      Array.from(
+        panelRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+
+    // Move focus into the dialog (close button is first).
+    focusables()[0]?.focus();
+
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const activeEl = document.activeElement;
+      if (e.shiftKey && activeEl === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && activeEl === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      previouslyFocused?.focus?.();
+    };
   }, [onClose]);
+
+  const auth = detail ? authLabel(detail.auth) : null;
+  const stats: { label: string; value: string }[] = [];
+  if (detail) {
+    if (detail.toolsCount > 0)
+      stats.push({ label: detail.toolsCount === 1 ? "Action" : "Actions", value: String(detail.toolsCount) });
+    if (detail.triggersCount > 0)
+      stats.push({ label: detail.triggersCount === 1 ? "Trigger" : "Triggers", value: String(detail.triggersCount) });
+    if (auth) stats.push({ label: "Auth", value: auth });
+  }
 
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/28 px-4 py-8 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label={`${entry.name} details`}
+      aria-labelledby="integration-modal-title"
+      aria-describedby="integration-modal-desc"
       onClick={onClose}
     >
       <motion.div
+        ref={panelRef}
         initial={{ opacity: 0, y: 8, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.22, ease: EASE }}
-        className="w-full max-w-[420px] rounded-[20px] bg-[var(--bg-app)] p-5 text-left"
+        className="w-full max-w-[440px] rounded-[20px] bg-[var(--bg-app)] p-5 text-left"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
-            <CardLogo entry={entry} />
+            <CardLogo entry={entry} size={28} />
             <div>
-              <h2 className="text-[18px] font-semibold tracking-[-0.018em]">{entry.name}</h2>
-              {meta ? (
-                <span className="mt-1 inline-flex rounded-full bg-secondary px-2.5 py-0.5 text-[10.5px] font-medium text-muted-foreground">
-                  {meta.category}
-                </span>
+              <h2 id="integration-modal-title" className="text-[18px] font-semibold tracking-[-0.018em]">
+                {entry.name}
+              </h2>
+              {entry.categories.length ? (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {entry.categories.map((c) => (
+                    <span
+                      key={c}
+                      className="inline-flex rounded-full bg-secondary px-2.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
+                    >
+                      {titleCase(c)}
+                    </span>
+                  ))}
+                </div>
               ) : null}
             </div>
           </div>
@@ -186,58 +374,129 @@ function IntegrationModal({
           </button>
         </div>
 
-        {meta ? (
-          <p className="mt-4 text-[13.5px] leading-relaxed text-muted-foreground">{meta.detail}</p>
-        ) : (
-          <p className="mt-4 text-[13.5px] leading-relaxed text-muted-foreground">
-            Connect {entry.name} so a worker can read the right context and act on your behalf, with approval gates.
-          </p>
-        )}
+        <p id="integration-modal-desc" className="mt-4 text-[13.5px] leading-relaxed text-muted-foreground">
+          {detail?.description ||
+            entry.blurb ||
+            `Connect ${entry.name} so a worker can read the right context and act on your behalf, with approval gates.`}
+        </p>
+
+        {stats.length ? (
+          <div className="mt-5">
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              In the Composio catalog
+            </p>
+            <div className="grid grid-cols-3 gap-2.5">
+              {stats.map((s) => (
+                <div key={s.label} className="rounded-[12px] bg-secondary px-3 py-2.5">
+                  <div className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{s.value}</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-5 border-t border-[rgba(16,17,20,.08)] pt-4">
-          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Triggers &amp; endpoints
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            Link {entry.name} from the connections page and a worker gets a scoped subset of
+            these actions — only what it needs, with approval gates on anything that ships.
           </p>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-            Available once connected. Floom exposes {entry.name}&apos;s actions to a worker after you
-            link it from the connections page, scoped to what that worker needs.
-          </p>
+          {detail?.appUrl ? (
+            <a
+              href={detail.appUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-[var(--v3-accent)] hover:underline"
+            >
+              Visit {entry.name}
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </a>
+          ) : null}
         </div>
       </motion.div>
     </div>
   );
 }
 
-/* Featured tools lead the grid; the rest follow alphabetically (catalog order). */
-const SORTED = [...CATALOG].sort((a, b) => {
-  const af = FEATURED[a.slug] ? 0 : 1;
-  const bf = FEATURED[b.slug] ? 0 : 1;
-  if (af !== bf) return af - bf;
-  return a.name.localeCompare(b.name);
-});
-
-// Render an initial batch; reveal the full catalog on demand (and always when
-// searching) to keep first paint fast across 1,000+ cards.
+// Render an initial batch; reveal the rest on demand to keep first paint fast
+// across large result sets (including filtered buckets).
 const INITIAL_VISIBLE = 90;
 
 export function IntegrationsBody() {
   const [query, setQuery] = useState("");
+  const [cat, setCat] = useState<string>("All");
   const [showAll, setShowAll] = useState(false);
   const [selected, setSelected] = useState<CatalogEntry | null>(null);
+  // Full descriptions live in the lazy detail file; loaded on first search so
+  // search can match them without shipping them in the initial payload.
+  const [detailMap, setDetailMap] = useState<Record<string, EntryDetail> | null>(detailCache);
   const openEntry = useCallback((entry: CatalogEntry) => setSelected(entry), []);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return SORTED;
-    return SORTED.filter(
-      (e) => e.name.toLowerCase().includes(q) || e.slug.toLowerCase().includes(q),
-    );
-  }, [query]);
+  // Read initial filter state from URL on client mount.
+  // useEffect is SSR-safe (runs only in the browser); window guard is therefore
+  // redundant but kept for clarity.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const rawCat = sp.get("category") ?? "All";
+    const safeCat = PILL_LABELS.includes(rawCat) ? rawCat : "All";
+    const rawQ = sp.get("q") ?? "";
+    if (safeCat !== "All") setCat(safeCat);
+    if (rawQ) setQuery(rawQ);
+  }, []); // runs once on mount
 
-  const isSearching = query.trim().length > 0;
-  const visible =
-    isSearching || showAll ? filtered : filtered.slice(0, INITIAL_VISIBLE);
-  const hasMore = !isSearching && !showAll && filtered.length > INITIAL_VISIBLE;
+  // Sync cat + query → URL without a navigation (preserves back-button history).
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (cat !== "All") params.set("category", cat);
+    if (query.trim()) params.set("q", query.trim());
+    const qs = params.toString();
+    const newUrl = qs ? `?${qs}` : window.location.pathname;
+    window.history.replaceState(null, "", newUrl);
+  }, [cat, query]);
+
+  // Any change to the filters resets pagination back to the first batch.
+  useEffect(() => {
+    setShowAll(false);
+  }, [query, cat]);
+
+  // Pull the detail map in once the user starts searching, so full-description
+  // matches light up as soon as the chunk lands.
+  useEffect(() => {
+    if (query.trim() && !detailMap) {
+      loadDetailMap().then((m) => {
+        if (m) setDetailMap(m);
+      });
+    }
+  }, [query, detailMap]);
+
+  const filtered = useMemo(() => {
+    let list = SORTED;
+    if (cat !== "All") list = list.filter((e) => inBucket(e, cat));
+    const q = query.trim().toLowerCase();
+    if (q) {
+      // Match the slim list fields immediately; once the lazy detail map has
+      // loaded, also match the full description so tail-of-text terms surface.
+      list = list.filter(
+        (e) =>
+          e.name.toLowerCase().includes(q) ||
+          e.slug.toLowerCase().includes(q) ||
+          e.blurb.toLowerCase().includes(q) ||
+          e.categories.some((c) => c.toLowerCase().includes(q)) ||
+          (detailMap?.[e.slug]?.description.toLowerCase().includes(q) ?? false),
+      );
+    }
+    return list;
+  }, [query, cat, detailMap]);
+
+  const isNarrowed = query.trim().length > 0 || cat !== "All";
+  const visible = showAll ? filtered : filtered.slice(0, INITIAL_VISIBLE);
+  const hasMore = !showAll && filtered.length > INITIAL_VISIBLE;
+
+  const clearFilters = useCallback(() => {
+    setQuery("");
+    setCat("All");
+  }, []);
 
   return (
     <V3Shell active="integrations">
@@ -262,49 +521,81 @@ export function IntegrationsBody() {
         </motion.p>
       </div>
 
-      {/* search + count */}
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[13px] text-muted-foreground">
-          {isSearching ? (
-            <>
-              <span className="font-semibold text-foreground">{filtered.length.toLocaleString()}</span>{" "}
-              {filtered.length === 1 ? "result" : "results"}
-            </>
-          ) : (
-            <>
-              <span className="font-semibold text-foreground">{CATALOG.length.toLocaleString()}+</span>{" "}
-              integrations
-            </>
-          )}
-        </p>
-        <div className="relative w-full sm:w-72">
-          <svg
-            className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden="true"
-          >
-            <circle cx="6.5" cy="6.5" r="4.5" />
-            <path d="M10.5 10.5l3 3" strokeLinecap="round" />
-          </svg>
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search integrations…"
-            aria-label="Search integrations"
-            className="h-9 w-full rounded-[10px] bg-secondary pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--v3-accent)]"
-          />
+      {/* controls: count + search, then category pills */}
+      <div className="mb-6 flex flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[13px] text-muted-foreground">
+            {isNarrowed ? (
+              <>
+                <span className="font-semibold text-foreground">{filtered.length.toLocaleString()}</span>{" "}
+                {filtered.length === 1 ? "result" : "results"}
+              </>
+            ) : (
+              <>
+                <span className="font-semibold text-foreground">{CATALOG.length.toLocaleString()}+</span>{" "}
+                integrations
+              </>
+            )}
+          </p>
+          {/* same search grammar as /templates: leading lucide icon, secondary
+              pill, 12.5px transparent input */}
+          <div className="flex w-full items-center gap-2 rounded-[10px] bg-secondary px-3 py-2 sm:w-72">
+            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search integrations…"
+              aria-label="Search integrations"
+              className="w-full bg-transparent text-[12.5px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+            />
+          </div>
+        </div>
+        {/* Mobile: single horizontally-scrollable row (pills never wrap / clip).
+            Desktop (sm+): wrap normally, exactly as before. */}
+        <div className="-mx-4 flex flex-nowrap gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+          {(["All", ...PILL_LABELS] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={cat === c}
+              onClick={() => setCat(c as string)}
+              className="shrink-0 rounded-full px-3 py-1.5 text-[12.5px] font-medium transition-colors"
+              style={
+                cat === c
+                  ? { background: "var(--v3-accent)", color: "#fff" }
+                  : { background: "var(--bg-2)", color: "var(--text-muted)" }
+              }
+            >
+              {c}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* card grid — templates-page grammar, full catalog */}
       {filtered.length === 0 ? (
-        <p className="py-16 text-center text-[14px] text-muted-foreground">
-          No integrations found for &ldquo;{query}&rdquo;.
-        </p>
+        <div className="flex flex-col items-center gap-3 py-16 text-center">
+          <p className="text-[14px] text-muted-foreground">
+            {query.trim() && cat !== "All" ? (
+              <>
+                No <span className="text-foreground">{cat}</span>{" "}
+                integrations match &ldquo;{query.trim()}&rdquo;.
+              </>
+            ) : query.trim() ? (
+              <>No integrations match &ldquo;{query.trim()}&rdquo;.</>
+            ) : (
+              <>No integrations in {cat} yet.</>
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="inline-flex h-9 items-center rounded-[10px] bg-secondary px-4 text-[13px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
+          >
+            Clear filters
+          </button>
+        </div>
       ) : (
         <div className="pb-12">
           <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -319,7 +610,8 @@ export function IntegrationsBody() {
                 onClick={() => setShowAll(true)}
                 className="inline-flex h-10 items-center rounded-[10px] bg-secondary px-5 text-[13px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
               >
-                Show all {CATALOG.length.toLocaleString()} integrations
+                Show all {filtered.length.toLocaleString()}
+                {isNarrowed ? "" : " integrations"}
               </button>
             </div>
           ) : null}
