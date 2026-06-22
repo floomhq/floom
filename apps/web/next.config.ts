@@ -120,6 +120,12 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // PostHog requires its ingestion paths to keep their exact trailing slashes
+  // (e.g. /ingest/decide/ vs /ingest/decide). Next.js would otherwise 308 the
+  // canonical form and break the proxied request, so trailing-slash redirects
+  // are disabled. This is PostHog's documented requirement for the reverse
+  // proxy; we have no app routes that depend on a trailing-slash redirect.
+  skipTrailingSlashRedirect: true,
   // Branded claim short-link: /c/:token is served by the FastAPI app (the
   // /c/{token} route lives on localhost:8000, NOT here). Proxy it so the
   // branded localhost:3000/c/:token also resolves. The upstream then 302s to
@@ -129,7 +135,42 @@ const nextConfig: NextConfig = {
     const apiBase = (
       process.env.FLOOM_API_BASE || "https://localhost:8000"
     ).replace(/\/$/, "");
+
+    // PostHog first-party reverse proxy (#1724 follow-up). Ingestion and
+    // recorder/feature-flag assets are served same-origin under /ingest/* so
+    //   (a) CSP `connect-src 'self'` covers ingestion with NO PostHog domain in
+    //       the allowlist (supersedes the CSP_EXTRA_CONNECT_SRC workaround), and
+    //   (b) ad/tracking blockers (which block i.posthog.com) cannot drop events.
+    // Hosts are env-overridable for EU/self-hosted PostHog; defaults are US
+    // cloud. The client SDK points api_host at POSTHOG_PROXY_PATH ("/ingest").
+    //
+    // Route order matters — the asset rules (static/array) MUST precede the
+    // catch-all /ingest/:path* so recorder + feature-flag bundles resolve to the
+    // assets host, not the ingestion host.
+    const phAssets = (
+      process.env.POSTHOG_PROXY_ASSETS_HOST || "https://us-assets.i.posthog.com"
+    ).replace(/\/$/, "");
+    const phIngest = (
+      process.env.POSTHOG_PROXY_INGEST_HOST || "https://us.i.posthog.com"
+    ).replace(/\/$/, "");
+    const proxyPath = (process.env.POSTHOG_PROXY_PATH || "/ingest").replace(/\/$/, "");
+
     return [
+      // Session-replay recorder, web snippet, and other static bundles.
+      {
+        source: `${proxyPath}/static/:path*`,
+        destination: `${phAssets}/static/:path*`,
+      },
+      // Feature-flag / remote-config payloads (served from the assets host).
+      {
+        source: `${proxyPath}/array/:path*`,
+        destination: `${phAssets}/array/:path*`,
+      },
+      // Everything else (event capture, /decide, /flags, /e, /s) -> ingestion.
+      {
+        source: `${proxyPath}/:path*`,
+        destination: `${phIngest}/:path*`,
+      },
       {
         source: "/c/:token",
         destination: `${apiBase}/c/:token`,

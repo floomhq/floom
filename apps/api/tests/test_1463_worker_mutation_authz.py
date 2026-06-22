@@ -56,10 +56,10 @@ def test_context_mutation_denies_workspace_member_without_owner_or_admin(monkeyp
     assert exc.value.status_code == 404
 
 
-def test_rollback_denies_workspace_member_without_owner_or_admin(monkeypatch):
+def test_rollback_denies_workspace_member_before_mutation(monkeypatch):
     import routers.worker_versions as versions
 
-    monkeypatch.setattr(versions, "_worker_for_mutation", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(versions, "_worker_for_mutation", lambda *_args, **_kwargs: {"id": "shared-worker"})
 
     with pytest.raises(HTTPException) as exc:
         versions.rollback_worker(
@@ -70,7 +70,7 @@ def test_rollback_denies_workspace_member_without_owner_or_admin(monkeypatch):
             repos=_repos(),
         )
 
-    assert exc.value.status_code == 404
+    assert exc.value.status_code == 403
 
 
 def test_webhook_secret_rotation_denies_workspace_member_without_owner_or_admin(monkeypatch):

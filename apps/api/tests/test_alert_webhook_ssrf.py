@@ -171,9 +171,15 @@ def test_payload_contains_no_secret(monkeypatch):
     raw = captured["data"].decode()
     # The signing secret must never appear in the POST body.
     assert secret not in raw
-    # The HMAC signature header is derived from the secret but is not the secret.
-    sig_header = captured["headers"].get("X-workeros-signature", "")
-    assert secret not in sig_header
+    # The HMAC signature headers are derived from the secret but are not the secret.
+    headers = {str(k).lower(): v for k, v in captured["headers"].items()}
+    for header_name in ("x-floom-signature", "x-workeros-signature"):
+        sig_header = headers.get(header_name, "")
+        assert sig_header.startswith("sha256=")
+        assert secret not in sig_header
+    assert headers["x-floom-signature"] == headers["x-workeros-signature"]
+    assert headers["x-floom-run-id"] == "run_z"
+    assert headers["x-workeros-run-id"] == "run_z"
 
 
 # ---------------------------------------------------------------------------

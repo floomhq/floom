@@ -17,13 +17,41 @@ class SpendCapExceeded(ValueError):
     """#793: the worker's month-to-date cost has reached its monthly spend cap."""
 
 
-def _persist_run_cost(run_id: str) -> None:
-    """Compute + store total_tokens/total_cost_usd for a terminal run (#793/#795)."""
-    from db import get_db
-    from cost import estimate_cost_usd, total_tokens_from_transcript
+def _persist_run_cost(
+    run_id: str,
+    *,
+    user_id: Optional[str] = None,
+    repos: Any = None,
+) -> None:
+    """Compute + store total_tokens/total_cost_usd for a terminal run (#793/#795).
+
+    Routes the write through the run repository (``repos.runs.update``) when a
+    repo + user_id are supplied. This is REQUIRED for the cloud: its data lives
+    in Supabase, and the old raw ``get_db()`` write went to the engine's local
+    sqlite file, so total_tokens/total_cost_usd never reached the cloud's runs
+    table (every cloud run showed null tokens/cost). The repo path writes to
+    whichever backend the deployment uses. Falls back to the direct sqlite write
+    only when called without a repo (single-tenant / legacy callers / tests).
+    """
+    from cost import resolved_cost_usd_from_transcript, total_tokens_from_transcript
 
     tokens = total_tokens_from_transcript(run_id)
-    cost = estimate_cost_usd(tokens)
+    # Prefer the trace-derived (model-aware, summed-per-generation) cost from
+    # Track A; fall back to the blended estimate when the run wasn't
+    # AI-instrumented (pure-script, or analytics disabled at run time).
+    cost = resolved_cost_usd_from_transcript(run_id)
+
+    if repos is not None and user_id is not None:
+        repos.runs.update(
+            user_id=user_id,
+            run_id=run_id,
+            total_tokens=tokens,
+            total_cost_usd=cost,
+        )
+        return
+
+    from db import get_db
+
     with get_db() as conn:
         conn.execute(
             "UPDATE runs SET total_tokens = ?, total_cost_usd = ? WHERE id = ?",

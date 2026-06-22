@@ -17,6 +17,8 @@ import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Paperclip } from "lucide-react";
 import { GenericOutput } from "@/components/generic-output";
 import { ApprovalActionItems, hasActionItems } from "@/components/share/ApprovalActionItems";
+import { PreviewMedia } from "@/components/share/PreviewMedia";
+import { sanitizeOutputText } from "@/lib/strip-citations";
 import type { ApprovalRow } from "@/lib/types";
 
 /* ---- helpers --------------------------------------------------------------- */
@@ -32,7 +34,7 @@ function parseDecisionInput(raw?: string | null): Record<string, unknown> {
 
 function asString(v: unknown): string {
   if (v == null) return "";
-  return typeof v === "string" ? v : String(v);
+  return sanitizeOutputText(typeof v === "string" ? v : String(v));
 }
 
 function formatRelative(iso?: string): string {
@@ -111,6 +113,7 @@ function ProposedOutput({ approval }: { approval: ApprovalRow }) {
             ))}
           </div>
         )}
+        <PreviewMedia text={email.body ?? ""} />
       </div>
     );
   }
@@ -132,7 +135,8 @@ function ProposedOutput({ approval }: { approval: ApprovalRow }) {
     const t = (approval.type ?? approval.preview_type ?? inferPreviewType(approval.preview)) as string;
     return (
       <div className="c-appr-proposed">
-        <GenericOutput type={t} value={approval.preview} />
+        <PreviewMedia text={sanitizeOutputText(approval.preview)} />
+        <GenericOutput type={t} value={sanitizeOutputText(approval.preview)} />
       </div>
     );
   }

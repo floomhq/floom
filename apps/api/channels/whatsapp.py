@@ -1,4 +1,4 @@
-﻿"""WhatsApp (Meta WhatsApp Business Cloud API) channel — routes and helpers.
+"""WhatsApp (Meta WhatsApp Business Cloud API) channel — routes and helpers.
 
 All route paths are identical to those previously defined directly on the
 ``app`` FastAPI instance in main.py.  The router is included in main.py via
@@ -860,9 +860,9 @@ async def _maybe_handle_approval_reply(
     - Only intercept when the sender has >= 1 pending approval (conservative).
     - Owner must be the bound user (scoped_user_id) — enforced by the canonical
       approve/reject path which checks run visibility + ownership.
-    - Ambiguous (multiple pending, no suffix) → list pending approvals with
+    - Ambiguous (multiple pending, no suffix) ? list pending approvals with
       their id-suffixes; do NOT approve anything.
-    - Already-resolved or not-found approval → graceful "no longer pending" reply.
+    - Already-resolved or not-found approval ? graceful "no longer pending" reply.
     """
     # #891: a fast strict parse decides whether this even LOOKS like an approval
     # command without touching the DB. Only when it doesn't strictly match do we
@@ -923,7 +923,7 @@ async def _maybe_handle_approval_reply(
     elif len(pending) == 1:
         target = pending[0]
     else:
-        # Multiple pending, no suffix → list them and ask for disambiguation.
+        # Multiple pending, no suffix ? list them and ask for disambiguation.
         lines = [
             f"• {str(row.get('worker_name') or row.get('worker_id') or 'Worker')}: "
             f"{str(row.get('label') or 'Approval requested')} "
@@ -1113,7 +1113,7 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
             send_whatsapp_text(
                 normalized_wa_id,
                 (
-                    f"Hi! I'm Emily. Link this number to your Workeros account and we're good to go: "
+                    f"Hi! I'm Emily. Link this number to your Floom account and we're good to go: "
                     f"{short_url} (valid 24h)"
                 ),
             )
@@ -1217,7 +1217,7 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
             logger.exception("WhatsApp approval reply send failed")
         return
 
-    # Feature #1383: "help" keyword → short capability reply, no agent run.
+    # Feature #1383: "help" keyword ? short capability reply, no agent run.
     if text.lower().strip() in {"help", "?", "commands", "/help"}:
         _help_msg = (
             "Here's what I can do:\n\n"

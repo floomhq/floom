@@ -137,7 +137,7 @@ def _seed_running_run(main, *, owner_id: str, worker_id: str) -> str:
 def _run_headers(run_id: str) -> dict[str, str]:
     from run_token import make_run_token
 
-    return {"X-Workeros-Run-Token": make_run_token(run_id, secret=AUTH_HEADERS["x-floom-secret"])}
+    return {"X-Floom-Run-Token": make_run_token(run_id, secret=AUTH_HEADERS["x-floom-secret"])}
 
 
 def _seed_connection(main, *, owner_id: str, app_name: str, composio_connection_id: str) -> None:

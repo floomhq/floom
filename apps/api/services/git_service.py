@@ -1,4 +1,4 @@
-﻿"""Git workspace resolution and commit-identity helpers.
+"""Git workspace resolution and commit-identity helpers.
 
 Extracted from main.py. These are pure resolution helpers used across the
 worker, context, and workspace route groups. They depend only on leaf modules
@@ -105,7 +105,7 @@ def _restore_workspace_git_bundle_if_missing(workspace: Path) -> bool:
 
 def _git_author(auth: "AuthContext") -> tuple[str, str]:
     """Return (author_name, author_email) suitable for a git commit."""
-    name = getattr(auth, "username", None) or getattr(auth, "user_id", None) or "WorkerOS"
+    name = getattr(auth, "username", None) or getattr(auth, "user_id", None) or "Floom"
     email = getattr(auth, "email", None) or f"{name}@workeros.local"
     return name, email
 
@@ -382,7 +382,7 @@ def _sync_secrets_to_enc(user_id: str, repos, pat: str, repo_full_name: str) -> 
 
 
 def _load_secrets_from_enc(user_id: str, repos, pat: str, repo_full_name: str) -> int:
-    """Decrypt .secrets.enc and load secrets into WorkerOS. Returns count loaded.
+    """Decrypt .secrets.enc and load secrets into Floom. Returns count loaded.
 
     Called on startup (if already connected) and after linking a repo (fresh install).
     """

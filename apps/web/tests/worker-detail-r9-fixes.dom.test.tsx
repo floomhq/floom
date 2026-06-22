@@ -4,13 +4,18 @@ import { QueryProvider } from "@/components/providers/QueryProvider";
 
 // R9 worker-detail FIX 1 + FIX 2 — structural proof on the REAL WorkersCollection.
 //   FIX 1: the advanced tab group ("Advanced") is a visible affordance ON the
-//          primary tab row (inside .c-dtabs), not a hidden header control.
-//   FIX 2: in Operations, the second-row tabs (.c-dtabs2) stack flush under the
+//          primary tab row (inside .c-dtabs), directly after the operator tabs —
+//          not far-right, not a dropdown menu. Clicking once reveals ALL advanced
+//          tabs inline; clicking again collapses them (disclosure, not pick-one).
+//   FIX 2: in Setup, the second-row tabs (.c-dtabs2) stack flush under the
 //          primary row — no "Visual editor of worker.yml" framing text or gap
 //          element sits BETWEEN .c-dtabs and .c-dtabs2.
 
+// Mutable search string so a test can simulate a deep-linked active tab
+// (?sel=...&tab=Source) before mounting.
+let mockSearch = "";
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(mockSearch),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/",
 }));
@@ -74,6 +79,7 @@ vi.mock("@/lib/useApprovalsSync", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  mockSearch = "";
 });
 
 async function openDetail() {
@@ -88,28 +94,54 @@ async function openDetail() {
   await waitFor(() => expect(document.querySelector(".c-dtabs")).toBeTruthy());
 }
 
-describe("R9 worker-detail FIX 1 — Advanced group is visible ON the tab row", () => {
-  it("renders an 'Advanced' affordance inside the primary .c-dtabs row", async () => {
+describe("R9 worker-detail FIX 1 — Advanced disclosure is inline on the tab row", () => {
+  it("renders an 'Advanced' button inside the primary .c-dtabs row (not far-right / not a dropdown)", async () => {
     await openDetail();
     const tabRow = document.querySelector(".c-dtabs");
     expect(tabRow).toBeTruthy();
-    // The Advanced trigger lives inside the tab row (via tabsTrailing), not in
-    // the detail header actions.
-    const adv = tabRow!.querySelector("[aria-label='Advanced tabs']");
+    // The Advanced button lives inside .c-dtabs-trailing which is a direct child
+    // of the tab row — inline, not a far-right floating pill.
+    const trailing = tabRow!.querySelector(".c-dtabs-trailing");
+    expect(trailing).toBeTruthy();
+    const adv = trailing!.querySelector("[aria-label='Show developer tabs']");
     expect(adv).toBeTruthy();
     expect(adv!.textContent).toMatch(/Advanced/);
+    // It is a plain button, not a dropdown trigger.
+    expect(adv!.tagName.toLowerCase()).toBe("button");
+    // No checkmark/menuitemcheckbox inside the row.
+    expect(tabRow!.querySelector('[role="menuitemcheckbox"]')).toBeNull();
   });
 
-  it("opening Advanced lists the four advanced tabs and selecting one pins it onto the row", async () => {
+  it("clicking Advanced once reveals ALL advanced tabs (Source, Versions, Brain, Tools) as real tabs", async () => {
     await openDetail();
-    fireEvent.click(await screen.findByRole("button", { name: /Advanced tabs/i }));
-    expect(await screen.findByRole("menuitemcheckbox", { name: "Source" })).toBeTruthy();
-    expect(screen.getByRole("menuitemcheckbox", { name: "Versions" })).toBeTruthy();
-    expect(screen.getByRole("menuitemcheckbox", { name: "Brain" })).toBeTruthy();
-    expect(screen.getByRole("menuitemcheckbox", { name: "Tools" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Versions" }));
-    // Versions now renders as a real tab on the primary row.
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Versions" })).toBeTruthy());
+    // Initially no advanced tabs visible.
+    expect(screen.queryByRole("tab", { name: "Source" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Versions" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Brain" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Tools" })).toBeNull();
+
+    // Click Advanced — all four appear as real selectable tabs.
+    const advBtn = await screen.findByRole("button", { name: /Show developer tabs/i });
+    fireEvent.click(advBtn);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy());
+    expect(screen.getByRole("tab", { name: "Versions" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Brain" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Tools" })).toBeTruthy();
+  });
+
+  it("clicking Advanced again collapses the advanced tabs", async () => {
+    await openDetail();
+    const advBtn = await screen.findByRole("button", { name: /Show developer tabs/i });
+
+    // Expand.
+    fireEvent.click(advBtn);
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy());
+
+    // Collapse — advanced tabs gone, button label reverts.
+    const collapseBtn = screen.getByRole("button", { name: /Hide developer tabs/i });
+    fireEvent.click(collapseBtn);
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "Source" })).toBeNull());
+    expect(screen.queryByRole("tab", { name: "Versions" })).toBeNull();
   });
 });
 

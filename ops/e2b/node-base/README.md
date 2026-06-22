@@ -1,4 +1,4 @@
-# WorkerOS Node E2B Base Template
+# Floom Node E2B Base Template
 
 Build:
 

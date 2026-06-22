@@ -1,4 +1,4 @@
-﻿"""Workspace-agent tool implementations: workers, runs, secrets, connections,
+"""Workspace-agent tool implementations: workers, runs, secrets, connections,
 MCP-tools, and contexts.
 
 Extracted verbatim from chat_service.py: the agent action handlers behind the
@@ -146,7 +146,7 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
                     f"Invalid trigger.type '{trigger_type}'. "
                     f"Valid values: {sorted(_VALID_TRIGGER_TYPES)}. "
                     "For a scheduled worker use type: 'schedule' with cron: '*/10 * * * *'. "
-                    "Never use 'cron' or 'incoming_email' — they do not exist in WorkerOS."
+                    "Never use 'cron' or 'incoming_email' — they do not exist in Floom."
                 ),
             }
     exec_block = manifest.get("exec") or {}
@@ -856,3 +856,87 @@ def _tool_contexts_write(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": True, "message": f"Written {len(content)} chars to {name}/{file_path}."}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Workspace issues (#1781): git-backed operating record under .floom/issues/.
+# ---------------------------------------------------------------------------
+
+def _issue_commit_identity(user_id: str) -> tuple[str, str]:
+    return user_id or "Floom", f"{user_id or 'workeros'}@workeros.local"
+
+
+def _tool_issues_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from services import workspace_issues as _issues
+
+    try:
+        issues = _issues.list_issues(
+            status=args.get("status"),
+            label=args.get("label"),
+            asset_type=args.get("asset_type"),
+            asset_id=args.get("asset_id"),
+        )
+    except _issues.IssueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "issues": issues, "count": len(issues)}
+
+
+def _tool_issues_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from services import workspace_issues as _issues
+
+    title = str(args.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "error": "title is required"}
+    name, email = _issue_commit_identity(user_id)
+    try:
+        issue = _issues.create_issue(
+            title=title,
+            body=str(args.get("body") or ""),
+            asset_type=args.get("asset_type"),
+            asset_id=args.get("asset_id"),
+            source=args.get("source"),
+            labels=args.get("labels") or [],
+            created_by=user_id,
+            author_name=name,
+            author_email=email,
+        )
+    except _issues.IssueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "issue": issue}
+
+
+def _tool_issues_comment(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from services import workspace_issues as _issues
+
+    issue_id = str(args.get("id") or "")
+    body = str(args.get("body") or "").strip()
+    if not body:
+        return {"ok": False, "error": "body is required"}
+    name, email = _issue_commit_identity(user_id)
+    try:
+        comment = _issues.add_comment(
+            issue_id, body=body, created_by=user_id, author_name=name, author_email=email
+        )
+    except _issues.IssueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except _issues.IssueNotFound:
+        return {"ok": False, "error": f"Issue not found: {issue_id}"}
+    return {"ok": True, "comment": comment}
+
+
+def _tool_issues_close(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from services import workspace_issues as _issues
+
+    issue_id = str(args.get("id") or "")
+    name, email = _issue_commit_identity(user_id)
+    reopen = bool(args.get("reopen"))
+    try:
+        if reopen:
+            issue = _issues.reopen_issue(issue_id, author_name=name, author_email=email)
+        else:
+            issue = _issues.close_issue(issue_id, author_name=name, author_email=email)
+    except _issues.IssueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except _issues.IssueNotFound:
+        return {"ok": False, "error": f"Issue not found: {issue_id}"}
+    return {"ok": True, "issue": issue}

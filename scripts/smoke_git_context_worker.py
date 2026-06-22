@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke a git-backed brain pack in a live Workeros API.
+"""Smoke a git-backed brain pack in a live Floom API.
 
 The script creates a disposable worker that:
   1. declares a git-backed brain pack via ``contexts:``,

@@ -30,7 +30,7 @@ def _load_runtime_env_files() -> None:
     # N4-1 root cause: the secret-store path was source-tree-relative
     # (`apps/api/.env` next to the db source file). Two processes serving the
     # same shared DB but running from different deploy directories
-    # (/opt/workeros vs /opt/workeros-live vs a /tmp worktree) resolved it to
+    # (/opt/floom vs /opt/floom-live vs a /tmp worktree) resolved it to
     # DIFFERENT files. The DB row (absolute WORKEROS_DB path) is shared, so a
     # secret read back as "set" while its value was orphaned in another tree's
     # .env — every scheduled run failed "missing_secret". The store path is now
@@ -96,7 +96,7 @@ _PLATFORM_SECRET_NAMES: frozenset[str] = frozenset({
     # NOTE: OPENAI_API_KEY is INTENTIONALLY NOT in this list. Workers
     # legitimately need it to call OpenAI from inside the sandbox (research_brief,
     # csv_enricher, resume_helper etc. all declare secrets: [OPENAI_API_KEY]).
-    # Workeros v0 is single-user, so the platform owner == the worker author,
+    # Floom v0 is single-user, so the platform owner == the worker author,
     # and sharing the OpenAI key is acceptable. When the platform goes
     # multi-tenant (skills-neo v0.y), this needs to change: each tenant must
     # bring their own OPENAI_API_KEY via the secrets DB, and the platform's
@@ -121,7 +121,7 @@ def get_secrets_for_worker(
     etc.) because the sandbox runs untrusted worker code and any leak there
     is equivalent to publishing the secret.
 
-    Pre-fix this function unioned every key in `/etc/workeros/api.env`
+    Pre-fix this function unioned every key in `/etc/floom/api.env`
     into the result, including all platform secrets above. Audit 2026-05-26
     flagged it as P0. The `_PLATFORM_SECRET_NAMES` denylist now blocks them
     regardless of whether they appear in the worker manifest or the DB.
@@ -168,7 +168,15 @@ def get_secrets_for_worker(
     # Only declared worker secrets are injected into the sandbox. Resolving every
     # DB secret in the workspace is slower for secret-heavy tenants and weakens
     # the least-privilege contract documented above.
+    #
+    # #1730 — declared secrets can live under EITHER the top-level/exec `secrets`
+    # field (folded into config.secrets) OR `capabilities.secrets`. config.secrets
+    # only carries the former, so a worker that declared `capabilities.secrets:
+    # [BUFFER_API_TOKEN]` had its secret silently dropped here and saw it as unset
+    # at runtime. Union both shapes (mirrors _worker_required_secret_names).
     names = set(config.secrets if config else [])
+    if config is not None and getattr(config, "capabilities", None) is not None:
+        names.update(config.capabilities.secrets or [])
     allowed_names = [name for name in names if name not in _PLATFORM_SECRET_NAMES]
     allowed_name_set = set(allowed_names)
     resolved = {

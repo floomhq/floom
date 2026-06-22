@@ -1,8 +1,9 @@
-﻿import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { createAuthenticatedClient, WorkerosApiClient } from "../lib/api.js";
+import { createAuthenticatedClient, FloomApiClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
+import { getCommandName } from "../lib/command-name.js";
 import { readCredentials, updateCredentials } from "../lib/credentials.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
@@ -10,6 +11,8 @@ type JsonObject = Record<string, unknown>;
 
 const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
+const MCP_SERVER_NAME = "floom";
+const LEGACY_MCP_SERVER_NAME = "workeros";
 
 // Targets that write a file (kind = "object" or "array" for config shape).
 const FILE_CLIENTS = [
@@ -52,7 +55,8 @@ function patchObjectConfig(config: JsonObject, mcpUrl: string, headers: Record<s
     typeof next.mcpServers === "object" && next.mcpServers && !Array.isArray(next.mcpServers)
       ? { ...(next.mcpServers as JsonObject) }
       : {};
-  mcpServers.workeros = serverConfig(mcpUrl, headers);
+  delete mcpServers[LEGACY_MCP_SERVER_NAME];
+  mcpServers[MCP_SERVER_NAME] = serverConfig(mcpUrl, headers);
   next.mcpServers = mcpServers;
   return next;
 }
@@ -61,11 +65,13 @@ function patchContinueConfig(config: JsonObject, mcpUrl: string, headers: Record
   const next = { ...config };
   const servers = Array.isArray(next.mcpServers) ? [...next.mcpServers] : [];
   const entry = {
-    name: "workeros",
+    name: MCP_SERVER_NAME,
     ...serverConfig(mcpUrl, headers),
   };
   const existing = servers.findIndex((server) => (
-    typeof server === "object" && server !== null && (server as JsonObject).name === "workeros"
+    typeof server === "object" &&
+    server !== null &&
+    [MCP_SERVER_NAME, LEGACY_MCP_SERVER_NAME].includes(String((server as JsonObject).name))
   ));
   if (existing === -1) {
     servers.push(entry);
@@ -80,7 +86,8 @@ function removeObjectConfig(config: JsonObject): JsonObject {
   const next = { ...config };
   if (typeof next.mcpServers === "object" && next.mcpServers && !Array.isArray(next.mcpServers)) {
     const mcpServers = { ...(next.mcpServers as JsonObject) };
-    delete mcpServers.workeros;
+    delete mcpServers[MCP_SERVER_NAME];
+    delete mcpServers[LEGACY_MCP_SERVER_NAME];
     next.mcpServers = mcpServers;
   }
   return next;
@@ -90,7 +97,9 @@ function removeContinueConfig(config: JsonObject): JsonObject {
   const next = { ...config };
   const servers = Array.isArray(next.mcpServers) ? [...next.mcpServers] : [];
   next.mcpServers = servers.filter((server) => (
-    !(typeof server === "object" && server !== null && (server as JsonObject).name === "workeros")
+    !(typeof server === "object" &&
+      server !== null &&
+      [MCP_SERVER_NAME, LEGACY_MCP_SERVER_NAME].includes(String((server as JsonObject).name)))
   ));
   return next;
 }
@@ -98,7 +107,7 @@ function removeContinueConfig(config: JsonObject): JsonObject {
 function genericSnippet(mcpUrl: string, headers: Record<string, string>): string {
   return JSON.stringify({
     mcpServers: {
-      workeros: serverConfig(mcpUrl, headers),
+      [MCP_SERVER_NAME]: serverConfig(mcpUrl, headers),
     },
   }, null, 2);
 }
@@ -137,13 +146,17 @@ async function resolveMcpConfig(
 ): Promise<McpConfig> {
   if (credentials.mode === "oss") {
     if (!credentials.api_secret) {
-      throw new Error("OSS credentials missing api_secret. Run: floom login");
+      throw new Error(`OSS credentials missing api_secret. Run: ${getCommandName()} login`);
     }
     const headers: Record<string, string> = { "x-floom-secret": credentials.api_secret };
     // OSS scopes by header, not URL: bake the active workspace in so the MCP
     // session lands on the selected workspace instead of the default one.
     if (credentials.workspace_id) {
       headers["x-workeros-workspace"] = credentials.workspace_id;
+    }
+    // Self-hosted engines with user-header scope require x-floom-user.
+    if (credentials.user) {
+      headers["x-floom-user"] = credentials.user;
     }
     return {
       mcpUrl: `${apiBase}/mcp-tools/serve`,
@@ -158,14 +171,14 @@ async function resolveMcpConfig(
     throw new Error(
       "Cloud MCP install requires a Personal Access Token (PAT).\n" +
       "Generate one at https://floom.ai/settings/tokens, then run:\n" +
-      "  floom login --pat <your-token>",
+      `  ${getCommandName()} login --pat <your-token>`,
     );
   }
 
   // Resolve the workspace_id: stored in credentials, set via env var, or fetched from API.
   let workspaceId = credentials.workspace_id || process.env.WORKEROS_WORKSPACE_ID?.trim();
   if (!workspaceId) {
-    const client = new WorkerosApiClient(apiBase, credentials);
+    const client = new FloomApiClient(apiBase, credentials);
     try {
       const workspaces = await client.requestJson("GET", "/api/workspaces") as Array<{ id: string; name?: string }>;
       if (!Array.isArray(workspaces) || workspaces.length === 0) {
@@ -175,7 +188,7 @@ async function resolveMcpConfig(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(
-        `Could not resolve workspace ID. Set WORKEROS_WORKSPACE_ID or run: floom login\nDetails: ${msg}`,
+        `Could not resolve workspace ID. Set WORKEROS_WORKSPACE_ID or run: ${getCommandName()} login\nDetails: ${msg}`,
       );
     }
   }
@@ -193,7 +206,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
   const credentials = await readCredentials();
   if (!credentials) {
     log.err("Not logged in. Cannot install MCP config without credentials.");
-    log.info("Run: floom login");
+    log.info(`Run: ${getCommandName()} login`);
     return 1;
   }
 
@@ -238,7 +251,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
       : patchObjectConfig(config, mcpUrl, headers);
     await writeJson(configPath, patched);
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
-    log.ok(`Installed Workeros MCP config for ${client.name}`);
+    log.ok(`Installed Floom MCP config for ${client.name}`);
     log.kv("Config path", displayPath);
     log.kv("MCP URL", mcpUrl);
     return 0;
@@ -256,7 +269,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
       : patchObjectConfig(config, mcpUrl, headers);
     await writeJson(configPath, patched);
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
-    log.ok(`Installed Workeros MCP config for ${client.name} (auto-detected)`);
+    log.ok(`Installed Floom MCP config for ${client.name} (auto-detected)`);
     log.kv("Config path", displayPath);
     log.kv("MCP URL", mcpUrl);
     return 0;
@@ -288,13 +301,13 @@ export async function mcpUninstallCommand(options: { target?: ClientTarget }): P
     const patched = client.kind === "array" ? removeContinueConfig(config) : removeObjectConfig(config);
     await writeJson(configPath, patched);
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
-    log.ok(`Removed Workeros MCP config from ${client.name}`);
+    log.ok(`Removed Floom MCP config from ${client.name}`);
     log.kv("Config path", displayPath);
     return 0;
   }
 
-  log.warn("No Workeros MCP config entries were found.");
-  log.info("Install first: floom mcp install");
+  log.warn("No Floom MCP config entries were found.");
+  log.info(`Install first: ${getCommandName()} mcp install`);
   return 0;
 }
 
@@ -312,7 +325,7 @@ function mcpRowLabel(row: McpConnectionRow): string {
   return String(row.mcp_label || row.display_name || row.app_name || "");
 }
 
-async function fetchMcpConnections(client: WorkerosApiClient): Promise<McpConnectionRow[]> {
+async function fetchMcpConnections(client: FloomApiClient): Promise<McpConnectionRow[]> {
   const rows = (await client.requestJson("GET", "/connections")) as McpConnectionRow[];
   return (Array.isArray(rows) ? rows : []).filter((row) => (row.kind || "composio") === "mcp");
 }
@@ -331,7 +344,7 @@ export async function mcpListCommand(options: { json?: boolean }): Promise<numbe
     }
     if (servers.length === 0) {
       log.info("No MCP servers configured.");
-      log.info("Add one: floom connections import-mcp-config <path>");
+      log.info(`Add one: ${getCommandName()} connections import-mcp-config <path>`);
       return 0;
     }
     process.stdout.write(renderTable(
@@ -369,15 +382,15 @@ export async function mcpSwitchCommand(target: string): Promise<number> {
     if (!match) {
       log.err(`No configured MCP server matches "${target}".`);
       process.stderr.write(
-        "Run `floom mcp list` to see configured servers, or add one with " +
-        "`floom connections import-mcp-config <path>`.\n",
+        `Run \`${getCommandName()} mcp list\` to see configured servers, or add one with ` +
+        `\`${getCommandName()} connections import-mcp-config <path>\`.\n`,
       );
       return 1;
     }
     const label = mcpRowLabel(match);
     await updateCredentials({ active_mcp_label: label });
     log.ok(`Active MCP server set to ${label}.`);
-    log.step(`Verify it responds: floom mcp test`);
+    log.step(`Verify it responds: ${getCommandName()} mcp test`);
     return 0;
   } catch (error) {
     const handled = handleAuthError(error);
@@ -404,7 +417,7 @@ export async function mcpTestCommand(
     const name = (target || credentials.active_mcp_label || "").trim();
     if (!name) {
       log.err("No MCP server specified and no active one is set.");
-      process.stderr.write("Run `floom mcp switch <name>` first, or pass a name: floom mcp test <name>\n");
+      process.stderr.write(`Run \`${getCommandName()} mcp switch <name>\` first, or pass a name: ${getCommandName()} mcp test <name>\n`);
       return 1;
     }
     const servers = await fetchMcpConnections(client);
@@ -412,7 +425,7 @@ export async function mcpTestCommand(
     const match = servers.find((row) => mcpRowLabel(row).toLowerCase() === needle);
     if (!match || !match.id) {
       log.err(`No configured MCP server matches "${name}".`);
-      process.stderr.write("Run `floom mcp list` to see configured servers.\n");
+      process.stderr.write(`Run \`${getCommandName()} mcp list\` to see configured servers.\n`);
       return 1;
     }
     const result = (await client.requestJson(

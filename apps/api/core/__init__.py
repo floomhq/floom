@@ -1,4 +1,4 @@
-"""Core building blocks for the WorkerOS API.
+"""Core building blocks for the Floom API.
 
 This package holds the cross-cutting pieces that the FastAPI application and its
 routers are built from:

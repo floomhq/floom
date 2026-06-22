@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import open from "open";
 import { createAuthenticatedClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
+import { getCommandName } from "../lib/command-name.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
 type McpTransport = "streamable_http" | "sse" | "stdio";
@@ -136,7 +137,7 @@ export async function connectionsAddCommand(
     } else {
       log.ok(`Started ${created.app_name} connection (${created.id}).`);
       log.kv("Authorize", created.redirect_url);
-      log.step("Complete the OAuth flow in the browser, then run `floom connections list`.");
+      log.step(`Complete the OAuth flow in the browser, then run \`${getCommandName()} connections list\`.`);
     }
     return 0;
   } catch (error) {

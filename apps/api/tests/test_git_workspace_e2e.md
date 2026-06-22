@@ -62,7 +62,7 @@ Invoke-RestMethod -Uri "http://localhost:8000/system/git" -Headers $h
 
 ---
 
-## Flow 3 — List WorkerOS Repos
+## Flow 3 — List Floom Repos
 
 ```
 GET /system/git/repos

@@ -300,3 +300,24 @@ class TestCorsLockdown:
             )
         allowed = (resp.headers.get("access-control-allow-headers") or "").lower()
         assert "x-evil-header" not in allowed
+
+    def test_cors_allows_current_and_legacy_workspace_run_headers(self, monkeypatch, tmp_path):
+        main = _load_main(monkeypatch, tmp_path)
+        requested = [
+            "x-workeros-workspace",
+            "x-floom-workspace",
+            "x-workeros-run-token",
+            "x-floom-run-token",
+        ]
+        with _client(main) as client:
+            resp = client.options(
+                "/healthz",
+                headers={
+                    "Origin": "https://localhost:3000",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": ", ".join(requested),
+                },
+            )
+        allowed = (resp.headers.get("access-control-allow-headers") or "").lower()
+        for header in requested:
+            assert header in allowed

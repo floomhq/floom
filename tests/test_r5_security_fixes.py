@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib
 import os
@@ -37,7 +37,7 @@ def _load_api(
     monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "whsec-test")
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
-    monkeypatch.setenv("ALLOWED_ORIGINS", "https://localhost:3000,https://workeros.example.com")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://localhost:3000,https://floom.example.com")
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     if upload_hourly_cap_bytes is None:
         monkeypatch.delenv("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", raising=False)
@@ -169,6 +169,7 @@ def test_upload_rejects_disallowed_media_type(monkeypatch, tmp_path):
 
 
 def test_upload_rejects_oversized_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_UPLOAD_MAX_BYTES", str(10 * 1024 * 1024))
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
 

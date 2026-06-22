@@ -1,10 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Copy, Check, Download, FileText, Pencil, RotateCcw, Square } from "lucide-react";
+import { Copy, Check, Download, FileText, Flag, Pencil, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RunStatusBadge, RunStatusGlyph } from "@/components/RunStatus";
 import { Tool } from "@/components/ai-elements/tool";
@@ -27,7 +39,7 @@ import {
 } from "@/lib/run-format";
 import { stripCitationTokens } from "@/lib/strip-citations";
 import { getToolCardTitle } from "@/lib/useChatStream";
-import type { LogEntry, RunDetail, RunPart, TranscriptRow, ToolCallEntry, ApprovalEntry } from "@/lib/types";
+import type { LogEntry, RunDetail, RunFeedback, RunPart, TranscriptRow, ToolCallEntry, ApprovalEntry } from "@/lib/types";
 
 type Props = {
   run: RunDetail;
@@ -43,6 +55,144 @@ type Props = {
   onCancel?: () => void;
 };
 
+/**
+ * #1807: explicit, opt-in control that turns actionable run feedback into a
+ * git-backed workspace issue (#1781) bound to this run. Lightweight feedback is
+ * unchanged; this only fires when the operator chooses to track the run.
+ */
+export function TrackRunFeedbackIssue({ run }: { run: RunDetail }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<RunFeedback[] | null>(null);
+  const [note, setNote] = useState("");
+  const [title, setTitle] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [createdIssueId, setCreatedIssueId] = useState<string | null>(null);
+
+  const defaultTitle = `Run feedback: ${run.worker_name || run.worker_id}`;
+
+  useEffect(() => {
+    if (!open) return;
+    api.runs.feedback
+      .list(run.id)
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [open, run.id]);
+
+  async function submit() {
+    const feedback = note.trim();
+    if (!feedback || submitting) return;
+    setSubmitting(true);
+    try {
+      const created = await api.runs.feedback.create(run.id, feedback);
+      setItems((prev) => [...(prev ?? []), created]);
+      toast.success("Feedback saved");
+      setNote("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save feedback");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function promote(feedbackId: string) {
+    if (promotingId) return;
+    setPromotingId(feedbackId);
+    try {
+      const resp = await api.runs.createFeedbackIssue(run.id, {
+        feedback_id: feedbackId,
+        title: title.trim() || null,
+      });
+      setCreatedIssueId(resp.issue_id);
+      if (resp.feedback) {
+        setItems((prev) => (prev ?? []).map((item) => (item.id === resp.feedback?.id ? resp.feedback : item)));
+      }
+      setTitle("");
+      toast.success(resp.created ? `Created ${resp.issue_id}` : `Already tracked as ${resp.issue_id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not create issue");
+    } finally {
+      setPromotingId(null);
+    }
+  }
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Flag className="size-3.5 mr-1.5" />
+        Feedback
+      </Button>
+      {createdIssueId && (
+        <span className="text-xs text-muted-foreground">
+          Created <code className="font-mono">{createdIssueId}</code>
+        </span>
+      )}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Run feedback</DialogTitle>
+            <DialogDescription>
+              Capture lightweight feedback, then mark specific items actionable as workspace issues.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="run-issue-title">Issue title override (optional)</Label>
+              <Input
+                id="run-issue-title"
+                value={title}
+                placeholder={defaultTitle}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="run-issue-note">Feedback</Label>
+              <Textarea
+                id="run-issue-note"
+                value={note}
+                rows={4}
+                placeholder="What went wrong or what should change?"
+                onChange={(e) => setNote(e.target.value)}
+              />
+              <Button onClick={submit} disabled={!note.trim() || submitting}>
+                {submitting ? "Saving..." : "Save feedback"}
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {items === null && <div className="text-sm text-muted-foreground">Loading feedback...</div>}
+              {items?.length === 0 && <div className="text-sm text-muted-foreground">No feedback yet.</div>}
+              {items?.map((item) => (
+                <div key={item.id} className="rounded-md border p-3 space-y-2">
+                  <div className="text-sm whitespace-pre-wrap">{item.content}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {item.issue_id ? `Tracked as ${item.issue_id}` : "Feedback only"}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={Boolean(item.issue_id) || promotingId === item.id}
+                      onClick={() => void promote(item.id)}
+                    >
+                      <Flag className="size-3.5 mr-1.5" />
+                      {item.issue_id ? "Issue created" : promotingId === item.id ? "Creating..." : "Create issue"}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={submitting}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export function RunDetailSplitPane({
   run,
   parts = [],
@@ -56,6 +206,7 @@ export function RunDetailSplitPane({
   onReplay,
   onCancel,
 }: Props) {
+  const [replayConfirmOpen, setReplayConfirmOpen] = useState(false);
   const transcriptParts = parts.length > 0 ? parts : partsFromRun(run);
   const timeline = buildTimeline(run, transcriptParts);
   const isActive = run.status === "running" || run.status === "queued";
@@ -142,14 +293,12 @@ export function RunDetailSplitPane({
             </Button>
           </Link>
           {run.can_replay !== false && (
-            /* #1274: confirm before replaying to prevent accidental duplicate runs. */
+            /* #1274: confirm before replaying to prevent accidental duplicate runs.
+               Uses the shared ConfirmDialog (not native window.confirm). */
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                if (!window.confirm("Re-run this worker with the same inputs?")) return;
-                onReplay?.();
-              }}
+              onClick={() => setReplayConfirmOpen(true)}
             >
               <RotateCcw className="size-3.5 mr-1.5" />
               Re-run
@@ -161,6 +310,7 @@ export function RunDetailSplitPane({
               Download
             </Button>
           </a>
+          <TrackRunFeedbackIssue run={run} />
           {isActive && (
             <Button variant="outline" size="sm" onClick={onCancel}>
               <Square className="size-3.5 mr-1.5" />
@@ -169,6 +319,18 @@ export function RunDetailSplitPane({
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={replayConfirmOpen}
+        onOpenChange={setReplayConfirmOpen}
+        title="Re-run this worker?"
+        body="It will run again with the same inputs."
+        confirmLabel="Re-run"
+        onConfirm={() => {
+          setReplayConfirmOpen(false);
+          onReplay?.();
+        }}
+      />
 
       {streamUnavailable && isActive && (
         <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3">

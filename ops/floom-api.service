@@ -1,0 +1,19 @@
+[Unit]
+Description=Floom API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/floom/apps/api
+EnvironmentFile=/etc/floom/api.env
+Environment=WORKEROS_SHUTDOWN_RUN_DRAIN_SECONDS=75
+ExecStart=/opt/floom/apps/api/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8011 --timeout-graceful-shutdown 85
+KillSignal=SIGTERM
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

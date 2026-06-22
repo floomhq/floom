@@ -33,8 +33,40 @@ def _max_concurrent_runs() -> int:
 _execution_semaphore: Optional[threading.Semaphore] = None
 _semaphore_lock = threading.Lock()
 
+# --- Pluggable distributed limiter seam --------------------------------------
+# The in-process threading.Semaphore only bounds concurrency WITHIN one worker
+# process. When the API/executor is scaled horizontally (e.g. cloud runs N
+# Fargate/Railway worker tasks), each process would admit its own N runs and
+# collectively blow past E2B's hard sandbox cap. A deployment can inject a
+# DISTRIBUTED limiter (e.g. a Postgres-lease) that coordinates the slot budget
+# across all processes. The injected object must implement the same contract as
+# threading.Semaphore: ``acquire(blocking=False) -> bool`` and ``release()``.
+# Names: "runs" (the E2B-cap gate) and "llm_runs" (the provider-quota gate).
+# Unset (the default) = single-process semaphore, so OSS/single-node behavior is
+# unchanged. The cloud overlay registers a PG-lease limiter in startup, mirroring
+# how it injects Supabase repositories for the engine's repository Protocols.
+_RUN_LIMITERS: Dict[str, Any] = {}
+_run_limiters_lock = threading.Lock()
 
-def _get_semaphore() -> threading.Semaphore:
+
+def register_run_limiter(name: str, limiter: Any) -> None:
+    """Inject a distributed run-concurrency limiter for ``name`` ("runs" or
+    "llm_runs"). Must expose ``acquire(blocking=False) -> bool`` and
+    ``release()``. Overrides the in-process semaphore for that budget."""
+    with _run_limiters_lock:
+        _RUN_LIMITERS[name] = limiter
+
+
+def clear_run_limiters() -> None:
+    """Drop all injected limiters (revert to in-process semaphores). For tests."""
+    with _run_limiters_lock:
+        _RUN_LIMITERS.clear()
+
+
+def _get_semaphore():
+    injected = _RUN_LIMITERS.get("runs")
+    if injected is not None:
+        return injected
     global _execution_semaphore
     if _execution_semaphore is None:
         with _semaphore_lock:
@@ -46,6 +78,13 @@ def _get_semaphore() -> threading.Semaphore:
 def _semaphore_available_count() -> int:
     """Return an approximate count of free execution slots (best-effort)."""
     sem = _get_semaphore()
+    # An injected distributed limiter may expose its own free-slot count.
+    avail = getattr(sem, "available_count", None)
+    if callable(avail):
+        try:
+            return max(0, int(avail()))
+        except Exception:
+            return -1
     # Semaphore._value is CPython internal but stable across 3.8-3.12.
     try:
         return max(0, sem._value)  # type: ignore[attr-defined]
@@ -76,7 +115,10 @@ _llm_execution_semaphore: Optional[threading.Semaphore] = None
 _llm_semaphore_lock = threading.Lock()
 
 
-def _get_llm_semaphore() -> threading.Semaphore:
+def _get_llm_semaphore():
+    injected = _RUN_LIMITERS.get("llm_runs")
+    if injected is not None:
+        return injected
     global _llm_execution_semaphore
     if _llm_execution_semaphore is None:
         with _llm_semaphore_lock:
@@ -111,6 +153,7 @@ from models import (
     WorkerConfig,
     RunStatus,
     assert_safe_outbound_url,
+    is_self_hosted_runner,
     UnsafeOutboundUrlError,
     _allow_private_mcp_urls,
     _ip_is_disallowed,
@@ -435,7 +478,7 @@ def _schedule_retry_for_failed_run(
     return True
 
 
-API_ENV_PATH = Path("/etc/workeros/api.env")
+API_ENV_PATH = Path("/etc/floom/api.env")
 
 
 # --- authored-worker registration + smoke/gate (services/run_authoring.py) ---
@@ -544,14 +587,16 @@ def _scrub_run_output(
     worker_id: str,
     owner_id: str,
     repos: Repositories,
+    run_secrets: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     if output is None:
         return None
-    try:
-        run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos)
-    except Exception:
-        logger.warning("Could not resolve secrets while scrubbing output for worker %s", worker_id, exc_info=True)
-        run_secrets = {}
+    if run_secrets is None:
+        try:
+            run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos)
+        except Exception:
+            logger.warning("Could not resolve secrets while scrubbing output for worker %s", worker_id, exc_info=True)
+            run_secrets = {}
     safe = scrub_secret_values(output, run_secrets)
     return safe if isinstance(safe, dict) else {}
 
@@ -893,24 +938,37 @@ def _log_flush_loop() -> None:
         try:
             item = _log_queue.get(timeout=interval)
         except queue.Empty:
-            item = None
-        if item is None:
+            # Idle timeout: nothing was dequeued, so we must NOT call task_done().
+            # Doing so drives the queue's unfinished-task counter negative and raises
+            # "task_done() called too many times", which kills this daemon thread and
+            # silently breaks run-log/result persistence. Just flush what we have.
             if pending:
                 try:
                     _persist_log_batch(pending)
                 except Exception as exc:
                     logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
                 pending = []
-            _log_queue.task_done()
             continue
-        pending.append(item)
-        _log_queue.task_done()
-        if len(pending) >= batch_size:
-            try:
-                _persist_log_batch(pending)
-            except Exception as exc:
-                logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
-            pending = []
+        # An item was dequeued (a real row, or the None shutdown/flush sentinel):
+        # exactly one task_done() is owed for it, regardless of branch.
+        try:
+            if item is None:
+                if pending:
+                    try:
+                        _persist_log_batch(pending)
+                    except Exception as exc:
+                        logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
+                    pending = []
+            else:
+                pending.append(item)
+                if len(pending) >= batch_size:
+                    try:
+                        _persist_log_batch(pending)
+                    except Exception as exc:
+                        logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
+                    pending = []
+        finally:
+            _log_queue.task_done()
 
     # Final best-effort drain on shutdown.
     while True:
@@ -1037,6 +1095,245 @@ def add_log(
     })
 
 
+# ---------------------------------------------------------------------------
+# PostHog product-analytics emission (server is the source of truth for run
+# OUTCOMES). All four run-lifecycle events emit from the single terminal point
+# (update_run_status) so there is exactly one event per state transition and the
+# failure category is computed from the SAME classify_failure() the runs API
+# uses. Fail-soft + no-op when POSTHOG_API_KEY is unset; never blocks/raises.
+# ---------------------------------------------------------------------------
+
+# status value -> PostHog event name. running/completed/failed/cancelled only;
+# pending_approval is emitted separately as approval_requested at its set point.
+_RUN_STATUS_EVENT = {
+    RunStatus.RUNNING.value: "run_started",
+    RunStatus.COMPLETED.value: "run_completed",
+    RunStatus.FAILED.value: "run_failed",
+    RunStatus.CANCELLED.value: "run_cancelled",
+}
+
+
+def _json_byte_len(value: Any) -> Optional[int]:
+    """UTF-8 byte length of a JSON-serializable value (dict OR pre-serialized
+    str). Returns None when absent; never raises."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            return len(value)
+        if isinstance(value, str):
+            return len(value.encode("utf-8"))
+        return len(json.dumps(value, default=str).encode("utf-8"))
+    except Exception:
+        return None
+
+
+def _run_duration_ms(run_row: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Best-effort run duration in ms: prefer the persisted duration_ms; else
+    compute started_at -> now. Returns None when no start time is known."""
+    if not run_row:
+        return None
+    persisted = run_row.get("duration_ms")
+    if persisted is not None:
+        try:
+            return int(persisted)
+        except (TypeError, ValueError):
+            pass
+    started_raw = run_row.get("started_at")
+    if not started_raw:
+        return None
+    try:
+        started = datetime.fromisoformat(str(started_raw).replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - started
+        return max(0, int(delta.total_seconds() * 1000))
+    except Exception:
+        return None
+
+
+def _emit_run_lifecycle_event(
+    *,
+    run_id: str,
+    status: str,
+    worker_id: str,
+    owner_id: Optional[str],
+    error: Optional[str],
+    error_code: Optional[str],
+    run_row: Optional[Dict[str, Any]],
+    repos: Repositories,
+) -> None:
+    """Emit the run_started/completed/failed/cancelled PostHog event for a
+    terminal (or running) transition. Pure side effect; swallows all errors so
+    analytics can never break a run."""
+    try:
+        from services import analytics_posthog
+        from services import run_metrics
+    except Exception:  # pragma: no cover - analytics module import guard
+        return
+    if not analytics_posthog.is_enabled():
+        return
+
+    event = _RUN_STATUS_EVENT.get(status)
+    if event is None:
+        return
+
+    try:
+        # workspace group: prefer an explicit workspace_id from the row (cloud
+        # backend); else derive from the owner id (engine convention).
+        from db import derive_workspace_id
+
+        workspace_id = ""
+        if run_row:
+            workspace_id = str(run_row.get("workspace_id") or "").strip()
+        if not workspace_id:
+            workspace_id = derive_workspace_id(owner_id)
+
+        trigger_source = str((run_row or {}).get("trigger_source") or "").strip() or None
+        runner = str((run_row or {}).get("runner") or "").strip() or None
+        input_bytes = _json_byte_len((run_row or {}).get("input_json"))
+        output_bytes = _json_byte_len((run_row or {}).get("output_json"))
+
+        props: Dict[str, Any] = {
+            "run_id": run_id,
+            "worker_id": worker_id or None,
+            "status": status,
+            "trigger_source": trigger_source,
+            "runner": runner,
+        }
+
+        if event == "run_started":
+            props.update(
+                {
+                    "input_bytes": input_bytes,
+                    "input_present": bool(input_bytes),
+                }
+            )
+        else:
+            # terminal: attach duration + cost + tokens (cost persisted just
+            # before this call). tokens/cost are computed from the transcript so
+            # they are correct regardless of the backend's run-row columns.
+            duration_ms = _run_duration_ms(run_row)
+            total_tokens: Optional[int] = None
+            total_cost_usd: Optional[float] = None
+            try:
+                from cost import (
+                    resolved_cost_usd_from_transcript,
+                    total_tokens_from_transcript,
+                )
+
+                total_tokens = total_tokens_from_transcript(run_id)
+                # Trace-derived cost (Track A §A2) when available, else blended
+                # estimate — the SAME source the persisted run row uses, so the
+                # PostHog event and the runs API never disagree on cost.
+                total_cost_usd = resolved_cost_usd_from_transcript(run_id)
+            except Exception:
+                total_tokens = None
+                total_cost_usd = None
+            props.update(
+                {
+                    "duration_ms": duration_ms,
+                    "total_tokens": total_tokens,
+                    "total_cost_usd": total_cost_usd,
+                }
+            )
+            if event == "run_completed":
+                props["output_bytes"] = output_bytes
+            elif event == "run_failed":
+                # error_category is computed from the SAME classify_failure the
+                # runs API uses — NEVER a hand-typed string (taxonomy parity).
+                props["error_category"] = run_metrics.classify_failure(
+                    error_code=error_code, error=error
+                )
+                props["error_code"] = error_code or None
+            elif event == "run_cancelled":
+                # cancelled is its own category; keep it off the failure funnel.
+                props["error_category"] = "cancelled"
+                props["error_code"] = error_code or None
+
+        analytics_posthog.capture_event(
+            distinct_id=owner_id or "",
+            event=event,
+            properties=props,
+            groups={"workspace": workspace_id} if workspace_id else None,
+        )
+    except Exception:  # pragma: no cover - belt-and-suspenders
+        logger.debug("PostHog run-lifecycle emit failed for %s", run_id, exc_info=True)
+
+
+def _emit_run_exception(
+    *,
+    exc: BaseException,
+    run_id: str,
+    worker_id: str,
+    owner_id: Optional[str],
+    trace_id: Optional[str] = None,
+    error_code: Optional[str] = None,
+) -> None:
+    """Capture a PostHog ``$exception`` for a crashed run (Track A §A4).
+
+    Groups crashes into issues with type + stack trace, attaching the run /
+    worker / workspace / trace id + the run_metrics error_category. Pure side
+    effect; swallows everything so it can never break a run."""
+    try:
+        from services import ai_observability as ai_obs
+        from services import run_metrics
+        from db import derive_workspace_id
+    except Exception:  # pragma: no cover
+        return
+    if not ai_obs.is_enabled():
+        return
+    try:
+        category = run_metrics.classify_failure(error_code=error_code, error=str(exc))
+        ai_obs.capture_exception(
+            owner_id=owner_id or "",
+            exc=exc,
+            run_id=run_id,
+            worker_id=worker_id or "",
+            workspace_id=derive_workspace_id(owner_id),
+            trace_id=trace_id,
+            error_code=error_code,
+            error_category=category,
+        )
+    except Exception:  # pragma: no cover - belt-and-suspenders
+        logger.debug("PostHog $exception emit failed for %s", run_id, exc_info=True)
+
+
+def _emit_approval_requested(
+    *,
+    approval_id: str,
+    run_id: str,
+    worker_id: str,
+    owner_id: Optional[str],
+    tool_name: Optional[str] = None,
+    risk_level: Optional[str] = None,
+) -> None:
+    """Emit the approval_requested PostHog event when a run parks awaiting
+    approval. Single point (the pending_approval set). Swallows all errors."""
+    try:
+        from services import analytics_posthog
+        from db import derive_workspace_id
+    except Exception:  # pragma: no cover
+        return
+    if not analytics_posthog.is_enabled():
+        return
+    try:
+        analytics_posthog.capture_event(
+            distinct_id=owner_id or "",
+            event="approval_requested",
+            properties={
+                "approval_id": approval_id,
+                "run_id": run_id,
+                "worker_id": worker_id or None,
+                "tool_name": tool_name or None,
+                "risk_level": risk_level or None,
+            },
+            groups={"workspace": derive_workspace_id(owner_id)},
+        )
+    except Exception:  # pragma: no cover
+        logger.debug("PostHog approval_requested emit failed for %s", run_id, exc_info=True)
+
+
 def update_run_status(
     run_id: str,
     status: str,
@@ -1046,6 +1343,7 @@ def update_run_status(
     *,
     user_id: str | None = None,
     repos: Repositories | None = None,
+    run_secrets: Optional[Dict[str, str]] = None,
 ) -> None:
     repos_obj = _repos(repos)
     owner_id = user_id
@@ -1057,7 +1355,13 @@ def update_run_status(
     run_row = repos_obj.runs.get(user_id=owner_id, run_id=run_id)
     worker_id = str((run_row or {}).get("worker_id") or "")
     if output is not None and worker_id:
-        output = _scrub_run_output(output, worker_id=worker_id, owner_id=owner_id, repos=repos_obj)
+        output = _scrub_run_output(
+            output,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            repos=repos_obj,
+            run_secrets=run_secrets,
+        )
     previous_error = (run_row or {}).get("error")
     previous_error_code = (run_row or {}).get("error_code")
     if status == RunStatus.FAILED.value:
@@ -1104,7 +1408,11 @@ def update_run_status(
         # the monthly-spend aggregate and approval cost-so-far don't have to
         # re-read transcripts later. Never let cost accounting break a run.
         try:
-            _persist_run_cost(run_id)
+            # Route through the repo so the write lands in whatever backend the
+            # deployment uses (sqlite single-tenant OR cloud Supabase). The old
+            # raw get_db() write went only to local sqlite, leaving cloud runs
+            # with null total_tokens/total_cost_usd.
+            _persist_run_cost(run_id, user_id=owner_id, repos=repos_obj)
         except Exception:
             logger.debug("run cost persistence failed for %s", run_id, exc_info=True)
         _dispatch_terminal_run_alerts(
@@ -1124,6 +1432,22 @@ def update_run_status(
         "error": error,
         "error_code": error_code,
     })
+
+    # PostHog: emit the run-lifecycle outcome event from this single terminal
+    # point (one event per running/completed/failed/cancelled transition). The
+    # cost row was just persisted above so total_tokens/total_cost_usd are read
+    # from the same transcript. No-op + never raises when analytics is disabled.
+    if status in _RUN_STATUS_EVENT:
+        _emit_run_lifecycle_event(
+            run_id=run_id,
+            status=status,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            error=error if error is not None else previous_error,
+            error_code=error_code,
+            run_row=run_row,
+            repos=repos_obj,
+        )
 
 
 # --- run output storage + validation (services/run_outputs.py) ---
@@ -2181,6 +2505,124 @@ def _apply_approval_phase_inputs(
     return out
 
 
+def _pause_run_for_required_approval(
+    *,
+    run_id: str,
+    worker_id: str,
+    owner_id: str,
+    config: WorkerConfig,
+    effective_inputs: Dict[str, Any],
+    decision_required: Dict[str, Any],
+    outputs: Dict[str, Any],
+    repos_obj: Repositories,
+    log_fn: Callable[[str, str], None],
+) -> None:
+    approval_id = f"apr_{uuid.uuid4().hex[:12]}"
+    label = decision_required.get("label") or (
+        config.approvals.label if config and config.approvals else "Approve action"
+    )
+    preview = decision_required.get("preview") or ""
+    original_inputs = {
+        k: v for k, v in effective_inputs.items()
+        if k not in (_APPROVAL_DECISION_KEY, _APPROVAL_PHASE_KEY)
+    }
+    try:
+        ttl_hours = float(os.environ.get("APPROVAL_TTL_HOURS", "24") or "24")
+    except ValueError:
+        ttl_hours = 24.0
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=ttl_hours)).isoformat()
+    preview_type = decision_required.get("preview_type") or decision_required.get("type")
+    preview_payload = decision_required.get("preview_payload")
+    preview_payload_json = json.dumps(preview_payload) if isinstance(preview_payload, (dict, list)) else None
+    try:
+        from cost import estimate_cost_usd, total_tokens_from_transcript
+
+        tokens_so_far = total_tokens_from_transcript(run_id)
+        cost_so_far = estimate_cost_usd(tokens_so_far)
+    except Exception:
+        tokens_so_far, cost_so_far = None, None
+    try:
+        repos_obj.approvals.create(
+            owner_id=owner_id,
+            id=approval_id,
+            run_id=run_id,
+            worker_id=worker_id,
+            status="pending",
+            label=label,
+            preview=preview,
+            created_at=_now_iso(),
+            expires_at=expires_at,
+            preview_type=(str(preview_type) if preview_type else None),
+            preview_payload_json=preview_payload_json,
+            decision_input_json=json.dumps(original_inputs),
+            tokens_so_far=tokens_so_far,
+            cost_usd_so_far=cost_so_far,
+        )
+    except Exception as exc:
+        logger.error("Failed to create approval row for run %s: %s", run_id, exc)
+    safe_outputs = (
+        _scrub_run_output(
+            outputs,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            repos=repos_obj,
+        )
+        if outputs
+        else {}
+    )
+    repos_obj.runs.update_status(
+        user_id=owner_id,
+        run_id=run_id,
+        status=RunStatus.PENDING_APPROVAL.value,
+        output_json=safe_outputs,
+    )
+    _publish_sse(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.PENDING_APPROVAL.value,
+        "approval_id": approval_id,
+        "label": label,
+    })
+    publish_run_part(run_id, {"type": "finish", "status": "pending_approval"})
+    _emit_approval_requested(
+        approval_id=approval_id,
+        run_id=run_id,
+        worker_id=worker_id,
+        owner_id=owner_id,
+        tool_name=decision_required.get("tool_name") or decision_required.get("tool"),
+        risk_level=decision_required.get("risk_level") or decision_required.get("risk"),
+    )
+    log_fn(f"Run awaiting approval: {label}")
+    worker_name_for_notify = worker_id
+    try:
+        worker_row = repos_obj.workers.get_any(worker_id=worker_id)
+        worker_name_for_notify = (worker_row or {}).get("name") or worker_id
+    except Exception:
+        pass
+    try:
+        from channels.common import notify_pending_approval_via_whatsapp
+        notify_pending_approval_via_whatsapp(
+            owner_id=owner_id,
+            run_id=run_id,
+            worker_name=worker_name_for_notify,
+            label=label,
+            approval_id=approval_id,
+        )
+    except Exception:
+        logger.warning("WhatsApp approval notify failed for run %s", run_id, exc_info=True)
+    try:
+        from channels.common import notify_pending_approval_via_slack
+        notify_pending_approval_via_slack(
+            owner_id=owner_id,
+            run_id=run_id,
+            worker_name=worker_name_for_notify,
+            label=label,
+            approval_id=approval_id,
+        )
+    except Exception:
+        logger.warning("Slack approval notify failed for run %s", run_id, exc_info=True)
+
+
 def execute_run(
     run_id: str,
     worker_id: str,
@@ -2211,8 +2653,7 @@ def execute_run(
         effective_inputs, run_id, config, repos_obj
     )
     perf.mark("approval_inputs")
-    run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
-    perf.mark("secrets")
+    run_secrets: Dict[str, str] = {}
 
     def log_fn(msg: str, level: str = "info") -> None:
         safe_msg = scrub_secrets(msg, run_secrets)
@@ -2273,32 +2714,85 @@ def execute_run(
                 return
         perf.mark("validate_inputs")
 
-        log_fn("Loading secrets", level="debug")
-        perf.mark("loading_secrets_log")
-        secrets = run_secrets
-        missing = [s for s in config.secrets if s not in secrets]
-        if missing:
-            err = f"Missing secrets: {', '.join(missing)}"
-            update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
-            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
-            log_fn(err, level="error")
-            if _maybe_pause_scheduled_worker_after_setup_failure(
-                worker_id=worker_id,
-                run_id=run_id,
+        worker_needs_approval = bool(
+            config and getattr(config, "approvals", None) and config.approvals.required
+        )
+        approval_follow_up = (
+            worker_needs_approval
+            and _is_engine_approved_execution_run(run_id, repos_obj)
+        )
+        approval_propose_phase = worker_needs_approval and not approval_follow_up
+        # Resolve runner availability before secrets/connections are loaded.
+        runner = "e2b"
+        if config and config.runtime:
+            runner = config.runtime.runner or "e2b"
+        mode = config.runtime.mode if config and config.runtime else "pure-script"
+
+        if is_self_hosted_runner(runner):
+            message = (
+                f"Worker requested runner {runner!r}, but self-hosted runner "
+                "execution is not connected for this workspace yet."
+            )
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=message,
+                error_code="self_hosted_runner_unavailable",
                 user_id=owner_id,
-                error_code="missing_secret",
                 repos=repos_obj,
-            ):
-                log_fn(
-                    "Paused scheduled worker after repeated missing-secret setup failures",
-                    level="warning",
-                )
+            )
+            publish_run_part(
+                run_id,
+                {
+                    "type": "finish",
+                    "status": "failed",
+                    "error": message,
+                    "error_code": "self_hosted_runner_unavailable",
+                },
+            )
+            log_fn(message, level="error")
             return
+
+        if approval_propose_phase:
+            # Approval preview runs are allowed to build a proposal, but sensitive
+            # bindings are held until the engine-spawned approved follow-up run.
+            run_secrets = {}
+            secrets = {}
+            log_fn("Withholding secrets until approval", level="debug")
+            perf.mark("secrets_withheld")
+            perf.mark("loading_secrets_log")
+        else:
+            run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+            perf.mark("secrets")
+            log_fn("Loading secrets", level="debug")
+            perf.mark("loading_secrets_log")
+            secrets = run_secrets
+            missing = [s for s in config.secrets if s not in secrets]
+            if missing:
+                err = f"Missing secrets: {', '.join(missing)}"
+                update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
+                publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
+                log_fn(err, level="error")
+                if _maybe_pause_scheduled_worker_after_setup_failure(
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    user_id=owner_id,
+                    error_code="missing_secret",
+                    repos=repos_obj,
+                ):
+                    log_fn(
+                        "Paused scheduled worker after repeated missing-secret setup failures",
+                        level="warning",
+                    )
+                return
         perf.mark("check_secrets")
 
         # Resolve Composio connections declared in worker.yml.
         connection_ids: Dict[str, str] = {}
-        if config.connections:
+        if approval_propose_phase and config.connections:
+            log_fn("Withholding connections until approval", level="debug")
+            perf.mark("resolve_connections_withheld")
+        elif config.connections:
             log_fn("Resolving connections", level="debug")
             from runner_utils import _resolve_connections
             connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config, user_id=owner_id)
@@ -2339,6 +2833,30 @@ def execute_run(
         timeout_seconds = _resolved_worker_timeout_seconds(config)
         perf.mark("resolve_timeout")
         log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
+        if is_self_hosted_runner(runner):
+            message = (
+                f"Worker requested runner {runner!r}, but self-hosted runner "
+                "execution is not connected for this workspace yet."
+            )
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=message,
+                error_code="self_hosted_runner_unavailable",
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+            publish_run_part(
+                run_id,
+                {
+                    "type": "finish",
+                    "status": "failed",
+                    "error": message,
+                    "error_code": "self_hosted_runner_unavailable",
+                },
+            )
+            log_fn(message, level="error")
+            return
         perf.mark("executing_log")
         _mark_active_run_stage(run_id, "pre_sandbox")
         latest_run = repos_obj.runs.get_any(run_id=run_id)
@@ -2575,6 +3093,7 @@ def execute_run(
                 worker_id=worker_id,
                 owner_id=owner_id,
                 repos=repos_obj,
+                run_secrets=run_secrets,
             )
             repos_obj.runs.update_status(
                 user_id=owner_id,
@@ -2590,6 +3109,16 @@ def execute_run(
                 "label": label,
             })
             publish_run_part(run_id, {"type": "finish", "status": "pending_approval"})
+            # PostHog: run paused awaiting approval (single emit point). No-op
+            # when analytics is disabled; never raises.
+            _emit_approval_requested(
+                approval_id=approval_id,
+                run_id=run_id,
+                worker_id=worker_id,
+                owner_id=owner_id,
+                tool_name=decision_required.get("tool_name") or decision_required.get("tool"),
+                risk_level=decision_required.get("risk_level") or decision_required.get("risk"),
+            )
             log_fn(f"Run awaiting approval: {label}")
             # Fan-out: notify the run owner over WhatsApp if they have an active binding.
             try:
@@ -2664,6 +3193,16 @@ def execute_run(
         # gets a REAL, editable, runnable worker instead of a dead-end bundle.
         # The new worker id is stored on the run output AND broadcast via SSE
         # so /workers/new can navigate to /workers/<id>?edit=1.
+        if worker_id == _WORKER_AUTHOR_WORKER_ID or (
+            isinstance(outputs, dict) and "bundle" in outputs
+        ):
+            log_fn(
+                "worker-author registration gate: "
+                f"worker_id={worker_id!r} expected={_WORKER_AUTHOR_WORKER_ID!r} "
+                f"outputs_keys={sorted(outputs.keys()) if isinstance(outputs, dict) else type(outputs).__name__} "
+                f"artifact_count={len(artifacts or [])}",
+                level="debug",
+            )
         if worker_id == _WORKER_AUTHOR_WORKER_ID:
             try:
                 created_worker_id = _register_authored_worker(
@@ -2718,7 +3257,14 @@ def execute_run(
                 outputs = dict(outputs or {})
                 outputs["worker_creation_failed"] = True
 
-        update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
+        update_run_status(
+            run_id,
+            RunStatus.COMPLETED.value,
+            output=outputs,
+            user_id=owner_id,
+            repos=repos_obj,
+            run_secrets=run_secrets,
+        )
 
         # Feature #1386: fan-out a worker-created card to the owner's channel
         # bindings (Slack Block Kit DM + WhatsApp formatted message) when the
@@ -2791,6 +3337,18 @@ def execute_run(
     except Exception as exc:
         logger.exception("Run %s crashed for worker %s", run_id, worker_id)
         error_message = str(exc) or exc.__class__.__name__
+        # PostHog Error Tracking (Track A §A4): capture the real exception with
+        # type + stack trace so crashes group into debuggable issues, beyond the
+        # flat run_failed.error_category label. No-op + never raises when
+        # analytics is disabled. Stack text carries no prompt/completion bodies.
+        _emit_run_exception(
+            exc=exc,
+            run_id=run_id,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            trace_id=trace_id,
+            error_code="run_execution_exception",
+        )
         try:
             update_run_status(
                 run_id,

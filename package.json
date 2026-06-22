@@ -1,11 +1,11 @@
 {
-  "name": "workeros",
+  "name": "floom",
   "version": "1.0.0",
   "description": "The source-available, self-hosted runtime for AI workers. Sandboxed by default.",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
-    "url": "https://github.com/floomhq/workeros.git"
+    "url": "https://github.com/floomhq/floom.git"
   },
   "keywords": [
     "ai",
@@ -27,6 +27,7 @@
     "test:api": "python -m pytest tests -q -n auto --dist loadscope",
     "test:api:serial": "python -m pytest tests -q",
     "test:api:full": "python -m pytest apps/api/tests -q",
-    "test:crud": "python tests/crud_regression.py"
+    "test:crud": "python tests/crud_regression.py",
+    "sbom": "node scripts/generate-sbom.mjs"
   }
 }

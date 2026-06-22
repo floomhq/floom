@@ -112,7 +112,7 @@ def composio_execute(slug, payload):
     }
     headers = {"Content-Type": "application/json"}
     if WORKEROS_RUN_TOKEN:
-        headers["X-Workeros-Run-Token"] = WORKEROS_RUN_TOKEN
+        headers["X-Floom-Run-Token"] = WORKEROS_RUN_TOKEN
     req = urlrequest.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -124,7 +124,7 @@ def composio_execute(slug, payload):
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        return {"successful": False, "error": f"Workeros proxy HTTP {exc.code}: {detail}"}
+        return {"successful": False, "error": f"Floom proxy HTTP {exc.code}: {detail}"}
     except (URLError, TimeoutError, json.JSONDecodeError) as exc:
         return {"successful": False, "error": str(exc)}
 

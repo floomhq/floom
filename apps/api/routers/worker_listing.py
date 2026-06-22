@@ -20,6 +20,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from auth import AuthContext, get_auth_context
+from auth.local_workspaces import requested_local_workspace_id
 from core import hot_cache
 from db import Repositories, get_repos
 from models import WorkerInput, WorkerListSummary, WorkerSummaryInput
@@ -100,10 +101,7 @@ def list_workers(
     started = time.perf_counter()
     workspace_key = None
     if request is not None:
-        workspace_key = (
-            request.headers.get("x-workeros-workspace")
-            or request.query_params.get("workspace_id")
-        )
+        workspace_key = requested_local_workspace_id(request)
     cache_key = (
         "workers",
         _hot_cache_scope(),

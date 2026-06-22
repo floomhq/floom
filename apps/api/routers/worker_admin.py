@@ -531,7 +531,7 @@ async def suggest_worker_updates(
         return _WorkerSuggestResponse(has_conflicts=False, suggestions=[])
 
     prompt = (
-        "You are reviewing a Workeros worker configuration for consistency with a new description.\n\n"
+        "You are reviewing a Floom worker configuration for consistency with a new description.\n\n"
         f"New description from user:\n{payload.new_description}\n\n"
         f"Current worker.yml:\n{current_yml}\n\n"
         "Identify ONLY real conflicts between the new description and the existing config.\n"

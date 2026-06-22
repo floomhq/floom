@@ -1,4 +1,4 @@
-﻿# Workeros Design System
+# Floom Design System
 
 > Source of truth for the visual system deployed at `localhost:3000`.
 > Canonical tokens live in `apps/web/app/globals.css`.
@@ -12,7 +12,7 @@
 Calm, deliberate, premium without being theatrical. Think Linear × Apple System Settings × a warm kitchen table. Matte surfaces, one accent hue per mode, generous radius, zero gratuitous blur or parallax.
 
 **What this replaces:**
-- The legacy pre-release design system (emerald green, glass refraction, aurora backgrounds, Bricolage Grotesque) is **archived**. Do not use it for any new Workeros surfaces.
+- The legacy pre-release design system (emerald green, glass refraction, aurora backgrounds, Bricolage Grotesque) is **archived**. Do not use it for any new Floom surfaces.
 
 ---
 
@@ -292,16 +292,16 @@ A subtle grain overlay exists at 11% opacity (light) / 7% (dark), `mix-blend-mod
 
 ## 11. Anti-Patterns (NEVER ship)
 
-1. ❌ **Colored left borders on cards** — this is AI slop. the operator's words: "red cards look like ai slop."
-2. ❌ **Warm-tint backgrounds on warning rows** — no `bg-[rgba(249,115,91,0.04)]` on alert rows.
-3. ❌ **Multiple blues in dark mode** — only ONE blue hue: `oklch(0.72 0.14 250)`.
-4. ❌ **Blue primary buttons in light mode** — primary in light is `#181818` near-black.
-5. ❌ `rounded-md` / `rounded-sm` — use the radius token scale.
-6. ❌ **Purple/blue gradients, glass refraction, aurora blobs** — these belong to the old archived Floom system.
-7. ❌ **Emerald green accent** — replaced by blue (dark) / black (light).
-8. ❌ **Bricolage Grotesque, Instrument Serif, JetBrains Mono as display fonts** — archived. Use Geist Sans everywhere.
-9. ❌ **Fake dashboards, fake charts, fake testimonials, fabricated counts**
-10. ❌ **"Powered by AI" badges, sparkles, emojis**
+1. ? **Colored left borders on cards** — this is AI slop. the operator's words: "red cards look like ai slop."
+2. ? **Warm-tint backgrounds on warning rows** — no `bg-[rgba(249,115,91,0.04)]` on alert rows.
+3. ? **Multiple blues in dark mode** — only ONE blue hue: `oklch(0.72 0.14 250)`.
+4. ? **Blue primary buttons in light mode** — primary in light is `#181818` near-black.
+5. ? `rounded-md` / `rounded-sm` — use the radius token scale.
+6. ? **Purple/blue gradients, glass refraction, aurora blobs** — these belong to the old archived Floom system.
+7. ? **Emerald green accent** — replaced by blue (dark) / black (light).
+8. ? **Bricolage Grotesque, Instrument Serif, JetBrains Mono as display fonts** — archived. Use Geist Sans everywhere.
+9. ? **Fake dashboards, fake charts, fake testimonials, fabricated counts**
+10. ? **"Powered by AI" badges, sparkles, emojis**
 
 ---
 

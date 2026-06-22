@@ -16,7 +16,15 @@ import os
 
 
 def _short_link_base_url() -> str:
-    return (os.environ.get("WORKEROS_SHORT_LINK_BASE_URL") or "http://localhost:3000/s").rstrip("/")
+    explicit = os.environ.get("WORKEROS_SHORT_LINK_BASE_URL")
+    if explicit:
+        return explicit.rstrip("/")
+    frontend = (
+        os.environ.get("WORKERS_FRONTEND_URL")
+        or os.environ.get("WORKEROS_FRONTEND_URL")
+        or "http://localhost:3000"
+    ).rstrip("/")
+    return f"{frontend}/s"
 
 
 def _public_api_base_url() -> str:

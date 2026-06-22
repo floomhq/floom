@@ -1,6 +1,6 @@
 # Third-Party Licenses And SBOM
 
-Workeros is source-available under the Workeros Source Available License.
+Floom is source-available under the Floom Source Available License.
 Third-party packages keep their own licenses. This page is the release-time
 inventory policy for dependency license review and SBOM publication.
 
@@ -45,19 +45,27 @@ and CycloneDX JSON.
 Recommended commands:
 
 ```bash
-# Whole repository SPDX SBOM from GitHub's dependency graph
+# Repository SPDX SBOM from checked-in dependency manifests
+npm run sbom
+
+# Optional GitHub dependency-graph export when the repository is public/enabled
 gh api \
   -H "Accept: application/vnd.github+json" \
-  /repos/floomhq/workeros/dependency-graph/sbom \
-  > workeros-sbom.spdx.json
+  /repos/floomhq/floom/dependency-graph/sbom \
+  > docs/sbom/floom-sbom.github.spdx.json
 
 # Optional local cross-check when syft is installed
-syft . -o cyclonedx-json > workeros-sbom.cdx.json
+syft . -o cyclonedx-json > floom-sbom.cdx.json
 ```
+
+The current generated SPDX file is checked in at
+[`docs/sbom/floom-sbom.spdx.json`](sbom/floom-sbom.spdx.json). Attach that file
+to the GitHub release, along with any GitHub or Syft cross-check output used for
+the release.
 
 Release reviewers should check that:
 
-- No dependency license conflicts with Workeros source-available distribution.
+- No dependency license conflicts with Floom source-available distribution.
 - New dependencies are necessary and maintained.
 - High and critical production advisories are resolved or explicitly documented.
 - Generated SBOM files match the release tag, not an uncommitted working tree.

@@ -27,6 +27,10 @@ pyjwt==2.13.0
 cryptography==49.0.0
 lxml==6.1.1
 pytest-xdist==3.8.0
+# Server-side product analytics (PostHog). Fail-soft: no-op when POSTHOG_API_KEY
+# is unset, so dev/OSS/tests run without it. capture() is non-blocking (batches
+# on a background thread). See apps/api/services/analytics_posthog.py.
+posthog==7.19.2
 
 # Optional: AWS Bedrock / Claude model provider (resolved by litellm at runtime).
 # Not needed for the default OpenAI path and not installed by the test suite, so

@@ -156,7 +156,7 @@ def connect_github(
 
 @system_git_router.get("/system/git/repos", response_model=List[_GitRepoItem])
 def list_git_repos(auth: AuthContext = Depends(get_auth_context)) -> List[_GitRepoItem]:
-    """List GitHub repos that look like WorkerOS workspaces. Admin only."""
+    """List GitHub repos that look like Floom workspaces. Admin only."""
     from auth.guards import _require_admin
 
     _require_admin(auth)
@@ -307,7 +307,7 @@ def import_git_workspace(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    """Import workers and contexts from the linked GitHub repo into WorkerOS.
+    """Import workers and contexts from the linked GitHub repo into Floom.
 
     Clones the repo into a temp directory, parses each worker bundle, upserts
     into the repository, then cleans up. Safe to call on an existing install —

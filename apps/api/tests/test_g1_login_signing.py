@@ -120,6 +120,72 @@ def test_magic_link_is_single_use(monkeypatch, tmp_path):
         assert "already used" in second.json()["detail"].lower()
 
 
+# ---------------------------------------------------------------------------
+# #1702 — a failed/consumed magic link, when opened directly in a BROWSER,
+# redirects to /login?error=... instead of dumping raw {"detail": ...} JSON.
+# fetch()/API callers keep the JSON contract.
+# ---------------------------------------------------------------------------
+
+def test_consumed_link_browser_navigation_redirects_to_login_1702(monkeypatch, tmp_path):
+    main = _load_main(
+        monkeypatch, tmp_path, env={"WORKEROS_MAGIC_LINK_SECRET": "g1-magic-secret"}
+    )
+    with _client(main) as client:
+        _login_session(client)
+        token = client.post("/auth/magic-link").json()["url"].rsplit("/auth/magic/", 1)[1]
+
+        # First consume succeeds.
+        assert client.get(f"/auth/magic/{token}").status_code == 200
+
+        # Replay as a top-level browser navigation -> redirect to login, no JSON.
+        replayed = client.get(
+            f"/auth/magic/{token}",
+            headers={"sec-fetch-mode": "navigate"},
+            follow_redirects=False,
+        )
+        assert replayed.status_code == 303, replayed.text
+        location = replayed.headers["location"]
+        assert "/login?error=expired_link" in location
+        # No raw JSON body leaked.
+        assert "Auth callback failed" not in replayed.text
+        assert "already used" not in replayed.text
+
+
+def test_invalid_token_browser_navigation_redirects_to_login_1702(monkeypatch, tmp_path):
+    main = _load_main(
+        monkeypatch, tmp_path, env={"WORKEROS_MAGIC_LINK_SECRET": "g1-magic-secret"}
+    )
+    with _client(main) as client:
+        _login_session(client)
+        resp = client.get(
+            "/auth/magic/not-a-real-token",
+            headers={"sec-fetch-mode": "navigate"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303, resp.text
+        assert "/login?error=expired_link" in resp.headers["location"]
+
+
+def test_consumed_link_fetch_caller_keeps_json_contract_1702(monkeypatch, tmp_path):
+    # A programmatic fetch (no navigate mode) must still get the JSON error so the
+    # existing web MagicLinkPage fetch flow is unchanged.
+    main = _load_main(
+        monkeypatch, tmp_path, env={"WORKEROS_MAGIC_LINK_SECRET": "g1-magic-secret"}
+    )
+    with _client(main) as client:
+        _login_session(client)
+        token = client.post("/auth/magic-link").json()["url"].rsplit("/auth/magic/", 1)[1]
+        assert client.get(f"/auth/magic/{token}").status_code == 200
+
+        replayed = client.get(
+            f"/auth/magic/{token}",
+            headers={"sec-fetch-mode": "cors", "accept": "application/json"},
+            follow_redirects=False,
+        )
+        assert replayed.status_code == 400, replayed.text
+        assert "already used" in replayed.json()["detail"].lower()
+
+
 def test_legacy_magic_link_without_nonce_is_rejected(monkeypatch, tmp_path):
     """A token forged/issued without a nonce cannot be made one-time, so it is
     rejected rather than allowed unbounded reuse."""

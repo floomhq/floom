@@ -1,4 +1,4 @@
-"""HTTP route groups for the WorkerOS API.
+"""HTTP route groups for the Floom API.
 
 Each module here exposes an ``APIRouter`` that ``main`` mounts via
 ``app.include_router(...)``. Routers depend only on ``core``/``services`` and the

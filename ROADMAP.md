@@ -1,7 +1,7 @@
-# Workeros Roadmap
+# Floom Roadmap
 
 This roadmap is for contributors and users who want to understand where the
-source-available project is headed. It is intentionally deployment-neutral: Workeros
+source-available project is headed. It is intentionally deployment-neutral: Floom
 can run locally, on your own server, or behind whatever hosting stack you choose.
 
 ## Current Focus
@@ -28,7 +28,7 @@ observing AI workers.
 - Context/brain packs for worker reference material.
 - Git-backed worker and context version history when the workspace lives outside
   the engine source checkout.
-- CLI and MCP package published as `@floomhq/workeros`.
+- CLI and MCP package published as `@floomhq/floom`.
 - Web UI for workers, runs, connections, approvals, contexts, and settings.
 - Security posture for platform secrets, sandbox payloads, SSRF-sensitive MCP
   URLs, webhook tokens, magic links, and upload download tokens.

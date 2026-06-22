@@ -3,13 +3,13 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
 
 // User-facing brand is now "Floom", never "WorkerOS" or "Workeros".
-// Package/identifiers stay lowercase (workeros_*, WORKEROS_*, the CLI command
-// `workeros ...`) and component identifiers are allowed.
+// Package/identifiers may retain lowercase legacy compatibility names
+// (workeros_*, WORKEROS_*, x-workeros, legacy CLI aliases).
 // This scan guards against capitalized legacy brand display strings slipping in.
 
 const ROOT = resolve(__dirname, "..");
 const DIRS = ["app", "components"];
-const ALLOWED = /Workeros(Mark)?|WORKEROS_|x-workeros|workeros_session/;
+const ALLOWED = /WORKEROS_|x-workeros|workeros_session/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

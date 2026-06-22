@@ -4,8 +4,8 @@ This is an example worker (is_example: true). Copy and customise it.
 
 Requirements:
   - SLACK_BOT_TOKEN: Bot token with channels:history and chat:write scopes.
-  - WORKEROS_API_SECRET: Same secret used by the Workeros API.
-  - WORKEROS_API_BASE: Workeros API base URL (default: http://localhost:8000).
+  - WORKEROS_API_SECRET: Same secret used by the Floom API.
+  - WORKEROS_API_BASE: Floom API base URL (default: http://localhost:8000).
 """
 
 import json

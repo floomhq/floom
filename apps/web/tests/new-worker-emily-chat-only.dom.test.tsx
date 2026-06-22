@@ -92,7 +92,9 @@ describe("new worker = the consistent Emily empty state (no bespoke hero)", () =
     // Exactly one composer (centered in the empty state, no bottom clone).
     expect(composers).toHaveLength(1);
     expect(composers[0].tagName).toBe("TEXTAREA");
-    expect(screen.queryByRole("button", { name: /hire worker/i })).not.toBeInTheDocument();
+    // #1706: the landing send CTA is now aria-label="Hire worker" (canonical action name).
+    // Assert the bespoke hero HEADING is absent, not the action button.
+    expect(screen.queryByRole("heading", { name: /hire a new worker/i })).not.toBeInTheDocument();
   });
 
   it("clicking a home pill primes the composer with that prompt", async () => {

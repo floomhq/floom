@@ -1,5 +1,5 @@
 [Unit]
-Description=Hourly Workeros data snapshot
+Description=Hourly Workeros data snapshot (legacy compatibility unit)
 Requires=workeros-backup.service
 
 [Timer]

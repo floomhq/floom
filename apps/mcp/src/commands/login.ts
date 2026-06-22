@@ -1,10 +1,13 @@
-﻿import open from "open";
+import open from "open";
+import { mkdir, open as openFile, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
-  WorkerosApiClient,
-  WorkerosApiError,
+  FloomApiClient,
+  FloomApiError,
   resolveLoginApiBase,
 } from "../lib/api.js";
 import { promptYesNo } from "../lib/prompt.js";
+import { getCommandName } from "../lib/command-name.js";
 import { log } from "../lib/output.js";
 import {
   writeCredentials,
@@ -54,6 +57,59 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function loginLockPath(): string {
+  return join(dirname(credentialsPath()), "login.lock");
+}
+
+function processAppearsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function acquireLoginLock(): Promise<() => Promise<void>> {
+  const path = loginLockPath();
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const payload = {
+    pid: process.pid,
+    started_at: new Date().toISOString(),
+  };
+  try {
+    const handle = await openFile(path, "wx", 0o600);
+    await handle.writeFile(JSON.stringify(payload, null, 2) + "\n", "utf8");
+    await handle.close();
+  } catch (error) {
+    const existing: { pid?: unknown; started_at?: unknown } = await readFile(path, "utf8").then(
+      (raw) => JSON.parse(raw) as { pid?: unknown; started_at?: unknown },
+      () => ({}),
+    );
+    const pid = typeof existing.pid === "number" ? existing.pid : 0;
+    if (processAppearsAlive(pid)) {
+      throw new Error(
+        `Another ${getCommandName()} login is already running (pid ${pid}). ` +
+          "Finish it or stop that process before starting a new device code.",
+      );
+    }
+    await rm(path, { force: true });
+    const handle = await openFile(path, "wx", 0o600);
+    await handle.writeFile(JSON.stringify(payload, null, 2) + "\n", "utf8");
+    await handle.close();
+  }
+  return async () => {
+    const existing: { pid?: unknown } = await readFile(path, "utf8").then(
+      (raw) => JSON.parse(raw) as { pid?: unknown },
+      () => ({}),
+    );
+    if (existing.pid === process.pid) {
+      await rm(path, { force: true });
+    }
+  };
+}
+
 function retryAfterSecondsFromBody(body: unknown): number | null {
   if (!body || typeof body !== "object") return null;
   const detail = "detail" in body ? (body as { detail?: unknown }).detail : undefined;
@@ -82,7 +138,7 @@ function retryAfterSecondsFromHeader(headers: Headers | undefined): number | nul
 }
 
 export function cloudRateLimitRetryMs(
-  error: WorkerosApiError,
+  error: FloomApiError,
   pollingIntervalSeconds: number,
 ): number {
   const retryAfterSeconds =
@@ -95,7 +151,7 @@ export type LoginOptions = {
   cloud?: boolean;
 };
 
-// Heuristic: the cloud verification_url points at workeros.example.com
+// Heuristic: the cloud verification_url points at floom.example.com
 // (or /app/cli-auth). The OSS engine points at localhost:3000/cli-auth.
 // Lets the CLI auto-detect cloud-vs-oss even when --cloud is omitted, so a
 // user running `floom login` against WORKEROS_API_BASE=<cloud> still gets
@@ -103,7 +159,7 @@ export type LoginOptions = {
 function detectCloudFromVerificationUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    if (u.hostname === "workeros.example.com") return true;
+    if (u.hostname === "floom.example.com") return true;
     if (u.pathname.startsWith("/app/")) return true;
     return false;
   } catch {
@@ -135,11 +191,13 @@ async function fetchCloudBootstrap(apiBase: string): Promise<CloudBootstrap | nu
 }
 
 export async function runLoginCommand(options: LoginOptions = {}): Promise<number> {
+  const releaseLoginLock = await acquireLoginLock();
+  try {
   log.heading("Login");
   log.step("Requesting device authorization...");
 
   const loginApiBase = resolveLoginApiBase(options);
-  const client = new WorkerosApiClient(loginApiBase);
+  const client = new FloomApiClient(loginApiBase);
   // The engine endpoint /cli-auth/devices lives at /api/cli-auth/devices
   // when the cloud FastAPI app mounts the engine under /api. We don't have
   // saved credentials yet, so resolvePath in the client can't help. Probe
@@ -219,20 +277,20 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
         log.kv("API", polled.api_base);
         log.kv("Token saved to", credentialsPath());
         log.blank();
-        log.info("Try: floom workers list");
+        log.info(`Try: ${getCommandName()} workers list`);
         return 0;
       }
       await sleep(started.polling_interval_seconds * 1000);
     } catch (error) {
-      if (error instanceof WorkerosApiError) {
+      if (error instanceof FloomApiError) {
         if (error.status === 403) {
           log.err("CLI authorization was denied.");
-          log.info("Run: floom login to try again");
+          log.info(`Run: ${getCommandName()} login to try again`);
           return 1;
         }
         if (error.status === 410) {
           log.err("Device code expired before approval.");
-          log.info("Run: floom login to start a new session");
+          log.info(`Run: ${getCommandName()} login to start a new session`);
           return 1;
         }
         if (error.status === 404) {
@@ -243,7 +301,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
             continue;
           }
           log.err("Device code not found.");
-          log.info("Run: floom login to start a new session");
+          log.info(`Run: ${getCommandName()} login to start a new session`);
           return 1;
         }
         if (error.status === 409 && isCloud) {
@@ -264,12 +322,15 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
     }
   }
   log.err("Timed out waiting for CLI approval.");
-  log.info("Run: floom login to try again");
+  log.info(`Run: ${getCommandName()} login to try again`);
   return 1;
+  } finally {
+    await releaseLoginLock();
+  }
 }
 
 async function pollCloudExchange(args: {
-  client: WorkerosApiClient;
+  client: FloomApiClient;
   loginApiBase: string;
   deviceCode: string;
   userCode: string;
@@ -339,9 +400,9 @@ async function saveCloudCredentials(creds: StoredCredentials, apiBase: string): 
   log.kv("Token saved to", credentialsPath());
   log.blank();
   if (workspace) {
-    log.info("Tip: run `floom workers list` to inspect this workspace.");
+    log.info(`Tip: run \`${getCommandName()} workers list\` to inspect this workspace.`);
   } else {
-    log.info("Tip: run `floom workspaces list` to pick a workspace.");
+    log.info(`Tip: run \`${getCommandName()} workspaces list\` to pick a workspace.`);
   }
   return 0;
 }
@@ -350,7 +411,7 @@ export async function resolveInitialCloudWorkspace(
   credentials: StoredCredentials,
 ): Promise<WorkspaceRow | null> {
   try {
-    const client = new WorkerosApiClient(credentials.api_base, credentials);
+    const client = new FloomApiClient(credentials.api_base, credentials);
     const data = (await client.requestJson("GET", "/workspaces")) as WorkspaceListResponse;
     const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
     if (data.active_id) {

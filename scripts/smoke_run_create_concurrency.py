@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create Workeros runs concurrently against a live API.
+"""Create Floom runs concurrently against a live API.
 
 Used for S35 production smoke evidence. The script only verifies run-create
 responses; it does not wait for worker execution to finish.
@@ -24,7 +24,7 @@ def _read_secret(explicit: str | None) -> str:
     env_secret = os.environ.get("FLOOM_SECRET", "").strip()
     if env_secret:
         return env_secret
-    for path in (Path(".deploy-secret"), Path("/opt/workeros/.deploy-secret")):
+    for path in (Path(".deploy-secret"), Path("/opt/floom/.deploy-secret")):
         if path.is_file():
             return path.read_text().strip()
     raise SystemExit("FLOOM_SECRET or --secret is required")

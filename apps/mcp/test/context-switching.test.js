@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp, readFile } from "node:fs/promises";
@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { readCredentials, writeCredentials } from "../dist/lib/credentials.js";
-import { WorkerosApiClient } from "../dist/lib/api.js";
+import { FloomApiClient } from "../dist/lib/api.js";
 import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
 import { connectionsAddCommand, connectionsListCommand } from "../dist/commands/connections.js";
 import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
@@ -86,6 +86,7 @@ async function withStubServer(fn, { cloud = false } = {}) {
           id: "ws_created",
           name: parsedBody?.name || "Created",
           created_at: "2026-01-03",
+          ...(cloud ? { api_token: "floom_new_workspace_token" } : {}),
         }));
         return;
       }
@@ -223,11 +224,32 @@ test("workspace create posts to API and persists new active workspace", async ()
   });
 });
 
+test("cloud workspace create persists replacement workspace-scoped token", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "floom_old_workspace_token",
+        workspace_id: "ws_old",
+        workspace_name: "Old",
+        authed_at: new Date().toISOString(),
+      });
+      const code = await workspacesCreateCommand("Customer A", { json: true });
+      assert.equal(code, 0);
+      const creds = await readCredentials();
+      assert.equal(creds.workspace_id, "ws_created");
+      assert.equal(creds.workspace_name, "Customer A");
+      assert.equal(creds.api_token, "floom_new_workspace_token");
+    }, { cloud: true });
+  });
+});
+
 test("OSS auth headers carry the persisted active workspace", async () => {
   await withTempHome(async () => {
     await writeOssCreds("https://localhost:8000", { workspace_id: "ws_0123456789abcd" });
     const creds = await readCredentials();
-    const client = new WorkerosApiClient(creds.api_base, creds);
+    const client = new FloomApiClient(creds.api_base, creds);
     const headers = await client.authHeaders();
     assert.equal(headers["x-floom-secret"], "test-secret");
     assert.equal(headers["x-workeros-workspace"], "ws_0123456789abcd");
@@ -338,7 +360,7 @@ test("mcp install (OSS) bakes the active workspace header into the client config
     const code = await mcpInstallCommand({ target: "claude" });
     assert.equal(code, 0);
     const config = JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8"));
-    const entry = config.mcpServers.workeros;
+    const entry = config.mcpServers.floom;
     assert.equal(entry.headers["x-floom-secret"], "test-secret");
     assert.equal(entry.headers["x-workeros-workspace"], "ws_0123456789abcd");
   });
@@ -350,7 +372,7 @@ test("mcp install (OSS) omits the workspace header when no workspace is selected
     const code = await mcpInstallCommand({ target: "claude" });
     assert.equal(code, 0);
     const config = JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8"));
-    assert.equal(config.mcpServers.workeros.headers["x-workeros-workspace"], undefined);
+    assert.equal(config.mcpServers.floom.headers["x-workeros-workspace"], undefined);
   });
 });
 

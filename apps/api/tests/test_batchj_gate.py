@@ -139,11 +139,11 @@ def test_worker_detail_does_not_leak_bundle_path(client_and_main):
     bundle_path = runtime.get("bundle_path")
     # If present at all, it must be a bare basename — never an absolute host path.
     if bundle_path:
-        assert "/opt/workeros" not in bundle_path, bundle_path
+        assert "/opt/floom" not in bundle_path, bundle_path
         assert not bundle_path.startswith("/"), bundle_path
         assert "/" not in bundle_path, bundle_path
     # Belt: the whole serialized detail never contains the deploy dir.
-    assert "/opt/workeros/workers" not in resp.text
+    assert "/opt/floom/workers" not in resp.text
 
 
 def test_paused_worker_detail_reports_enabled_false(client_and_main):

@@ -1,4 +1,4 @@
-﻿"""E2B cloud sandbox driver for Workeros - uses e2b SDK 2.x.
+"""E2B cloud sandbox driver for Floom - uses e2b SDK 2.x.
 
 Worker protocol: run.py in an E2B worker reads inputs from inputs.json and
 MUST write result.json with:
@@ -588,7 +588,56 @@ def _default_template_resources(kind: str) -> tuple[int, int]:
     return memory_mb, cpu_count
 
 
+class TemplateProfileError(RuntimeError):
+    """A worker requested a template profile that the operator has not configured."""
+
+
+def _template_profile(config: WorkerConfig | None) -> str | None:
+    profile = getattr(config, "template_profile", None)
+    if not profile:
+        return None
+    text = str(profile).strip()
+    return text or None
+
+
+def _profile_template_env_key(profile: str) -> str:
+    # #1764: map a logical profile (e.g. "workeros-dev") to its operator env key
+    # (WORKEROS_E2B_TEMPLATE_PROFILE_WORKEROS_DEV). The profile name is
+    # author-supplied; sanitize to a safe env-key suffix.
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", profile).strip("_").upper()
+    return f"WORKEROS_E2B_TEMPLATE_PROFILE_{slug}"
+
+
+def _resolve_template_profile(profile: str) -> str | None:
+    """Resolve an operator-approved profile to a template id.
+
+    Returns the configured template id, or ``None`` when the profile is
+    unconfigured and the fallback policy permits falling through to the existing
+    runtime-kind/resource-bucket resolution. Raises ``TemplateProfileError`` under
+    the default (strict) policy so unknown profiles fail clearly instead of
+    silently running on the wrong toolchain.
+    """
+    env_key = _profile_template_env_key(profile)
+    value = (os.environ.get(env_key) or "").strip()
+    if value:
+        return value
+    policy = (os.environ.get("WORKEROS_E2B_TEMPLATE_PROFILE_FALLBACK") or "strict").strip().lower()
+    if policy == "default":
+        return None
+    raise TemplateProfileError(
+        f"Worker requested E2B template profile {profile!r}, but the operator has not "
+        f"configured it (set {env_key} to a template id, or set "
+        "WORKEROS_E2B_TEMPLATE_PROFILE_FALLBACK=default to fall back to the default template)."
+    )
+
+
 def _e2b_template_for_config(config: WorkerConfig | None) -> str | None:
+    profile = _template_profile(config)
+    if profile:
+        resolved = _resolve_template_profile(profile)
+        if resolved:
+            return resolved
+        # policy=default: profile unconfigured, fall through to legacy resolution.
     kind = _runtime_kind(config)
     memory_mb, cpu_count = _worker_resources(config)
     for resource_env in _resource_template_env_keys(kind, memory_mb, cpu_count):
@@ -664,6 +713,18 @@ def _e2b_template_for_run(
         )
 
     template = _e2b_template_for_config(config)
+    profile = _template_profile(config)
+    if profile:
+        # #1764: surface that a custom profile drove selection without leaking the
+        # raw template id (an internal infra identifier, see #1700).
+        if (os.environ.get(_profile_template_env_key(profile)) or "").strip():
+            log_fn(f"[e2b] Using operator-approved template profile {profile!r}", "info")
+        else:
+            log_fn(
+                f"[e2b] Template profile {profile!r} is not configured; falling back to the "
+                "default template per WORKEROS_E2B_TEMPLATE_PROFILE_FALLBACK=default policy",
+                "warning",
+            )
     kind = _runtime_kind(config)
     memory_mb, cpu_count = _worker_resources(config)
     resource_envs = _resource_template_env_keys(kind, memory_mb, cpu_count)
@@ -684,7 +745,10 @@ def _sandbox_resource_log_line(config: WorkerConfig | None, sandbox_template: st
     default_memory_mb, default_cpu_count = _default_template_resources(kind)
     memory_label = f"{requested_memory_mb}MB requested" if requested_memory_mb else f"{default_memory_mb}MB template default"
     cpu_label = f"{requested_cpu_count} requested" if requested_cpu_count else f"{default_cpu_count} template default"
-    template_label = sandbox_template or "E2B SDK default template"
+    # #1700: never emit the raw E2B template id (e.g. gzm0071hrus9jwkse7w6) into
+    # run logs; it is an internal infra identifier. Report whether a custom
+    # template was used without exposing the id.
+    template_label = "custom template" if sandbox_template else "E2B SDK default template"
     return (
         "[e2b] Sandbox resources: "
         f"memory={memory_label}, cpu={cpu_label}, template={template_label}. "
@@ -847,13 +911,33 @@ def _timeout_elapsed_near_cap(elapsed_seconds: float, timeout_seconds: int) -> b
     return elapsed_seconds >= max(1.0, cap * 0.9)
 
 
+# Low-level transport/library exceptions surface their __repr__ as the message,
+# e.g. h2 emits "<ConnectionTerminated error_code:1, last_stream_id:343, ...>"
+# (h2/events.py). That repr is internal noise to an operator and must never be
+# stored in the user-visible run.error (#1700). Collapse any such angle-bracket
+# library repr to its class name; the full exception is still captured in the
+# server logs via logger.exception().
+_LIBRARY_REPR_RE = re.compile(r"<([A-Za-z_][A-Za-z0-9_]*)\b[^>]*>")
+
+
+def _sanitize_sandbox_exception_detail(detail: str) -> str:
+    """Strip raw library exception reprs from a sandbox error detail string.
+
+    Keeps a human-meaningful summary (the exception type name) instead of the
+    full ``<ConnectionTerminated error_code:1, last_stream_id:343, ...>`` repr.
+    """
+    cleaned = _LIBRARY_REPR_RE.sub(lambda m: m.group(1), detail or "")
+    return cleaned.strip()
+
+
 def _sandbox_exception_result(
     exc: Exception,
     *,
     elapsed_seconds: float,
     timeout_seconds: int,
 ) -> WorkerResult:
-    detail = str(exc).strip() or exc.__class__.__name__
+    raw_detail = str(exc).strip() or exc.__class__.__name__
+    detail = _sanitize_sandbox_exception_detail(raw_detail) or exc.__class__.__name__
     if _looks_like_timeout_exception(exc) and _timeout_elapsed_near_cap(elapsed_seconds, timeout_seconds):
         return WorkerResult(
             status="error",
@@ -1698,7 +1782,11 @@ class E2BSandboxDriver(SandboxDriver):
                 elapsed_seconds=elapsed_seconds,
                 timeout_seconds=effective_timeout_seconds,
             )
-            log_fn(f"E2B sandbox error after {elapsed_seconds:.3f}s: {result.error}", "error")
+            # #1700: prefix with [e2b] so the operator Logs tab filters this
+            # infra line, and log the SANITIZED result.error (never the raw h2
+            # ConnectionTerminated repr). The full exception is already captured
+            # above via logger.exception() for server-side debugging.
+            log_fn(f"[e2b] Sandbox error after {elapsed_seconds:.3f}s: {result.error}", "error")
             return result
 
     def _run_in_sandbox(

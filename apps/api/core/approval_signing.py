@@ -97,3 +97,43 @@ def try_approval_public_token(approval: Dict[str, Any]) -> Optional[str]:
     if not secret:
         return None
     return _sign(secret, approval)
+
+
+def _approvals_base_url() -> str:
+    """Public frontend base for user-facing approval deep links.
+
+    Honour the same host the rest of the engine uses: WORKEROS_PUBLIC_URL is the
+    explicit override; otherwise fall back to WORKERS_FRONTEND_URL (used by the
+    email/alert links) so a self-hosted deployment that sets one host gets
+    correct links everywhere, not a hardcoded example.com.
+    """
+    return (
+        os.environ.get("WORKEROS_PUBLIC_URL")
+        or os.environ.get("WORKERS_FRONTEND_URL")
+        or "https://localhost:3000"
+    ).rstrip("/")
+
+
+def try_approval_review_url(approval: Dict[str, Any]) -> Optional[str]:
+    """Build the tokenised `/approvals/review` deep link for an approval, or None.
+
+    Single source of truth for the operator-facing approval/review URL so the
+    chat tool (Emily), the run-detail serializer, and the CLI all emit the SAME
+    link instead of each re-deriving the host + token shape. `approval` must
+    carry ``id``, ``run_id`` and ``owner_id``.
+
+    DEGRADE, never raise: when no signer secret is configured (e.g. hosted mode)
+    the token mint returns None, so this returns None and callers simply omit the
+    link rather than failing the whole response.
+    """
+    approval_id = approval.get("id")
+    run_id = approval.get("run_id")
+    owner_id = approval.get("owner_id")
+    if not (approval_id and run_id and owner_id):
+        return None
+    token = try_approval_public_token(
+        {"id": approval_id, "run_id": run_id, "owner_id": owner_id}
+    )
+    if not token:
+        return None
+    return f"{_approvals_base_url()}/approvals/review?id={approval_id}&token={token}"

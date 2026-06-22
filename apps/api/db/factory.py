@@ -15,6 +15,7 @@ from .interface import (
     FeedbackRepository,
     McpToolRepository,
     PersonalAccessTokenRepository,
+    RunFeedbackRepository,
     RunRepository,
     SecretRepository,
     UserRepository,
@@ -31,6 +32,7 @@ from .sqlite import (
     SqliteFeedbackRepository,
     SqliteMcpToolRepository,
     SqlitePersonalAccessTokenRepository,
+    SqliteRunFeedbackRepository,
     SqliteRunRepository,
     SqliteSecretRepository,
     SqliteUserRepository,
@@ -62,6 +64,9 @@ class Repositories(NamedTuple):
     # Worker feedback (migration 63). Optional with default for backwards compat
     # so a downstream factory predating it keeps constructing Repositories(...).
     feedback: Optional[FeedbackRepository] = None
+    # Run feedback (#1807). Optional so downstream repository factories can adopt
+    # it independently without breaking older deploys.
+    run_feedback: Optional[RunFeedbackRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -80,6 +85,7 @@ def _local_repositories() -> Repositories:
         tokens=SqlitePersonalAccessTokenRepository(),
         sessions=SqliteUserSessionRepository(),
         feedback=SqliteFeedbackRepository(),
+        run_feedback=SqliteRunFeedbackRepository(),
     )
 
 

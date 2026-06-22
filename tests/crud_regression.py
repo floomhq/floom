@@ -238,7 +238,7 @@ def test_worker_pause_unpause() -> None:
 def main() -> None:
     global BASE, HEADERS, SECRET
 
-    parser = argparse.ArgumentParser(description="Workeros CRUD regression tests")
+    parser = argparse.ArgumentParser(description="Floom CRUD regression tests")
     parser.add_argument("--base", default=BASE, help="API base URL")
     args = parser.parse_args()
     BASE = args.base.rstrip("/")

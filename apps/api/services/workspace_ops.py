@@ -1,4 +1,4 @@
-﻿"""Workspace operations: instructions/base-persona git commits, membership,
+"""Workspace operations: instructions/base-persona git commits, membership,
 and the workspace-template export (zip build, share token, payload).
 
 The active-workspace resolver, member projection + owner-membership guard, the
@@ -131,7 +131,7 @@ def _ensure_owner_membership(
 def _git_commit_workspace_md(
     *,
     message: str,
-    author_name: str = "WorkerOS",
+    author_name: str = "Floom",
     author_email: str = "workeros@local",
 ) -> None:
     import git_ops as _git_ops
@@ -154,7 +154,7 @@ def _git_commit_workspace_md(
 def _git_commit_workspace_base_md(
     *,
     message: str,
-    author_name: str = "WorkerOS",
+    author_name: str = "Floom",
     author_email: str = "workeros@local",
 ) -> None:
     import git_ops as _git_ops
@@ -205,6 +205,7 @@ def _build_workspace_template_zip(
     user_id: str,
     repos: Repositories,
     exported_at: Optional[str] = None,
+    include_issues: bool = False,
 ) -> bytes:
     """Build the workspace template .zip and return its raw bytes.
 
@@ -212,6 +213,12 @@ def _build_workspace_template_zip(
     signed public ``GET /workspace/template/{token}`` share-link download so the
     bundle layout, the example/system exclusions, and the no-secret-value
     guarantee live in exactly ONE place.
+
+    ``include_issues`` bundles the git-backed workspace issues (``.floom/issues``)
+    so the owner's own export/import round trip preserves them (#1781). It is OFF
+    by default: issues are an operating record that may hold sensitive notes, so
+    the public share-link template (a reusable scaffold for OTHER users) must not
+    carry them.
     """
     from contexts import current_contexts_root, ensure_contexts_dir, iter_context_files, load_context_metadata
 
@@ -281,6 +288,18 @@ def _build_workspace_template_zip(
         if has_workspace_md:
             zf.writestr("workspace.md", _WS_MD_PATH.read_bytes())
 
+        # ---- git-backed workspace issues (.floom/issues) --------------
+        # The bundle is an allow-list, not a raw git copy, so issues must be
+        # emitted explicitly or they would be dropped from export/import (#1781).
+        # Owner export only — never on the public share-link template.
+        issue_count = 0
+        if include_issues:
+            from services.workspace_issues import iter_issue_export_files
+            issue_files = iter_issue_export_files()
+            for name, data in issue_files:
+                zf.writestr(f"issues/{name}", data)
+            issue_count = sum(1 for name, _ in issue_files if name.endswith(".md"))
+
         # ---- manifest -------------------------------------------------
         # Aggregate the full set of secret/connection NAMES to reconnect.
         all_secret_names: set[str] = set()
@@ -300,6 +319,7 @@ def _build_workspace_template_zip(
             "counts": {
                 "workers": len(worker_manifest_entries),
                 "contexts": len(context_manifest_entries),
+                "issues": issue_count,
             },
         }
         zf.writestr("workspace.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")

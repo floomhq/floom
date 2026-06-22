@@ -1,10 +1,10 @@
 # Workspace Agent
 
-The workspace agent is the operator-facing assistant for a Workeros workspace.
+The workspace agent is the operator-facing assistant for a Floom workspace.
 It combines:
 
 - `workspace.base.md`: optional editable Emily base-persona override. If absent,
-  Workeros uses the built-in Emily default.
+  Floom uses the built-in Emily default.
 - `workspace.md`: editable workspace custom instructions layered on top of the
   base persona.
 - A live workspace snapshot: workers, recent run state, brain packs, and
@@ -58,7 +58,7 @@ status belong to the Slack lane.
 
 ## Connections And Scopes
 
-OAuth scopes are granted at the provider connection level. Workeros can enforce
+OAuth scopes are granted at the provider connection level. Floom can enforce
 per-worker capability allowlists in its own proxy layer, but it cannot make an
 already-broad upstream OAuth token cryptographically narrower at the provider.
 For hard isolation, create a separate provider connection with narrower scopes.
@@ -75,7 +75,7 @@ connections:
       - GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID
 ```
 
-The structured allowlist is enforced by the Workeros Composio proxy for E2B
+The structured allowlist is enforced by the Floom Composio proxy for E2B
 workers. It is separate from the upstream OAuth scope grant.
 
 ## Brain Packs

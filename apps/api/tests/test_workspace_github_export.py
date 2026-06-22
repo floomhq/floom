@@ -102,7 +102,7 @@ def _mock_git(monkeypatch):
     git_ops = importlib.import_module("git_ops")
     calls: list[tuple[str, object]] = []
 
-    def commit_paths(workspace_dir, rel_paths, message, author_name="WorkerOS", author_email="workeros@local"):
+    def commit_paths(workspace_dir, rel_paths, message, author_name="Floom", author_email="workeros@local"):
         calls.append(("commit", (workspace_dir, rel_paths, message, author_name, author_email)))
         return "abc1234"
 

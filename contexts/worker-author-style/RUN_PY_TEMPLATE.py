@@ -16,7 +16,7 @@
 #   2. Secrets are available in os.environ (the harness sets them) and ALSO in a
 #      `secrets.json` file. Read os.environ first, fall back to secrets.json.
 #      Connections (Composio) are in `connections.json` when present. Call
-#      Composio through the Workeros proxy, never by shelling out to the CLI.
+#      Composio through the Floom proxy, never by shelling out to the CLI.
 #   3. The worker writes its output file(s) under `out/` (mkdir it).
 #   4. The worker writes `result.json` IN THE WORKING DIRECTORY (NOT under out/),
 #      with the EXACT schema below, on BOTH the success and the error path, then
@@ -93,7 +93,7 @@ def _load_connections():
 
 
 def composio_execute(app, tool_slug, arguments):
-    """Execute a declared Composio tool through the Workeros API proxy."""
+    """Execute a declared Composio tool through the Floom API proxy."""
     run_id = os.environ.get("FLOOM_RUN_ID", "")
     api_url = os.environ.get("WORKEROS_API_URL", "https://localhost:8000").rstrip("/")
     run_token = os.environ.get("WORKEROS_RUN_TOKEN", "")
@@ -105,7 +105,7 @@ def composio_execute(app, tool_slug, arguments):
 
     headers = {"Content-Type": "application/json"}
     if run_token:
-        headers["X-Workeros-Run-Token"] = run_token
+        headers["X-Floom-Run-Token"] = run_token
 
     body = json.dumps({
         "connected_account_id": connection_id,

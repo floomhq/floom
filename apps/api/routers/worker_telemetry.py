@@ -32,6 +32,7 @@ from models import (
     assert_safe_outbound_url,
 )
 from services.public_view import _redact_public_log_message
+from services.run_metrics import duration_summary, failures_by_category
 from services.worker_access import _active_local_workspace_id, _get_visible_worker
 from services.worker_serialize import _get_stats_batch, _get_timeseries_batch
 
@@ -83,25 +84,15 @@ def get_worker_stats(
         user_id=auth.user_id, worker_ids=[worker_id], days=30
     ).get(worker_id)
 
-    # Aggregate duration and last failure from raw run rows
+    # Aggregate duration and last failure from raw run rows. duration_summary
+    # excludes orphaned/never-closed runs (duration > absolute timeout ceiling)
+    # so a single stuck run can't poison avg/p95, and adds a robust median.
     runs_30d_rows, _ = repos.runs.list(
         user_id=auth.user_id,
         worker_id=worker_id,
         limit=200,
     )
-    durations = [
-        r["duration_ms"]
-        for r in runs_30d_rows
-        if r.get("duration_ms") is not None
-    ]
-    avg_duration_ms: Optional[float] = (
-        sum(durations) / len(durations) if durations else None
-    )
-    p95_duration_ms: Optional[float] = None
-    if durations:
-        sorted_d = sorted(durations)
-        idx = max(0, int(len(sorted_d) * 0.95) - 1)
-        p95_duration_ms = float(sorted_d[idx])
+    dur = duration_summary(runs_30d_rows)
 
     failed_rows = [
         r for r in runs_30d_rows if r.get("status") == RunStatus.FAILED.value
@@ -116,9 +107,12 @@ def get_worker_stats(
         success_rate_change_7d=stats_7d.success_rate_change_7d if stats_7d else None,
         runs_30d=stats_30d.runs_7d if stats_30d else 0,
         success_rate_30d=stats_30d.success_rate_7d if stats_30d else None,
-        avg_duration_ms=avg_duration_ms,
-        p95_duration_ms=p95_duration_ms,
+        avg_duration_ms=dur["avg_duration_ms"],
+        median_duration_ms=dur["median_duration_ms"],
+        p95_duration_ms=dur["p95_duration_ms"],
+        duration_outliers_excluded=dur["duration_outliers_excluded"],
         total_failures=len(failed_rows),
+        failures_by_category=failures_by_category(failed_rows),
         last_error=last_failure.get("error") if last_failure else None,
         last_error_at=last_failure.get("completed_at") or last_failure.get("created_at") if last_failure else None,
     )
@@ -164,19 +158,26 @@ def get_workspace_stats(
         w_row = next((w for w in workers if w["id"] == most_active_worker_id), None)
         most_active_worker_name = w_row.get("name") if w_row else None
 
-    # Avg duration across recent runs
+    # Duration + failure taxonomy across recent runs. duration_summary excludes
+    # orphaned/never-closed runs so a single stuck run can't poison the headline.
     runs_rows, _ = repos.runs.list(
         user_id=auth.user_id, limit=200
     )
-    durations = [r["duration_ms"] for r in runs_rows if r.get("duration_ms") is not None]
-    avg_duration_ms: Optional[float] = sum(durations) / len(durations) if durations else None
+    dur = duration_summary(runs_rows)
+    failed_rows = [
+        r for r in runs_rows if r.get("status") == RunStatus.FAILED.value
+    ]
 
     return WorkspaceStats(
         total_workers=total_workers,
         active_workers=active_workers,
         total_runs_7d=total_runs_7d,
         success_rate_7d=success_rate_7d,
-        avg_duration_ms=avg_duration_ms,
+        avg_duration_ms=dur["avg_duration_ms"],
+        median_duration_ms=dur["median_duration_ms"],
+        p95_duration_ms=dur["p95_duration_ms"],
+        duration_outliers_excluded=dur["duration_outliers_excluded"],
+        failures_by_category=failures_by_category(failed_rows),
         most_active_worker_id=most_active_worker_id,
         most_active_worker_name=most_active_worker_name,
     )

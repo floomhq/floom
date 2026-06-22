@@ -8,7 +8,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from services.worker_registry_ops import _embed_files_in_skill_version
-from services.worker_serialize import _should_ignore_worker_file
+from services.worker_serialize import (
+    _is_secret_bearing_export_path,
+    _should_ignore_worker_file,
+)
 
 
 def test_worker_file_ignore_drops_engine_backup_artifacts():
@@ -20,6 +23,44 @@ def test_worker_file_ignore_drops_engine_backup_artifacts():
     assert not _should_ignore_worker_file("run.py")
     assert not _should_ignore_worker_file("lib/search.py")
     assert not _should_ignore_worker_file(".python-version")
+
+
+def test_worker_file_ignore_drops_credential_files_1681():
+    # #1681: credential/secret-bearing files must never surface in the worker
+    # Source file tree. The reported leak was vertex-wif-cred.json.
+    assert _should_ignore_worker_file("vertex-wif-cred.json")
+    assert _should_ignore_worker_file("config/vertex-wif-cred.json")
+    assert _should_ignore_worker_file("gcp-service-account.json")
+    assert _should_ignore_worker_file("my_service_account.json")
+    assert _should_ignore_worker_file("prod-sa.json")
+    assert _should_ignore_worker_file("app_creds.json")
+    assert _should_ignore_worker_file(".env")
+    assert _should_ignore_worker_file(".env.production")
+    assert _should_ignore_worker_file("server.pem")
+    assert _should_ignore_worker_file("client.key")
+    assert _should_ignore_worker_file("credentials.json")
+
+    # Legitimate worker files must still be listed.
+    assert not _should_ignore_worker_file("run.py")
+    assert not _should_ignore_worker_file("worker.yml")
+    assert not _should_ignore_worker_file("data/results.json")
+    assert not _should_ignore_worker_file("schema.json")
+    assert not _should_ignore_worker_file("package.json")
+
+
+def test_is_secret_bearing_export_path_credential_patterns_1681():
+    assert _is_secret_bearing_export_path("vertex-wif-cred.json")
+    assert _is_secret_bearing_export_path("foo/bar/gcp-service-account.json")
+    assert _is_secret_bearing_export_path("svc_sa.json")
+    assert _is_secret_bearing_export_path("token.pem")
+    # Not a credential file (delimited-token match avoids false positives).
+    assert not _is_secret_bearing_export_path("results.json")
+    assert not _is_secret_bearing_export_path("manifest.json")
+    assert not _is_secret_bearing_export_path("my-wifi.json")
+    assert not _is_secret_bearing_export_path("usa.json")
+    assert not _is_secret_bearing_export_path("visa.json")
+    assert not _is_secret_bearing_export_path("package.json")
+    assert not _is_secret_bearing_export_path("tsconfig.json")
 
 
 def test_embed_files_skips_bak_files_and_preserves_canonical_files(monkeypatch, tmp_path):
