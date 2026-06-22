@@ -2,7 +2,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { runLoginCommand } from "./commands/login.js";
 import { runLogoutCommand } from "./commands/logout.js";
 import { runWhoamiCommand } from "./commands/whoami.js";
@@ -49,13 +49,14 @@ import {
 import { completionCommand } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { main as runServer } from "./server.js";
+import {
+  type CommandName,
+  getCommandName,
+  resolveCommandName,
+  setCommandName,
+} from "./lib/command-name.js";
 
 type RunResult = Promise<number> | number;
-
-function inferCommandName(argv = process.argv): "workeros" | "floom" {
-  const invoked = argv[1] ? basename(argv[1]) : "";
-  return invoked === "workeros" ? "workeros" : "floom";
-}
 
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -71,7 +72,7 @@ async function runAction(result: RunResult): Promise<void> {
   }
 }
 
-export function buildCliProgram(commandName: "workeros" | "floom" = "floom"): Command {
+export function buildCliProgram(commandName: CommandName = "floom"): Command {
   const program = new Command();
   program
     .name(commandName)
@@ -141,7 +142,7 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "floom"): Co
     .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
     .action(async (dir: string) => runAction(workersPushCommand(dir)));
   workers.command("run")
-    .description("Trigger a worker run (alias for `floom run`)")
+    .description(`Trigger a worker run (alias for \`${commandName} run\`)`)
     .argument("<id>", "Worker id")
     .option("--input <key=value>", "Input key/value (repeatable)", (value: string, acc: string[]) => [...acc, value], [])
     .option("-f, --inputs-file <path>", "Path to JSON inputs object")
@@ -308,10 +309,19 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "floom"): Co
 }
 
 export async function main(argv = process.argv): Promise<void> {
-  const commandName = inferCommandName(argv);
+  const commandName = resolveCommandName(argv);
+  setCommandName(commandName);
   const program = buildCliProgram(commandName);
   const args = argv.slice(2);
   if (args.length === 0) {
+    // MCP clients launch the server with a piped stdin (no TTY). A human running
+    // the bare command in a terminal instead gets help and a non-zero exit,
+    // rather than a silently-hanging stdio server.
+    if (process.stdin.isTTY) {
+      program.outputHelp();
+      process.exitCode = 1;
+      return;
+    }
     await runServer();
     return;
   }
@@ -334,7 +344,7 @@ const executedPath = resolveExecutedPath(process.argv[1]);
 if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`${inferCommandName()} failed: ${message}`);
+    console.error(`${getCommandName()} failed: ${message}`);
     process.exit(1);
   });
 }

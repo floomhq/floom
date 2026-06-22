@@ -1,5 +1,6 @@
 import { createAuthenticatedClient, FloomApiError, type FloomApiClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
+import { getCommandName } from "../lib/command-name.js";
 import { updateCredentials, type StoredCredentials } from "../lib/credentials.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
@@ -110,7 +111,7 @@ export async function workspacesShowCommand(options: { json?: boolean }): Promis
       return 0;
     }
     if (!payload.id) {
-      log.info("No active workspace. Run `floom workspaces list` then `floom workspaces switch <name-or-id>`.");
+      log.info(`No active workspace. Run \`${getCommandName()} workspaces list\` then \`${getCommandName()} workspaces switch <name-or-id>\`.`);
       return 0;
     }
     log.heading("Active workspace");
@@ -142,8 +143,8 @@ export async function workspacesSwitchCommand(target: string): Promise<number> {
     if (!match) {
       log.err(`No authenticated workspace matches "${target}".`);
       process.stderr.write(
-        "Run `floom workspaces list` to see workspaces your credentials can access.\n" +
-        "If the workspace belongs to another account, authenticate first: floom login" +
+        `Run \`${getCommandName()} workspaces list\` to see workspaces your credentials can access.\n` +
+        `If the workspace belongs to another account, authenticate first: ${getCommandName()} login` +
         (credentials.mode === "cloud" ? " --cloud" : "") + "\n",
       );
       return 1;
@@ -156,7 +157,7 @@ export async function workspacesSwitchCommand(target: string): Promise<number> {
       } catch (error) {
         if (error instanceof FloomApiError && error.status === 404) {
           log.err(`Workspace ${match.id} was not accepted by the server.`);
-          process.stderr.write("Re-run `floom workspaces list` and try again.\n");
+          process.stderr.write(`Re-run \`${getCommandName()} workspaces list\` and try again.\n`);
           return 1;
         }
         throw error;
@@ -167,7 +168,7 @@ export async function workspacesSwitchCommand(target: string): Promise<number> {
       workspace_name: match.name,
     });
     log.ok(`Active workspace set to ${match.name} (${match.id}).`);
-    log.step("Installed MCP client configs pin the workspace at install time. Re-run `floom mcp install` to repoint them.");
+    log.step(`Installed MCP client configs pin the workspace at install time. Re-run \`${getCommandName()} mcp install\` to repoint them.`);
     return 0;
   } catch (error) {
     const handled = handleAuthError(error);

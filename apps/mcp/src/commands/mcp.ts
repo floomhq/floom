@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createAuthenticatedClient, FloomApiClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
+import { getCommandName } from "../lib/command-name.js";
 import { readCredentials, updateCredentials } from "../lib/credentials.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
@@ -145,7 +146,7 @@ async function resolveMcpConfig(
 ): Promise<McpConfig> {
   if (credentials.mode === "oss") {
     if (!credentials.api_secret) {
-      throw new Error("OSS credentials missing api_secret. Run: floom login");
+      throw new Error(`OSS credentials missing api_secret. Run: ${getCommandName()} login`);
     }
     const headers: Record<string, string> = { "x-floom-secret": credentials.api_secret };
     // OSS scopes by header, not URL: bake the active workspace in so the MCP
@@ -170,7 +171,7 @@ async function resolveMcpConfig(
     throw new Error(
       "Cloud MCP install requires a Personal Access Token (PAT).\n" +
       "Generate one at https://floom.ai/settings/tokens, then run:\n" +
-      "  floom login --pat <your-token>",
+      `  ${getCommandName()} login --pat <your-token>`,
     );
   }
 
@@ -187,7 +188,7 @@ async function resolveMcpConfig(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(
-        `Could not resolve workspace ID. Set WORKEROS_WORKSPACE_ID or run: floom login\nDetails: ${msg}`,
+        `Could not resolve workspace ID. Set WORKEROS_WORKSPACE_ID or run: ${getCommandName()} login\nDetails: ${msg}`,
       );
     }
   }
@@ -205,7 +206,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
   const credentials = await readCredentials();
   if (!credentials) {
     log.err("Not logged in. Cannot install MCP config without credentials.");
-    log.info("Run: floom login");
+    log.info(`Run: ${getCommandName()} login`);
     return 1;
   }
 
@@ -306,7 +307,7 @@ export async function mcpUninstallCommand(options: { target?: ClientTarget }): P
   }
 
   log.warn("No Floom MCP config entries were found.");
-  log.info("Install first: floom mcp install");
+  log.info(`Install first: ${getCommandName()} mcp install`);
   return 0;
 }
 
@@ -343,7 +344,7 @@ export async function mcpListCommand(options: { json?: boolean }): Promise<numbe
     }
     if (servers.length === 0) {
       log.info("No MCP servers configured.");
-      log.info("Add one: floom connections import-mcp-config <path>");
+      log.info(`Add one: ${getCommandName()} connections import-mcp-config <path>`);
       return 0;
     }
     process.stdout.write(renderTable(
@@ -381,15 +382,15 @@ export async function mcpSwitchCommand(target: string): Promise<number> {
     if (!match) {
       log.err(`No configured MCP server matches "${target}".`);
       process.stderr.write(
-        "Run `floom mcp list` to see configured servers, or add one with " +
-        "`floom connections import-mcp-config <path>`.\n",
+        `Run \`${getCommandName()} mcp list\` to see configured servers, or add one with ` +
+        `\`${getCommandName()} connections import-mcp-config <path>\`.\n`,
       );
       return 1;
     }
     const label = mcpRowLabel(match);
     await updateCredentials({ active_mcp_label: label });
     log.ok(`Active MCP server set to ${label}.`);
-    log.step(`Verify it responds: floom mcp test`);
+    log.step(`Verify it responds: ${getCommandName()} mcp test`);
     return 0;
   } catch (error) {
     const handled = handleAuthError(error);
@@ -416,7 +417,7 @@ export async function mcpTestCommand(
     const name = (target || credentials.active_mcp_label || "").trim();
     if (!name) {
       log.err("No MCP server specified and no active one is set.");
-      process.stderr.write("Run `floom mcp switch <name>` first, or pass a name: floom mcp test <name>\n");
+      process.stderr.write(`Run \`${getCommandName()} mcp switch <name>\` first, or pass a name: ${getCommandName()} mcp test <name>\n`);
       return 1;
     }
     const servers = await fetchMcpConnections(client);
@@ -424,7 +425,7 @@ export async function mcpTestCommand(
     const match = servers.find((row) => mcpRowLabel(row).toLowerCase() === needle);
     if (!match || !match.id) {
       log.err(`No configured MCP server matches "${name}".`);
-      process.stderr.write("Run `floom mcp list` to see configured servers.\n");
+      process.stderr.write(`Run \`${getCommandName()} mcp list\` to see configured servers.\n`);
       return 1;
     }
     const result = (await client.requestJson(
