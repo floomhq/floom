@@ -2844,36 +2844,6 @@ def execute_run(
             and _is_engine_approved_execution_run(run_id, repos_obj)
         )
         approval_propose_phase = worker_needs_approval and not approval_follow_up
-        # Resolve runner availability before secrets/connections are loaded.
-        runner = "e2b"
-        if config and config.runtime:
-            runner = config.runtime.runner or "e2b"
-        mode = config.runtime.mode if config and config.runtime else "pure-script"
-
-        if is_self_hosted_runner(runner):
-            message = (
-                f"Worker requested runner {runner!r}, but self-hosted runner "
-                "execution is not connected for this workspace yet."
-            )
-            update_run_status(
-                run_id,
-                RunStatus.FAILED.value,
-                error=message,
-                error_code="self_hosted_runner_unavailable",
-                user_id=owner_id,
-                repos=repos_obj,
-            )
-            publish_run_part(
-                run_id,
-                {
-                    "type": "finish",
-                    "status": "failed",
-                    "error": message,
-                    "error_code": "self_hosted_runner_unavailable",
-                },
-            )
-            log_fn(message, level="error")
-            return
 
         if approval_propose_phase:
             # Approval preview runs are allowed to build a proposal, but sensitive
