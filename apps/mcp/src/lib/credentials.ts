@@ -1,6 +1,7 @@
 import { chmodSync, existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { getCommandName } from "./command-name.js";
 
 // AuthMode determines how the CLI hits the API:
 // - "oss" -> single-tenant OSS engine, x-floom-secret header, no workspaces
@@ -147,7 +148,7 @@ export async function updateCredentials(
 ): Promise<StoredCredentials> {
   const current = await readCredentials();
   if (!current) {
-    throw new Error("Not logged in. Run floom login first.");
+    throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
   }
   const next: StoredCredentials = { ...current, ...partial };
   await writeCredentials(next);

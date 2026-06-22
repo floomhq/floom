@@ -15,6 +15,7 @@ by fixtures). The router is purged in lockstep with main by the test fixtures.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import sqlite3
 import uuid as _uuid_mod
@@ -48,6 +49,7 @@ from models import (
     ContextDetail,
     ContextFileItem,
     ContextFileMoveRequest,
+    ContextRenameRequest,
     ContextSecretScanFile,
     ContextSecretScanResponse,
     ContextSensitiveRequest,
@@ -61,6 +63,7 @@ from models import (
 )
 from secret_scan import scan_bytes
 from services.context_access import (
+    _brain_pack_visibility,
     _context_actor_user_id,
     _context_detail,
     _context_file_path_or_400,
@@ -73,6 +76,7 @@ from services.context_access import (
     _asset_workspace_id,
     _ensure_brain_pack_row,
     _git_commit_context,
+    _git_commit_context_rename,
     _is_system_context_pack,
     _read_context_upload_bytes,
     _require_context_for_user,
@@ -82,6 +86,8 @@ from services.context_access import (
     _write_context_file,
 )
 from services.git_service import _git_author, _git_workspace, _require_sha_in_asset_history
+
+logger = logging.getLogger(__name__)
 
 contexts_router = APIRouter()
 
@@ -487,6 +493,164 @@ def delete_context(
     # Record the deletion in git so the history is preserved but the directory is gone.
     _git_commit_context(safe_name, message=f"context {safe_name}: delete")
     return ContextDeleteResponse(status="deleted", referenced_by=referenced_by)
+
+
+@contexts_router.post("/contexts/{name}/rename", response_model=ContextDetail)
+def rename_context(
+    name: str,
+    payload: ContextRenameRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextDetail:
+    """#1813: rename a brain pack / Library folder, preserving its files,
+    metadata, git history, and visibility.
+
+    PR #1811 made folder creation auto-name (no blocking prompt) so the user can
+    "just choose one, I can change it later". Contexts had create + delete but no
+    rename, so auto-named folders were stuck. This closes that loop.
+
+    Owner/edit-gated (system packs -> 404 via the require helper). Rejects a name
+    that would clobber an existing folder (409) and a rename that would silently
+    break workers mounting the pack (409 with ``referenced_by``: detach first).
+    Moves the directory, carries metadata + visibility, and records the move in
+    git as old -> new.
+    """
+    from contexts import context_dir, context_owner_id, rename_context_metadata
+
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, metadata = _require_context_for_user(
+        name, user_id=context_user_id, repos=repos
+    )
+    new_name = _context_name_or_400(payload.new_name)
+    if new_name == safe_name:
+        raise HTTPException(status_code=400, detail="new_name is the same as the current name")
+    new_root = context_dir(new_name)
+    if new_root.exists():
+        raise HTTPException(status_code=409, detail="A folder with that name already exists")
+    # Scan the WHOLE workspace for mounts, not just the caller's own workers: an
+    # admin renaming another member's shared pack must still see the pack owner's
+    # (or a third member's) workers, or the rename breaks them silently (#1813).
+    # role="admin" lists all workers; scope to the pack's workspace because pack
+    # names are workspace-local (a same-named pack elsewhere is a false match).
+    pack_owner_id = context_owner_id(safe_name) or context_user_id
+    pack_workspace_id = _asset_workspace_id(pack_owner_id)
+    referenced_by = _workers_referencing_context(
+        safe_name,
+        user_id=context_user_id,
+        repos=repos,
+        role="admin",
+        workspace_id=pack_workspace_id,
+    )
+    if referenced_by:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Folder is referenced by workers; detach it before renaming.",
+                "referenced_by": referenced_by,
+            },
+        )
+    # `brain_packs.id` is a GLOBAL primary key while pack folders are
+    # workspace-local, so the destination name can collide with a DIFFERENT
+    # workspace's access row even though `new_root` is free on this workspace's
+    # disk. Re-keying onto it would violate the PK, and the fallback below would
+    # then ON CONFLICT(id) rewrite (corrupt) that workspace's owner/visibility
+    # mirror. Reject up front, before any filesystem move, so the rename stays
+    # all-or-nothing. Message mirrors the on-disk conflict above (no cross-
+    # workspace existence is leaked).
+    asset_access = getattr(repos, "asset_access", None)
+    if asset_access is not None and hasattr(asset_access, "asset_id_conflict"):
+        try:
+            cross_workspace_conflict = asset_access.asset_id_conflict(
+                asset_type="brain_pack",
+                asset_id=new_name,
+                workspace_id=pack_workspace_id,
+            )
+        except Exception:
+            cross_workspace_conflict = False
+        if cross_workspace_conflict:
+            raise HTTPException(
+                status_code=409, detail="A folder with that name already exists"
+            )
+    # Read the source visibility before the move so the fallback path below can
+    # carry it over (auto-named folders are private, but a shared pack must stay
+    # shared).
+    old_visibility = _brain_pack_visibility(safe_name, metadata, repos=repos)
+    context_dir(safe_name).rename(new_root)
+    rename_context_metadata(safe_name, new_name)
+    # Move the access-control mirror row from the old id to the new id. The row is
+    # keyed by pack name, so the rename must RE-KEY it, not create a second row:
+    #   * leaving the old `safe_name` row behind re-exposes a later folder that
+    #     reuses that name (`ensure_brain_pack` never downgrades, so the stale
+    #     "workspace" row would silently share the new private folder), and
+    #   * a stale row already sitting at `new_name` (left by a previously
+    #     deleted/renamed shared folder) would keep ITS old visibility.
+    # `rename_asset` deletes any destination row, then re-keys the source row, so
+    # visibility/owner ride the same row and both leaks are closed in one step.
+    # Scope the move to the pack's workspace: pack ids are workspace-local, so an
+    # unscoped re-key would clobber a same-named pack's row in another workspace.
+    owner_id = context_owner_id(new_name)
+    moved_row = None
+    if asset_access is not None and hasattr(asset_access, "rename_asset"):
+        try:
+            moved_row = asset_access.rename_asset(
+                asset_type="brain_pack",
+                old_asset_id=safe_name,
+                new_asset_id=new_name,
+                workspace_id=pack_workspace_id,
+            )
+        except Exception:
+            # A RAISED error here is not the benign "no source row" signal -- that
+            # is a None RETURN. It means the re-key itself failed, e.g. the
+            # destination id is held by another workspace (the global `id` PK can't
+            # be re-keyed onto it) and the precheck raced, or a repo ships
+            # rename_asset without asset_id_conflict. Falling through to
+            # `_ensure_brain_pack_row` would ON CONFLICT(id) rewrite (corrupt) that
+            # foreign workspace's owner/visibility row. Roll the filesystem +
+            # metadata move back so the rename stays all-or-nothing, then reject.
+            logger.warning(
+                "rename_asset failed for %s -> %s; rolling back rename",
+                safe_name, new_name, exc_info=True,
+            )
+            try:
+                # Resolve the original source path WITHOUT hydration: the dir was
+                # just moved away, so a hosted hook would otherwise re-materialize
+                # the old pack at `safe_name`, making this rename-back fail on an
+                # already-existing destination and leaving the move half-applied.
+                new_root.rename(context_dir(safe_name, hydrate=False))
+                rename_context_metadata(new_name, safe_name)
+            except Exception:
+                logger.error(
+                    "failed to roll back context rename %s -> %s",
+                    safe_name, new_name, exc_info=True,
+                )
+            raise HTTPException(
+                status_code=409, detail="A folder with that name already exists"
+            )
+    if moved_row is None and owner_id:
+        # No source row to move (or a repo without rename_asset): materialize a
+        # fresh row and rewrite its visibility to the source value, INCLUDING
+        # "private", so a stale destination row can't keep its old visibility.
+        _ensure_brain_pack_row(new_name, owner_id=owner_id, repos=repos)
+        if old_visibility and asset_access is not None and hasattr(asset_access, "set_visibility"):
+            try:
+                asset_access.set_visibility(
+                    workspace_id=_asset_workspace_id(owner_id),
+                    actor_id=context_user_id,
+                    asset_type="brain_pack",
+                    asset_id=new_name,
+                    visibility=old_visibility,
+                )
+            except Exception:
+                pass  # visibility carry-over is best-effort, never blocks rename
+    author_name, author_email = _git_author(auth)
+    _git_commit_context_rename(
+        safe_name,
+        new_name,
+        message=f"context {safe_name}: rename -> {new_name}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+    return _context_detail(new_name, repos=repos, user_id=context_user_id)
 
 
 @contexts_router.get("/contexts/{name}/files/{file_path:path}")

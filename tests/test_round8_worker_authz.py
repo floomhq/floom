@@ -42,6 +42,7 @@ def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
     # backups path.
     monkeypatch.setenv("WORKEROS_PRECLEAR_BACKUP_DIR", str(tmp_path / "backups"))
     monkeypatch.setenv("FLOOM_SECRET", AUTH["x-floom-secret"])
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
     monkeypatch.setenv("WORKEROS_USER_ID", "user-a")
     monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
