@@ -37,6 +37,7 @@ import {
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
 import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 // Re-export so the create-mode wiring + its tests share one source of truth.
 export { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
@@ -1026,8 +1027,7 @@ export function EmilyDock({ className }: { className?: string }) {
     // home create surface so create always opens the same way — and the param
     // never lingers on a Collection route to be mistaken for view state.
     if (!isHomeRoute) {
-      const prime = primeParam ? `&prime=${encodeURIComponent(primeParam)}` : "";
-      router.replace(`/?create=1${prime}`);
+      router.replace(createWorkerHref(primeParam));
       return;
     }
     setCreateLatched(true);
