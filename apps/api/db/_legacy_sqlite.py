@@ -2132,6 +2132,25 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_worker_triggers_schedule_due_lock
         ON worker_triggers(type, enabled, next_run_at, locked_until);
     """,
+    # -- migration 87: run_feedback (lightweight comments per run) -------------
+    # #1807: users can leave run-scoped feedback as a quality signal, then mark
+    # a specific feedback row actionable by promoting it to a git-backed issue.
+    """
+    CREATE TABLE IF NOT EXISTS run_feedback (
+        id          TEXT PRIMARY KEY,
+        run_id      TEXT NOT NULL,
+        worker_id   TEXT NOT NULL,
+        author_id   TEXT NOT NULL,
+        author_name TEXT,
+        content     TEXT NOT NULL,
+        rating      TEXT,
+        issue_id    TEXT,
+        created_at  TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_run_feedback_run_id
+        ON run_feedback(run_id, created_at);
+    """,
 ]
 
 
