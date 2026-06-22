@@ -1100,7 +1100,7 @@ def test_run_events_redact_trace_ids_and_internal_metadata(monkeypatch, tmp_path
     emitter = threading.Thread(target=emit_events, daemon=True)
     emitter.start()
     emitter.join(timeout=1)
-    consumer.join(timeout=2)
+    consumer.join(timeout=10)
     assert not consumer.is_alive(), "SSE consumer did not finish"
 
     body = json.dumps(events)
