@@ -120,6 +120,7 @@ def test_workspace_agent_mcp_discovery_routes_require_auth(monkeypatch, tmp_path
         assert body["endpoint"] == "POST /api/mcp"
         assert "workers.list" in body["tools"]
         assert "contexts.write" in body["tools"]
+        assert "connections.add_mcp" not in body["tools"]
 
 
 def test_workspace_agent_mcp_get_discovery_matches_nova_pattern(monkeypatch, tmp_path):
@@ -140,7 +141,35 @@ def test_workspace_agent_mcp_get_discovery_matches_nova_pattern(monkeypatch, tmp
     assert "ask_workspace_agent" in body["tools"]
     assert "workers.list" in body["tools"]
     assert "contexts.write" in body["tools"]
+    assert "connections.add_mcp" not in body["tools"]
     assert mounted_response.json() == body
+
+
+def test_workspace_agent_mcp_discovery_matches_tools_list_gates(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    headers = {**_secret_headers(), "Content-Type": "application/json"}
+
+    with TestClient(main.app) as client:
+        discovery = client.get("/api/mcp", headers=headers)
+        listed = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/list")),
+            headers=headers,
+        )
+        setup = client.get("/api/mcp/setup/langdock", headers=headers)
+
+    assert discovery.status_code == 200, discovery.text
+    assert listed.status_code == 200, listed.text
+    assert setup.status_code == 200, setup.text
+
+    discovery_names = set(discovery.json()["tools"])
+    listed_names = {tool["name"] for tool in listed.json()["result"]["tools"]}
+    setup_names = set(setup.json()["tools"])
+    assert "connections.add_mcp" not in discovery_names
+    assert "connections.add_mcp" not in setup_names
+    assert "connections.add_mcp" not in listed_names
+    assert "workers.list" in discovery_names
+    assert "workers.list" in setup_names
 
 
 def test_langdock_mcp_accepts_existing_workeros_secret_and_rejects_invalid_token(monkeypatch, tmp_path):

@@ -34,6 +34,7 @@ def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("WORKSPACE_AGENT_MCP_TOKEN", TOKEN)
+    monkeypatch.setenv("FLOOM_SECRET", "test-api-secret")
     monkeypatch.delenv("WORKEROS_MCP_ENABLE_DESTRUCTIVE", raising=False)
     monkeypatch.delenv("WORKEROS_MCP_ENABLED_TOOLS", raising=False)
     for name in list(sys.modules):

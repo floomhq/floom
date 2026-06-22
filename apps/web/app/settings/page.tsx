@@ -1163,15 +1163,15 @@ floom run <worker>`;
 
 // API base comes from the same env seam lib/api uses (NEXT_PUBLIC_API_PROXY_BASE
 // → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
-// hardcoded host. The token header (x-floom-secret) matches the CLI/MCP curl
-// examples in CliCommandPanel; create the token in the Tokens tab.
+// hardcoded host. Account-scoped PATs authenticate as bearer tokens; the OSS
+// x-floom-secret examples live in CliCommandPanel.
 const API_CALL_SNIPPET = `# List your workers
 curl -sS ${API_BASE}/workers?shape=list \\
-  -H "x-floom-secret: <your-token>"
+  -H "Authorization: Bearer <your-token>"
 
 # Run a worker
 curl -sS -X POST ${API_BASE}/workers/<worker>/runs \\
-  -H "x-floom-secret: <your-token>" \\
+  -H "Authorization: Bearer <your-token>" \\
   -H "content-type: application/json" \\
   -d '{"inputs": {}}'`;
 
@@ -1266,12 +1266,10 @@ function ConnectSection() {
         <div className="space-y-1">
           <h2 className="text-sm font-medium">REST API</h2>
           <p className="text-xs text-muted-foreground">
-            Call your workspace over HTTP. Authenticate every request with a token
-            in the <code className="font-mono">x-floom-secret</code> header: a{" "}
+            Call your workspace over HTTP. Authenticate with{" "}
+            <code className="font-mono">Authorization: Bearer</code> and a{" "}
             <span className="font-medium text-foreground">personal access token</span>{" "}
-            (Account scope) or the{" "}
-            <span className="font-medium text-foreground">workspace access key</span>{" "}
-            (Workspace scope, admin only).
+            from your account.
           </p>
         </div>
         <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
