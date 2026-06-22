@@ -832,7 +832,6 @@ html.dark .grain {
 .c-file-edit { width:100%; min-height:420px; resize:vertical; border:var(--bd-card); border-radius:var(--radius-card); background:var(--bg-2); color:var(--ink-soft); padding:13px; white-space:pre-wrap; overflow:auto; font-size:12px; font-family:var(--font-mono); line-height:1.5; outline:none; }
 .c-lprimary { display:flex; align-items:center; gap:13px; min-width:0; }
 .c-logo { width:30px; height:30px; border-radius:var(--radius-button); background:var(--bg-2); border:var(--bd-card); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
-.c-av { width:30px; height:30px; border-radius:var(--radius-button); display:flex; align-items:center; justify-content:center; color:var(--primary-text); font-size:12px; font-weight:600; flex:0 0 auto; }
 .c-lp-tx { min-width:0; }
 .c-lp-tx .nm { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
 .c-lp-tx .sub { color:var(--muted-foreground); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -1087,4 +1086,20 @@ html.dark .grain {
   .c-appr-grid { grid-template-columns:1fr; }
   .c-appr-grid .col-left { padding-right:0; padding-bottom:22px; margin-bottom:22px; border-bottom:var(--bd-div); }
   .c-appr-grid .col-right { padding-left:0; border-left:0; }
+}
+
+/* Emily identity mark — gentle arc pulse while she is actively working.
+   Only the energy arcs breathe; the white core disc stays solid. Disabled
+   under prefers-reduced-motion. SPEC: workeros-design-baseline/SPEC.md. */
+@keyframes wos-emily-arc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.wos-emily-arcs {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wos-emily-arc-pulse 1.6s var(--ease, ease-in-out) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wos-emily-arcs { animation: none; }
 }
