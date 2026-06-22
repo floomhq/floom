@@ -31,6 +31,7 @@ export function PromptInput({
   disabled,
   sendDisabled,
   variant = "default",
+  large = false,
   autoFocus = false,
 }: {
   value: string;
@@ -59,6 +60,13 @@ export function PromptInput({
    * landing variant simply drops the separate Uses-row to stay clean.
    */
   variant?: "default" | "landing";
+  /**
+   * Hero sizing (Federico 2026-06-21): the home empty-state composer is the
+   * primary call-to-action, so it gets a taller min-height, larger text, and
+   * more generous padding than the in-conversation composer. Borderless flat
+   * fill is preserved (it pairs with variant="landing").
+   */
+  large?: boolean;
   /**
    * #1698: when the composer is the PRIMARY first action (the home/create
    * empty state reached via "New worker" / `?create=1`), focus it on mount so
@@ -103,9 +111,9 @@ export function PromptInput({
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, large ? 200 : 120)}px`;
     }
-  }, [value]);
+  }, [value, large]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files ?? []).filter((f) => f.size <= MAX_FILE_SIZE);
@@ -164,8 +172,11 @@ export function PromptInput({
           // wrapper: a token-based ring (--ring = --accent-line) appears whenever
           // the composer is focused, satisfying the visible-focus requirement
           // without changing the resting flat look.
-          "flex items-center gap-2 rounded-xl bg-[var(--bg-app)] px-3 py-2",
+          "flex gap-2 rounded-xl bg-[var(--bg-app)]",
           "focus-within:ring-2 focus-within:ring-[var(--ring)] focus-within:ring-offset-0",
+          // Hero (large): taller, roomier padding, send button top-aligned so a
+          // multi-line draft reads cleanly. Standard: compact, vertically centered.
+          large ? "items-start px-4 py-3.5" : "items-center px-3 py-2",
           isLanding
             ? "[border:none]"
             : "[border:var(--bd-div)]"
@@ -176,7 +187,12 @@ export function PromptInput({
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
-          className="shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          className={cn(
+            "shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40",
+            // Hero composer is top-aligned (items-start); nudge the icon down so
+            // it sits on the first text line instead of the very top edge.
+            large && "mt-1",
+          )}
           title="Attach file"
           aria-label="Attach file"
         >
@@ -199,7 +215,14 @@ export function PromptInput({
           // a11y #1711: explicit accessible name (the textarea has no visible
           // <label>; the placeholder is not an accessible name).
           aria-label="Describe the job for a new worker"
-          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[120px] overflow-auto"
+          className={cn(
+            "flex-1 resize-none bg-transparent outline-none placeholder:text-muted-foreground overflow-auto",
+            // Hero (large): bigger type + taller min-height so the home composer
+            // reads as the primary input. Standard: compact body text.
+            large
+              ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px] py-0.5"
+              : "text-sm min-h-[20px] max-h-[120px]",
+          )}
           placeholder={placeholder ?? "Message Emily..."}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -214,7 +237,10 @@ export function PromptInput({
           // "Send message" so the send action stays discoverable to AT + tests.
           <Button
             size="sm"
-            className="h-7 shrink-0 gap-1.5 px-3 text-xs font-medium"
+            className={cn(
+              "h-7 shrink-0 gap-1.5 px-3 text-xs font-medium",
+              large && "mt-1",
+            )}
             onClick={onSubmit}
             disabled={!canSend}
             style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}

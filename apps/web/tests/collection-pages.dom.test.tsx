@@ -177,10 +177,10 @@ describe("page components render with data (no client crash)", () => {
   it("BrainCollection renders the folder", async () => {
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
     render(<TestQueryProvider><BrainCollection initialFolders={[folder as never]} /></TestQueryProvider>);
-    expect(await screen.findByRole("button", { name: /Company facts 3 files/i })).toBeInTheDocument();
-    // #1257: folder name is now wrapped in <span title={c.name}> for truncation
-    // accessibility; getAllByText returns the leaf span only (not both span + parent div).
-    expect(screen.getAllByText("Company facts")).toHaveLength(1);
+    // List view is the default; the folder name appears as the row primary text.
+    expect(await screen.findByText("Company facts")).toBeInTheDocument();
+    // "3 files" appears as a column cell in list view.
+    expect(screen.getByText("3 files")).toBeInTheDocument();
     // BrainVisual (which rendered "Contexts") was removed; collection title is now "Library".
     expect(screen.getByText("Library")).toBeInTheDocument();
   });

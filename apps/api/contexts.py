@@ -13,6 +13,7 @@ import os
 import re
 import hashlib
 import threading
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -242,7 +243,7 @@ def current_contexts_root() -> Path:
     """
     scope = _current_scope()
     if scope is None:
-        return CONTEXTS_DIR
+        return CONTEXTS_DIR.resolve()
     return (CONTEXTS_DIR / scope).resolve()
 
 
@@ -417,7 +418,14 @@ def save_context_metadata(metadata: dict[str, dict[str, Any]]) -> None:
     )
     with _CONTEXT_METADATA_SAVE_LOCK:
         tmp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
-        os.replace(tmp_path, metadata_path)
+        for attempt in range(5):
+            try:
+                os.replace(tmp_path, metadata_path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.025 * (attempt + 1))
 
 
 def context_owner_id(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> str | None:

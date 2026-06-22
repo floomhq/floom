@@ -174,7 +174,10 @@ def poll_cli_device(device_code: str) -> Dict[str, Any]:
     if status == "approved":
         consumed = repos.cli_auth.consume(device_code)
         if consumed is None:
-            raise HTTPException(status_code=404, detail="Device code not found")
+            # #1740 — race: another poll already consumed this code (or it expired
+            # between the status read and the atomic delete). The CLI already
+            # handles 410 Gone as "expired before approval" and retries the flow.
+            raise HTTPException(status_code=410, detail="Device code already consumed or expired")
         secret = str(consumed.get("secret") or "")
         if not secret:
             raise HTTPException(status_code=500, detail="Approved device missing API secret")

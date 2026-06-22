@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { getCommandName } from "./command-name.js";
 import { readCredentials, updateCredentials, type StoredCredentials } from "./credentials.js";
 
@@ -309,6 +309,41 @@ export class FloomApiClient {
       throw new Error(`Upload for input ${inputName} returned no upload id`);
     }
     return uploadId;
+  }
+
+  async uploadContextFile(contextName: string, filePath: string, targetPath?: string): Promise<unknown> {
+    if (!this.credentials) {
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
+    }
+    const relPath = (targetPath || basename(filePath)).replace(/\\/g, "/").replace(/^\/+/, "");
+    const prefix = dirname(relPath);
+    const filename = basename(relPath);
+    const bytes = await readFile(filePath);
+    const form = new FormData();
+    form.append("files", new File([bytes], filename));
+    if (prefix && prefix !== ".") {
+      form.append("path_prefix", prefix);
+    }
+    const path = `/contexts/${encodeURIComponent(contextName)}/upload`;
+    const response = await fetchFloom(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path)), {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        ...(await this.authHeaders()),
+      },
+      body: form,
+    });
+    const parsed = await parseResponse(response);
+    if (!response.ok) {
+      const detail = responseDetail(parsed);
+      throw new FloomApiError(
+        `API POST ${path} failed with HTTP ${response.status}: ${detail}`,
+        response.status,
+        parsed,
+        response.headers,
+      );
+    }
+    return parsed;
   }
 }
 

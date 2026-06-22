@@ -27,6 +27,7 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("COMPOSIO_WEBHOOK_URL", "https://example.test/composio-events")
     # Ensure auth middleware does not block test requests (empty = dev mode / no auth)
     monkeypatch.setenv("FLOOM_SECRET", "")
+    monkeypatch.setenv("WORKEROS_DEV", "1")
 
     sys.path.insert(0, str(api_dir))
     for name in ["main", "db", "models", "worker_registry", "run_service", "composio_client"]:

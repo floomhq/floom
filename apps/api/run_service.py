@@ -153,6 +153,7 @@ from models import (
     WorkerConfig,
     RunStatus,
     assert_safe_outbound_url,
+    is_self_hosted_runner,
     UnsafeOutboundUrlError,
     _allow_private_mcp_urls,
     _ip_is_disallowed,
@@ -586,14 +587,16 @@ def _scrub_run_output(
     worker_id: str,
     owner_id: str,
     repos: Repositories,
+    run_secrets: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     if output is None:
         return None
-    try:
-        run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos)
-    except Exception:
-        logger.warning("Could not resolve secrets while scrubbing output for worker %s", worker_id, exc_info=True)
-        run_secrets = {}
+    if run_secrets is None:
+        try:
+            run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos)
+        except Exception:
+            logger.warning("Could not resolve secrets while scrubbing output for worker %s", worker_id, exc_info=True)
+            run_secrets = {}
     safe = scrub_secret_values(output, run_secrets)
     return safe if isinstance(safe, dict) else {}
 
@@ -935,24 +938,37 @@ def _log_flush_loop() -> None:
         try:
             item = _log_queue.get(timeout=interval)
         except queue.Empty:
-            item = None
-        if item is None:
+            # Idle timeout: nothing was dequeued, so we must NOT call task_done().
+            # Doing so drives the queue's unfinished-task counter negative and raises
+            # "task_done() called too many times", which kills this daemon thread and
+            # silently breaks run-log/result persistence. Just flush what we have.
             if pending:
                 try:
                     _persist_log_batch(pending)
                 except Exception as exc:
                     logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
                 pending = []
-            _log_queue.task_done()
             continue
-        pending.append(item)
-        _log_queue.task_done()
-        if len(pending) >= batch_size:
-            try:
-                _persist_log_batch(pending)
-            except Exception as exc:
-                logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
-            pending = []
+        # An item was dequeued (a real row, or the None shutdown/flush sentinel):
+        # exactly one task_done() is owed for it, regardless of branch.
+        try:
+            if item is None:
+                if pending:
+                    try:
+                        _persist_log_batch(pending)
+                    except Exception as exc:
+                        logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
+                    pending = []
+            else:
+                pending.append(item)
+                if len(pending) >= batch_size:
+                    try:
+                        _persist_log_batch(pending)
+                    except Exception as exc:
+                        logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
+                    pending = []
+        finally:
+            _log_queue.task_done()
 
     # Final best-effort drain on shutdown.
     while True:
@@ -1327,6 +1343,7 @@ def update_run_status(
     *,
     user_id: str | None = None,
     repos: Repositories | None = None,
+    run_secrets: Optional[Dict[str, str]] = None,
 ) -> None:
     repos_obj = _repos(repos)
     owner_id = user_id
@@ -1338,7 +1355,13 @@ def update_run_status(
     run_row = repos_obj.runs.get(user_id=owner_id, run_id=run_id)
     worker_id = str((run_row or {}).get("worker_id") or "")
     if output is not None and worker_id:
-        output = _scrub_run_output(output, worker_id=worker_id, owner_id=owner_id, repos=repos_obj)
+        output = _scrub_run_output(
+            output,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            repos=repos_obj,
+            run_secrets=run_secrets,
+        )
     previous_error = (run_row or {}).get("error")
     previous_error_code = (run_row or {}).get("error_code")
     if status == RunStatus.FAILED.value:
@@ -2698,60 +2721,78 @@ def execute_run(
             worker_needs_approval
             and _is_engine_approved_execution_run(run_id, repos_obj)
         )
-        if worker_needs_approval and not approval_follow_up:
-            preview_payload = {
-                "message": "Approval required before this worker executes.",
-                "inputs": {
-                    k: v for k, v in effective_inputs.items()
-                    if k not in (_APPROVAL_DECISION_KEY, _APPROVAL_PHASE_KEY)
-                },
-            }
-            _pause_run_for_required_approval(
-                run_id=run_id,
-                worker_id=worker_id,
-                owner_id=owner_id,
-                config=config,
-                effective_inputs=effective_inputs,
-                decision_required={
-                    "label": config.approvals.label if config.approvals else "Approve action",
-                    "preview": json.dumps(preview_payload, indent=2)[:2000],
-                    "preview_type": "json",
-                    "preview_payload": preview_payload,
-                },
-                outputs={},
-                repos_obj=repos_obj,
-                log_fn=log_fn,
+        approval_propose_phase = worker_needs_approval and not approval_follow_up
+        # Resolve runner availability before secrets/connections are loaded.
+        runner = "e2b"
+        if config and config.runtime:
+            runner = config.runtime.runner or "e2b"
+        mode = config.runtime.mode if config and config.runtime else "pure-script"
+
+        if is_self_hosted_runner(runner):
+            message = (
+                f"Worker requested runner {runner!r}, but self-hosted runner "
+                "execution is not connected for this workspace yet."
             )
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=message,
+                error_code="self_hosted_runner_unavailable",
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+            publish_run_part(
+                run_id,
+                {
+                    "type": "finish",
+                    "status": "failed",
+                    "error": message,
+                    "error_code": "self_hosted_runner_unavailable",
+                },
+            )
+            log_fn(message, level="error")
             return
 
-        run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
-        perf.mark("secrets")
-        log_fn("Loading secrets", level="debug")
-        perf.mark("loading_secrets_log")
-        secrets = run_secrets
-        missing = [s for s in config.secrets if s not in secrets]
-        if missing:
-            err = f"Missing secrets: {', '.join(missing)}"
-            update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
-            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
-            log_fn(err, level="error")
-            if _maybe_pause_scheduled_worker_after_setup_failure(
-                worker_id=worker_id,
-                run_id=run_id,
-                user_id=owner_id,
-                error_code="missing_secret",
-                repos=repos_obj,
-            ):
-                log_fn(
-                    "Paused scheduled worker after repeated missing-secret setup failures",
-                    level="warning",
-                )
-            return
+        if approval_propose_phase:
+            # Approval preview runs are allowed to build a proposal, but sensitive
+            # bindings are held until the engine-spawned approved follow-up run.
+            run_secrets = {}
+            secrets = {}
+            log_fn("Withholding secrets until approval", level="debug")
+            perf.mark("secrets_withheld")
+            perf.mark("loading_secrets_log")
+        else:
+            run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+            perf.mark("secrets")
+            log_fn("Loading secrets", level="debug")
+            perf.mark("loading_secrets_log")
+            secrets = run_secrets
+            missing = [s for s in config.secrets if s not in secrets]
+            if missing:
+                err = f"Missing secrets: {', '.join(missing)}"
+                update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
+                publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
+                log_fn(err, level="error")
+                if _maybe_pause_scheduled_worker_after_setup_failure(
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    user_id=owner_id,
+                    error_code="missing_secret",
+                    repos=repos_obj,
+                ):
+                    log_fn(
+                        "Paused scheduled worker after repeated missing-secret setup failures",
+                        level="warning",
+                    )
+                return
         perf.mark("check_secrets")
 
         # Resolve Composio connections declared in worker.yml.
         connection_ids: Dict[str, str] = {}
-        if config.connections:
+        if approval_propose_phase and config.connections:
+            log_fn("Withholding connections until approval", level="debug")
+            perf.mark("resolve_connections_withheld")
+        elif config.connections:
             log_fn("Resolving connections", level="debug")
             from runner_utils import _resolve_connections
             connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config, user_id=owner_id)
@@ -2792,6 +2833,30 @@ def execute_run(
         timeout_seconds = _resolved_worker_timeout_seconds(config)
         perf.mark("resolve_timeout")
         log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
+        if is_self_hosted_runner(runner):
+            message = (
+                f"Worker requested runner {runner!r}, but self-hosted runner "
+                "execution is not connected for this workspace yet."
+            )
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=message,
+                error_code="self_hosted_runner_unavailable",
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+            publish_run_part(
+                run_id,
+                {
+                    "type": "finish",
+                    "status": "failed",
+                    "error": message,
+                    "error_code": "self_hosted_runner_unavailable",
+                },
+            )
+            log_fn(message, level="error")
+            return
         perf.mark("executing_log")
         _mark_active_run_stage(run_id, "pre_sandbox")
         latest_run = repos_obj.runs.get_any(run_id=run_id)
@@ -3028,6 +3093,7 @@ def execute_run(
                 worker_id=worker_id,
                 owner_id=owner_id,
                 repos=repos_obj,
+                run_secrets=run_secrets,
             )
             repos_obj.runs.update_status(
                 user_id=owner_id,
@@ -3191,7 +3257,14 @@ def execute_run(
                 outputs = dict(outputs or {})
                 outputs["worker_creation_failed"] = True
 
-        update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
+        update_run_status(
+            run_id,
+            RunStatus.COMPLETED.value,
+            output=outputs,
+            user_id=owner_id,
+            repos=repos_obj,
+            run_secrets=run_secrets,
+        )
 
         # Feature #1386: fan-out a worker-created card to the owner's channel
         # bindings (Slack Block Kit DM + WhatsApp formatted message) when the
