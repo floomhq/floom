@@ -169,7 +169,7 @@ export function V3TemplatesBody() {
 
       {mode === "workers" ? (
         <>
-          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((t, i) => (
               <V3TemplateCard key={t.slug} t={t} i={i} animate="mount" />
             ))}
@@ -182,7 +182,7 @@ export function V3TemplatesBody() {
         </>
       ) : (
         <>
-          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filteredWorkspaces.map((w, i) => (
               <V3WorkspaceCard key={w.slug} w={w} i={i} />
             ))}

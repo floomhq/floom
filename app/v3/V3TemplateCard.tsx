@@ -1,14 +1,14 @@
 "use client";
 
 /**
- * V3TemplateCard — THE worker card. Sells the OUTPUT, not just the label.
- * Category + name + one-line job, a small artifact preview (by output type),
- * footer with real tool logos + cadence. Card is the link.
+ * V3TemplateCard — THE worker card. The jewel is the name + the real output it
+ * produces. Category lives in the filter pills (not repeated here). Name is a
+ * heading; job is its subtitle; the artifact preview is the proof; tools +
+ * cadence whisper at the bottom. Card is the link.
  */
 
 import Link from "next/link";
 import { motion } from "motion/react";
-import { ArrowRight } from "lucide-react";
 import type { Template } from "@/components/landing-ref/data";
 import {
   GCalLogo,
@@ -57,36 +57,32 @@ export function V3TemplateCard({
     <motion.div {...anim} transition={{ duration: 0.4, delay: Math.min(i * 0.05, 0.3), ease: EASE }}>
       <Link
         href={href ?? `/templates/${t.slug}`}
-        className="group flex h-full min-h-[262px] flex-col overflow-hidden rounded-[16px] bg-card transition-colors hover:bg-secondary/60"
+        className="group flex h-full flex-col overflow-hidden rounded-[16px] bg-card transition-colors hover:bg-secondary/50"
       >
-        <div className="p-5 pb-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="text-[10.5px] font-medium uppercase tracking-[0.07em] text-muted-foreground">
-              {t.category}
-            </div>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100" />
-          </div>
-          <h3 className="mt-2 line-clamp-1 text-[15px] font-medium leading-snug">{t.name}</h3>
-          <p className="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{t.job}</p>
+        <div className="px-5 pb-4 pt-5">
+          <h3 className="text-[16px] font-semibold leading-snug tracking-[-0.02em]">{t.name}</h3>
+          <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-muted-foreground">{t.job}</p>
         </div>
 
         <V3OutputPreview
-          kind={t.preview}
-          className="mx-5 mb-4 transition-transform duration-200 group-hover:-translate-y-0.5"
+          sample={t.sample}
+          className="mx-5 mb-4 transition-transform duration-200 group-hover:-translate-y-1"
         />
 
-        <div className="mt-auto flex items-center justify-between px-5 py-3">
+        <div className="mt-auto flex items-center justify-between gap-3 px-5 py-3">
           <span className="flex items-center gap-2">
             {marks.map(({ tool, mark }) => (
               <span
                 key={tool}
-                className="flex h-[15px] w-[15px] items-center justify-center opacity-80 [&_svg]:h-[15px] [&_svg]:w-[15px]"
+                className="flex h-[14px] w-[14px] items-center justify-center opacity-60 [&_svg]:h-[14px] [&_svg]:w-[14px]"
               >
                 {mark}
               </span>
             ))}
           </span>
-          <span className="font-mono text-[10.5px] text-muted-foreground">{t.runs}</span>
+          <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 font-mono text-[9.5px] text-muted-foreground">
+            {t.runs}
+          </span>
         </div>
       </Link>
     </motion.div>

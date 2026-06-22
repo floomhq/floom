@@ -67,3 +67,4 @@ CODEX_BRIEF.md
 .env.test
 tests/e2e/.auth/
 web/.vercel/
+.crit/

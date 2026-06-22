@@ -14,9 +14,16 @@ export type Category =
 
 export type Approval = "Required" | "Optional" | "Auto-run";
 
-// The shape of the artifact a worker produces — drives the mini output preview
-// on each card (identity comes from the work, not from avatars).
+// The shape of the artifact a worker produces. Each worker carries a real
+// miniature `sample` of its output so the card shows the WORK, not a skeleton.
 export type PreviewKind = "email" | "digest" | "list" | "kpi" | "issues";
+
+export type Sample =
+  | { kind: "email"; subject: string; to: string; lines: string[] }
+  | { kind: "digest"; title: string; items: string[] }
+  | { kind: "list"; rows: { name: string; score: string }[] }
+  | { kind: "kpi"; cells: { label: string; value: string; delta?: string }[] }
+  | { kind: "issues"; rows: { pri: "high" | "med" | "low"; title: string }[] };
 
 export type Template = {
   slug: string;
@@ -29,7 +36,7 @@ export type Template = {
   approval: Approval;
   approvalNote: string;
   triggers: string[];
-  preview: PreviewKind;
+  sample: Sample;
 };
 
 export const CATEGORIES: Category[] = [
@@ -55,15 +62,9 @@ export const FILTER_TOOLS = [
   "Web",
 ];
 
-export const FILTER_TRIGGERS = [
-  "Schedule",
-  "New email",
-  "On demand",
-  "Webhook",
-];
+export const FILTER_TRIGGERS = ["Schedule", "New email", "On demand", "Webhook"];
 
-// Real workers, drawn from the proven WorkerOS bench. `runs` describes the
-// cadence (when it runs), not a count.
+// Real workers, drawn from the proven WorkerOS bench. `runs` = cadence.
 export const TEMPLATES: Template[] = [
   // --- Sales ---
   {
@@ -77,7 +78,12 @@ export const TEMPLATES: Template[] = [
     approval: "Required",
     approvalNote: "Required before sending",
     triggers: ["Calendar event"],
-    preview: "email",
+    sample: {
+      kind: "email",
+      subject: "Next steps from today's call",
+      to: "Sarah at Acme",
+      lines: ["Recapped the onboarding plan", "Logged the call in HubSpot", "Booked Friday follow-up"],
+    },
   },
   {
     slug: "lead-research-worker",
@@ -90,7 +96,11 @@ export const TEMPLATES: Template[] = [
     approval: "Required",
     approvalNote: "Required before CRM updates or outreach",
     triggers: ["New lead"],
-    preview: "digest",
+    sample: {
+      kind: "digest",
+      title: "Acme Corp — 3 outreach angles",
+      items: ["Just raised a $40M Series B", "Hiring 12 SDRs — scaling pain", "CTO posted about data silos"],
+    },
   },
   {
     slug: "crm-sync-secretary",
@@ -103,7 +113,14 @@ export const TEMPLATES: Template[] = [
     approval: "Required",
     approvalNote: "Required before updating records",
     triggers: ["Schedule"],
-    preview: "list",
+    sample: {
+      kind: "list",
+      rows: [
+        { name: "Acme Corp", score: "updated" },
+        { name: "Northstar", score: "deduped" },
+        { name: "Orbit Inc", score: "new" },
+      ],
+    },
   },
 
   // --- Ops ---
@@ -118,7 +135,14 @@ export const TEMPLATES: Template[] = [
     approval: "Auto-run",
     approvalNote: "Files issues automatically; asks before closing",
     triggers: ["New email", "Schedule"],
-    preview: "issues",
+    sample: {
+      kind: "issues",
+      rows: [
+        { pri: "high", title: "Checkout 500 on Safari" },
+        { pri: "high", title: "Stripe webhook 429s" },
+        { pri: "med", title: "CSV export truncates" },
+      ],
+    },
   },
   {
     slug: "meeting-to-tasks",
@@ -131,7 +155,14 @@ export const TEMPLATES: Template[] = [
     approval: "Optional",
     approvalNote: "Optional before creating issues",
     triggers: ["Schedule"],
-    preview: "issues",
+    sample: {
+      kind: "issues",
+      rows: [
+        { pri: "high", title: "Ship auth fix — Lin" },
+        { pri: "med", title: "Draft the Q3 roadmap" },
+        { pri: "low", title: "Update onboarding docs" },
+      ],
+    },
   },
   {
     slug: "inbox-manager",
@@ -144,7 +175,12 @@ export const TEMPLATES: Template[] = [
     approval: "Required",
     approvalNote: "Required before archiving",
     triggers: ["Schedule"],
-    preview: "email",
+    sample: {
+      kind: "email",
+      subject: "Today: 3 need you, 28 archived",
+      to: "you",
+      lines: ["Investor reply from Mary", "Signed contract from Legal", "Archived 28 newsletters"],
+    },
   },
   {
     slug: "github-digest",
@@ -157,7 +193,14 @@ export const TEMPLATES: Template[] = [
     approval: "Auto-run",
     approvalNote: "Sends automatically",
     triggers: ["Schedule"],
-    preview: "issues",
+    sample: {
+      kind: "issues",
+      rows: [
+        { pri: "high", title: "#412 auth token refresh" },
+        { pri: "med", title: "#408 migration pending" },
+        { pri: "low", title: "3 stale PRs to nudge" },
+      ],
+    },
   },
 
   // --- Marketing ---
@@ -172,7 +215,11 @@ export const TEMPLATES: Template[] = [
     approval: "Optional",
     approvalNote: "Optional before posting briefs",
     triggers: ["Schedule"],
-    preview: "digest",
+    sample: {
+      kind: "digest",
+      title: "5 page-2 keywords to win",
+      items: ['"ai worker" — pos 12, 3.2k/mo', '"hire ai agent" — pos 9', "2 briefs queued to Notion"],
+    },
   },
   {
     slug: "seo-article-writer",
@@ -185,7 +232,11 @@ export const TEMPLATES: Template[] = [
     approval: "Required",
     approvalNote: "Required before publishing",
     triggers: ["Webhook"],
-    preview: "digest",
+    sample: {
+      kind: "digest",
+      title: "Draft: How AI workers cut ops time",
+      items: ["1,450 words, 6 sections", "4 internal links added", "2 images generated"],
+    },
   },
 
   // --- Research ---
@@ -200,7 +251,11 @@ export const TEMPLATES: Template[] = [
     approval: "Optional",
     approvalNote: "Optional before sharing",
     triggers: ["Webhook"],
-    preview: "digest",
+    sample: {
+      kind: "digest",
+      title: "Brief: EU AI Act for SaaS",
+      items: ["12 sources, all cited", "Key compliance risks", "Action checklist included"],
+    },
   },
   {
     slug: "ai-news-reporter",
@@ -213,7 +268,11 @@ export const TEMPLATES: Template[] = [
     approval: "Auto-run",
     approvalNote: "Posts automatically",
     triggers: ["Schedule"],
-    preview: "digest",
+    sample: {
+      kind: "digest",
+      title: "AI digest — today",
+      items: ["OpenAI ships a new model", "Anthropic raises a round", "3 launches worth a look"],
+    },
   },
 
   // --- Recruiting ---
@@ -228,7 +287,14 @@ export const TEMPLATES: Template[] = [
     approval: "Optional",
     approvalNote: "Optional before outreach",
     triggers: ["Webhook"],
-    preview: "list",
+    sample: {
+      kind: "list",
+      rows: [
+        { name: "Maya Patel", score: "92" },
+        { name: "Jon Bell", score: "88" },
+        { name: "Ana Ruiz", score: "84" },
+      ],
+    },
   },
   {
     slug: "cv-writeup",
@@ -241,7 +307,11 @@ export const TEMPLATES: Template[] = [
     approval: "Optional",
     approvalNote: "Optional before sending",
     triggers: ["Webhook"],
-    preview: "list",
+    sample: {
+      kind: "digest",
+      title: "Maya Patel — Senior PM",
+      items: ["8 yrs B2B SaaS, 2 exits", "Led 0→1 product teams", "DACH, fluent German + English"],
+    },
   },
 
   // --- Founder ---
@@ -256,7 +326,14 @@ export const TEMPLATES: Template[] = [
     approval: "Auto-run",
     approvalNote: "Sends automatically",
     triggers: ["Schedule"],
-    preview: "kpi",
+    sample: {
+      kind: "kpi",
+      cells: [
+        { label: "MRR", value: "$84.2k", delta: "+6.4%" },
+        { label: "Signups", value: "312", delta: "+18%" },
+        { label: "Churn", value: "1.8%", delta: "-0.3" },
+      ],
+    },
   },
   {
     slug: "founder-update-worker",
@@ -269,7 +346,14 @@ export const TEMPLATES: Template[] = [
     approval: "Required",
     approvalNote: "Required before sending or posting",
     triggers: ["Schedule"],
-    preview: "kpi",
+    sample: {
+      kind: "kpi",
+      cells: [
+        { label: "MRR", value: "$84k", delta: "+6%" },
+        { label: "Runway", value: "14mo" },
+        { label: "NPS", value: "68", delta: "+5" },
+      ],
+    },
   },
 
   // --- Customer ---
@@ -284,7 +368,12 @@ export const TEMPLATES: Template[] = [
     approval: "Required",
     approvalNote: "Required before sending",
     triggers: ["New email"],
-    preview: "email",
+    sample: {
+      kind: "email",
+      subject: "Re: Question about pricing",
+      to: "a customer",
+      lines: ["Answered the tiering question", "Linked the docs page", "Offered a quick call"],
+    },
   },
 ];
 
