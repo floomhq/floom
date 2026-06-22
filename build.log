@@ -5,15 +5,15 @@
 ▲ Next.js 16.2.6 (Turbopack)
 
   Creating an optimized production build ...
-✓ Compiled successfully in 12.4s
+✓ Compiled successfully in 13.5s
   Running TypeScript ...
-  Finished TypeScript in 9.0s ...
+  Finished TypeScript in 9.6s ...
   Collecting page data using 11 workers ...
-  Generating static pages using 11 workers (0/53) ...
-  Generating static pages using 11 workers (13/53) 
-  Generating static pages using 11 workers (26/53) 
-  Generating static pages using 11 workers (39/53) 
-✓ Generating static pages using 11 workers (53/53) in 1217ms
+  Generating static pages using 11 workers (0/54) ...
+  Generating static pages using 11 workers (13/54) 
+  Generating static pages using 11 workers (26/54) 
+  Generating static pages using 11 workers (40/54) 
+✓ Generating static pages using 11 workers (54/54) in 1243ms
   Finalizing page optimization ...
 
 Route (app)
@@ -21,6 +21,7 @@ Route (app)
 ├ ○ /_not-found
 ├ ƒ /api/auth/email
 ├ ƒ /api/auth/password
+├ ƒ /api/marketplace/community
 ├ ƒ /api/marketplace/hires
 ├ ƒ /api/marketplace/reviews
 ├ ƒ /api/marketplace/reviews/summary

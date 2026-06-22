@@ -44,12 +44,16 @@ export function V3AdminBody() {
   }, [load]);
 
   async function moderate(id: string, status: "approved" | "rejected") {
-    await fetch(`/api/marketplace/submissions/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    setSubs((s) => s.filter((x) => x.id !== id));
+    try {
+      const res = await fetch(`/api/marketplace/submissions/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) setSubs((s) => s.filter((x) => x.id !== id));
+    } catch {
+      /* keep the row so the moderator can retry */
+    }
   }
 
   return (

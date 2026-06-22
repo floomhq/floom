@@ -38,10 +38,10 @@ export function V3HireBody({
           <path d="M5 10.5l3.2 3.2L15 7" fill="none" stroke="var(--v3-accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
-      <h1 className="mt-5 text-[26px] font-semibold tracking-[-0.022em]">{name} is yours</h1>
+      <h1 className="mt-5 text-[26px] font-semibold tracking-[-0.022em]">Finish hiring {name}</h1>
       <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground">
-        Added to your workspace. Connect its tools and approve the first run — it asks before anything
-        ships.
+        We&apos;ve saved your pick. Open your workspace to connect its tools and start the first run —
+        it asks before anything ships.
       </p>
       <div className="mt-6 flex items-center gap-3">
         <Link
