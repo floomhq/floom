@@ -92,7 +92,7 @@ def create_worker(
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
     _reject_raw_local_runner_on_create(worker_yml)
     worker_yml = _apply_workspace_approval_default(worker_yml)  # #794
-    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id, repos=repos)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
     if payload.files:
         file_map = {item.path: item.content for item in payload.files}
         file_map["worker.yml"] = worker_yml
