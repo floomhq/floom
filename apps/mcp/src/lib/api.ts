@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { getCommandName } from "./command-name.js";
 import { readCredentials, updateCredentials, type StoredCredentials } from "./credentials.js";
 

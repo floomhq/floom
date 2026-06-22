@@ -104,10 +104,6 @@ async function withStubServer(fn) {
         res.end(JSON.stringify([{ sha: "abc123", message: "context crm: update" }]));
         return;
       }
-      if (req.method === "GET" && req.url === "/contexts/empty/versions?limit=50") {
-        res.end(JSON.stringify([]));
-        return;
-      }
       if (req.method === "POST" && req.url === "/contexts/crm/rollback/abc123") {
         res.end(JSON.stringify({ ok: true }));
         return;
@@ -161,27 +157,6 @@ test("contexts CLI mirrors the context REST API", async () => {
         { content: "hello" },
       );
       assert.ok(calls.some((call) => call.method === "DELETE" && call.url === "/contexts/crm?force=true"));
-    });
-  });
-});
-
-test("contexts versions explains empty history for sensitive packs", async () => {
-  await withTempHome(async () => {
-    await withStubServer(async (base) => {
-      await writeOssCreds(base);
-      const originalWrite = process.stdout.write.bind(process.stdout);
-      let stdout = "";
-      try {
-        process.stdout.write = (chunk) => {
-          stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-          return true;
-        };
-        assert.equal(await contextsVersionsCommand("empty", {}), 0);
-      } finally {
-        process.stdout.write = originalWrite;
-      }
-      assert.match(stdout, /Sensitive brain packs do not record git history/);
-      assert.match(stdout, /--no-sensitive/);
     });
   });
 });

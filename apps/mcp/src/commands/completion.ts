@@ -7,8 +7,7 @@ _${name}_completion() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  local commands="login logout whoami auth run workers workspaces workspace runs secrets connections contexts context mcp completion --help --version"
-  local auth_sub="list login switch status logout"
+  local commands="login logout whoami run workers workspaces workspace runs secrets connections contexts context mcp completion --help --version"
   local workers_sub="list show"
   local workspaces_sub="list create show switch use"
   local runs_sub="list show logs download approve reject cancel"
@@ -63,12 +62,13 @@ compdef _${name} ${name}
 }
 
 function fishCompletion(name: string): string {
-  return `complete -c ${name} -f -a "login logout whoami run workers workspaces workspace runs secrets connections mcp completion"
+  return `complete -c ${name} -f -a "login logout whoami run workers workspaces workspace runs secrets connections contexts context mcp completion"
 complete -c ${name} -n "__fish_seen_subcommand_from workers" -a "list show"
 complete -c ${name} -n "__fish_seen_subcommand_from workspaces workspace" -a "list create show switch use"
 complete -c ${name} -n "__fish_seen_subcommand_from runs" -a "list show logs download approve reject cancel"
 complete -c ${name} -n "__fish_seen_subcommand_from secrets" -a "list set delete"
 complete -c ${name} -n "__fish_seen_subcommand_from connections" -a "list add import-mcp-config"
+complete -c ${name} -n "__fish_seen_subcommand_from contexts context" -a "list create read write upload delete delete-file versions rollback"
 complete -c ${name} -n "__fish_seen_subcommand_from mcp" -a "list switch test add install uninstall"
 `;
 }

@@ -19,7 +19,6 @@ import {
   resolveLoginApiBase,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
-import { runWhoamiCommand } from "../dist/commands/whoami.js";
 import { acquireLoginLock, cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
 
 test("cloud login honors Retry-After headers on cli-exchange 429", () => {
