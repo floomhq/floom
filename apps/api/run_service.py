@@ -937,24 +937,37 @@ def _log_flush_loop() -> None:
         try:
             item = _log_queue.get(timeout=interval)
         except queue.Empty:
-            item = None
-        if item is None:
+            # Idle timeout: nothing was dequeued, so we must NOT call task_done().
+            # Doing so drives the queue's unfinished-task counter negative and raises
+            # "task_done() called too many times", which kills this daemon thread and
+            # silently breaks run-log/result persistence. Just flush what we have.
             if pending:
                 try:
                     _persist_log_batch(pending)
                 except Exception as exc:
                     logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
                 pending = []
-            _log_queue.task_done()
             continue
-        pending.append(item)
-        _log_queue.task_done()
-        if len(pending) >= batch_size:
-            try:
-                _persist_log_batch(pending)
-            except Exception as exc:
-                logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
-            pending = []
+        # An item was dequeued (a real row, or the None shutdown/flush sentinel):
+        # exactly one task_done() is owed for it, regardless of branch.
+        try:
+            if item is None:
+                if pending:
+                    try:
+                        _persist_log_batch(pending)
+                    except Exception as exc:
+                        logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
+                    pending = []
+            else:
+                pending.append(item)
+                if len(pending) >= batch_size:
+                    try:
+                        _persist_log_batch(pending)
+                    except Exception as exc:
+                        logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
+                    pending = []
+        finally:
+            _log_queue.task_done()
 
     # Final best-effort drain on shutdown.
     while True:
