@@ -2754,12 +2754,16 @@ def execute_run(
             return
 
         if approval_propose_phase:
-            # Approval preview runs are allowed to build a proposal, but sensitive
-            # bindings are held until the engine-spawned approved follow-up run.
-            run_secrets = {}
-            secrets = {}
-            log_fn("Withholding secrets until approval", level="debug")
-            perf.mark("secrets_withheld")
+            # Approval preview runs are allowed to build a proposal and may need
+            # declared credentials to inspect external state before asking for a
+            # human decision. Keep the same declared-secret resolver used by
+            # ordinary runs; it already enforces least privilege and owner scope.
+            # Connections remain withheld below because Composio connection IDs
+            # are action-capable bindings.
+            run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+            secrets = run_secrets
+            log_fn("Loading secrets for approval proposal", level="debug")
+            perf.mark("secrets")
             perf.mark("loading_secrets_log")
         else:
             run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
