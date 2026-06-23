@@ -195,6 +195,11 @@ def update_local_workspace(
         clean_name = _strip_html_tags(name.strip())
         if not clean_name:
             raise ValueError("workspace name required")
+        # #1888 — a missing workspace must read as 404, not a 409 name conflict.
+        # Confirm the target exists before the duplicate-name guard so a stale
+        # id never gets masked by a sibling's name collision.
+        if get_local_workspace(owner_user_id, workspace_id) is None:
+            return None
         # #1738 — renaming must honor the same duplicate-name guard as create.
         _assert_name_available(owner_user_id, clean_name, exclude_id=workspace_id)
         sets.append("name = ?")
