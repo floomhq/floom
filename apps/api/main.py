@@ -7678,8 +7678,25 @@ async def _mcp_dispatch(
     custom = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=name)
     if custom:
         worker_id = custom["worker_id"]
-        run_id = create_run(worker_id, a, "mcp", user_id=auth.user_id, repos=repos)
-        start_run(run_id, worker_id, a, user_id=auth.user_id, repos=repos)
+        # Hosted/cloud workers created via MCP may be backed by persisted DB
+        # files instead of a static WORKERS_DIR entry. Use the same internal
+        # API path as workers.run so cloud overrides materialize/queue them.
+        created, status_code = await _api_call(
+            "POST",
+            f"/workers/{_enc(worker_id)}/runs",
+            request,
+            body={"inputs": a, "trigger_source": "mcp"},
+        )
+        if status_code >= 400:
+            return _mcp_api_result(created, status_code)
+        run_id = str(created.get("run_id") or created.get("id") or "")
+        if not run_id:
+            result = _mcp_call_result(
+                {"status": "error", "detail": "Worker run response did not include run_id."},
+                "Worker run failed.",
+            )
+            result["isError"] = True
+            return result
         # #835 RCA: this loop blocked the HTTP connection for up to 120s per
         # call — concurrent custom-tool calls exhausted the connection pool.
         # Fix: wait at most the shared 30s MCP cap so fast tools still return
@@ -7689,25 +7706,34 @@ async def _mcp_dispatch(
         run = None
         while _time.monotonic() < deadline:
             await asyncio.sleep(1.0)
-            run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
-            if run and run["status"] in ("completed", "failed"):
+            run_data, run_status_code = await _api_call("GET", f"/runs/{_enc(run_id)}", request)
+            if run_status_code >= 400:
+                return _mcp_api_result(run_data, run_status_code)
+            run = run_data if isinstance(run_data, dict) else {}
+            if run and run.get("status") in ("completed", "failed", "cancelled"):
                 break
-        if not run or run["status"] not in ("completed", "failed"):
-            return _mcp_content(
-                json.dumps(
-                    {
-                        "status": "running",
-                        "run_id": run_id,
-                        "detail": "Run still in progress. Poll runs.get or runs.watch with this run_id for the result.",
-                    },
-                    indent=2,
-                ),
-                is_error=False,
+        if not run or run.get("status") not in ("completed", "failed", "cancelled"):
+            return _mcp_call_result(
+                {
+                    "status": "running",
+                    "run_id": run_id,
+                    "detail": "Run still in progress. Poll runs.get or runs.watch with this run_id for the result.",
+                }
             )
-        if run["status"] == "failed":
-            return _mcp_content(_mcp_text(run.get("error") or "Worker run failed"), is_error=True)
+        if run.get("status") in ("failed", "cancelled"):
+            result = _mcp_call_result(
+                {
+                    "status": run.get("status"),
+                    "run_id": run_id,
+                    "error": run.get("error") or "Worker run failed",
+                }
+            )
+            result["isError"] = True
+            return result
         output = run.get("output_json") or run.get("output") or {}
-        return _mcp_content(_mcp_text(output))
+        if not isinstance(output, dict):
+            output = {"data": output}
+        return _mcp_call_result({"status": "completed", "run_id": run_id, "output": output})
 
     return _mcp_content(f"Unknown tool: {name!r}", is_error=True)
 

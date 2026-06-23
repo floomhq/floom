@@ -37,10 +37,14 @@ def _load_main(monkeypatch, tmp_path):
 
 
 class _FakeResponse:
-    def __init__(self, *, json_body=None, text="", status_code=200):
+    def __init__(self, *, json_body=None, text="", status_code=200, headers=None):
         self._json_body = json_body
         self.text = text
         self.status_code = status_code
+        self.content = text.encode("utf-8") if isinstance(text, str) else text
+        if json_body is not None and not self.content:
+            self.content = b"{}"
+        self.headers = headers or {}
 
     def json(self):
         if self._json_body is None:
