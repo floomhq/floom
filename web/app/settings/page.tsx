@@ -232,7 +232,7 @@ function PersonalAccessTokensPanel() {
           <CheckCircle2 className="size-4" />
           <AlertTitle>Token created</AlertTitle>
           <AlertDescription>
-            <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+            <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-xs">
               <span className="flex-1 break-all">{createdToken}</span>
               <button
                 type="button"
@@ -264,7 +264,7 @@ function PersonalAccessTokensPanel() {
       {tokens.length > 0 ? (
         <div className="space-y-1">
           {tokens.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 rounded-lg [border:var(--bd-card)] px-3 py-2 text-sm">
+            <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-sm">
               <div className="flex-1 min-w-0">
                 <div className="font-medium">{t.name}</div>
                 <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
@@ -390,7 +390,7 @@ export function WorkspaceTokensPanel() {
               <CheckCircle2 className="size-4" />
               <AlertTitle>Workspace access key created</AlertTitle>
               <AlertDescription>
-                <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-xs">
                   <span className="flex-1 break-all">{createdToken}</span>
                   <button
                     type="button"
@@ -2578,7 +2578,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
       ) : null}
 
       {canManageWorkspace ? (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border [border-color:var(--bd-div)] px-4 py-3.5">
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3.5">
           <div className="min-w-0">
             <h2 className="text-sm font-medium">Download a copy</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -2755,7 +2755,7 @@ function WhatsAppQR() {
           shapeRendering="crispEdges"
           aria-label="WhatsApp QR code"
           role="img"
-          className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
+          className="rounded-[var(--radius-button)] bg-white"
         >
           <rect width="29" height="29" fill="white" />
           <path fill="black" d={WA_QR_PATH} />
