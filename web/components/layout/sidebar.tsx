@@ -56,32 +56,41 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 
 // #1305: the app is WHITE-LABELED — the workspace IS the brand. The mark must
 // be the WORKSPACE logo/avatar, never the Floom play-triangle.
-// Generated identity mark deterministically seeded by workspace name —
-// squircle shape (workspace = non-human). Logo override handled where a
-// company logo is available; the sidebar header mark uses the generated mark.
-function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
+// Generated identity mark deterministically seeded by workspace id (stable)
+// then name — squircle shape (workspace = non-human). Logo override handled
+// where a company logo is available; the sidebar header mark uses the generated mark.
+function WorkspaceDiceBearAvatar({ id, name, size }: { id?: string; name: string; size: number }) {
   const seed = resolveWorkspaceName(name) || name || "workspace";
-  return <Avatar role="workspace" name={seed} size={size} />;
+  // #1920: seed by stable id so the mark is identical to WorkspaceSwitcher's
+  // WorkspaceAvatar (which also passes id={workspace.id}). Seeding by name only
+  // produces a different motif when the hash of the name differs from the hash
+  // of the id, causing the mark to change between the switcher dropdown and the
+  // sidebar header/collapsed rail.
+  return <Avatar role="workspace" id={id} name={seed} size={size} />;
 }
 
 
-// Module-level cache for the active workspace name so WorkspaceMark and
-// MobileWorkspaceName return the resolved name on every remount (e.g. sidebar
-// collapse/expand) without a blank-seed flash. Populated on first successful
-// fetch; invalidated to "" on catch so error states still propagate correctly.
+// Module-level cache for the active workspace so WorkspaceMark and
+// MobileWorkspaceName return the resolved name/id on every remount (e.g.
+// sidebar collapse/expand) without a blank-seed flash. Populated on first
+// successful fetch; invalidated to null on catch so error states propagate.
 let _cachedWorkspaceName: string | null = null;
+let _cachedWorkspaceId: string | null = null;
 
-/** Active workspace name, resolved once from the workspace list (shared shape
- *  with UserProfileFooter so the mark + footer stay in sync).
- *  Module-level cache ensures the name is available instantly on remount — the
- *  key fix for the collapse/expand avatar flicker: without it every remount
+/** Active workspace name + id, resolved once from the workspace list.
+ *  Module-level cache ensures the values are available instantly on remount —
+ *  the key fix for the collapse/expand avatar flicker: without it every remount
  *  starts with seed="" → wrong motif → API resolves → correct motif (two
- *  distinct SVG renders = visible flash). */
-function useActiveWorkspaceName(): string {
+ *  distinct SVG renders = visible flash).
+ *
+ *  Returns both name and id so callers can seed Avatar by the stable id,
+ *  matching WorkspaceSwitcher's WorkspaceAvatar. */
+function useActiveWorkspace(): { name: string; id: string | undefined } {
   const [name, setName] = useState(() => _cachedWorkspaceName ?? "");
+  const [id, setId] = useState<string | undefined>(() => _cachedWorkspaceId ?? undefined);
   useEffect(() => {
-    // Already have a name: skip the fetch (returns cached value immediately).
-    if (_cachedWorkspaceName) return;
+    // Already have both: skip the fetch.
+    if (_cachedWorkspaceName && _cachedWorkspaceId) return;
     let active = true;
     api.workspace
       .list()
@@ -90,32 +99,48 @@ function useActiveWorkspaceName(): string {
           data.workspaces.find((workspace) => workspace.id === data.active_id) ?? data.workspaces[0];
         if (active && current) {
           _cachedWorkspaceName = current.name;
+          _cachedWorkspaceId = current.id;
           setName(current.name);
+          setId(current.id);
         }
       })
       .catch(() => {
-        if (active) setName("");
+        if (active) { setName(""); setId(undefined); }
       });
     return () => {
       active = false;
     };
   }, []);
-  return name;
+  return { name, id };
+}
+
+/** Convenience alias — returns only the name for MobileWorkspaceName.
+ *  Delegates to useActiveWorkspace so the single fetch is shared. */
+function useActiveWorkspaceName(): string {
+  return useActiveWorkspace().name;
 }
 
 export function WorkspaceMark({
   size = 22,
   name,
+  id,
   logoUrl,
 }: {
   size?: number;
   name?: string;
+  /** Stable workspace id — when provided, the generated mark is seeded by id
+   *  (matching WorkspaceSwitcher) so the motif is identical everywhere.
+   *  When omitted, falls back to the cached active workspace id. */
+  id?: string;
   /** Real workspace logo (e.g. from the Downstream host). When omitted, the OSS
    *  engine has no per-workspace logo, so a neutral monogram is shown. */
   logoUrl?: string | null;
 }) {
-  const fetched = useActiveWorkspaceName();
-  const workspaceName = name ?? fetched;
+  const fetched = useActiveWorkspace();
+  const workspaceName = name ?? fetched.name;
+  // Prefer the explicit id prop (e.g. from a Downstream host that knows the
+  // workspace id); fall back to the cached active id from the hook.
+  const workspaceId = id ?? fetched.id;
   const [imgOk, setImgOk] = useState(true);
   const dim = { width: size, height: size } as const;
 
@@ -133,8 +158,8 @@ export function WorkspaceMark({
       />
     );
   }
-  // DiceBear shapes avatar — consistent with the WorkspaceSwitcher mark.
-  return <WorkspaceDiceBearAvatar name={workspaceName} size={size} />;
+  // DiceBear shapes avatar — seeded by id (matches WorkspaceSwitcher).
+  return <WorkspaceDiceBearAvatar id={workspaceId} name={workspaceName} size={size} />;
 }
 
 /** Mobile top-bar workspace name (white-label, replaces the "Floom" wordmark). */
