@@ -58,8 +58,15 @@ export function PromptInput({
    * NOTE: rendering the detected tools as rich INLINE chips inside the editable
    * textarea (as the landing does within static prompt text) is a follow-up; the
    * landing variant simply drops the separate Uses-row to stay clean.
+   *
+   * "home": the Emily home-route fullscreen empty-state composer. Uses the grey
+   * bg-2 fill (focus-within → bg-3) so the input area is visually discoverable
+   * against the flat bg-app background — richer than the flat default, but
+   * distinct from the landing's fully-borderless look. Keeps the send-icon
+   * affordance (not the labeled "Hire" CTA). No chip row. Only used on the
+   * home/overview route when NOT in createMode.
    */
-  variant?: "default" | "landing";
+  variant?: "default" | "landing" | "home";
   /**
    * Hero sizing (Federico 2026-06-21): the home empty-state composer is the
    * primary call-to-action, so it gets a taller min-height, larger text, and
@@ -76,6 +83,7 @@ export function PromptInput({
   autoFocus?: boolean;
 }) {
   const isLanding = variant === "landing";
+  const isHome = variant === "home";
   const textareaLabel = placeholder ?? "Describe the job you want done";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -158,14 +166,16 @@ export function PromptInput({
           the assistant decides what to wire). Same shared detector as
           /workers/new (lib/prompt-detect). #1557/P1-10: the landing variant keeps
           the composer clean (no separate Uses-row); inline tool chips are a
-          follow-up. */}
-      {!isLanding && <PromptChips prompt={value} className="px-1" />}
+          follow-up. Home variant also drops the row to stay clean. */}
+      {!isLanding && !isHome && <PromptChips prompt={value} className="px-1" />}
 
       {/* E10 (Federico 2026-06-17): flat #FBFBFC composer (bg-app), NOT the grey
           --bg-2 panel that read as an unwanted "white box" appearing on type/focus.
           default: a single subtle divider outline keeps it discoverable.
           landing (#1557/P1-10): fully FLAT, no box border at all, to match the
-          marketing landing prompt box; compact padding (py-2) keeps it short. */}
+          marketing landing prompt box; compact padding (py-2) keeps it short.
+          home: bg-2 fill (focus-within -> bg-3) so the input is discoverable
+          against the flat bg-app surface without a border. */}
       {/* Two-row composer: textarea on top, action toolbar below (attach left,
           send right): the prompt-kit/ChatGPT/Cursor layout (Federico 2026-06-21).
           Flat Floom system: bg fill, NO border, NO shadow. The a11y focus ring
@@ -179,7 +189,11 @@ export function PromptInput({
           large && "p-2",
           // landing keeps the fully-flat marketing look (#1557); the Emily
           // composer uses a bg-2 fill so it's discoverable without a border.
-          isLanding ? "bg-[var(--bg-app)]" : "bg-[var(--bg-2)]",
+          isHome
+            ? "bg-[var(--bg-2)] focus-within:bg-[var(--bg-3)]"
+            : isLanding
+              ? "bg-[var(--bg-app)]"
+              : "bg-[var(--bg-2)]",
         )}
       >
         <textarea
