@@ -6,6 +6,7 @@
  * thin configs of `<Collection>`; this file is the shared type surface.
  */
 import type { ReactNode } from "react";
+import type { ConfirmDialogProps } from "@/components/ui/confirm-dialog";
 
 /** Tag families, rendered left→right in this order (SPEC §1, §11). */
 export type TagFamilyKey =
@@ -74,6 +75,10 @@ export interface RowMenuItem {
   label: string;
   onSelect: () => void;
   danger?: boolean;
+  confirm?: Pick<
+    ConfirmDialogProps,
+    "title" | "body" | "confirmLabel" | "cancelLabel" | "destructive" | "requireTypedConfirmation"
+  >;
 }
 
 /** Grid column headers, aligned to ListRowSpec.cols (resting list only). */

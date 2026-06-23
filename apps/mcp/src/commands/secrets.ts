@@ -82,7 +82,7 @@ export async function secretsDeleteCommand(key: string, options: { yes?: boolean
     const confirmed = options.yes || await promptYesNo(`Delete secret ${key}? [y/N] `, false);
     if (!confirmed) {
       log.info("Cancelled.");
-      return 0;
+      return 1;
     }
     await client.requestJson("DELETE", `/secrets/${encodeURIComponent(key)}`);
     log.ok(`Deleted ${key}`);

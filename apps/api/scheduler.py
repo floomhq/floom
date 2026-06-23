@@ -24,6 +24,7 @@ from croniter import croniter
 from db.factory import get_repositories
 from run_service import create_run, get_worker_config_for_run, start_run
 from alerting import alerting_tick
+from services.product_events import emit_product_event
 
 
 def _missing_secrets_for_scheduled_worker(repos, worker_id: str, user_id: str | None) -> list[str]:
@@ -82,6 +83,28 @@ def _advance_next_run_after_failure(
         repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=next_run_at)
         return
     repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=next_run_at)
+
+
+def _emit_trigger_fired(
+    *,
+    owner_id: str | None,
+    worker_id: str,
+    run_id: str,
+    trigger_type: str,
+    trigger_id: str | None = None,
+) -> None:
+    if not owner_id:
+        return
+    emit_product_event(
+        owner_id=owner_id,
+        event="trigger_fired",
+        properties={
+            "worker_id": worker_id,
+            "run_id": run_id,
+            "trigger_type": trigger_type,
+            "trigger_id": trigger_id,
+        },
+    )
 
 logger = logging.getLogger("floom.scheduler")
 
@@ -368,6 +391,13 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 last_fired_at=now_iso_str,
                 next_run_at=new_next,
             )
+            _emit_trigger_fired(
+                owner_id=user_id,
+                worker_id=worker_id,
+                run_id=run_id,
+                trigger_type="schedule",
+                trigger_id=trigger_id,
+            )
             # Keep the worker-scalar bookkeeping roughly in sync for any legacy
             # readers of workers.last_scheduled_run_at.
             try:
@@ -542,6 +572,12 @@ def _tick() -> None:
                 worker_id=worker_id,
                 last_scheduled_run_at=now_iso_str,
                 next_run_at=new_next,
+            )
+            _emit_trigger_fired(
+                owner_id=user_id,
+                worker_id=worker_id,
+                run_id=run_id,
+                trigger_type="schedule",
             )
             logger.info(
                 "Scheduled run %s started for worker %s, next at %s",

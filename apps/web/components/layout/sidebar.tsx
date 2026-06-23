@@ -157,7 +157,7 @@ type NavItem = {
 // Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is gone,
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
-// Connections. (MCP is a pinned item above the profile footer, see below.)
+// Connections. (Agent setup is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
@@ -261,7 +261,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   );
 }
 
-// MCP item, pinned LOW, just above the profile footer (Emily-home redesign).
+// Agent setup item, pinned LOW, just above the profile footer (Emily-home redesign).
 // Opens the MCP-install POPUP modal (not a page). The badge mirrors the v6
 // "12" affordance but is informational chrome only; the count is omitted here
 // since the OSS engine has no live "installed clients" count to show honestly.
@@ -276,10 +276,11 @@ function SidebarMcpItem({ onNavigate }: { onNavigate?: () => void }) {
           mcpModal.open();
         }}
         title="Add Floom to your AI client"
+        aria-label="Add Floom to your AI client"
         className="flex h-9 w-full items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
       >
         <Terminal className="w-4 h-4" />
-        MCP
+        Agent setup
       </button>
     </div>
   );
@@ -527,12 +528,12 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             })}
             {/* Settings icon at bottom */}
             <div className="flex-1" />
-            {/* MCP, opens the install popup modal (above Settings). */}
+            {/* Agent setup, opens the install popup modal (above Settings). */}
             <button
               type="button"
               onClick={() => mcpModal.open()}
-              title="MCP, add Floom to your AI client"
-              aria-label="MCP, add Floom to your AI client"
+              title="Add Floom to your AI client"
+              aria-label="Add Floom to your AI client"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 hover:bg-[var(--active-nav-bg)] hover:text-ink"
             >
               <Terminal className="w-4 h-4" />

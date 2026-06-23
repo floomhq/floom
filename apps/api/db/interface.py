@@ -195,6 +195,7 @@ class RunRepository(Protocol):
         limit: int = 50,
         offset: int = 0,
         include_total: bool = True,
+        workspace_id: str | None = None,
     ) -> tuple[list[RowDict], int]: ...
 
     def list_operator_visible(
@@ -210,6 +211,7 @@ class RunRepository(Protocol):
         before_id: str | None = None,
         offset: int = 0,
         include_system: bool = False,
+        workspace_id: str | None = None,
     ) -> tuple[list[RowDict], int]: ...
 
     def overview_status_rollup(

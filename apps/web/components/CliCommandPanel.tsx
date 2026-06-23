@@ -66,7 +66,7 @@ const CLI_COMMANDS: { name: string; description: string }[] = [
   { name: "floom runs list", description: "List runs, filterable by worker or status." },
   { name: "floom runs show <id>", description: "Show run details." },
   { name: "floom runs logs <id>", description: "Show or follow run logs." },
-  { name: "floom runs download <id>", description: "Download a run's bundle archive." },
+  { name: "floom runs download <id>", description: "Download a run's files." },
   { name: "floom secrets list", description: "List secret names." },
   { name: "floom secrets set <key>", description: "Set a secret value." },
   { name: "floom secrets delete <key>", description: "Delete a secret." },
@@ -91,7 +91,7 @@ const API_ENDPOINT_GROUPS: {
     endpoints: [
       { method: "GET", path: "/workers?shape=list", description: "List workers (compact shape)." },
       { method: "GET", path: "/workers/{id}", description: "Read one worker's config and metadata." },
-      { method: "POST", path: "/workers", description: "Create a worker from worker.yml + run.py." },
+      { method: "POST", path: "/workers", description: "Create a worker from its worker file and run script." },
       { method: "POST", path: "/workers/draft-and-create", description: "Draft a worker from a prompt and create it." },
       { method: "PATCH", path: "/workers/{id}", description: "Update trigger, cron, inputs, or capabilities." },
       { method: "POST", path: "/workers/{id}/archive", description: "Archive a worker (reversible)." },
@@ -311,7 +311,7 @@ export function CliCommandPanel() {
               onClick={() => void generateToken()}
             >
               <RefreshCw className="mr-1 h-3.5 w-3.5" />
-              {generating ? "Generating" : "Generate token"}
+              {generating ? "Generating" : "Create key"}
             </Button>
           </div>
         )}
@@ -325,7 +325,7 @@ export function CliCommandPanel() {
         <div>
           <h2 className="text-base font-medium text-foreground">Setup &amp; reference</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Install the CLI, add the MCP server, or hit the API directly. Commands embed your token
+            Install the CLI, add the MCP server, or hit the API directly. Commands include your key
             {storedSecret ? (revealed ? "." : " (revealed above to see the real value).") : " once you generate one."}
           </p>
         </div>

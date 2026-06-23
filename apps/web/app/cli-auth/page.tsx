@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, ChevronDown, ShieldCheck, Terminal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloomMark } from "@/components/layout/sidebar";
 
@@ -16,9 +16,6 @@ export type CliAuthContentProps = {
   loginPath?: string;
 };
 
-// Explicit state machine. A terminal state (approved/denied) NEVER renders the
-// action buttons, the security warning, or the code-confirm prompt — only a
-// calm "return to your terminal" / "access denied" panel.
 type AuthState = "idle" | "approving" | "denying" | "approved" | "denied" | "error";
 
 function cliAuthEndpoint(endpointBase: string, action: "approve" | "deny") {
@@ -80,9 +77,6 @@ export function CliAuthContent({
         setState("error");
         return;
       }
-      // No auto-redirect: land on a clean terminal state so the user can return
-      // to their terminal (the engine twin of the cloud-overlay post-approve
-      // bounce fix).
       setState(action === "approve" ? "approved" : "denied");
     } catch {
       setErrorText("Could not reach the API.");
@@ -91,71 +85,131 @@ export function CliAuthContent({
   }
 
   return (
-    // Full-screen standalone gate (AppShell standalonePrefixes), centered like
-    // /login: no sidebar chrome, the page IS the single authorize action.
-    <div className="grid min-h-screen w-full place-items-center bg-[var(--bg-app)] px-6 py-10 text-[var(--ink)]">
-      <div className="w-full max-w-md">
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] px-8 py-9">
-          {/* Brand mark — same play-arrow squircle as /login, never a text circle. */}
-          <div className="mb-7 flex items-center gap-2.5">
-            <FloomMark size={22} />
-            <span className="text-sm font-semibold tracking-tight">Floom</span>
-          </div>
+    <div className="min-h-screen w-full bg-[#FBFBFC] px-5 py-8 text-[#16171A]">
+      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-5xl items-center justify-center">
+        <div className="grid w-full overflow-hidden rounded-[16px] bg-white shadow-[0_24px_80px_hsl(220_18%_18%/.12)] md:grid-cols-[1.08fr_.92fr]">
+          <CliAuthHero />
+          <main className="px-6 py-7 sm:px-9 sm:py-10">
+            <div className="mb-7 flex items-center gap-2.5">
+              <FloomMark size={22} />
+              <span className="text-sm font-semibold tracking-tight">Floom</span>
+            </div>
 
-          {(state === "approved" || state === "denied") ? (
-            <TerminalState kind={state} />
-          ) : (
-            <>
-              <h1 className="text-xl font-semibold tracking-tight">Authorize CLI</h1>
-              <p className="mt-1.5 text-sm text-[var(--muted-text)]">
-                A command-line client is requesting access to your workspace.
-              </p>
-
-              <div className="mt-6 space-y-1.5">
-                <p className="text-xs font-medium text-[var(--muted-text)]">Confirmation code</p>
-                <div className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-4 py-3">
-                  <code className="font-mono text-2xl font-semibold tracking-[0.2em] text-[var(--ink)]">
-                    {code || "····"}
-                  </code>
-                </div>
-                <p className="pt-1 text-xs text-[var(--muted-text)]">
-                  Client <span className="font-medium text-[var(--ink)]">{clientName}</span>
+            {isTerminal ? (
+              <TerminalState kind={state} />
+            ) : (
+              <>
+                <h1 className="text-2xl font-semibold tracking-tight">Connect your agents</h1>
+                <p className="mt-2 text-sm leading-6 text-[#5C6470]">
+                  Match the code from your terminal, then approve this device.
                 </p>
-              </div>
 
-              <p className="mt-5 text-xs leading-relaxed text-[var(--muted-text)]">
-                Only approve if this code matches the one shown in your terminal. If it
-                does not match, deny; someone may be trying to hijack your login.
-              </p>
+                <div className="mt-7 space-y-2">
+                  <p className="text-xs font-medium text-[#68707C]">Confirmation code</p>
+                  <div className="rounded-[10px] bg-[#F3F5F8] px-4 py-4">
+                    <code className="block text-center font-mono text-2xl font-semibold tracking-[0.18em] text-[#16171A]">
+                      {code || "...."}
+                    </code>
+                  </div>
+                </div>
 
-              {state === "error" && errorText && (
-                <p className="mt-4 text-sm text-destructive">{errorText}</p>
-              )}
+                <details className="group mt-4 rounded-[10px] bg-[#F8F9FB] px-4 py-3">
+                  <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-[#31363D]">
+                    Details
+                    <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="mt-3 grid gap-2 text-xs leading-5 text-[#5C6470]">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Client</span>
+                      <span className="font-medium text-[#16171A]">{clientName}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Account</span>
+                      <span className="font-medium text-[#16171A]">Current workspace user</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Access</span>
+                      <span className="font-medium text-[#16171A]">CLI token for this account</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Revoke</span>
+                      <span className="font-medium text-[#16171A]">Settings tokens</span>
+                    </div>
+                  </div>
+                </details>
 
-              <div className="mt-6 flex gap-2.5">
-                <Button
-                  size="lg"
-                  className="flex-1"
-                  disabled={!canAct}
-                  onClick={() => void submit("approve")}
-                >
-                  {state === "approving" ? "Approving..." : "Approve"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="lg"
-                  className="flex-1"
-                  disabled={!canAct}
-                  onClick={() => void submit("deny")}
-                >
-                  {state === "denying" ? "Denying..." : "Deny"}
-                </Button>
-              </div>
-            </>
-          )}
+                <div className="mt-5 flex items-start gap-2 rounded-[10px] bg-[#FFF8EA] px-3.5 py-3 text-xs leading-5 text-[#7A560F]">
+                  <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#C98A1A]" />
+                  <span>Approve only when this code matches your terminal.</span>
+                </div>
+
+                {state === "error" && errorText && (
+                  <p className="mt-4 text-sm text-[#9A5E00]">{errorText}</p>
+                )}
+
+                <div className="mt-7 space-y-3">
+                  <Button
+                    size="lg"
+                    className="h-12 w-full bg-[#16171A] text-white hover:bg-[#2B2D31]"
+                    disabled={!canAct}
+                    onClick={() => void submit("approve")}
+                  >
+                    {state === "approving" ? "Approving..." : "Approve & connect"}
+                  </Button>
+                  <button
+                    type="button"
+                    className="mx-auto block text-sm font-medium text-[#68707C] transition-colors hover:text-[#16171A] disabled:opacity-50"
+                    disabled={!canAct}
+                    onClick={() => void submit("deny")}
+                  >
+                    {state === "denying" ? "Denying..." : "Deny"}
+                  </button>
+                </div>
+              </>
+            )}
+          </main>
         </div>
       </div>
     </div>
+  );
+}
+
+function CliAuthHero() {
+  return (
+    <section className="relative hidden min-h-[620px] overflow-hidden bg-[#F5F7FB] px-10 py-10 md:block" aria-hidden>
+      <div className="absolute inset-x-10 top-10 h-44 rounded-[16px] bg-[#16171A] shadow-[0_20px_60px_hsl(220_22%_10%/.22)]">
+        <div className="flex h-9 items-center gap-2 border-b border-white/10 px-4">
+          <span className="size-2 rounded-full bg-[#C98A1A]" />
+          <span className="size-2 rounded-full bg-white/30" />
+          <span className="size-2 rounded-full bg-white/30" />
+        </div>
+        <div className="space-y-3 px-5 py-5 font-mono text-[12px] leading-none text-white/72">
+          <div>$ floom login</div>
+          <div className="text-white">ABCD-2345</div>
+          <div className="h-2 w-40 animate-pulse rounded-[10px] bg-[#3563CC]" />
+        </div>
+      </div>
+      <div className="absolute left-1/2 top-[206px] h-44 w-px -translate-x-1/2 bg-gradient-to-b from-[#3563CC] via-[#3563CC] to-transparent" />
+      <div className="absolute inset-x-12 bottom-12 rounded-[16px] bg-white p-6 shadow-[0_18px_70px_hsl(220_18%_18%/.10)]">
+        <div className="mb-5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="grid size-9 place-items-center rounded-[10px] bg-[#16171A] text-white">
+              <Terminal className="size-4" />
+            </div>
+            <div>
+              <div className="h-2.5 w-24 rounded-[10px] bg-[#16171A]" />
+              <div className="mt-2 h-2 w-32 rounded-[10px] bg-[#D9DEE7]" />
+            </div>
+          </div>
+          <div className="h-7 w-16 rounded-[10px] bg-[#3563CC]" />
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="h-20 rounded-[10px] bg-[#F3F5F8]" />
+          <div className="h-20 rounded-[10px] bg-[#EEF3FF]" />
+          <div className="h-20 rounded-[10px] bg-[#F8F9FB]" />
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -167,25 +221,25 @@ function TerminalState({ kind }: { kind: "approved" | "denied" }) {
         className="grid size-11 place-items-center rounded-full"
         style={{
           backgroundColor: approved
-            ? "color-mix(in srgb, var(--primary) 12%, transparent)"
-            : "color-mix(in srgb, var(--destructive) 12%, transparent)",
+            ? "color-mix(in srgb, #3563CC 12%, transparent)"
+            : "color-mix(in srgb, #C98A1A 12%, transparent)",
         }}
       >
         {approved ? (
-          <Check className="size-5 text-[var(--primary)]" aria-hidden />
+          <Check className="size-5 text-[#3563CC]" aria-hidden />
         ) : (
-          <X className="size-5 text-destructive" aria-hidden />
+          <X className="size-5 text-[#C98A1A]" aria-hidden />
         )}
       </div>
       <h1 className="mt-5 text-xl font-semibold tracking-tight">
-        {approved ? "Approved" : "Access denied"}
+        {approved ? "Your agents are connected" : "Access denied"}
       </h1>
-      <p className="mt-1.5 text-sm text-[var(--muted-text)]">
+      <p className="mt-1.5 text-sm text-[#5C6470]">
         {approved
           ? "You can return to your terminal."
           : "The request was rejected. No access was granted."}
       </p>
-      <p className="mt-4 text-xs text-[var(--ink-faint)]">You can close this tab.</p>
+      <p className="mt-4 text-xs text-[#8A929D]">You can close this tab.</p>
     </div>
   );
 }

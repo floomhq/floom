@@ -42,6 +42,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ActionMenu } from "@/components/ui/action-menu";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
@@ -522,6 +523,7 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
     currentFiles: { path: string; content: string }[];
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [restoreId, setRestoreId] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
   const editable = can("edit", w);
 
@@ -565,12 +567,13 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
     }
   };
   const restore = async (id: string) => {
-    if (!window.confirm(`Restore worker to version ${id.slice(0, 7)}? This commits a new version.`)) return;
     setBusy(true);
     try {
       applyDetail(await api.workers.rollback(w.id, id));
       toast.success(`Restored to ${id.slice(0, 7)}`);
       setVersions(await api.workers.listVersions(w.id));
+      setRestoreId(null);
+      setDiff(null);
     } catch {
       toast.error("Could not restore that version.");
     } finally {
@@ -580,6 +583,19 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
 
   return (
     <div>
+      <ConfirmDialog
+        open={restoreId !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) setRestoreId(null);
+        }}
+        title={restoreId ? `Restore worker to ${restoreId.slice(0, 7)}?` : "Restore worker version?"}
+        body="This commits a new version with the selected source files."
+        confirmLabel="Restore"
+        loading={busy}
+        onConfirm={() => {
+          if (restoreId) void restore(restoreId);
+        }}
+      />
       <div className="c-ltable">
         {rows.map((r) => (
           <div key={r.id} className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
@@ -602,7 +618,7 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
                   className="c-vpill"
                   style={pillBtn}
                   disabled={busy}
-                  onClick={() => void restore(r.id)}
+                  onClick={() => setRestoreId(r.id)}
                 >
                   Restore
                 </button>
@@ -625,7 +641,7 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
               currentFiles={diff.currentFiles}
               isRestoring={busy}
               canRestore={editable && rows.find((r) => r.id === diff.id && !r.isCurrent) !== undefined}
-              onRestore={() => void restore(diff.id).then(() => setDiff(null))}
+              onRestore={() => setRestoreId(diff.id)}
             />
           )}
         </DialogContent>
@@ -1688,7 +1704,7 @@ function SetupTab({ w }: { w: WorkerSummary }) {
       {/* Visual-editor-of-worker.yml framing + View-as-YAML deep-link, now in the
           panel body below the rows (not between them). */}
       <div className="c-ops-frame">
-        <span>Visual editor of worker.yml</span>
+        <span>Visual worker editor</span>
         <Link
           href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`}
           className="ml-auto normal-case"
@@ -1862,6 +1878,18 @@ function WorkerDetailActions({
             // Share — opens the real Share modal (company access + grants +
             // anonymous public link with revoke), not a bare copy-link.
             { label: "Share", onSelect: () => setShareOpen(true) },
+            {
+              label: "Duplicate",
+              onSelect: () => {
+                api.workers.duplicate(w.id)
+                  .then((created) => {
+                    onUpdated(detailToSummary(created));
+                    router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
+                    toast.success("Worker duplicated");
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
+              },
+            },
             {
               label: workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live",
               onSelect: () => {
@@ -2217,7 +2245,55 @@ export default function WorkersCollection({
         rel(w.recent_stats?.last_run_at),
       ],
       status: workerStatusPill(w),
-      menu: [{ label: "Open", onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) }],
+      menu: [
+        { label: "Open", onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) },
+        { label: "Run", onSelect: () => router.push(`/run/${encodeURIComponent(w.id)}`) },
+        ...(canManageWorkers ? [
+          {
+            label: "Duplicate",
+            onSelect: () => {
+              api.workers.duplicate(w.id)
+                .then((created) => {
+                  setWorkers((prev) => [detailToSummary(created), ...prev]);
+                  router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
+                  toast.success("Worker duplicated");
+                })
+                .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
+            },
+          },
+          {
+            label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+            onSelect: () => {
+              const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
+              const action = isArchived ? api.workers.restore : api.workers.archive;
+              action(w.id)
+                .then((updated) => {
+                  setWorkers((prev) => prev.map((item) => (item.id === w.id ? { ...item, ...detailToSummary(updated) } : item)));
+                  toast.success(isArchived ? "Worker restored" : "Worker archived");
+                })
+                .catch((err: Error) => toast.error(err.message || "Could not update worker"));
+            },
+          },
+          {
+            label: "Delete",
+            destructive: true,
+            confirm: {
+              title: `Delete "${w.name}"?`,
+              body: "This cannot be undone.",
+              confirmLabel: "Delete",
+              destructive: true,
+            },
+            onSelect: () => {
+              api.workers.delete(w.id)
+                .then(() => {
+                  setWorkers((prev) => prev.filter((item) => item.id !== w.id));
+                  toast.success("Worker deleted");
+                })
+                .catch((err: Error) => toast.error(err.message || "Could not delete worker"));
+            },
+          },
+        ] : []),
+      ],
     }),
     card: (w) => {
       const meta = workerCardMeta(w);

@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,6 +112,12 @@ test("doctor header uses the invoked binary name (workeros doctor)", async () =>
   });
   assert.match(result.stdout, /workeros doctor/);
   assert.doesNotMatch(result.stdout, /Floom doctor/);
+});
+
+test("doctor warning summary does not claim all checks passed", () => {
+  const src = readFileSync(new URL("../src/commands/doctor.ts", import.meta.url), "utf8");
+  assert.match(src, /All required checks passed/);
+  assert.match(src, /optional warning/);
 });
 
 test("bare command in a terminal prints help and exits non-zero", async (t) => {

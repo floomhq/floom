@@ -929,7 +929,7 @@ export default function ConnectionsCollection({
                     </span>,
                   ],
                   ["Transport", c.mcp_transport || "—"],
-                  ["Auth secret", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
+                  ["Secret name", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
                   ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
                   ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
                   ["Last used", formatLastUsed(c)],

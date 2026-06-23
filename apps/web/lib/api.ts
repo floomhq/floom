@@ -267,6 +267,8 @@ export const api = {
       return fetchJson<import("./types").WorkerSummary[]>(`/workers?${qs.toString()}`);
     },
     get: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}`),
+    duplicate: (id: string) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: async (id: string) => {
@@ -968,6 +970,8 @@ export const api = {
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),
+    emailChannel: () =>
+      fetchJson<{ connected: boolean; email?: string | null }>("/channels/email"),
     // Members STEP 5: assistant Private <-> Shared with workspace.
     setAssistantVisibility: (visibility: import("./types").AssetVisibility) =>
       fetchJson<import("./types").WorkspaceAgentInfo>(

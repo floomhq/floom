@@ -70,6 +70,7 @@ import {
   History,
   Info,
   KeyRound,
+  Mail,
   MessageSquare,
   Palette,
   QrCode,
@@ -2889,6 +2890,49 @@ function WhatsAppBindingStatus() {
 // ---------------------------------------------------------------------------
 // ChannelsTab — Slack + WhatsApp + Agent install
 // ---------------------------------------------------------------------------
+function EmailChannelStatus() {
+  const [status, setStatus] = useState<{ connected: boolean; email?: string | null } | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    api.system.emailChannel()
+      .then((next) => {
+        if (alive) setStatus(next);
+      })
+      .catch((err: Error) => {
+        if (alive) setError(err.message || "Could not load email status");
+      });
+    return () => { alive = false; };
+  }, []);
+
+  if (error) {
+    return <p className="text-sm text-[var(--warning)]">{error}</p>;
+  }
+  if (!status) {
+    return <Skeleton className="h-16 w-full rounded-[var(--radius-ui)]" />;
+  }
+
+  return (
+    <div className="c-ltable">
+      <div className="c-lrow" style={{ gridTemplateColumns: "auto 1fr auto", cursor: "default" }}>
+        <div className="grid size-9 place-items-center rounded-[var(--radius-ui)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
+          <Mail className="size-4" />
+        </div>
+        <div className="c-lp-tx">
+          <div className="nm">Email</div>
+          <div className="sub">
+            {status.connected && status.email
+              ? `Notifications can be sent to ${status.email}.`
+              : "Add an email address to your account to receive notification emails."}
+          </div>
+        </div>
+        <span className="c-vpill">{status.connected ? "Connected" : "Not connected"}</span>
+      </div>
+    </div>
+  );
+}
+
 function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [qrOpen, setQrOpen] = useState(false);
   return (
@@ -2897,6 +2941,7 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
         <TabsList className="mb-4">
           <TabsTrigger value="slack">Slack</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+          <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="agent-install">Agent install</TabsTrigger>
         </TabsList>
         <TabsContent value="slack" className="space-y-4">
@@ -2943,6 +2988,9 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
               WhatsApp not configured. Set <code className="font-mono">WA_BOT_NUMBER</code>.
             </p>
           )}
+        </TabsContent>
+        <TabsContent value="email" className="space-y-4">
+          <EmailChannelStatus />
         </TabsContent>
         <TabsContent value="agent-install" className="space-y-5">
           <McpInstallPanel />
