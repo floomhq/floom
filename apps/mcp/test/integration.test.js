@@ -663,10 +663,24 @@ test("runs.watch does a final run status check before timing out", async (t) => 
     assert.deepEqual(watched.structuredContent.events.map((event) => event.data.status), ["running"]);
   });
 
-  assert.deepEqual(mock.seen.filter((entry) => entry.includes("run_sse_timeout")), [
-    "GET /runs/run_sse_timeout/events",
-    "GET /runs/run_sse_timeout",
-  ]);
+  const seen = mock.seen.filter((entry) => entry.includes("run_sse_timeout"));
+  assert.equal(seen[0], "GET /runs/run_sse_timeout/events");
+  assert.ok(seen.includes("GET /runs/run_sse_timeout"));
+});
+
+test("runs.watch polls run detail while SSE remains open and stale", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_sse_timeout", timeout_ms: 5000 } });
+    assert.equal(watched.structuredContent.status, "completed");
+    assert.equal(watched.structuredContent.run.output.result, "finished while SSE was stale");
+  });
+
+  const seen = mock.seen.filter((entry) => entry.includes("run_sse_timeout"));
+  assert.equal(seen[0], "GET /runs/run_sse_timeout/events");
+  assert.ok(seen.includes("GET /runs/run_sse_timeout"));
 });
 
 test("workeros CLI without a subcommand serves MCP over stdio", async (t) => {
