@@ -177,3 +177,26 @@ def test_worker_payload_validation_uses_active_context_scope(client):
 
     assert worker_id == "ctx-worker"
     assert "crm-pack" in config.contexts
+
+
+def test_worker_payload_validation_rejects_foreign_context_scope(client):
+    c, _ = client
+    assert c.get("/auth/me").status_code == 200
+
+    import contexts
+    from fastapi import HTTPException
+    from services.worker_registry_ops import _parse_worker_payload
+
+    foreign_root = contexts.CONTEXTS_DIR / "workspace-b"
+    (foreign_root / "crm-pack").mkdir(parents=True)
+    worker_yml = _YML.replace("contexts: []", "contexts:\n  - crm-pack\n")
+
+    contexts.set_context_scope_resolver(lambda: "workspace-a")
+    try:
+        with pytest.raises(HTTPException) as exc:
+            _parse_worker_payload(worker_yml, user_id="member-a")
+    finally:
+        contexts.set_context_scope_resolver(None)
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Context not found: crm-pack"
