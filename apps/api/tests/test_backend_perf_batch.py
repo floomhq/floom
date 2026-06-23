@@ -24,6 +24,10 @@ def test_public_api_base_prefers_api_base_and_uses_local_default(monkeypatch):
 
 
 def test_slack_oauth_uses_forwarded_public_host(monkeypatch):
+    monkeypatch.delenv("WORKEROS_PUBLIC_API_URL", raising=False)
+    monkeypatch.delenv("WORKEROS_API_BASE", raising=False)
+    monkeypatch.delenv("WORKEROS_API_URL", raising=False)
+    monkeypatch.delenv("WORKERS_API_URL", raising=False)
     from starlette.requests import Request
     import channels.slack as slack
 
@@ -44,6 +48,31 @@ def test_slack_oauth_uses_forwarded_public_host(monkeypatch):
     assert (
         slack._slack_oauth_callback_url(slack._request_public_api_base_url(request))
         == "https://workeros-api.floom.dev/slack/oauth/callback"
+    )
+
+
+def test_slack_oauth_configured_public_url_wins_over_forwarded_host(monkeypatch):
+    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://api.floom.dev/")
+    from starlette.requests import Request
+    import channels.slack as slack
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/slack/oauth/callback",
+        "headers": [
+            (b"host", b"internal:8000"),
+            (b"x-forwarded-proto", b"https"),
+            (b"x-forwarded-host", b"attacker.example"),
+        ],
+    }
+    request = Request(scope)
+
+    assert slack._request_public_api_base_url(request) == "https://api.floom.dev"
+    assert (
+        slack._slack_oauth_callback_url(slack._request_public_api_base_url(request))
+        == "https://api.floom.dev/slack/oauth/callback"
     )
 
 

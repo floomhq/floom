@@ -113,7 +113,21 @@ def _public_api_base_url() -> str:
     return raw.rstrip("/")
 
 
+def _configured_public_api_base_url() -> Optional[str]:
+    raw = (
+        os.environ.get("WORKEROS_PUBLIC_API_URL")
+        or os.environ.get("WORKEROS_API_BASE")
+        or os.environ.get("WORKEROS_API_URL")
+        or os.environ.get("WORKERS_API_URL")
+    )
+    return raw.rstrip("/") if raw else None
+
+
 def _request_public_api_base_url(request: Request) -> str:
+    configured = _configured_public_api_base_url()
+    if configured:
+        return configured
+
     forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
     host = forwarded_host or (request.headers.get("host") or "").strip()
     if not host:
