@@ -919,6 +919,8 @@ export const api = {
     clearRuns: () => fetchJson<import("@/lib/types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("@/lib/types").WorkspaceAgentInfo>("/system/workspace-agent"),
+    emailChannel: () =>
+      fetchJson<{ connected: boolean; email?: string | null }>("/channels/email"),
     // Members STEP 5: assistant Private <-> Shared with workspace.
     setAssistantVisibility: (visibility: import("@/lib/types").AssetVisibility) =>
       fetchJson<import("@/lib/types").WorkspaceAgentInfo>(
