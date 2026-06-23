@@ -151,23 +151,13 @@ jobs:
     timeout-minutes: 20
 
     env:
-      # The dashboard apex /app/* is served by the landing project's rewrite to
-      # the floomhq workeros-cloud-dashboard project's stable -three alias (see
-      # vercel.json / next.config.ts). This job MUST deploy to that floomhq
-      # project (team_aOM4ANb5KeVEoKFGTePRK0Wi / prj_K4EXgIgtwjD54fpU2MjjFJ5SLWKT)
-      # and re-alias -three to the new deploy. The VERCEL_WORKEROS_CLOUD_DASHBOARD_PROJECT_ID
-      # repo secret previously resolved to a same-named PERSONAL-team project
-      # (fedes-projects-5891bd50), so prebuilt deploys landed there (and returned
-      # 401 behind Vercel SSO), while the floomhq project — and therefore the apex
-      # /app — stayed frozen at a pre-merge deploy even though the job reported
-      # success. We pin the floomhq org + project id explicitly below (and write
-      # .vercel/project.json BEFORE pull) so the deploy can never auto-link to the
-      # wrong team's project again.
-      DASHBOARD_ORG_ID: team_aOM4ANb5KeVEoKFGTePRK0Wi
-      DASHBOARD_PROJECT_ID: prj_K4EXgIgtwjD54fpU2MjjFJ5SLWKT
-      DASHBOARD_PROD_ALIAS: workeros-cloud-dashboard-three.vercel.app
-      VERCEL_ORG_ID: team_aOM4ANb5KeVEoKFGTePRK0Wi
-      VERCEL_PROJECT_ID: prj_K4EXgIgtwjD54fpU2MjjFJ5SLWKT
+      # The landing project rewrites /app/* to the fedes-projects dashboard
+      # production domain. Pin the accessible production project explicitly so
+      # dashboard deploys advance the same build that floom.dev/app and
+      # workeros.floom.dev/app serve.
+      DASHBOARD_SCOPE: fedes-projects-5891bd50
+      DASHBOARD_PROJECT_NAME: workeros-cloud-dashboard
+      DASHBOARD_PROD_ALIAS: r9-detail.floom.dev
 
     steps:
       # The private engine submodule is cloned with the self-hosted runner's
@@ -187,8 +177,10 @@ jobs:
             echo "::error::with read access to floomhq/floom."
             exit 1
           fi
+          auth_url="https://x-access-token:${TOKEN}"
+          github_host="@github.com/"
           git config --global \
-            url."https://x-access-token:${TOKEN}@github.com/".insteadOf \
+            url."${auth_url}${github_host}".insteadOf \
             "https://github.com/"
           git submodule update --init --depth 1 engine
           if [ ! -d engine/apps/web ]; then
@@ -216,16 +208,26 @@ jobs:
         working-directory: web
         run: npm run sync -- --quiet
 
-      - name: Pin Vercel project link (floomhq dashboard)
+      - name: Pin Vercel project link (fedes dashboard)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
           # Pin the link BEFORE pull so `vercel pull`/`build`/`deploy` target the
-          # floomhq workeros-cloud-dashboard project regardless of any stale/
-          # personal-team repo secrets. This is the durable guard against the
-          # prebuilt deploy landing in the wrong team's same-named project.
+          # canonical fedes-projects workeros-cloud-dashboard project regardless
+          # of stale repo secrets or old same-named projects.
+          dashboard_project_id="$(curl -sS \
+            "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_NAME}?teamId=${DASHBOARD_SCOPE}" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')"
+          if [ -z "$dashboard_project_id" ]; then
+            echo "::error::Could not resolve ${DASHBOARD_PROJECT_NAME} in ${DASHBOARD_SCOPE}."
+            exit 1
+          fi
+          echo "DASHBOARD_PROJECT_ID=$dashboard_project_id" >> "$GITHUB_ENV"
           mkdir -p .vercel
           printf '{"projectId":"%s","orgId":"%s"}\n' \
-            "$DASHBOARD_PROJECT_ID" "$DASHBOARD_ORG_ID" > .vercel/project.json
+            "$dashboard_project_id" "$DASHBOARD_SCOPE" > .vercel/project.json
           cat .vercel/project.json
 
       - name: Pull Vercel project settings
@@ -234,7 +236,7 @@ jobs:
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
           npx --yes vercel@50.22.1 pull --yes --environment=production \
-            --scope "$DASHBOARD_ORG_ID" --token "$VERCEL_TOKEN"
+            --scope "$DASHBOARD_SCOPE" --token "$VERCEL_TOKEN"
 
       - name: Build (prebuilt) on runner
         env:
@@ -246,7 +248,7 @@ jobs:
           # engine seams baked into web/package.json. Engine source is present on
           # the runner, so it builds a complete tree into .vercel/output.
           timeout 15m npx --yes vercel@50.22.1 build --prod \
-            --scope "$DASHBOARD_ORG_ID" --token "$VERCEL_TOKEN"
+            --scope "$DASHBOARD_SCOPE" --token "$VERCEL_TOKEN"
 
       - name: Deploy prebuilt to production
         env:
@@ -254,7 +256,7 @@ jobs:
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
           timeout 10m npx --yes vercel@50.22.1 deploy --prebuilt --prod --yes \
-            --scope "$DASHBOARD_ORG_ID" --token "$VERCEL_TOKEN" \
+            --scope "$DASHBOARD_SCOPE" --token "$VERCEL_TOKEN" \
             | tee deploy-url.txt
           DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy-url.txt | tail -1)"
           if [ -z "$DEPLOY_URL" ]; then
@@ -269,14 +271,11 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          # The apex /app/* rewrite (vercel.json) serves
-          # workeros-cloud-dashboard-three.vercel.app, so the new deploy must own
-          # that alias. Do not rely on Vercel auto-promotion (the personal-team
-          # project previously "auto-aliased" a same-named domain that the apex
-          # never actually served). Resolve the new deploy id and point the alias
-          # at it explicitly via the v2 aliases API.
+          # Keep the dashboard production domain attached to the just-promoted
+          # deploy. The landing rewrite points at this domain, so this is the
+          # build floom.dev/app and workeros.floom.dev/app inherit.
           DEPLOY_ID="$(curl -sS \
-            "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${DASHBOARD_ORG_ID}" \
+            "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${DASHBOARD_SCOPE}" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')"
           if [ -z "$DEPLOY_ID" ]; then
@@ -284,9 +283,9 @@ jobs:
             exit 1
           fi
           echo "DEPLOY_ID=$DEPLOY_ID" >> "$GITHUB_ENV"
-          echo "Re-aliasing $DASHBOARD_PROD_ALIAS -> $DEPLOY_ID"
+          echo "Ensuring $DASHBOARD_PROD_ALIAS aliases $DEPLOY_ID"
           RESP="$(curl -sS -X POST \
-            "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${DASHBOARD_ORG_ID}" \
+            "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${DASHBOARD_SCOPE}" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"alias\":\"${DASHBOARD_PROD_ALIAS}\"}")"
@@ -299,24 +298,23 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -uo pipefail
-          # A green deploy is NOT proof the apex /app advanced: the prior runs were
-          # green while the floomhq project stayed frozen. Poll until BOTH hold:
-          # (1) the floomhq dashboard project's production deploy id == the deploy
-          # we just shipped, and (2) the apex /app/login serves 200 (login screen)
-          # from that build.
+          # A green deploy is NOT proof the public /app routes advanced. Poll
+          # until BOTH hold: (1) the dashboard project's production deploy id is
+          # the deploy we just shipped, and (2) the public /app/login route serves
+          # a login screen without route loops or server errors.
           for i in $(seq 1 30); do
             proj_id="$(curl -sS \
-              "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_ID}?teamId=${DASHBOARD_ORG_ID}" \
+              "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_NAME}?teamId=${DASHBOARD_SCOPE}" \
               -H "Authorization: Bearer $VERCEL_TOKEN" \
               | python3 -c 'import sys,json; d=json.load(sys.stdin); print(((d.get("targets") or {}).get("production") or {}).get("id",""))')"
             code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://workeros.floom.dev/app/login" || true)"
-            echo "attempt $i: floomhq prod id=$proj_id (expected ${DEPLOY_ID}); apex /app/login=$code"
+            echo "attempt $i: dashboard prod id=$proj_id (expected ${DEPLOY_ID}); /app/login=$code"
             if [ "$proj_id" = "$DEPLOY_ID" ] && [ "$code" = "200" ]; then
-              echo "Dashboard apex /app is fresh: floomhq prod == $DEPLOY_ID and /app/login==200."
+              echo "Dashboard /app is fresh: prod == $DEPLOY_ID and /app/login==200."
               break
             fi
             if [ "$i" = "30" ]; then
-              echo "::error::Dashboard did not converge: floomhq prod ($proj_id) != $DEPLOY_ID or /app/login != 200."
+              echo "::error::Dashboard did not converge: prod ($proj_id) != $DEPLOY_ID or /app/login != 200."
               exit 1
             fi
             sleep 10

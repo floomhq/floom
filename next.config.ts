@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const CLOUD_DASHBOARD_URL = (
-  process.env.CLOUD_DASHBOARD_URL || "https://workeros-cloud-dashboard-three.vercel.app"
+  process.env.CLOUD_DASHBOARD_URL || "https://r9-detail.floom.dev"
 ).replace(/\/+$/, "");
 
 const APP_ROUTES = [
