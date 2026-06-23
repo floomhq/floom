@@ -358,6 +358,7 @@ async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
 async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObject> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const pollIntervalMs = Math.min(1000, Math.max(100, timeoutMs));
   const events: JsonObject[] = [];
   let status: string | undefined;
   let buffer = "";
@@ -401,11 +402,39 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let pendingRead: Promise<
+      | { kind: "read"; result: ReadableStreamReadResult<Uint8Array> }
+      | { kind: "readError"; error: unknown }
+    > = reader.read().then(
+      (result) => ({ kind: "read", result }),
+      (error) => ({ kind: "readError", error }),
+    );
     while (true) {
-      const { done, value } = await reader.read();
+      const raced = await Promise.race([
+        pendingRead,
+        new Promise<{ kind: "poll" }>((resolve) => {
+          setTimeout(() => resolve({ kind: "poll" }), pollIntervalMs);
+        }),
+      ]);
+      if (raced.kind === "poll") {
+        const final = await finalRunStatus();
+        if (final) {
+          await reader.cancel();
+          return final;
+        }
+        continue;
+      }
+      if (raced.kind === "readError") {
+        throw raced.error;
+      }
+      const { done, value } = raced.result;
       if (done) {
         break;
       }
+      pendingRead = reader.read().then(
+        (result) => ({ kind: "read", result }),
+        (error) => ({ kind: "readError", error }),
+      );
       buffer += decoder.decode(value, { stream: true });
       const chunks = buffer.split(/\r?\n\r?\n/);
       buffer = chunks.pop() || "";

@@ -3,7 +3,8 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, ShieldCheck, Terminal, X } from "lucide-react";
+import { Check, X } from "lucide-react";
+import { ChevronDown, ShieldCheck, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloomMark } from "@/components/layout/sidebar";
 
