@@ -2,6 +2,10 @@
 
 Hosted multi-tenant workeros. Supabase auth, CLI login, runs on Floom infra.
 
+<p align="center">
+  <img src="docs/media/hero.gif" alt="Ask Emily, your AI chief of staff — she runs the tools and answers" width="900">
+</p>
+
 This is the **hosted product**. The runtime engine — agent runtime, sandbox, triggers, manifest parsing — lives in the open-source [`floomhq/floom`](https://github.com/floomhq/floom) repo. This repo wraps it with tenancy, auth, billing, and the cloud-native UX.
 
 ## Relationship to `workeros` (open source)
