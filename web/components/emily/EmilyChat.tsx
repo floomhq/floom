@@ -31,8 +31,6 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import {
-  getAutoOpenRunDetailsHref,
-  shouldAutoOpenRunDetails,
   useChatStream,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
@@ -477,7 +475,6 @@ interface EmilyChatCoreProps {
   createMode?: boolean;
   /** #902: pre-fill the composer (legacy /workers/new?prompt= deep links). */
   primeInput?: string;
-  onOpenRunDetails?: () => void;
   /** When provided, the core omits its own controls row (host renders them in the header). */
   hideControls?: boolean;
   /** Mutable ref that receives action callbacks so the host header can drive them. */
@@ -506,7 +503,7 @@ const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__create_from_
 // Exported so the Emily HOME (components/home/EmilyHome) can render the SAME
 // real chat core inline for its drafting state — reusing the live conversation
 // rendering + worker-drafting tool cards instead of rebuilding Emily.
-export function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false, autoSubmitPrime = false, homeMode = false, homeInitialData = null }: EmilyChatCoreProps) {
+export function EmilyChatCore({ fullPage = false, createMode = false, primeInput, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false, autoSubmitPrime = false, homeMode = false, homeInitialData = null }: EmilyChatCoreProps) {
   const assistantName = useAssistantName();
   const mcpModal = useMcpModal();
   const {
@@ -519,7 +516,6 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     newSession,
     loadConversation,
   } = useChatStream({ ephemeral: createMode });
-  const router = useRouter();
   // Read the query client via context (NOT useQueryClient) so it is `undefined`
   // when no QueryClientProvider is mounted — the targeted list refresh below is
   // then a no-op. In the app Emily is always under QueryProvider, so this is the
@@ -544,9 +540,6 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
   // Start true so the first message load scrolls to bottom automatically.
   const isNearBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const openedRunDetailsRef = useRef(new Set<string>());
-  const runDetailsNavReadyRef = useRef(false);
-
   // Track whether the user is near the bottom of the scroll container.
   // We use a ref (not state) so the scroll handler doesn't trigger re-renders.
   const handleScroll = useCallback(() => {
@@ -592,7 +585,6 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     const grew = messages.length > prevLengthRef.current;
     prevLengthRef.current = messages.length;
     if (grew && messages[messages.length - 1]?.role === "user") {
-      runDetailsNavReadyRef.current = true;
       scrollToBottom();
     }
   }, [messages, scrollToBottom]);
@@ -647,28 +639,6 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     queryClient.invalidateQueries({ queryKey: ["runs"] });
   }, [isStreaming, queryClient]);
 
-  useEffect(() => {
-    if (!runDetailsNavReadyRef.current || isHydrating) return;
-    if (fullPage) return;
-    for (const msg of messages) {
-      if (msg.role !== "assistant" || !msg.parts) continue;
-      for (const part of msg.parts) {
-        if (part.type !== "tool-card") continue;
-        const card = part.card;
-        if (!shouldAutoOpenRunDetails(card)) continue;
-        const href = getAutoOpenRunDetailsHref(card);
-        if (!href) continue;
-        const runId = card.runId;
-        if (!runId) continue;
-        if (openedRunDetailsRef.current.has(runId)) continue;
-        openedRunDetailsRef.current.add(runId);
-        onOpenRunDetails?.();
-        router.push(href);
-        return;
-      }
-    }
-  }, [messages, router, fullPage, isHydrating, onOpenRunDetails]);
-
   const handleSubmit = useCallback(() => {
     const text = input.trim();
     if (!text && attachedFiles.length === 0) return;
@@ -721,8 +691,6 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
     newSession();
     isNearBottomRef.current = true;
     setShowScrollButton(false);
-    openedRunDetailsRef.current.clear();
-    runDetailsNavReadyRef.current = false;
   }, [newSession]);
 
   const hasMessages = messages.length > 0;

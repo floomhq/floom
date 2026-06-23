@@ -28,8 +28,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/useChatStream", () => ({
-  getAutoOpenRunDetailsHref: vi.fn(),
-  shouldAutoOpenRunDetails: vi.fn(() => false),
   getCardHref: vi.fn(() => null),
   getToolCardTitle: vi.fn((name: string) => name),
   useChatStream: () => ({

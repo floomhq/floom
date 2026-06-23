@@ -1083,15 +1083,6 @@ export function reduceSSEEvent(
   }
 }
 
-export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
-  return (
-    card.kind === "run" &&
-    normalizeToolName(card.toolName || "") === "runs.get" &&
-    card.status === "completed" &&
-    Boolean(card.runId)
-  );
-}
-
 export function safeRunPartsStreamPath(path: unknown): string | null {
   if (typeof path !== "string") return null;
   const trimmed = path.trim();
@@ -1099,15 +1090,9 @@ export function safeRunPartsStreamPath(path: unknown): string | null {
   return trimmed;
 }
 
-export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
-  return shouldAutoOpenRunDetails(card) && card.runId
-    ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Logs`
-    : null;
-}
-
 // #825: Emily's answers link to app pages as REAL router hrefs (no DOM access /
-// page driving — links only). Generalizes getAutoOpenRunDetailsHref across every
-// card kind to its in-app route, or null when there's nothing concrete to open.
+// page driving — links only). Maps each card kind to its in-app route, or null
+// when there's nothing concrete to open.
 export function getCardHref(card: ToolCard): string | null {
   switch (card.kind) {
     case "worker-create":

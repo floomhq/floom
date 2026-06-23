@@ -16,8 +16,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/useChatStream", () => ({
-  getAutoOpenRunDetailsHref: vi.fn(),
-  shouldAutoOpenRunDetails: vi.fn(() => false),
   useChatStream: () => ({
     messages,
     conversationId: "c1",
