@@ -5,7 +5,6 @@ import { api } from "@/lib/api";
 import type {
   ApprovalRow,
   ContextSummary,
-  LocalWorkspaceListResponse,
   SystemOverview,
   WorkerSummary,
   ConnectionItem,
@@ -16,6 +15,9 @@ import type {
 
 // Stable query keys — one namespace per resource so the cache survives navigation
 // and revalidation patches the same entry in place (no skeleton on return).
+export const WORKERS_LIST_QUERY_OPTS = { include_archived: true } as const;
+export const RUNS_FIRST_PAGE_QUERY_PARAMS = { limit: 50, offset: 0 } as const;
+
 export const qk = {
   overview: ["system", "overview"] as const,
   workers: (opts?: { include_archived?: boolean }) => ["workers", opts ?? {}] as const,
@@ -26,8 +28,6 @@ export const qk = {
   approvalsCount: ["approvals", "count"] as const,
   members: ["workspace", "members"] as const,
   runs: (params?: Record<string, unknown>) => ["runs", params ?? {}] as const,
-  // Workspace list — cached so the switcher never re-spins on every mount.
-  workspaces: ["workspaces"] as const,
 };
 
 // Each hook is cache-first (see QueryProvider defaults: staleTime 30s,
@@ -106,11 +106,10 @@ export function useApprovalsCountQuery(initialData?: { pending: number }) {
 export function useMembers(initialData?: WorkspaceMember[]) {
   return useQuery({
     queryKey: qk.members,
-    queryFn: async () => {
-      if (!api.members?.list) return [] as WorkspaceMember[];
-      const response = await api.members.list();
-      return response.members;
-    },
+    queryFn: () =>
+      (api.members?.list?.() ?? Promise.resolve({ members: [] as WorkspaceMember[] }))
+        .then((r) => r.members)
+        .catch(() => [] as WorkspaceMember[]),
     initialData,
     placeholderData: keepPreviousData,
   });
@@ -120,21 +119,6 @@ export function useRuns(params?: Parameters<typeof api.runs.list>[0], initialDat
   return useQuery({
     queryKey: qk.runs(params as Record<string, unknown>),
     queryFn: () => api.runs.list(params),
-    initialData,
-    placeholderData: keepPreviousData,
-  });
-}
-
-// Cached workspace list hook — mirrors the shape WorkspaceSwitcher needs so it
-// can read from the cache rather than raw-useEffect-fetching on every mount.
-// staleTime is inherited from the global QueryClient default (30s), so the
-// switcher never spins again during normal navigation. WorkspaceSwitcher passes
-// initialData (the first server-rendered paint) to make the initial render
-// instant on load.
-export function useWorkspaces(initialData?: LocalWorkspaceListResponse) {
-  return useQuery({
-    queryKey: qk.workspaces,
-    queryFn: () => api.workspace.list(),
     initialData,
     placeholderData: keepPreviousData,
   });

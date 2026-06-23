@@ -5,6 +5,9 @@
 import { TerminalSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// S28: theme-aware Terminal. Was bg-[#111] always (looked broken in light
+// mode against warm matte background). Now uses bg-[var(--bg-2)] in light
+// + bg-[#0d0d0d] in dark via dark: variant. Text colors follow.
 export function Terminal({
   lines,
   className,
@@ -15,7 +18,7 @@ export function Terminal({
   return (
     <div className={cn(
       "overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] text-foreground",
-      "dark:bg-[var(--bg-2)] dark:text-[var(--ink)]",
+      "dark:bg-[#0d0d0d] dark:text-[#e8e8e8]",
       className,
     )}>
       <div className="flex items-center gap-2 [border-bottom:var(--bd-div)] px-3 py-2 text-xs text-muted-foreground dark:text-white/70">
@@ -28,7 +31,7 @@ export function Terminal({
           : lines.map((line, index) => (
               <div
                 key={`${line.timestamp || "line"}-${index}`}
-                className={line.level === "error" ? "text-[var(--warning)]" : ""}
+                className={line.level === "error" ? "text-error" : ""}
               >
                 <span className="text-muted-foreground dark:text-white/35">
                   {line.timestamp ? `[${new Date(line.timestamp).toLocaleTimeString()}]` : "$"}

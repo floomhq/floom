@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
-import { useWorkers } from "@/lib/query/hooks";
+import { useWorkers, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
 import type {
   WorkerSummary,
   WorkerDetail,
@@ -401,7 +401,7 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
         <div>
           <h4 style={h4}>
             <Brain className="inline-block size-[11px] align-[-1px] mr-1" aria-hidden="true" />
-            Library folders it uses
+            Company brain it uses
           </h4>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {contexts.map((spec) => {
@@ -773,7 +773,7 @@ function BrainTab({ w }: { w: WorkerSummary }) {
     setBusy(true);
     try {
       applyDetail(await persistYml(d, patchBrainContexts(workerYml(d), next)));
-      toast.success("Library updated");
+      toast.success("Brain updated");
     } catch {
       toast.error("Could not update brain folders.");
     } finally {
@@ -1753,13 +1753,13 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
   Setup: SetupTab,
   Source: SourceTab,
   Versions: VersionsTab,
-  Library: BrainTab,
+  Brain: BrainTab,
   Tools: ToolsTab,
 };
 
 /**
  * Inline "Developer" disclosure button — sits directly after the operator tabs
- * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Library, Tools).
+ * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Brain, Tools).
  * One click reveals all; clicking again collapses all. No dropdown, no pin, no
  * per-item checkmark. Replaces the pick-one dropdown (kills the #1680 bug class).
  */
@@ -2092,7 +2092,7 @@ export default function WorkersCollection({
   // state is kept in sync so the existing optimistic mutation handlers (delete,
   // update, archive) still work.
   const workersQuery = useWorkers(
-    { include_archived: true },
+    WORKERS_LIST_QUERY_OPTS,
     initialWorkers.length > 0 ? initialWorkers : undefined,
   );
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);

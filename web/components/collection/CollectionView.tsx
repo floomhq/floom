@@ -251,9 +251,9 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           squishing the description or clipping the rightmost chip. */}
       <div className="c-headrow">
         <div className="c-headtitle">
-          <h1 style={{ margin: 0, fontSize: 23, fontWeight: 600, letterSpacing: 0 }}>
+          <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.02em" }}>
             {config.title}
-          </h1>
+          </div>
           {config.subtitle && (
             <div style={{ color: "var(--muted-foreground)", marginTop: 2 }}>{config.subtitle}</div>
           )}
@@ -278,8 +278,8 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       value={state.view}
       onChange={setView}
       options={[
-        { value: "list", label: "List view", icon: <ListIcon />, iconOnly: true },
         { value: "grid", label: "Grid view", icon: <LayoutGrid />, iconOnly: true },
+        { value: "list", label: "List view", icon: <ListIcon />, iconOnly: true },
       ]}
     />
   );

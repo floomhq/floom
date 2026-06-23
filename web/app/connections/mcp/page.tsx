@@ -259,7 +259,6 @@ function truncateUrl(url: string, max = 48): string {
 export default function McpConnectionsPage() {
   const [connections, setConnections] = useState<McpConnection[]>([]);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
-  const [secretsError, setSecretsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // Distinguish a FAILED load from an empty one: a 500/network error renders an
   // explicit retry state, never a perpetual skeleton or a misleading empty card.
@@ -311,19 +310,10 @@ export default function McpConnectionsPage() {
     }
   }, []);
 
-  const loadSecrets = useCallback(async () => {
-    setSecretsError(null);
-    try {
-      setSecrets(await api.secrets.list());
-    } catch {
-      setSecretsError("Could not load access keys. Retry before choosing or saving a secret-backed MCP server.");
-    }
-  }, []);
-
   useEffect(() => {
     void load();
-    void loadSecrets();
-  }, [load, loadSecrets]);
+    api.secrets.list().then(setSecrets).catch(() => setSecrets([]));
+  }, [load]);
 
   function resetForm() {
     setLabel(""); setTransport("streamable_http"); setUrl(""); setCommand("");
@@ -347,10 +337,6 @@ export default function McpConnectionsPage() {
     const { payload, error } = serverJsonValidation;
     if (error || !payload) {
       toast.error(error || "MCP config is invalid");
-      return;
-    }
-    if (payload.auth_secret && secretsError) {
-      toast.error("Access keys did not load. Retry access keys before saving this MCP server.");
       return;
     }
     setSaving(true);
@@ -399,10 +385,6 @@ export default function McpConnectionsPage() {
     });
     if (validation.error || !validation.payload) {
       toast.error(validation.error || "MCP config is invalid");
-      return;
-    }
-    if (validation.payload.auth_secret && secretsError) {
-      toast.error("Access keys did not load. Retry access keys before saving this MCP server.");
       return;
     }
     setSaving(true);
@@ -525,14 +507,14 @@ export default function McpConnectionsPage() {
       {/* ============================================================= */}
       {/* Concept A — Use Floom Workers IN your AI client (secondary)   */}
       {/* ============================================================= */}
-      <section className="rounded-[var(--radius-card)] bg-[var(--bg-2)]">
+      <section className="rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)]">
         <button
           type="button"
           onClick={() => setInstallOpen((v) => !v)}
           aria-expanded={installOpen}
-          className="flex w-full items-center gap-3 rounded-[var(--radius-card)] px-4 py-3.5 text-left transition-colors hover:bg-[var(--bg-3)]"
+          className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors hover:bg-[var(--bg-2)]"
         >
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-app)]">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)]">
             <Terminal className="size-4 text-muted-foreground" />
           </div>
           <div className="min-w-0 flex-1">
@@ -554,10 +536,10 @@ export default function McpConnectionsPage() {
                   key={target.target}
                   type="button"
                   onClick={() => setInstallTarget(target.target)}
-                  className={`rounded-[var(--radius-button)] px-2.5 py-1 text-xs font-medium transition-colors ${
+                  className={`rounded-[var(--radius-button)] [border:var(--bd-pill)] px-2.5 py-1 text-xs font-medium transition-colors ${
                     installTarget === target.target
                       ? "bg-[var(--ink)] text-[var(--bg-app)]"
-                      : "bg-[var(--bg-card)] text-muted-foreground hover:bg-[var(--bg-3)] hover:text-foreground"
+                      : "bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {target.label}
@@ -598,7 +580,7 @@ export default function McpConnectionsPage() {
 
       {/* Single add flow: JSON config first, with form and bulk import as secondary paths. */}
       {formOpen && (
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] p-4">
+        <div className="rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)] p-4">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-sm font-medium text-foreground">Add MCP server</h3>
@@ -606,13 +588,13 @@ export default function McpConnectionsPage() {
                 Paste a JSON config. Use secret names, not secret values.
               </p>
             </div>
-          <div className="inline-flex rounded-[var(--radius-button)] bg-[var(--bg-app)] p-0.5">
+          <div className="inline-flex rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)] p-0.5">
             <button
               type="button"
               onClick={() => setMode("json")}
-              className={`rounded-[var(--radius-button)] px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "json"
-                  ? "bg-[var(--bg-2)] text-foreground"
+                  ? "bg-[var(--bg-card)] text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -621,9 +603,9 @@ export default function McpConnectionsPage() {
             <button
               type="button"
               onClick={() => setMode("form")}
-              className={`rounded-[var(--radius-button)] px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "form"
-                  ? "bg-[var(--bg-2)] text-foreground"
+                  ? "bg-[var(--bg-card)] text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -632,9 +614,9 @@ export default function McpConnectionsPage() {
             <button
               type="button"
               onClick={() => setMode("import")}
-              className={`rounded-[var(--radius-button)] px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "import"
-                  ? "bg-[var(--bg-2)] text-foreground"
+                  ? "bg-[var(--bg-card)] text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -678,7 +660,7 @@ export default function McpConnectionsPage() {
                   type="button"
                   size="sm"
                   onClick={handleCreateFromJson}
-                  disabled={saving || Boolean(serverJsonValidation.error) || Boolean(serverJsonValidation.payload?.auth_secret && secretsError)}
+                  disabled={saving || Boolean(serverJsonValidation.error)}
                 >
                   {saving ? <><Loader2 className="size-3.5 animate-spin" /> Saving...</> : "Save MCP server"}
                 </Button>
@@ -719,7 +701,6 @@ export default function McpConnectionsPage() {
                     id="mcp-auth-secret"
                     value={authSecret}
                     onChange={(e) => setAuthSecret(e.target.value)}
-                    disabled={Boolean(secretsError)}
                     className="flex h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-3 text-sm outline-none"
                   >
                     <option value="">No access key</option>
@@ -727,15 +708,6 @@ export default function McpConnectionsPage() {
                       <option key={s.name} value={s.name}>{s.name}</option>
                     ))}
                   </select>
-                  {secretsError && (
-                    <div role="alert" className="flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] p-2 text-xs text-[var(--warning)]">
-                      <AlertCircle className="size-3.5 shrink-0" />
-                      <span className="min-w-0 flex-1">{secretsError}</span>
-                      <button type="button" className="underline underline-offset-2" onClick={() => void loadSecrets()}>
-                        Retry
-                      </button>
-                    </div>
-                  )}
                 </div>
                 )}
                 {transport !== "stdio" ? (
@@ -857,7 +829,7 @@ export default function McpConnectionsPage() {
                     {importParsed.map((item) => (
                       <div
                         key={item.key}
-                        className={`flex items-center gap-3 rounded-[var(--radius-button)] px-3 py-2.5 text-sm transition-colors ${
+                        className={`flex items-center gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-2.5 text-sm transition-colors ${
                           item.transport !== "stdio" && !item.url
                             ? "cursor-not-allowed bg-muted/30 opacity-60"
                             : "cursor-pointer bg-[var(--bg-app)] hover:bg-muted/40"
@@ -942,7 +914,7 @@ export default function McpConnectionsPage() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)]">
+        <div className="overflow-hidden rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)]">
           {/* Header row */}
           <div className="hidden grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 [border-bottom:var(--bd-div)] bg-[var(--bg-2)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid">
             <span />
@@ -990,19 +962,19 @@ function CommandBlock({
   onCopy: () => void;
 }) {
   return (
-    <div className="rounded-[var(--radius-card)] bg-[var(--bg-app)] p-3">
+    <div className="rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</span>
         <button
           type="button"
           onClick={onCopy}
-          className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-card)] text-muted-foreground hover:bg-[var(--bg-3)] hover:text-foreground"
+          className="inline-flex size-7 items-center justify-center rounded-md [border:var(--bd-card)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
           title="Copy command"
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
         </button>
       </div>
-      <pre className="overflow-x-auto rounded-[var(--radius-button)] bg-[var(--ink)] px-3 py-2 text-xs text-[var(--bg-app)]">
+      <pre className="overflow-x-auto rounded-md bg-[var(--ink)] px-3 py-2 text-xs text-[var(--bg-app)]">
         <code>{command}</code>
       </pre>
     </div>
@@ -1054,7 +1026,7 @@ function McpRow({
         className={`group grid grid-cols-[32px_1fr_auto] items-center gap-3 px-3 py-2.5 md:grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] md:gap-4 ${onToggle ? "cursor-pointer select-none hover:bg-[var(--bg-2)]" : "hover:bg-[var(--bg-2)]"} transition-colors`}
       >
         {/* Icon */}
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-app)]">
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)]">
           <Server className="size-3.5 text-muted-foreground" />
         </div>
 

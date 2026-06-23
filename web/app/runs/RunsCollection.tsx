@@ -15,7 +15,7 @@ import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
 import { ShareModal } from "@/components/sharing/ShareModal";
-import { useRuns } from "@/lib/query/hooks";
+import { useRuns, RUNS_FIRST_PAGE_QUERY_PARAMS } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
@@ -32,10 +32,8 @@ import { contentTagOptions } from "@/lib/workers/derive";
 import { createWorkerHref } from "@/lib/create-worker-nav";
 import {
   formatDuration,
-  formatElapsed,
   formatTrigger,
   triggerKey,
-  runDayGroup,
   runStatusPill,
   runSortTime,
   runsToCsvRows,
@@ -407,7 +405,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
   // on return; a slow or failed refetch keeps the cached rows instead of going
   // blank or flashing an error. Pagination (loadMore) and the bell refresh stay local.
   const runsQuery = useRuns(
-    { limit: PAGE_SIZE, offset: 0 },
+    RUNS_FIRST_PAGE_QUERY_PARAMS,
     initialRuns.length > 0 ? initialRuns : undefined,
   );
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
@@ -498,7 +496,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     let all: RunSummary[] = [];
     let before_created_at: string | undefined;
     let before_id: string | undefined;
-    let partial = false;
     try {
       for (;;) {
         const page = await api.runs.list({ limit: PAGE, before_created_at, before_id });
@@ -509,28 +506,18 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         before_id = last.id;
         if (!before_created_at || !before_id) break;
       }
-    } catch (err) {
-      logError("Could not export the complete run history.", err);
+    } catch {
       all = runs;
-      partial = true;
-    }
-    if (all.length === 0) {
-      toast.error(partial ? "Full export failed and no loaded runs were available." : "No runs to export.");
-      return;
     }
     const csv = Papa.unparse(runsToCsvRows(all));
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `workeros-runs-${partial ? "loaded-page-" : ""}${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `workeros-runs-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    if (partial) {
-      toast.error(`Full export failed. Downloaded ${all.length} loaded runs only.`);
-    } else {
-      toast.success(`Exported ${all.length} runs`);
-    }
+    toast.success(`Exported ${all.length} runs`);
   };
 
   // #796: bulk-export the loaded runs as one ZIP (result + artifacts per run).
@@ -619,9 +606,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       }
     },
     view: { default: "list", grid: true },
-    // Fix D: group runs by start time into Today / Yesterday / This week / Earlier.
-    // Uses the same `now` snapshot as tagsOf so grouping is stable during a session.
-    group: (r) => runDayGroup(r.created_at ?? r.started_at, now),
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
       ({
@@ -680,32 +664,23 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       // be cancelled directly from the list. Terminal runs render no menu.
       menuColumn: true,
     },
-    row: (r) => {
-      const isActive = r.status === "running" || r.status === "queued";
-      // Fix B: for active runs show live elapsed time instead of the "—" placeholder.
-      // duration_ms is only set once a run completes; elapsed is computed from
-      // started_at (or created_at) to the snapshot `now`.
-      const durationCell = isActive
-        ? formatElapsed(r.started_at ?? r.created_at, now)
-        : formatDuration(r.duration_ms);
-      return {
-        // V4 SPEC rule 3: no avatar for runs — non-person entity.
-        primary: r.worker_name ?? r.worker_id,
-        // Keep compact/split-left text distinct from the Status and Started columns.
-        secondary: formatTrigger(r.trigger_source),
-        cols: [
-          formatTrigger(r.trigger_source),
-          durationCell,
-          <StatusPill key="status" spec={runStatusPill(r.status)} />,
-          formatRelative(r.created_at ?? r.started_at ?? ""),
-        ],
-        // gap N2: Cancel row action, only for in-progress runs. Omitting `menu`
-        // entirely for terminal runs hides the ⋯ menu for that row.
-        menu: isCancellableRunStatus(r.status)
-          ? [{ label: "Cancel run", danger: true, onSelect: () => void cancel(r) }]
-          : undefined,
-      };
-    },
+    row: (r) => ({
+      // V4 SPEC rule 3: no avatar for runs — non-person entity.
+      primary: r.worker_name ?? r.worker_id,
+      // Keep compact/split-left text distinct from the Status and Started columns.
+      secondary: formatTrigger(r.trigger_source),
+      cols: [
+        formatTrigger(r.trigger_source),
+        formatDuration(r.duration_ms),
+        <StatusPill key="status" spec={runStatusPill(r.status)} />,
+        formatRelative(r.created_at ?? r.started_at ?? ""),
+      ],
+      // gap N2: Cancel row action, only for in-progress runs. Omitting `menu`
+      // entirely for terminal runs hides the ⋯ menu for that row.
+      menu: isCancellableRunStatus(r.status)
+        ? [{ label: "Cancel run", danger: true, onSelect: () => void cancel(r) }]
+        : undefined,
+    }),
     card: (r) => ({
       // V4 SPEC rule 3: no avatar monogram for runs.
       name: r.worker_name ?? r.worker_id,

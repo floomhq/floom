@@ -19,70 +19,44 @@ import { formatBytes, writeKey } from "@/lib/brain/format";
 const detailCache = new Map<string, ContextDetail>();
 const FOLDER_PLACEHOLDER_FILE = ".workeros-folder";
 
-function detailErrorMessage(name: string) {
-  return `Could not load ${name}. Check your connection and try again.`;
-}
-
-function useContextDetail(name: string): [ContextDetail | undefined, string | null, () => Promise<void>] {
+function useContextDetail(name: string): [ContextDetail | undefined, () => Promise<void>] {
   const [d, setD] = useState<ContextDetail | undefined>(detailCache.get(name));
-  const [error, setError] = useState<string | null>(null);
   const load = (force = false): Promise<void> => {
     if (!force && detailCache.has(name)) {
-      setError(null);
       setD(detailCache.get(name));
       return Promise.resolve();
     }
-    setError(null);
     return api.contexts
       .get(name)
       .then((cd) => {
         detailCache.set(name, cd);
         setD(cd);
       })
-      .catch((err) => {
-        setError(detailErrorMessage(name));
-        reportError("Could not load folder contents.", err);
-      });
+      .catch((err) => reportError("Could not load folder contents.", err));
   };
   useEffect(() => {
     let alive = true;
-    setError(null);
     if (detailCache.has(name)) {
       setD(detailCache.get(name));
     } else {
-      setD(undefined);
       api.contexts.get(name).then((cd) => {
         detailCache.set(name, cd);
         if (alive) setD(cd);
-      }).catch((err) => {
-        if (alive) setError(detailErrorMessage(name));
-        reportError("Could not load folder contents.", err);
-      });
+      }).catch((err) => reportError("Could not load folder contents.", err));
     }
     return () => {
       alive = false;
     };
   }, [name]);
   // #770: reload re-fetches and refreshes the cache (used after move/rename).
-  return [d, error, () => load(true)];
+  return [d, () => load(true)];
 }
 
 // Rule #5: Brain shares the EXACT inline file-open pattern with Run outputs —
 // breadcrumb `{folder} / file`, Back, Download; images render as images; text
 // loads inline via readTextFile; .db gets the honest #777 fallback.
 function FilesTab({ folder }: { folder: ContextSummary }) {
-  const [d, detailError, reload] = useContextDetail(folder.name);
-  if (detailError) {
-    return (
-      <div role="alert" style={{ display: "grid", gap: 10, padding: "18px 2px", maxWidth: 460 }}>
-        <div style={{ color: "var(--ink)", fontWeight: 600 }}>Could not load folder contents</div>
-        <div style={{ color: "var(--muted-foreground)", fontSize: 13 }}>{detailError}</div>
-        <button type="button" className="c-vpill" style={{ justifySelf: "start" }} onClick={() => void reload()}>
-          Retry
-        </button>
-      </div>
-    );
-  }
+  const [d, reload] = useContextDetail(folder.name);
   if (!d) return <LoadingState rows={4} />;
   const contextFiles = (d.files ?? []).filter((f) => !f.deleted);
   const files = (d.files ?? [])

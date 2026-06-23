@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { groupPostHogWorkspace } from "@/lib/posthog";
@@ -14,6 +13,7 @@ import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { Avatar } from "@/components/ui/Avatar";
 import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
 import { computeIsAdmin } from "@/lib/use-is-admin";
+import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -37,7 +37,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useWorkspaces, qk } from "@/lib/query/hooks";
+
+type WorkspaceState = {
+  workspaces: LocalWorkspace[];
+  activeId: string;
+};
 
 /** Identity mark for a workspace — squircle (non-human), seeded by id then name.
  *  Prefer the stable `id` so the mark survives workspace renames.
@@ -58,47 +62,7 @@ function WorkspaceAvatar({
 }
 
 export function WorkspaceSwitcher() {
-  // Cached workspace list — the React Query cache (staleTime 30s + persisted
-  // across reloads via localStorage) means the switcher renders instantly on
-  // every mount after the first load, with no spinner. Background revalidation
-  // still fires on window-focus / reconnect; the active-selection logic below
-  // re-derives from the fresh result without a visible flash.
-  const workspacesQuery = useWorkspaces();
-  const queryClient = useQueryClient();
-
-  // Derive the active workspace ID from the cached data. The browser storage
-  // key (getActiveWorkspaceId) is the source of truth for the user's last
-  // explicit switch; fall back to the server's active_id on first load.
-  const rawWorkspaces = workspacesQuery.data?.workspaces ?? [];
-  const rawActiveId = workspacesQuery.data?.active_id;
-  const browserActiveId = getActiveWorkspaceId();
-  const activeId = (() => {
-    if (browserActiveId && rawWorkspaces.some((w) => w.id === browserActiveId)) {
-      return browserActiveId;
-    }
-    return rawActiveId || "local-default";
-  })();
-
-  // PostHog workspace group — fire once when data first arrives.
-  const posthogFiredRef = useRef(false);
-  useEffect(() => {
-    if (!workspacesQuery.data || posthogFiredRef.current) return;
-    posthogFiredRef.current = true;
-    const activeWorkspace = rawWorkspaces.find((w) => w.id === activeId);
-    groupPostHogWorkspace(activeId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
-  }, [workspacesQuery.data, activeId, rawWorkspaces]);
-
-  // Admin flag for the Export button — fetched once, not on every mount.
-  const [canExportWorkspace, setCanExportWorkspace] = useState(false);
-  const meFetchedRef = useRef(false);
-  useEffect(() => {
-    if (meFetchedRef.current) return;
-    meFetchedRef.current = true;
-    api.me()
-      .then((me) => setCanExportWorkspace(computeIsAdmin(me)))
-      .catch(() => {/* no admin perms if /me fails */});
-  }, []);
-
+  const [state, setState] = useState<WorkspaceState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -113,12 +77,46 @@ export function WorkspaceSwitcher() {
   const [importing, setImporting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [sharingLink, setSharingLink] = useState(false);
+  const [canExportWorkspace, setCanExportWorkspace] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   // #1005: cloud speaks invite copy, OSS speaks template-zip copy.
   const copy = getWorkspaceActionCopy(isCloudMode());
 
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.workspace.list(),
+      api.me().catch(() => null),
+    ])
+      .then(([data, me]) => {
+        if (cancelled) return;
+        const browserActiveId = getActiveWorkspaceId();
+        const activeId =
+          browserActiveId && data.workspaces?.some((workspace) => workspace.id === browserActiveId)
+            ? browserActiveId
+            : data.active_id || "local-default";
+        setState({
+          workspaces: data.workspaces ?? [],
+          activeId,
+        });
+        // Attach the active workspace as the PostHog `workspace` group with its
+        // name, so client events are workspace-attributed with readable group
+        // props. (Switching reloads the page, so this re-runs per workspace.)
+        const activeWorkspace = data.workspaces?.find((w) => w.id === activeId);
+        groupPostHogWorkspace(activeId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
+        setCanExportWorkspace(computeIsAdmin(me));
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setError(err.message || "Failed to load workspaces");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleSwitch(workspaceId: string) {
-    if (activeId === workspaceId) return;
+    if (state && state.activeId === workspaceId) return;
     setSwitchingTo(workspaceId);
     try {
       await api.workspace.select(workspaceId);
@@ -145,16 +143,19 @@ export function WorkspaceSwitcher() {
     }
   }
 
-  // #791: rename the active workspace — invalidate the cached workspace list so
-  // the name updates in the switcher without a full reload.
+  // #791: rename the active workspace.
   async function handleRename() {
     const name = renameName.trim();
-    if (!name) return;
+    if (!name || !state) return;
     setRenaming(true);
     try {
-      await api.workspace.rename(activeId, name);
-      // Patch the cache in place so the UI updates immediately (no reload, no spinner).
-      queryClient.invalidateQueries({ queryKey: qk.workspaces });
+      const updated = await api.workspace.rename(state.activeId, name);
+      setState({
+        ...state,
+        workspaces: state.workspaces.map((w) =>
+          w.id === state.activeId ? { ...w, name: updated.name } : w
+        ),
+      });
       setRenameOpen(false);
     } catch (err) {
       setError((err as Error).message || "Failed to rename workspace");
@@ -206,10 +207,10 @@ export function WorkspaceSwitcher() {
   }
 
   async function handleDuplicate() {
-    if (duplicating) return;
+    if (duplicating || !state) return;
     setDuplicating(true);
     try {
-      const created = await api.workspace.duplicate(activeId);
+      const created = await api.workspace.duplicate(state.activeId);
       await api.workspace.select(created.id);
       setActiveWorkspaceId(created.id);
       toast.success(`Duplicated to “${created.name}”`);
@@ -243,10 +244,7 @@ export function WorkspaceSwitcher() {
     }
   }
 
-  // Show skeleton only when we have no data at all (first-ever cold load).
-  // On warm cache (localStorage restore) data is available synchronously and
-  // the skeleton never appears.
-  if (workspacesQuery.isLoading && !workspacesQuery.data) {
+  if (!state) {
     return (
       <div className="w-full">
         <div
@@ -261,14 +259,14 @@ export function WorkspaceSwitcher() {
   }
 
   const active =
-    rawWorkspaces.find((w) => w.id === activeId) ??
-    rawWorkspaces[0] ??
+    state.workspaces.find((w) => w.id === state.activeId) ??
+    state.workspaces[0] ??
     null;
 
   if (!active) {
     return (
       <div className="w-full px-2.5 text-xs text-[var(--ink-mute)]">
-        {error ?? workspacesQuery.error?.message ?? "No workspaces yet"}
+        {error ?? "No workspaces yet"}
       </div>
     );
   }
@@ -308,8 +306,8 @@ export function WorkspaceSwitcher() {
             <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--ink-mute)]">
               Workspaces
             </DropdownMenuLabel>
-            {rawWorkspaces.map((w) => {
-              const isActive = w.id === activeId;
+            {state.workspaces.map((w) => {
+              const isActive = w.id === state.activeId;
               const isLoading = switchingTo === w.id;
               return (
                 <DropdownMenuItem
@@ -344,7 +342,7 @@ export function WorkspaceSwitcher() {
               closeOnClick={false}
               onClick={() => {
                 setRenameName(
-                  rawWorkspaces.find((w) => w.id === activeId)?.name ?? ""
+                  state.workspaces.find((w) => w.id === state.activeId)?.name ?? ""
                 );
                 setRenameOpen(true);
               }}

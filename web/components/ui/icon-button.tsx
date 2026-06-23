@@ -21,7 +21,7 @@ export interface IconButtonProps
   label: string
   /** Tooltip text. Defaults to `label`. Pass `null` to disable the tooltip. */
   tooltip?: React.ReactNode | null
-  /** Icon-button size. Defaults to `icon` (44px hit-area). */
+  /** Icon-button size. Defaults to `icon-sm` (size-7, ≥28px hit-area). */
   size?: IconSize
   variant?: ButtonVariant
   /** Toggle/pressed state — sets aria-pressed. */
@@ -40,7 +40,7 @@ function IconButton({
   icon,
   label,
   tooltip,
-  size = "icon",
+  size = "icon-sm",
   variant = "ghost",
   pressed,
   type = "button",
