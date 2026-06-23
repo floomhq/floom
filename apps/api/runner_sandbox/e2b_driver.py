@@ -1126,6 +1126,7 @@ def _read_result_json(
                 "error",
                 "error_code",
                 "decision_required",
+                "await_external",
             }
         }
         if legacy_outputs:
