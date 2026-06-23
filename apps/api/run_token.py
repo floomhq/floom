@@ -44,7 +44,7 @@ MAX_TTL_SECONDS = 14_400  # 4 hours
 def _run_token_signing_key(secret: str | None = None) -> str:
     """Resolve the simple run-token signing secret.
 
-    Empty string remains valid for local OSS/dev mode.
+    Returns an empty string when no signing key is configured.
     """
     for candidate in (
         secret,
@@ -89,6 +89,8 @@ def verify_run_token(token: str, *, secret: str | None = None) -> str | None:
     if not token:
         return None
     key = _run_token_signing_key(secret)
+    if not key:
+        return None
     try:
         data, sig = token.rsplit(".", 1)
         _, run_id, hex_expires = data.split(":", 2)

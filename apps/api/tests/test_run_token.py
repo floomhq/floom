@@ -55,6 +55,19 @@ class TestMakeVerifyRunToken:
 
         assert verify_run_token(token) == "run-cloud"
 
+    def test_cross_service_env_chain_allows_different_floom_secrets(self, monkeypatch):
+        from run_token import make_run_token, verify_run_token
+
+        monkeypatch.delenv("WORKEROS_RUN_TOKEN_SECRET", raising=False)
+        monkeypatch.setenv("WORKEROS_WORKER_CALL_SECRET", "shared")
+        monkeypatch.setenv("FLOOM_SECRET", "orch-only")
+
+        token = make_run_token("run-x")
+
+        monkeypatch.setenv("FLOOM_SECRET", "web-only")
+
+        assert verify_run_token(token) == "run-x"
+
     def test_floom_secret_fallback_verifies_without_dedicated_env(self, monkeypatch):
         from run_token import make_run_token, verify_run_token
 
@@ -122,12 +135,17 @@ class TestMakeVerifyRunToken:
         t2 = make_run_token("run-bbb", secret=self.SECRET)
         assert t1 != t2
 
-    def test_empty_secret_accepts_signed_dev_token(self):
-        """Simple run tokens keep empty-secret localhost dev behavior."""
+    def test_empty_secret_rejects_signed_token(self, monkeypatch):
+        """Simple run token verification fails closed without a signing key."""
         from run_token import make_run_token, verify_run_token
+
+        monkeypatch.delenv("WORKEROS_RUN_TOKEN_SECRET", raising=False)
+        monkeypatch.delenv("WORKEROS_WORKER_CALL_SECRET", raising=False)
+        monkeypatch.delenv("FLOOM_SECRET", raising=False)
+
         token = make_run_token("run-dev", secret="")
         result = verify_run_token(token, secret="")
-        assert result == "run-dev"
+        assert result is None
 
     def test_empty_secret_rejects_forged_token(self):
         from run_token import verify_run_token
