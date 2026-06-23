@@ -68,6 +68,13 @@ def _worker_call_headers(run_id: str) -> dict[str, str]:
 def test_composio_proxy_accepts_script_worker_call_token_header(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     repos = db.get_repositories()
+    repos.users.create(
+        user_id="owner-a",
+        username="owner-a",
+        display_name=None,
+        password_hash="x",
+        role="admin",
+    )
     manifest = {
         "id": "gmail-worker",
         "name": "Gmail Worker",
@@ -132,6 +139,15 @@ def test_composio_proxy_accepts_script_worker_call_token_header(monkeypatch, tmp
     )
     assert mismatch.status_code == 403
     assert mismatch.json()["detail"] == "Run token does not match request run_id"
+
+    repos.users.update(user_id="owner-a", disabled=1)
+    disabled = client.post(
+        "/runs/run-gmail/composio-execute/GMAIL_FETCH_EMAILS",
+        headers=_worker_call_headers("run-gmail"),
+        json={"connected_account_id": "ca_gmail", "arguments": {}},
+    )
+    assert disabled.status_code == 401
+    assert disabled.json()["detail"] == "account disabled"
     db.get_repositories.cache_clear()
 
 

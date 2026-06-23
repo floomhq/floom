@@ -1674,7 +1674,10 @@ async def auth_middleware(request: Request, call_next):
     # authenticated operator/server paths, never this sandbox token.
     run_token_header = _run_token_header(request)
     if run_token_header:
-        run_id_from_token = _run_scoped_token_run_id(run_token_header, secret=secret)
+        try:
+            run_id_from_token = _run_scoped_token_run_id(run_token_header, secret=secret)
+        except HTTPException as exc:
+            return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         if run_id_from_token is None:
             return _JSONResponse(
                 status_code=401,
@@ -1813,6 +1816,9 @@ def _run_scoped_token_run_id(raw_token: str | None, *, secret: str | None = None
             payload = _validate_worker_call_token(token)
         except ValueError:
             return None
+        from auth.multi_member import _require_active_token_user  # noqa: PLC0415
+
+        _require_active_token_user(str(payload.get("user_id") or ""))
         return str(payload.get("parent_run_id") or "") or None
     return _verify_run_token(token, secret=secret)
 
