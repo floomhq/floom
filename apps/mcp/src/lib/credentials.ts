@@ -1,6 +1,6 @@
 import { chmodSync, existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { getCommandName } from "./command-name.js";
 
 // AuthMode determines how the CLI hits the API:
