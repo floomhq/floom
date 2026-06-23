@@ -281,6 +281,16 @@ describe("Round-09 #5 — RSC/Flight requests are not redirected to /login", () 
     expect(res.headers.get("location")).toContain("/login");
   });
 
+  it("allows build identity checks without a session", async () => {
+    const { middleware } = await import("@/middleware");
+    for (const path of ["/version", "/app/version"]) {
+      const res = await middleware(new NextRequest(`https://workeros.floom.dev${path}`));
+      expect(res.headers.get("x-middleware-next"), path).toBe("1");
+      expect(res.status, path).not.toBe(307);
+      expect(res.headers.get("location"), path).toBeNull();
+    }
+  });
+
   it("lets a VALID-session RSC request through (x-middleware-next), not a 401", async () => {
     const { middleware } = await import("@/middleware");
     const validCookie = cookieFor(await signToken());

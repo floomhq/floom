@@ -237,7 +237,8 @@ def _pat_request(workspace_header: str | None = None) -> Request:
 
 def test_verify_member_pat_is_not_admin(monkeypatch):
     """A workspace-scoped PAT for a non-owner member must not be admin."""
-    # Seed the PAT cache so no DB lookup is needed: hash -> (user_id, ws, ts).
+    # Seed the PAT cache so no DB lookup is needed:
+    # hash -> (user_id, ws, username, email, ts).
     import time as _time
 
     token_hash = supabase_provider._hash_token("floom_membertoken")
@@ -245,6 +246,8 @@ def test_verify_member_pat_is_not_admin(monkeypatch):
         supabase_provider._pat_cache[token_hash] = (
             "member-1",
             "ws_owned_by_other",
+            None,
+            None,
             _time.time(),
         )
     # _resolve_role: workspace owned by someone else, caller is a member.

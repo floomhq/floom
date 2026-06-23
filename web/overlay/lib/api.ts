@@ -262,6 +262,8 @@ export const api = {
       return fetchJson<import("@/lib/types").WorkerSummary[]>(`/workers?${qs.toString()}`);
     },
     get: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}`),
+    duplicate: (id: string) =>
+      fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     duplicate: (id: string) =>

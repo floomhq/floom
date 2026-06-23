@@ -85,6 +85,7 @@ export const OVERLAY_FILES = [
   // root page renders the overview dashboard at "/" directly (engine serves it at
   // both "/" and "/overview"), so the redirect was redundant.
   "app/privacy/page.tsx",
+  "app/version/route.ts",
   // app/settings/page.tsx de-forked 2026-06-13: the overlay copy was a stale
   // subset (1063 vs engine 2223 lines) missing WorkspaceTokensPanel /
   // BehaviourSettings / ModelDefaults / WorkspaceInfoSettings. The engine

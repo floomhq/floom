@@ -1098,6 +1098,19 @@ def cli_bootstrap():
     }
 
 
+@router.get("/me")
+def cloud_auth_me(auth: AuthContext = Depends(get_auth_context)) -> dict:
+    """Return the current cloud-authenticated user's profile."""
+    return {
+        "user_id": auth.user_id,
+        "username": auth.username,
+        "email": auth.email,
+        "role": auth.role,
+        "auth_method": auth.auth_method,
+        "is_admin": auth.is_admin,
+    }
+
+
 def _session_user(request: Request) -> tuple[str, str]:
     """Return (verified_user_id, refresh_token) from the cloud session cookie.
 

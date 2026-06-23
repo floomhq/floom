@@ -880,6 +880,7 @@ class SupabasePersonalAccessTokenRepository(_BaseSupabaseRepository):
             return None
         return {
             **token,
+            "email": user.get("email"),
             "username": user.get("username") or user.get("email") or user.get("id"),
             "role": user.get("role") or "member",
             "disabled": bool(user.get("disabled")),

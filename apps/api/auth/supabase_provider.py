@@ -25,7 +25,8 @@ from urllib.parse import urljoin
 # are safe under uvicorn's threaded worker model (default sync workers).
 # ---------------------------------------------------------------------------
 _cache_lock = Lock()
-_pat_cache: dict[str, tuple[str, str | None, float]] = {}   # hash → (user_id, workspace_id, ts)
+_pat_cache: dict[str, tuple[str, str | None, str | None, str | None, float]] = {}
+# hash -> (user_id, workspace_id, username, email, ts)
 _ws_cache:  dict[str, tuple[str, str | None, float]] = {}   # key → (workspace_id, role, ts)
 _PAT_TTL = 60.0
 _WS_TTL  = 30.0
@@ -382,12 +383,14 @@ class SupabaseAuthProvider:
         # Fast path: PAT already in cache and not expired.
         with _cache_lock:
             cached = _pat_cache.get(token_hash)
-        if cached and (now - cached[2]) < _PAT_TTL:
+        if cached and (now - cached[4]) < _PAT_TTL:
             user_id = cached[0]
             workspace_id = cached[1]
             return await self._build_pat_context(
                 user_id=user_id,
                 workspace_id=workspace_id,
+                username=cached[2],
+                email=cached[3],
                 request=request,
             )
 
@@ -404,7 +407,7 @@ class SupabaseAuthProvider:
         user_id = str(row["user_id"])
         workspace_id = str(row["workspace_id"]) if row.get("workspace_id") else None
         with _cache_lock:
-            _pat_cache[token_hash] = (user_id, workspace_id, now)
+            _pat_cache[token_hash] = (user_id, workspace_id, None, None, now)
 
         # Touch last_used_at at most once per cache TTL, not on every request.
         repo.touch(token_id=str(row["id"]))
@@ -421,10 +424,12 @@ class SupabaseAuthProvider:
 
         with _cache_lock:
             cached = _pat_cache.get(token_hash)
-        if cached and (now - cached[2]) < _PAT_TTL:
+        if cached and (now - cached[4]) < _PAT_TTL:
             return await self._build_pat_context(
                 user_id=cached[0],
                 workspace_id=None,
+                username=cached[2],
+                email=cached[3],
                 request=request,
             )
 
@@ -442,8 +447,10 @@ class SupabaseAuthProvider:
             raise HTTPException(status_code=401, detail="token expired")
 
         user_id = str(row["user_id"])
+        username = str(row.get("username") or row.get("email") or row["user_id"])
+        email = str(row["email"]) if row.get("email") else None
         with _cache_lock:
-            _pat_cache[token_hash] = (user_id, None, now)
+            _pat_cache[token_hash] = (user_id, None, username, email, now)
 
         try:
             repo.touch_last_used(token_id=str(row["id"]), last_used_at=now_iso())
@@ -453,6 +460,8 @@ class SupabaseAuthProvider:
         return await self._build_pat_context(
             user_id=user_id,
             workspace_id=None,
+            username=username,
+            email=email,
             request=request,
         )
 
@@ -461,6 +470,8 @@ class SupabaseAuthProvider:
         *,
         user_id: str,
         workspace_id: str | None,
+        username: str | None = None,
+        email: str | None = None,
         request: Request,
     ) -> AuthContext:
         header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
@@ -491,18 +502,21 @@ class SupabaseAuthProvider:
             obs.set_context(user_id=user_id)
             return AuthContext(
                 user_id=user_id,
-                email=None,
+                email=email,
                 scopes=("api",),
                 role=role,
                 auth_method="pat",
+                username=username,
             )
 
         # Legacy safety path for rows created before the workspace_id
         # migration is applied. Once migrated, all PAT rows have workspace_id.
         return await self._resolve_workspace_and_build_context(
             user_id=user_id,
-            email=None,
+            email=email,
+            username=username,
             scopes=("api",),
+            auth_method="pat",
             request=request,
         )
 
@@ -511,7 +525,9 @@ class SupabaseAuthProvider:
         *,
         user_id: str,
         email: str | None,
+        username: str | None = None,
         scopes: tuple[str, ...],
+        auth_method: str = "supabase",
         request: Request,
     ) -> AuthContext:
         # Workspace resolution: header (CLI) -> cookie (dashboard) -> owner
@@ -603,4 +619,6 @@ class SupabaseAuthProvider:
             email=email,
             scopes=scopes,
             role=role or "member",
+            auth_method=auth_method,
+            username=username,
         )

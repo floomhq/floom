@@ -1442,6 +1442,38 @@ def _ensure_approval_signing_secret() -> None:
     os.environ["WORKEROS_APPROVAL_SIGNING_SECRET"] = derived
 
 
+def _ensure_upload_signing_secret() -> None:
+    """Derive a stable upload download-token signing key in cloud.
+
+    The engine resolves upload signing as
+    WORKEROS_UPLOAD_URL_SIGNING_SECRET -> FLOOM_SECRET -> per-process random.
+    Cloud deliberately strips FLOOM_SECRET, so an unset dedicated upload secret
+    leaves download tokens invalid after every restart/redeploy. Reuse the
+    already-required Supabase service-role key with a domain-separated HMAC so
+    cloud uploads work without adding another env var.
+    """
+    if os.environ.get("WORKEROS_UPLOAD_URL_SIGNING_SECRET", "").strip():
+        return
+
+    service_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
+    if not service_key:
+        return
+
+    import hashlib
+    import hmac as _hmac
+
+    derived = _hmac.new(
+        service_key.encode("utf-8"),
+        b"workeros-upload-url-signing-secret-v1",
+        hashlib.sha256,
+    ).hexdigest()
+    os.environ["WORKEROS_UPLOAD_URL_SIGNING_SECRET"] = derived
+
+
 def _install_worker_call_signing_key() -> None:
     """Register the cloud worker-call signing secret via the engine's #992 hook.
 
@@ -1529,6 +1561,7 @@ def register_cloud_components() -> None:
     ensure_secret_crypto_ready()
     _ensure_magic_link_secret()
     _ensure_approval_signing_secret()
+    _ensure_upload_signing_secret()
     _disable_postgrest_http2()
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)

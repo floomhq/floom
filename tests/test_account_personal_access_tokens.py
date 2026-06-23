@@ -230,6 +230,7 @@ def test_supabase_personal_access_token_repository_lifecycle():
 
     by_hash = repo.get_by_hash(token_hash="hash_1")
     assert by_hash["user_id"] == USER_ID
+    assert by_hash["email"] == "alice@example.com"
     assert by_hash["username"] == "alice"
     assert by_hash["role"] == "admin"
     assert repo.list(user_id=USER_ID)[0]["id"] == "pat_1"
@@ -383,6 +384,79 @@ def test_wos_token_auth_resolves_requested_workspace(monkeypatch):
     workspace_setter.assert_called_once_with("ws_second")
     repo.get_by_hash.assert_called_once_with(token_hash=_hash_pat("wos_test"))
     repo.touch_last_used.assert_called_once()
+
+
+def test_wos_token_auth_populates_identity_from_user_row(monkeypatch):
+    repo = Mock()
+    repo.get_by_hash.return_value = {
+        "id": "pat_1",
+        "user_id": USER_ID,
+        "name": "cli",
+        "email": "alice@example.com",
+        "username": "alice",
+        "expires_at": None,
+        "disabled": False,
+    }
+    monkeypatch.setattr(
+        "apps.api.db.supabase_repos.SupabasePersonalAccessTokenRepository",
+        lambda: repo,
+    )
+    monkeypatch.setattr(
+        supa_module,
+        "get_cloud_settings",
+        lambda: SimpleNamespace(supabase_url="https://example.supabase.co"),
+    )
+    monkeypatch.setattr(
+        supa_module.workspace_repo,
+        "resolve_active_workspace",
+        lambda *, user_id, email, requested_id: {
+            "id": "ws_primary",
+            "owner_user_id": user_id,
+        },
+    )
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/auth/me",
+            "query_string": b"",
+            "headers": [(PAT_HEADER.encode(), b"wos_identity")],
+        }
+    )
+
+    ctx = asyncio.run(SupabaseAuthProvider().verify(request))
+
+    assert ctx.user_id == USER_ID
+    assert ctx.email == "alice@example.com"
+    assert ctx.username == "alice"
+    assert ctx.auth_method == "pat"
+
+
+def test_cloud_auth_me_returns_email():
+    from apps.api.routes import auth as cloud_auth
+
+    app = FastAPI()
+    app.include_router(cloud_auth.router)
+    app.dependency_overrides[cloud_auth.get_auth_context] = lambda: AuthContext(
+        user_id=USER_ID,
+        email="alice@example.com",
+        username="alice",
+        role="admin",
+        auth_method="pat",
+    )
+
+    response = TestClient(app).get("/auth/me")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "user_id": USER_ID,
+        "username": "alice",
+        "email": "alice@example.com",
+        "role": "admin",
+        "auth_method": "pat",
+        "is_admin": True,
+    }
 
 
 def test_account_pat_migration_adds_engine_tables_and_rls():

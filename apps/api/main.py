@@ -103,7 +103,7 @@ from apps.api import obs as _obs
 _obs.setup_logging()
 
 engine_run_service = import_engine_module("run_service")
-from apps.api.routes.auth import router as auth_router
+from apps.api.routes.auth import cloud_auth_me, router as auth_router
 from apps.api.routes.cli_auth_devices import router as cli_auth_devices_router
 from apps.api.routes.members import router as members_router
 from apps.api.routes.novasearch import router as novasearch_router
@@ -771,6 +771,13 @@ async def cloud_body_size_middleware(request: Request, call_next):
 
 
 app.include_router(auth_router)
+for _auth_me_prefix in ("/api", "/v1", "/api/v1"):
+    app.add_api_route(
+        f"{_auth_me_prefix}/auth/me",
+        cloud_auth_me,
+        methods=["GET"],
+        include_in_schema=False,
+    )
 # Mount workspaces + cli-auth/devices under /api BEFORE the engine sub-app
 # mount; otherwise FastAPI's path matching dispatches /api/workspaces (and
 # /api/cli-auth/devices) into the engine. The engine handler for
@@ -1982,8 +1989,17 @@ app.mount("/api", engine_main.app)
 
 
 @app.get("/healthz")
-def healthz() -> dict[str, str]:
-    return {"status": "ok", "deploy": "cloud"}
+def healthz() -> dict[str, object]:
+    from apps.api.build_identity import build_identity
+
+    return {"status": "ok", **build_identity(service="cloud-api")}
+
+
+@app.get("/version")
+def version() -> dict[str, object]:
+    from apps.api.build_identity import build_identity
+
+    return {"status": "ok", **build_identity(service="cloud-api")}
 
 
 app.include_router(slack_events_router)
