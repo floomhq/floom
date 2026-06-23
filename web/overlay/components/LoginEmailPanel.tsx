@@ -98,8 +98,8 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
         <button
           type="button"
           onClick={() => setMode("magic")}
-          className={`h-8 rounded-[calc(var(--radius-button)-4px)] text-[13px] font-medium transition-colors ${
-            mode === "magic" ? "bg-[var(--paper)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-soft)]"
+          className={`h-8 rounded-[calc(var(--radius-button)-4px)] text-[13px] font-medium outline-none transition-colors focus-visible:[box-shadow:var(--focus)] ${
+            mode === "magic" ? "bg-[var(--paper)] text-[var(--ink)]" : "text-[var(--ink-soft)]"
           }`}
         >
           Magic link
@@ -107,8 +107,8 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
         <button
           type="button"
           onClick={() => setMode("signin")}
-          className={`h-8 rounded-[calc(var(--radius-button)-4px)] text-[13px] font-medium transition-colors ${
-            mode === "signin" ? "bg-[var(--paper)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-soft)]"
+          className={`h-8 rounded-[calc(var(--radius-button)-4px)] text-[13px] font-medium outline-none transition-colors focus-visible:[box-shadow:var(--focus)] ${
+            mode === "signin" ? "bg-[var(--paper)] text-[var(--ink)]" : "text-[var(--ink-soft)]"
           }`}
         >
           Sign in
@@ -116,8 +116,8 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
         <button
           type="button"
           onClick={() => setMode("signup")}
-          className={`h-8 rounded-[calc(var(--radius-button)-4px)] text-[13px] font-medium transition-colors ${
-            mode === "signup" ? "bg-[var(--paper)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-soft)]"
+          className={`h-8 rounded-[calc(var(--radius-button)-4px)] text-[13px] font-medium outline-none transition-colors focus-visible:[box-shadow:var(--focus)] ${
+            mode === "signup" ? "bg-[var(--paper)] text-[var(--ink)]" : "text-[var(--ink-soft)]"
           }`}
         >
           Sign up
@@ -133,7 +133,7 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
           autoComplete="email"
           required
           placeholder="you@company.com"
-          className="h-11 w-full rounded-[var(--radius-input)] border border-[var(--line)] bg-[var(--paper)] px-3 text-sm outline-none transition-colors placeholder:text-[var(--ink-mute)] focus:border-[var(--ink-soft)]"
+          className="h-11 w-full rounded-[var(--radius-input)] border border-[var(--line)] bg-[var(--paper)] px-3 text-sm outline-none transition-colors placeholder:text-[var(--ink-mute)] focus:border-[var(--ink-soft)] focus-visible:[box-shadow:var(--focus)]"
         />
       </label>
 
@@ -147,7 +147,7 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
             autoComplete={mode === "signup" ? "new-password" : "current-password"}
             required
             placeholder="Password"
-            className="h-11 w-full rounded-[var(--radius-input)] border border-[var(--line)] bg-[var(--paper)] px-3 text-sm outline-none transition-colors placeholder:text-[var(--ink-mute)] focus:border-[var(--ink-soft)]"
+            className="h-11 w-full rounded-[var(--radius-input)] border border-[var(--line)] bg-[var(--paper)] px-3 text-sm outline-none transition-colors placeholder:text-[var(--ink-mute)] focus:border-[var(--ink-soft)] focus-visible:[box-shadow:var(--focus)]"
           />
         </label>
       ) : null}
