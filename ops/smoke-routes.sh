@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pre/post-deploy live-route smoke gate.
 # Compensating control for GitHub Actions being disabled or blocked.
-# Curls critical OS and Cloud routes and fails on any 508, 5xx, or curl failure.
+# Curls critical OS and Cloud routes and fails on any 4xx, 5xx, 508, or curl failure.
 #
 # Usage:
 #   bash ops/smoke-routes.sh          # check both OS and Cloud
@@ -20,8 +20,8 @@ OS_API="https://workers-api.floom.dev"
 CLOUD_HOST="https://workeros.floom.dev"
 CLOUD_API="https://workeros-api.floom.dev"
 
-# Unauthenticated routes that must never return 508/5xx.
-# Authenticated pages can return 200, 3xx, or 4xx; route loops and server errors fail.
+# Routes that must not return client or server errors. Auth redirects are 3xx;
+# any 4xx/5xx means the deploy is not promotable.
 CLOUD_ROUTES=(
   "/"
   "/app"
@@ -50,7 +50,7 @@ check() {
   if [[ "$code" == "508" ]]; then
     echo "FAIL  $label  $url  -> $code (INFINITE_LOOP)"
     FAIL=1
-  elif [[ "$code" =~ ^5[0-9][0-9]$ || "$code" == "000" ]]; then
+  elif [[ "$code" =~ ^[45][0-9][0-9]$ || "$code" == "000" ]]; then
     echo "FAIL  $label  $url  -> $code"
     FAIL=1
   else
