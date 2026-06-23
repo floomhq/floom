@@ -15,7 +15,7 @@ import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
 import { ShareModal } from "@/components/sharing/ShareModal";
-import { useRuns } from "@/lib/query/hooks";
+import { useRuns, RUNS_FIRST_PAGE_QUERY_PARAMS } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
@@ -405,7 +405,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
   // on return; a slow or failed refetch keeps the cached rows instead of going
   // blank or flashing an error. Pagination (loadMore) and the bell refresh stay local.
   const runsQuery = useRuns(
-    { limit: PAGE_SIZE, offset: 0 },
+    RUNS_FIRST_PAGE_QUERY_PARAMS,
     initialRuns.length > 0 ? initialRuns : undefined,
   );
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);

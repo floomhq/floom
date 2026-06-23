@@ -1,13 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
+import { qk, RUNS_FIRST_PAGE_QUERY_PARAMS, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
 
 // Mock the api module so each list/overview call is a counted spy. The eager
 // prefetch must hit these exactly once per main route, and be a no-op on a
 // second run (cache-first / idempotent).
 const calls = {
   overview: vi.fn(async () => ({ ok: true })),
-  workers: vi.fn(async () => [] as unknown[]),
-  runs: vi.fn(async () => [] as unknown[]),
+  workers: vi.fn(async (opts?: unknown) => {
+    void opts;
+    return [] as unknown[];
+  }),
+  runs: vi.fn(async (params?: unknown) => {
+    void params;
+    return [] as unknown[];
+  }),
   connections: vi.fn(async () => [] as unknown[]),
   secrets: vi.fn(async () => [] as unknown[]),
   members: vi.fn(async () => ({ members: [] as unknown[] })),
@@ -17,8 +24,8 @@ const calls = {
 vi.mock("@/lib/api", () => ({
   api: {
     system: { overview: () => calls.overview() },
-    workers: { list: () => calls.workers() },
-    runs: { list: () => calls.runs() },
+    workers: { list: (opts?: unknown) => calls.workers(opts) },
+    runs: { list: (params?: unknown) => calls.runs(params) },
     connections: { list: () => calls.connections() },
     secrets: { list: () => calls.secrets() },
     members: { list: () => calls.members() },
@@ -27,7 +34,7 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-import { prefetchMainRoutesEager } from "@/lib/query/prefetch";
+import { prefetchMainRoutesEager, prefetchRouteData } from "@/lib/query/prefetch";
 
 const MAIN = ["overview", "workers", "runs", "connections", "contexts"] as const;
 
@@ -59,8 +66,11 @@ describe("prefetchMainRoutesEager", () => {
 
     // Each main route's list/overview fetch fired exactly once.
     expect(calls.overview).toHaveBeenCalledTimes(1);
-    expect(calls.workers).toHaveBeenCalledTimes(1);
+    expect(calls.workers).toHaveBeenCalledTimes(2);
+    expect(calls.workers).toHaveBeenCalledWith(WORKERS_LIST_QUERY_OPTS);
+    expect(calls.workers).toHaveBeenCalledWith(undefined);
     expect(calls.runs).toHaveBeenCalledTimes(1);
+    expect(calls.runs).toHaveBeenCalledWith(RUNS_FIRST_PAGE_QUERY_PARAMS);
     expect(calls.connections).toHaveBeenCalledTimes(1);
     expect(calls.contexts).toHaveBeenCalledTimes(1);
 
@@ -73,6 +83,9 @@ describe("prefetchMainRoutesEager", () => {
         .some((q) => (q.queryKey as unknown[]).join("|").includes(root === "overview" ? "system|overview" : root));
       expect(has, `cache should hold an entry for ${root}`).toBe(true);
     }
+    expect(qc.getQueryData(qk.workers(WORKERS_LIST_QUERY_OPTS))).toEqual([]);
+    expect(qc.getQueryData(qk.workers())).toEqual([]);
+    expect(qc.getQueryData(qk.runs(RUNS_FIRST_PAGE_QUERY_PARAMS))).toEqual([]);
   });
 
   it("skips the current route's own data fetch (its hook owns it)", async () => {
@@ -112,5 +125,24 @@ describe("prefetchMainRoutesEager", () => {
     expect(calls.runs).toHaveBeenCalledTimes(0);
     expect(calls.connections).toHaveBeenCalledTimes(0);
     expect(calls.contexts).toHaveBeenCalledTimes(0);
+  });
+
+  it("warms supporting worker lists with the keys the destination routes read", async () => {
+    const connectionsClient = makeClient();
+    prefetchRouteData(connectionsClient, "/connections");
+    await flush(connectionsClient);
+
+    expect(calls.workers).toHaveBeenLastCalledWith(undefined);
+    expect(connectionsClient.getQueryData(qk.workers())).toEqual([]);
+    expect(connectionsClient.getQueryData(qk.workers(WORKERS_LIST_QUERY_OPTS))).toBeUndefined();
+
+    Object.values(calls).forEach((c) => c.mockClear());
+    const approvalsClient = makeClient();
+    prefetchRouteData(approvalsClient, "/approvals");
+    await flush(approvalsClient);
+
+    expect(calls.workers).toHaveBeenLastCalledWith(undefined);
+    expect(approvalsClient.getQueryData(qk.workers())).toEqual([]);
+    expect(approvalsClient.getQueryData(qk.workers(WORKERS_LIST_QUERY_OPTS))).toBeUndefined();
   });
 });
