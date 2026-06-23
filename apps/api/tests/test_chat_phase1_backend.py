@@ -260,6 +260,19 @@ def test_worker_list_fallback_summary_uses_successful_tool_result(booted):
     )
 
 
+def test_worker_author_fallback_summary_uses_successful_tool_result(booted):
+    chat_service = booted["chat_service"]
+
+    reply = chat_service._fallback_reply_from_successful_tools([
+        (
+            "workers__create_from_prompt",
+            {"ok": True, "run_id": "run_author_1", "worker_id": "worker-author"},
+        )
+    ])
+
+    assert reply == "I started drafting that worker. Track progress in the run card for `run_author_1`."
+
+
 @pytest.mark.asyncio
 async def test_stream_chat_uses_tool_result_when_provider_fails_after_workers_tool(booted, monkeypatch):
     chat_service = booted["chat_service"]
@@ -323,6 +336,86 @@ async def test_stream_chat_uses_tool_result_when_provider_fails_after_workers_to
     text_events = [event for event in events if event.get("type") == "text"]
     assert text_events
     assert "You have 2 workers" in text_events[-1]["text"]
+    assert events[-1]["type"] == "finish"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_stops_after_create_from_prompt_tool(booted, monkeypatch):
+    chat_service = booted["chat_service"]
+
+    monkeypatch.setattr(chat_service, "_brain_read_tools", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(chat_service, "_composio_read_tools", lambda *_args, **_kwargs: [])
+
+    async def _no_mcp(*_args, **_kwargs):
+        return []
+
+    from runner_sandbox import agent_capabilities
+    monkeypatch.setattr(agent_capabilities, "connect_mcp_servers", _no_mcp)
+    monkeypatch.setattr(agent_capabilities, "cleanup_mcp_servers", _no_mcp)
+
+    import runner_sandbox.stream_adapter as stream_adapter
+
+    monkeypatch.setattr(stream_adapter, "decode_stream_event", lambda event: event)
+
+    class _FakeResult:
+        async def stream_events(self):
+            yield SimpleNamespace(
+                kind="tool_call",
+                call_id="call_author",
+                tool_name="workers__create_from_prompt",
+                args={
+                    "prompt": "Create a worker for this job",
+                    "mode": "create",
+                    "idempotency_key": "idem-author",
+                },
+            )
+            yield SimpleNamespace(
+                kind="tool_output",
+                call_id="call_author",
+                output={
+                    "ok": True,
+                    "run_id": "run_author_1",
+                    "worker_id": "worker-author",
+                    "status": "running",
+                },
+                is_error=False,
+            )
+
+    captured = {}
+
+    import agents
+
+    def fake_run_streamed(agent, *args, **kwargs):
+        captured["tool_use_behavior"] = agent.tool_use_behavior
+        captured["max_turns"] = kwargs.get("max_turns")
+        return _FakeResult()
+
+    monkeypatch.setattr(agents.Runner, "run_streamed", staticmethod(fake_run_streamed))
+
+    q: asyncio.Queue = asyncio.Queue()
+    await chat_service.stream_chat(
+        message="Create a worker for this job",
+        user_id="local-user",
+        conversation_id=None,
+        part_queue=q,
+        source="web",
+    )
+
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+
+    assert captured["tool_use_behavior"] == {
+        "stop_at_tool_names": ["finish_with_outputs", "workers__create_from_prompt"]
+    }
+    assert captured["max_turns"] == 30
+    assert [event["toolName"] for event in events if event.get("type") == "tool-call"] == [
+        "workers__create_from_prompt"
+    ]
+    text_events = [event for event in events if event.get("type") == "text"]
+    assert text_events[-1]["text"] == (
+        "I started drafting that worker. Track progress in the run card for `run_author_1`."
+    )
     assert events[-1]["type"] == "finish"
 
 
