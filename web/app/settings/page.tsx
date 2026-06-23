@@ -164,22 +164,23 @@ function ScopeCrossLink({
 
 function PersonalAccessTokensPanel() {
   const [tokens, setTokens] = useState<PersonalAccessToken[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [newTokenName, setNewTokenName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const list = await api.tokens.list();
       setTokens(list);
-    } catch {
-      // /auth/tokens 404/401 means multi-member not active — hide silently
+    } catch (err) {
+      setTokens([]);
+      setLoadError((err as Error).message || "Could not load personal access tokens.");
     }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-
-  if (tokens === null) return null; // Not yet loaded or not available
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -221,6 +222,21 @@ function PersonalAccessTokensPanel() {
   return (
     <section className="space-y-3">
       <h2 className="text-sm font-medium text-muted-foreground">Your tokens</h2>
+      {loadError ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>Could not load personal access tokens</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{loadError}</p>
+            <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : tokens === null ? (
+        <Skeleton className="h-24 w-full" />
+      ) : (
+        <>
       <p className="text-sm text-muted-foreground">
         Tokens tied to your account (prefix <code className="font-mono text-xs">fl_pat_</code>).
         They authenticate as you and work in every workspace you belong to. No one
@@ -292,6 +308,8 @@ function PersonalAccessTokensPanel() {
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No tokens yet.</p>
+      )}
+        </>
       )}
     </section>
   );
@@ -520,24 +538,38 @@ function SettingsContent() {
   const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [workspaceList, setWorkspaceList] = useState<LocalWorkspaceListResponse | null>(null);
-  const [isAdmin, setIsAdmin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [permissionState, setPermissionState] = useState<"loading" | "ready" | "error">("loading");
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [systemLoadError, setSystemLoadError] = useState<string | null>(null);
+
+  const loadAccountContext = useCallback(async () => {
+    setPermissionState("loading");
+    setPermissionError(null);
+    try {
+      const u = await api.me();
+      setCurrentUser(u);
+      setIsAdmin(u.is_admin === true || u.role === "admin" || u.role === "owner");
+      setPermissionState("ready");
+    } catch (err) {
+      setCurrentUser(null);
+      setIsAdmin(false);
+      setPermissionState("error");
+      setPermissionError((err as Error).message || "Could not verify workspace permissions.");
+    }
+    try {
+      setWorkspaceList(await api.workspace.list());
+    } catch {}
+  }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const u = await api.me();
-        setCurrentUser(u);
-        setIsAdmin(u.is_admin ?? (u.role == null ? true : u.role === "admin" || u.role === "owner"));
-      } catch {}
-      try {
-        setWorkspaceList(await api.workspace.list());
-      } catch {}
-    })();
-  }, []);
+    void loadAccountContext();
+  }, [loadAccountContext]);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
 
   const loadData = useCallback(async () => {
+    setSystemLoadError(null);
     try {
       const [infoRes, platformRes] = await Promise.all([
         api.system.info(),
@@ -546,7 +578,9 @@ function SettingsContent() {
       setInfo(infoRes);
       setPlatformConfig(platformRes);
     } catch (e) {
-      console.error(e);
+      setInfo(null);
+      setPlatformConfig(null);
+      setSystemLoadError((e as Error).message || "Could not load system information.");
     }
   }, []);
 
@@ -744,6 +778,7 @@ function SettingsContent() {
   const workspaceName = resolveWorkspaceName(
     workspaceList?.workspaces.find((workspace) => workspace.id === workspaceList.active_id)?.name,
   );
+  const canManageWorkspace = permissionState === "ready" && isAdmin;
   // When the user has no real display name/email/username, leave this
   // undefined so the ScopeChip + group labels show just "Account" instead of
   // leaking the internal "the operator" placeholder into the UI.
@@ -817,7 +852,9 @@ function SettingsContent() {
                     tab={t.key}
                     info={info}
                     platformConfig={platformConfig}
-                    canEdit={isAdmin}
+                    canEdit={canManageWorkspace}
+                    loadError={systemLoadError}
+                    onRetryLoad={() => void loadData()}
                     onCopySecretName={copySecretName}
                   />
                 ),
@@ -835,7 +872,7 @@ function SettingsContent() {
       },
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountName, clearConfirmText, clearing, info, isAdmin, platformConfig, workspaceName]);
+  }, [accountName, canManageWorkspace, clearConfirmText, clearing, info, platformConfig, systemLoadError, workspaceName]);
 
   function handleCollectionChange(next: CollectionState) {
     setCollectionState(next);
@@ -863,22 +900,24 @@ function SettingsContent() {
             tab="info"
             info={info}
             platformConfig={platformConfig}
-            canEdit={isAdmin}
+            canEdit={canManageWorkspace}
+            loadError={systemLoadError}
+            onRetryLoad={() => void loadData()}
             onCopySecretName={copySecretName}
           />
         );
       case "channels":
-        return <ChannelsTab canManageWorkspace={isAdmin} />;
+        return <ChannelsTab canManageWorkspace={canManageWorkspace} />;
       case "assistant":
-        return <AssistantSettingsPanel canManageWorkspace={isAdmin} />;
+        return <AssistantSettingsPanel canManageWorkspace={canManageWorkspace} />;
       case "members":
         return <MembersSettingsPanel />;
       case "versions":
-        return <VersionHistorySettingsPanel canManageWorkspace={isAdmin} />;
+        return <VersionHistorySettingsPanel canManageWorkspace={canManageWorkspace} />;
       case "danger":
         return (
           <DangerSection
-            canEdit={isAdmin}
+            canEdit={canManageWorkspace}
             clearConfirmText={clearConfirmText}
             setClearConfirmText={setClearConfirmText}
             clearing={clearing}
@@ -905,6 +944,30 @@ function SettingsContent() {
     // Banners keep their natural height; the CollectionView wrapper below takes
     // the remaining space (mirrors the Workers collection page shell).
     <div className="flex min-h-full flex-1 flex-col gap-6">
+      {permissionState === "loading" && (
+        <Alert>
+          <Info className="size-4" />
+          <AlertTitle>Checking workspace permissions</AlertTitle>
+          <AlertDescription>Privileged controls are locked until your role is verified.</AlertDescription>
+        </Alert>
+      )}
+
+      {permissionState === "error" && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>Could not verify workspace permissions</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>
+              {permissionError ? `${permissionError}. ` : ""}
+              Privileged controls are locked until your role can be verified.
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadAccountContext()}>
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {claimSuccess && (
         <ClaimSuccessOverlay
           channel={claimSuccess}
@@ -1043,14 +1106,32 @@ function SystemSubTab({
   info,
   platformConfig,
   canEdit,
+  loadError,
+  onRetryLoad,
   onCopySecretName,
 }: {
   tab: SystemSubTabKey;
   info: SystemInfo | null;
   platformConfig: PlatformConfig | null;
   canEdit: boolean;
+  loadError: string | null;
+  onRetryLoad: () => void;
   onCopySecretName: (name: string) => Promise<void>;
 }) {
+  if (loadError) {
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="size-4" />
+        <AlertTitle>Could not load system information</AlertTitle>
+        <AlertDescription className="space-y-3">
+          <p>{loadError}</p>
+          <Button type="button" variant="outline" size="sm" onClick={onRetryLoad}>
+            Retry
+          </Button>
+        </AlertDescription>
+      </Alert>
+    );
+  }
   switch (tab) {
     case "info":
       return (
@@ -1359,33 +1440,33 @@ function AppearanceSection() {
 function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser | null; onUpdated: (u: CurrentUser) => void }) {
   const [displayName, setDisplayName] = useState(currentUser?.display_name ?? "");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     setDisplayName(currentUser?.display_name ?? "");
+    setSaveError(null);
   }, [currentUser?.display_name]);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     const name = displayName.trim();
     if (!name) return;
+    if (!currentUser?.user_id) {
+      const message = "Could not save your profile because your account is not loaded.";
+      setSaveError(message);
+      toast.error(message);
+      return;
+    }
     setSaving(true);
+    setSaveError(null);
     try {
-      const res = await fetch(`${API_BASE}/me`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ display_name: name }),
-      });
-      if (res.ok) {
-        const updated = (await res.json()) as CurrentUser;
-        onUpdated(updated);
-      } else {
-        // Optimistic update if backend doesn't support PATCH /me yet
-        if (currentUser) onUpdated({ ...currentUser, display_name: name });
-      }
+      const updated = await api.updateMe(name, currentUser.user_id);
+      onUpdated({ ...currentUser, ...updated, display_name: updated.display_name ?? name });
       toast.success("Name updated");
-    } catch {
-      if (currentUser) onUpdated({ ...currentUser, display_name: name });
-      toast.success("Name updated");
+    } catch (err) {
+      const message = (err as Error).message || "Could not update your profile.";
+      setSaveError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -1424,6 +1505,11 @@ function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser |
         <p className="text-xs text-muted-foreground">
           Your display name is shown in the sidebar and in activity logs.
         </p>
+        {saveError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {saveError}
+          </p>
+        ) : null}
       </section>
     </div>
   );

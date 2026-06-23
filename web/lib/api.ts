@@ -222,6 +222,16 @@ export const api = {
     }
     return res.json() as Promise<import("@/lib/types").CurrentUser>;
   },
+  updateMe: (displayName: string, userId: string) =>
+    api.users
+      .update(userId, { display_name: displayName })
+      .then((user) => ({
+        user_id: user.id,
+        display_name: user.display_name,
+        role: user.role,
+        is_admin: user.role === "admin",
+        username: user.username,
+      }) satisfies import("@/lib/types").CurrentUser),
   // #778: Emily chat attachments — upload to extract text for the next message.
   chat: {
     uploadAttachments: async (files: File[]): Promise<import("@/lib/types").ChatAttachment[]> => {
