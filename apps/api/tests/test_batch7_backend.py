@@ -30,6 +30,12 @@ def test_551_gate_reads_available_secrets():
     )
 
 
+def test_1916_gate_checks_worker_owner_secret_scope():
+    """The run preflight must check the same owner scope used for sandbox injection."""
+    src = MAIN_PY.read_text()
+    assert "_run_available_secrets = _available_secret_names_for_user(true_owner_id, repos)" in src
+
+
 def test_551_gate_computes_missing_secrets():
     """The gate must compute which required secrets are absent."""
     src = MAIN_PY.read_text()

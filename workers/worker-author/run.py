@@ -365,6 +365,11 @@ def _repair_generated_worker_manifest(
             repaired["version"] = "0.1.0"
         elif not version:
             repaired["version"] = "0.1.0"
+    trigger = repaired.get("trigger")
+    if isinstance(trigger, list):
+        trigger_items = [item for item in trigger if isinstance(item, dict)]
+        if len(trigger_items) == 1 and "triggers" not in repaired:
+            repaired["trigger"] = trigger_items[0]
     if "version" in repaired and repaired["version"] is not None and not isinstance(repaired["version"], str):
         repaired["version"] = str(repaired["version"])
     exec_block = repaired.get("exec")
@@ -560,6 +565,7 @@ Script-mode run.py rules (these EXACT mistakes crash generated workers — never
 - is_example must be false
 - system_worker must be false or absent
 - trigger.type: "manual" unless the prompt explicitly describes a schedule or webhook
+- trigger MUST be a single YAML mapping, never a list. Use `trigger:\n  type: "schedule"` not `trigger:\n- type: "schedule"`.
 - if you include "use_cases", it MUST contain EXACTLY 3 to 5 short items; otherwise omit the field entirely
 - if you include "tags", it MUST contain 8 or fewer flat (no "/") non-empty strings; otherwise omit it
 - KISS and YAGNI: the smallest bundle that does exactly what was described

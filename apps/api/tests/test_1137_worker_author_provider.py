@@ -230,6 +230,24 @@ exec:
     ]
 
 
+def test_worker_author_repairs_single_trigger_list():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "daily-brief",
+            "title": "Daily Brief",
+            "description": "Daily Brief",
+            "version": "0.1.0",
+            "trigger": [{"type": "schedule", "cron": "30 5 * * *"}],
+            "exec": {"entry": "run.py", "runner": "e2b"},
+        },
+        prompt="run every morning",
+    )
+
+    assert manifest["trigger"] == {"type": "schedule", "cron": "30 5 * * *"}
+
+
 def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypatch):
     from runner_sandbox.e2b_driver import _worker_author_platform_env
 

@@ -695,22 +695,20 @@ def test_warm_pool_key_changes_when_large_bundle_file_middle_changes_with_preser
     assert first_key != second_key
 
 
-def test_warm_pool_key_uses_trusted_bundle_sha_without_hashing_disk(monkeypatch, tmp_path):
+def test_warm_pool_key_uses_trusted_bundle_sha_when_it_matches_disk(monkeypatch, tmp_path):
     import runner_sandbox.e2b_driver as e2b_driver_mod
 
     monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
-    monkeypatch.setattr(
-        e2b_driver_mod,
-        "_hash_tree",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("_hash_tree should not run")),
-    )
     worker_dir = tmp_path / "worker"
     worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    bundle_sha = e2b_driver_mod._hash_embedded_worker_files(worker_dir)
+    assert bundle_sha
     cfg = SimpleNamespace(
         runtime=SimpleNamespace(
             command="python run.py",
             type="python",
-            bundle_sha256="a" * 64,
+            bundle_sha256=bundle_sha,
         ),
         contexts=[],
     )
@@ -728,18 +726,40 @@ def test_warm_pool_key_uses_trusted_bundle_sha_without_hashing_disk(monkeypatch,
     assert warm_key
 
 
-def test_warm_pool_key_changes_when_trusted_bundle_sha_changes(monkeypatch, tmp_path):
+def test_embedded_worker_file_hash_matches_db_bundle_sha(tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+    from db.sqlite import _bundle_sha256_from_manifest_files
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "worker.yml").write_text("name: demo\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    (worker_dir / ".pytest_cache").mkdir()
+    (worker_dir / ".pytest_cache" / "noise").write_text("ignored\n", encoding="utf-8")
+
+    manifest = {
+        "_files": {
+            "worker.yml": "name: demo\n",
+            "run.py": "print('ok')\n",
+        }
+    }
+
+    assert (
+        e2b_driver_mod._hash_embedded_worker_files(worker_dir)
+        == _bundle_sha256_from_manifest_files(manifest)
+    )
+
+
+def test_warm_pool_key_ignores_stale_trusted_bundle_sha_and_tracks_disk(monkeypatch, tmp_path):
     import runner_sandbox.e2b_driver as e2b_driver_mod
 
     monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
     worker_dir = tmp_path / "worker"
     worker_dir.mkdir()
-    cfg_a = SimpleNamespace(
-        runtime=SimpleNamespace(command="python run.py", type="python", bundle_sha256="a" * 64),
-        contexts=[],
-    )
-    cfg_b = SimpleNamespace(
-        runtime=SimpleNamespace(command="python run.py", type="python", bundle_sha256="b" * 64),
+    run_py = worker_dir / "run.py"
+    run_py.write_text("print('old')\n", encoding="utf-8")
+    cfg = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python", bundle_sha256="0" * 64),
         contexts=[],
     )
 
@@ -747,15 +767,16 @@ def test_warm_pool_key_changes_when_trusted_bundle_sha_changes(monkeypatch, tmp_
         worker_id="w",
         user_id="u",
         worker_dir=worker_dir,
-        config=cfg_a,
+        config=cfg,
         inputs={},
         sandbox_template="tmpl",
     )
+    run_py.write_text("print('new')\n", encoding="utf-8")
     second_key, second_err = e2b_driver_mod._warm_pool_key(
         worker_id="w",
         user_id="u",
         worker_dir=worker_dir,
-        config=cfg_b,
+        config=cfg,
         inputs={},
         sandbox_template="tmpl",
     )
