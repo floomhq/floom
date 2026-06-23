@@ -54,6 +54,11 @@ function isPublicPath(pathname: string): boolean {
   if (path.startsWith("/_next/")) return true;
   if (path.startsWith("/api/auth/")) return true;
   if (path.startsWith("/api/proxy/")) return true;
+  // CLI device approve/deny has its own server-side route handler. It reads the
+  // HttpOnly cloud session cookie and forwards it to /auth/cli-approve|deny.
+  // Keep it reachable here; the CSRF guard above still runs before this public
+  // path check.
+  if (path.startsWith("/api/cli-auth/")) return true;
   if (path === "/api/me") return true;
   if (path.startsWith("/invites/")) return true;
   return false;

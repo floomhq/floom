@@ -85,4 +85,22 @@ describe("#947 cloud CSRF origin validation on /api/proxy", () => {
     );
     expect(res.status).not.toBe(403);
   });
+
+  it("lets same-origin cli-auth approval reach its route handler", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(
+      req("/app/api/cli-auth/approve", { origin: `https://${HOST}` }),
+    );
+    expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(403);
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("still blocks cross-site cli-auth approval", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(
+      req("/app/api/cli-auth/approve", { origin: "https://evil.com" }),
+    );
+    expect(res.status).toBe(403);
+  });
 });
