@@ -33,4 +33,8 @@ regexes = [
   # CI-only Fernet test key (cloud-engine-autosync.yml) — base64 of
   # "workeros-cloud-ci-test-key-32byt"; documented as CI-only, never a real secret.
   '''d29ya2Vyb3MtY2xvdWQtY2ktdGVzdC1rZXktMzJieXQ=''',
+  # render_emails.py historical OTP placeholder (commit 6845495, replaced in
+  # 27bcf41) — a synthetic hex string used as Supabase OTP preview substitute
+  # in the email render script; not a real credential.
+  '''abcdef1234567890abcdef1234567890''',
 ]

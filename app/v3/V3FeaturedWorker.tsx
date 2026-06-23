@@ -13,7 +13,8 @@ import {
   getTemplate,
   getTemplateDetail,
 } from "@/components/landing-ref/data";
-import { GmailLogo, OutlookLogo } from "@/components/landing-icons";
+import { V3OutputPreview } from "./V3OutputPreview";
+import { MARKS, toolLabel } from "./V3TemplateCard";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -74,19 +75,25 @@ export function V3FeaturedWorker() {
       >
         <div className="rounded-[22px] bg-secondary/70 p-4 sm:p-5">
           <div className="rounded-[18px] border border-border-soft bg-card p-5 sm:p-6">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 [&_svg]:h-[15px] [&_svg]:w-[15px]" aria-label="Gmail or Outlook">
-                <GmailLogo />
-                <OutlookLogo />
+            <div className="flex items-center justify-between gap-4">
+              <span className="flex items-center gap-2 [&_svg]:h-[15px] [&_svg]:w-[15px]">
+                {t.tools.slice(0, 4).map((tool) => {
+                  const mark = MARKS[tool.toLowerCase()];
+                  return mark ? (
+                    <span key={tool} className="opacity-80">{mark}</span>
+                  ) : (
+                    <span key={tool} className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {toolLabel(tool)}
+                    </span>
+                  );
+                })}
               </span>
               <span className="font-mono text-[11px] text-muted-foreground">{d.exampleRun.id}</span>
             </div>
             <div className="mt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Email draft · to {d.exampleRun.email.to}
+              {t.output}
             </div>
-            <div className="mt-3 text-[16px] font-medium tracking-[-0.01em]">{d.exampleRun.email.subject}</div>
-            <p className="mt-2 whitespace-pre-line text-[13.5px] leading-relaxed text-muted-foreground">{d.exampleRun.email.body}</p>
-            <p className="mt-2 whitespace-pre-line text-[13.5px] text-muted-foreground">{d.exampleRun.email.signoff}</p>
+            <V3OutputPreview sample={t.sample} size="lg" bare className="mt-3" />
             <div className="mt-5 flex items-center justify-between border-t border-border-soft pt-4">
               <span className="text-[12px] text-muted-foreground">{d.exampleRun.approvalQuestion}</span>
               <span className="flex gap-2">

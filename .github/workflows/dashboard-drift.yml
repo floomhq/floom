@@ -2,12 +2,12 @@ name: Dashboard drift guard
 
 # Guards against the synced dashboard (web/) silently re-forking from the engine
 # UI (engine/apps/web). The engine is a submodule of a SEPARATE private repo
-# (github.com/floomhq/workeros).
+# (github.com/floomhq/floom).
 #
 # This runs on the self-hosted AX41 runner (org GitHub-hosted Actions are
 # billing-disabled). The private engine submodule is cloned with the runner's
 # LOCAL gh credentials (gh auth token) — no stored ENGINE_SUBMODULE_TOKEN secret.
-# The runner user has read access to floomhq/workeros, so the drift check ALWAYS
+# The runner user has read access to floomhq/floom, so the drift check ALWAYS
 # RUNS FOR REAL and fails the job on any drift. There is no neutral skip.
 
 on:
@@ -44,7 +44,7 @@ jobs:
           if [ -z "${TOKEN:-}" ]; then
             echo "::error::No gh token available on the self-hosted runner."
             echo "::error::Run 'gh auth login' as the runner user (github-runner)"
-            echo "::error::with read access to floomhq/workeros."
+            echo "::error::with read access to floomhq/floom."
             exit 1
           fi
           git config --global \
@@ -53,7 +53,7 @@ jobs:
           if ! git submodule update --init --recursive; then
             echo "::error::Failed to init the engine submodule with the runner's"
             echo "::error::gh credentials. Check the runner user's read access to"
-            echo "::error::floomhq/workeros and the submodule pin."
+            echo "::error::floomhq/floom and the submodule pin."
             exit 1
           fi
           if [ ! -d engine/apps/web ]; then

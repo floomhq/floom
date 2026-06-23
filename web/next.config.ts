@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-// R13 HIGH-9: workers.floom.dev was missing 5 security headers the API
+// R13 HIGH-9: localhost:3000 was missing 5 security headers the API
 // already sets. CSP is intentionally NOT the API's `default-src 'none'`
 // policy — that would break a Next.js app shell. Started from a pragmatic
 // baseline and loosened only the directives Next's runtime needs:
@@ -10,7 +10,7 @@ import type { NextConfig } from "next";
 //   - blob: on frame-src for authenticated PDF previews fetched through the
 //     app proxy and rendered from object URLs
 //   - blob: on media-src for authenticated video previews
-// Verify with: `curl -I https://workers.floom.dev/` and a browser console
+// Verify with: `curl -I https://localhost:3000/` and a browser console
 // CSP-violation check after deploy.
 //
 // #926 — CSP moved to middleware.ts. The policy needs a per-request nonce on
@@ -78,7 +78,7 @@ function cloudApexRedirects(): RedirectRule[] {
 
 const nextConfig: NextConfig = {
   // basePath seam: unset for the single-tenant OSS build (served at "/").
-  // The Cloud wrapper serves the dashboard under "/app" and sets
+  // The Downstream host serves the dashboard under "/app" and sets
   // NEXT_PUBLIC_BASE_PATH="/app" so this file is consumed unmodified (no fork).
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
   turbopack: {
@@ -120,16 +120,57 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // PostHog requires its ingestion paths to keep their exact trailing slashes
+  // (e.g. /ingest/decide/ vs /ingest/decide). Next.js would otherwise 308 the
+  // canonical form and break the proxied request, so trailing-slash redirects
+  // are disabled. This is PostHog's documented requirement for the reverse
+  // proxy; we have no app routes that depend on a trailing-slash redirect.
+  skipTrailingSlashRedirect: true,
   // Branded claim short-link: /c/:token is served by the FastAPI app (the
-  // /c/{token} route lives on workers-api.floom.dev, NOT here). Proxy it so the
-  // branded workers.floom.dev/c/:token also resolves. The upstream then 302s to
+  // /c/{token} route lives on localhost:8000, NOT here). Proxy it so the
+  // branded localhost:3000/c/:token also resolves. The upstream then 302s to
   // /settings?whatsapp_claim= | ?slack_claim= on this web app (auth-gated, which
   // is correct — only the short-link hop is public, via middleware below).
   async rewrites() {
     const apiBase = (
-      process.env.FLOOM_API_BASE || "https://workers-api.floom.dev"
+      process.env.FLOOM_API_BASE || "https://localhost:8000"
     ).replace(/\/$/, "");
+
+    // PostHog first-party reverse proxy (#1724 follow-up). Ingestion and
+    // recorder/feature-flag assets are served same-origin under /ingest/* so
+    //   (a) CSP `connect-src 'self'` covers ingestion with NO PostHog domain in
+    //       the allowlist (supersedes the CSP_EXTRA_CONNECT_SRC workaround), and
+    //   (b) ad/tracking blockers (which block i.posthog.com) cannot drop events.
+    // Hosts are env-overridable for EU/self-hosted PostHog; defaults are US
+    // cloud. The client SDK points api_host at POSTHOG_PROXY_PATH ("/ingest").
+    //
+    // Route order matters — the asset rules (static/array) MUST precede the
+    // catch-all /ingest/:path* so recorder + feature-flag bundles resolve to the
+    // assets host, not the ingestion host.
+    const phAssets = (
+      process.env.POSTHOG_PROXY_ASSETS_HOST || "https://us-assets.i.posthog.com"
+    ).replace(/\/$/, "");
+    const phIngest = (
+      process.env.POSTHOG_PROXY_INGEST_HOST || "https://us.i.posthog.com"
+    ).replace(/\/$/, "");
+    const proxyPath = (process.env.POSTHOG_PROXY_PATH || "/ingest").replace(/\/$/, "");
+
     return [
+      // Session-replay recorder, web snippet, and other static bundles.
+      {
+        source: `${proxyPath}/static/:path*`,
+        destination: `${phAssets}/static/:path*`,
+      },
+      // Feature-flag / remote-config payloads (served from the assets host).
+      {
+        source: `${proxyPath}/array/:path*`,
+        destination: `${phAssets}/array/:path*`,
+      },
+      // Everything else (event capture, /decide, /flags, /e, /s) -> ingestion.
+      {
+        source: `${proxyPath}/:path*`,
+        destination: `${phIngest}/:path*`,
+      },
       {
         source: "/c/:token",
         destination: `${apiBase}/c/:token`,

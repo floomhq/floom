@@ -7,6 +7,7 @@ from html import escape
 from typing import Any
 
 from apps.api.obs import get_logger, log_failure
+from apps.api import email_tokens as T
 
 logger = get_logger(__name__)
 
@@ -44,9 +45,9 @@ def build_welcome_email(*, to: str, dashboard_url: str) -> TransactionalEmail:
         preheader="Your Floom workspace is ready.",
         eyebrow="Workspace ready",
         headline="Welcome to Floom",
-        body_html="""
-<p class="workeros-ink" style="font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:17px;line-height:1.55;margin:0 0 20px;color:#16171A;font-weight:400;">Your workspace is ready. You can create workers, connect apps, attach Brain packs, and approve work from the dashboard.</p>
-<p class="workeros-ink" style="font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:1.65;margin:0 0 16px;color:#16171A;">Start with one worker, then attach the exact connections and Brain resources it is allowed to use.</p>
+        body_html=f"""
+<p class="workeros-ink" style="font-family:{T.FONT};font-size:17px;line-height:1.55;margin:0 0 20px;color:{T.INK};font-weight:400;">Your workspace is ready. You can create workers, connect apps, attach Brain packs, and approve work from the dashboard.</p>
+<p class="workeros-ink" style="font-family:{T.FONT};font-size:15px;line-height:1.65;margin:0 0 16px;color:{T.INK};">Start with one worker, then attach the exact connections and Brain resources it is allowed to use.</p>
 """.strip(),
         cta_label="Open Floom",
         cta_url=dashboard_link,
@@ -96,37 +97,37 @@ def _workeros_email_html(
 <style>
 @media only screen and (max-width: 480px) {{
   .workeros-shell {{ padding: 16px 12px !important; }}
-  .workeros-card {{ padding: 28px 24px 32px !important; border-radius: 0 0 16px 16px !important; }}
-  .workeros-band {{ padding: 22px 24px !important; border-radius: 16px 16px 0 0 !important; }}
+  .workeros-card {{ padding: 28px 24px 32px !important; border-radius: 0 0 {T.RADIUS_CARD} {T.RADIUS_CARD} !important; }}
+  .workeros-band {{ padding: 22px 24px !important; border-radius: {T.RADIUS_CARD} {T.RADIUS_CARD} 0 0 !important; }}
   .workeros-h1 {{ font-size: 24px !important; line-height: 1.22 !important; }}
   .workeros-cta a {{ display: block !important; padding: 16px 22px !important; }}
 }}
 @media (prefers-color-scheme: dark) {{
-  .workeros-shell-bg {{ background: #FBFBFC !important; }}
-  .workeros-ink {{ color: #16171A !important; }}
-  .workeros-card-bg {{ background: #FFFFFF !important; }}
+  .workeros-shell-bg {{ background: {T.BG_APP} !important; }}
+  .workeros-ink {{ color: {T.INK} !important; }}
+  .workeros-card-bg {{ background: {T.BG_CARD} !important; }}
 }}
 </style>
 </head>
-<body class="workeros-shell-bg" style="margin:0;padding:0;background:#FBFBFC;font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#16171A;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;">
+<body class="workeros-shell-bg" style="margin:0;padding:0;background:{T.BG_APP};font-family:{T.FONT};color:{T.INK};-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;">
 <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{safe_preheader}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FBFBFC;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{T.BG_APP};">
 <tr><td align="center" class="workeros-shell" style="padding:40px 16px;">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
-<tr><td class="workeros-band" style="background:#F2F3F5;border:1px solid rgba(20,23,26,0.08);border-bottom:none;border-radius:16px 16px 0 0;padding:26px 36px;">
+<tr><td class="workeros-band" style="background:{T.BG_BAND};border-radius:{T.RADIUS_CARD} {T.RADIUS_CARD} 0 0;padding:26px 36px;">
 <a href="https://workeros.floom.dev" style="text-decoration:none;display:inline-block;"><img src="{FLOOM_EMAIL_LOGO_URL}" width="120" height="42" alt="Floom" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;"></a>
 </td></tr>
-<tr><td class="workeros-card workeros-card-bg" style="background:#FFFFFF;border:1px solid rgba(20,23,26,0.08);border-top:none;border-radius:0 0 16px 16px;padding:40px 40px 44px;">
-<p style="margin:0 0 10px;font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#6B7280;">{safe_eyebrow}</p>
-<h1 class="workeros-h1 workeros-ink" style="margin:0 0 24px;font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:28px;line-height:1.2;font-weight:650;letter-spacing:0;color:#16171A;">{safe_headline}</h1>
+<tr><td class="workeros-card workeros-card-bg" style="background:{T.BG_CARD};border-radius:0 0 {T.RADIUS_CARD} {T.RADIUS_CARD};padding:40px 40px 44px;">
+<p style="margin:0 0 10px;font-family:{T.FONT};font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:{T.MUTED};">{safe_eyebrow}</p>
+<h1 class="workeros-h1 workeros-ink" style="margin:0 0 24px;font-family:{T.FONT};font-size:28px;line-height:1.2;font-weight:650;letter-spacing:0;color:{T.INK};">{safe_headline}</h1>
 {body_html}
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" class="workeros-cta" style="margin:28px 0 8px;"><tr><td style="border-radius:10px;background:#16171A;"><a href="{safe_cta_url}" style="display:inline-block;background:#16171A;color:#FFFFFF;text-decoration:none;padding:14px 28px;border-radius:10px;font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;font-weight:650;letter-spacing:0;line-height:1;">{safe_cta_label}</a></td></tr></table>
-<p style="font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:1.55;margin:0 0 16px;color:#6B7280;">Or paste this link into your browser:<br><a href="{safe_cta_url}" style="color:#3E6FE0;word-break:break-all;text-decoration:underline;">{safe_cta_url}</a></p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 4px;"><tr><td style="border-top:1px solid rgba(20,23,26,0.08);font-size:0;line-height:0;">&nbsp;</td></tr></table>
-<p style="font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:1.55;margin:16px 0 0;color:#6B7280;">{safe_footer_note}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" class="workeros-cta" style="margin:28px 0 8px;"><tr><td style="border-radius:{T.RADIUS_BUTTON};background:{T.INK};"><a href="{safe_cta_url}" style="display:inline-block;background:{T.INK};color:{T.BG_CARD};text-decoration:none;padding:14px 28px;border-radius:{T.RADIUS_BUTTON};font-family:{T.FONT};font-size:15px;font-weight:650;letter-spacing:0;line-height:1;">{safe_cta_label}</a></td></tr></table>
+<p style="font-family:{T.FONT};font-size:13px;line-height:1.55;margin:0 0 16px;color:{T.MUTED};">Or paste this link into your browser:<br><a href="{safe_cta_url}" style="color:{T.ACCENT};word-break:break-all;text-decoration:underline;">{safe_cta_url}</a></p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 4px;"><tr><td style="font-size:0;line-height:0;">&nbsp;</td></tr></table>
+<p style="font-family:{T.FONT};font-size:13px;line-height:1.55;margin:16px 0 0;color:{T.MUTED};">{safe_footer_note}</p>
 </td></tr>
-<tr><td style="padding:28px 4px 4px;font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.6;color:#6B7280;">
-<a href="https://workeros.floom.dev" style="color:#16171A;font-weight:650;text-decoration:none;">Floom</a> &middot; <a href="mailto:team@floom.dev" style="color:#3E6FE0;text-decoration:underline;">team@floom.dev</a>
+<tr><td style="padding:28px 4px 4px;font-family:{T.FONT};font-size:12px;line-height:1.6;color:{T.MUTED};">
+<a href="https://workeros.floom.dev" style="color:{T.INK};font-weight:650;text-decoration:none;">Floom</a> &middot; <a href="mailto:team@floom.dev" style="color:{T.ACCENT};text-decoration:underline;">team@floom.dev</a>
 </td></tr>
 </table>
 </td></tr>
@@ -149,8 +150,8 @@ def build_workspace_invite_email(
         eyebrow="Workspace invitation",
         headline=f"You've been invited to {safe_workspace}",
         body_html=f"""
-<p class="workeros-ink" style="font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:17px;line-height:1.55;margin:0 0 20px;color:#16171A;font-weight:400;"><strong>{safe_inviter}</strong> has invited you to collaborate on <strong>{safe_workspace}</strong>.</p>
-<p class="workeros-ink" style="font-family:'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:1.65;margin:0 0 16px;color:#16171A;">Accept the invitation to access shared workers and start collaborating. The link expires in 7 days.</p>
+<p class="workeros-ink" style="font-family:{T.FONT};font-size:17px;line-height:1.55;margin:0 0 20px;color:{T.INK};font-weight:400;"><strong>{safe_inviter}</strong> has invited you to collaborate on <strong>{safe_workspace}</strong>.</p>
+<p class="workeros-ink" style="font-family:{T.FONT};font-size:15px;line-height:1.65;margin:0 0 16px;color:{T.INK};">Accept the invitation to access shared workers and start collaborating. The link expires in 7 days.</p>
 """.strip(),
         cta_label="Accept invitation",
         cta_url=escape(invite_url, quote=True),

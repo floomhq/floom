@@ -83,8 +83,15 @@ os.environ.setdefault(
     "FLOOM_WORKERS_DIR",
     _custom_wd or str(_Path(__file__).resolve().parents[2] / "engine" / "workers"),
 )
+# Capture a cloud-provided secret before any route import can import the engine.
+# The engine import can load a local OSS api.env; that fallback must not become
+# cloud auth state, but an explicit Railway value is needed for Slack state HMAC.
+_cloud_floom_secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+if _cloud_floom_secret:
+    os.environ["WORKEROS_SLACK_STATE_SECRET"] = _cloud_floom_secret
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from apps.api.cloud_scheduler import start_cloud_scheduler, stop_cloud_scheduler
 from apps.api.cloud_webhooks import verify_webhook_token
@@ -96,7 +103,7 @@ from apps.api import obs as _obs
 _obs.setup_logging()
 
 engine_run_service = import_engine_module("run_service")
-from apps.api.routes.auth import router as auth_router
+from apps.api.routes.auth import cloud_auth_me, router as auth_router
 from apps.api.routes.cli_auth_devices import router as cli_auth_devices_router
 from apps.api.routes.members import router as members_router
 from apps.api.routes.novasearch import router as novasearch_router
@@ -108,6 +115,62 @@ from apps.api.routes.workspaces import router as workspaces_router
 
 engine_main = import_engine_module("main")
 engine_worker_serialize = import_engine_module("services.worker_serialize")
+
+
+_RUN_ARTIFACTS_BUCKET = "workeros-run-artifacts"
+
+
+def _install_cloud_artifact_responder() -> None:
+    """Serve cloud artifacts from Supabase Storage when the local disk is cold.
+
+    Engine routes call services.run_access._artifact_file_response through
+    module-level imports in runs/approvals. Patch those globals in cloud boot so
+    artifact metadata paths like supabase://workeros-run-artifacts/... stream
+    from Storage instead of returning "File not found on disk" on a different
+    Railway node. Local paths still use the engine responder unchanged.
+    """
+    run_access = import_engine_module("services.run_access")
+    runs_router = import_engine_module("routers.runs")
+    approvals_router = import_engine_module("routers.approvals")
+    original = run_access._artifact_file_response
+
+    def _cloud_artifact_file_response(row: Any):
+        from io import BytesIO
+        import mimetypes
+        from core.utils import row_to_dict
+        from apps.api.config import get_supabase_service_client
+
+        art = row_to_dict(row)
+        path = str(art.get("path") or "")
+        prefix = f"supabase://{_RUN_ARTIFACTS_BUCKET}/"
+        if not path.startswith(prefix):
+            return original(row)
+        if run_access._is_sensitive_artifact_row(row):
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+        key = path[len(prefix):]
+        try:
+            data = get_supabase_service_client().storage.from_(_RUN_ARTIFACTS_BUCKET).download(key)
+        except Exception:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        if not data:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+        name = str(art.get("name") or key.rsplit("/", 1)[-1] or "artifact")
+        content_type = art.get("type") or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        filename = run_access._sanitize_download_name(name)
+        return StreamingResponse(
+            BytesIO(data),
+            media_type=content_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    run_access._artifact_file_response = _cloud_artifact_file_response
+    runs_router._artifact_file_response = _cloud_artifact_file_response
+    approvals_router._artifact_file_response = _cloud_artifact_file_response
+
+
+_install_cloud_artifact_responder()
 
 # The engine's main.py auto-loads /root/.config/workeros/api.env via load_dotenv()
 # on import. That file is the OSS single-tenant local-mode prod env and contains
@@ -220,6 +283,9 @@ _CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], in
     (None, _re.compile(r"^/auth/(?:password-login|password-signup|login|fragment-session|cli-approve|cli-deny)$"), 5, 60.0),
     (("POST",), _re.compile(r"^/api/cli-auth/devices$"), 5, 60.0),
     (("POST", "DELETE"), _re.compile(r"^/auth/tokens(?:/.*)?$"), 20, 60.0),
+    # Workspace duplicate internally exports + imports a template bundle. Keep
+    # it much tighter than ordinary workspace metadata mutations.
+    (("POST",), _re.compile(r"^/api/workspaces/[^/]+/duplicate$"), 5, 3600.0),
     (("POST", "PATCH", "DELETE"), _re.compile(r"^/api/workspaces(?:/.*)?$"), 60, 60.0),
     (("POST",), _re.compile(r"^/api/novasearch(?:/.*)?$"), 30, 60.0),
     # #288: exact list endpoints can enumerate tenant-owned resources. Keep
@@ -287,6 +353,43 @@ def _cloud_client_ip(request: Request) -> str:
     if real_ip:
         return real_ip
     return request.client.host if request.client else "unknown"
+
+
+def _webhook_github_issue_action_allowed(
+    worker_id: str,
+    inputs: dict[str, Any],
+    config: dict[str, Any] | None,
+) -> bool:
+    """Return False when a worker opts into GitHub issue action filtering."""
+    if not isinstance(inputs.get("issue"), dict) or not isinstance(
+        inputs.get("repository"), dict
+    ):
+        return True
+    if inputs.get("zen"):
+        # GitHub ping payloads do not have an issue action and should not start
+        # issue-fixer workers.
+        return False
+
+    webhook_cfg = (config or {}).get("webhook") or {}
+    allowed = webhook_cfg.get("github_issue_actions")
+    if allowed is None:
+        trigger_cfg = (config or {}).get("trigger") or {}
+        allowed = trigger_cfg.get("github_issue_actions")
+    if allowed is None and worker_id == "claude-codex-pr-loop-v1":
+        allowed = ["opened"]
+    if allowed is None:
+        return True
+    if isinstance(allowed, str):
+        allowed_actions = {allowed.strip().lower()}
+    elif isinstance(allowed, list):
+        allowed_actions = {str(item).strip().lower() for item in allowed}
+    else:
+        return True
+    allowed_actions.discard("")
+    if not allowed_actions:
+        return True
+    action = str(inputs.get("action") or "").strip().lower()
+    return action in allowed_actions
 
 
 def _cloud_rate_identity(request: Request) -> str:
@@ -423,7 +526,11 @@ async def member_write_guard(request: Request, call_next):
                             content={"detail": "You do not have edit access to this worker."},
                         )
                 except Exception:
-                    pass  # never hard-fail the request on guard error
+                    from fastapi.responses import JSONResponse as _JSONResponse
+                    return _JSONResponse(
+                        status_code=403,
+                        content={"detail": "Worker ownership could not be verified."},
+                    )
 
     return await call_next(request)
 
@@ -667,6 +774,13 @@ async def cloud_body_size_middleware(request: Request, call_next):
 
 
 app.include_router(auth_router)
+for _auth_me_prefix in ("/api", "/v1", "/api/v1"):
+    app.add_api_route(
+        f"{_auth_me_prefix}/auth/me",
+        cloud_auth_me,
+        methods=["GET"],
+        include_in_schema=False,
+    )
 # Mount workspaces + cli-auth/devices under /api BEFORE the engine sub-app
 # mount; otherwise FastAPI's path matching dispatches /api/workspaces (and
 # /api/cli-auth/devices) into the engine. The engine handler for
@@ -681,6 +795,210 @@ app.include_router(novasearch_router, prefix="/api")
 app.include_router(workspace_agent_router, prefix="/api")
 app.include_router(slack_events_router, prefix="/api")
 app.include_router(slack_oauth_router)
+
+
+async def _blocked_engine_account_route() -> None:
+    """Cloud uses Supabase auth/workspace membership, not engine-local user admin."""
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+_BLOCKED_ENGINE_ACCOUNT_ROUTES = (
+    "/auth/setup",
+    "/auth/login",
+    "/auth/magic-link",
+    "/auth/magic/{_path:path}",
+    "/users",
+    "/users/{_path:path}",
+)
+
+for _prefix in ("", "/api", "/v1", "/api/v1"):
+    for _blocked_path in _BLOCKED_ENGINE_ACCOUNT_ROUTES:
+        app.add_api_route(
+            f"{_prefix}{_blocked_path}",
+            _blocked_engine_account_route,
+            methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            include_in_schema=False,
+        )
+
+
+async def _cloud_engine_auth_and_repos(request: Request) -> tuple[Any, Any]:
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from auth.context import AuthContext as _AuthContext
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    engine_auth = _AuthContext(
+        user_id=auth.user_id,
+        email=getattr(auth, "email", None),
+        scopes=getattr(auth, "scopes", ()),
+        role=getattr(auth, "role", None) or "member",
+        auth_method=getattr(auth, "auth_method", "secret"),
+    )
+    return engine_auth, engine_main.get_repositories()
+
+
+def _cloud_mark_context_materialized(root: _Path) -> None:
+    """Keep a newly-created empty pack from being lazily rehydrated as missing."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ".workeros-empty").mkdir(exist_ok=True)
+
+
+def _cloud_backup_context_metadata() -> None:
+    try:
+        from apps.api.auth.workspace_context import get_active_workspace_id
+        from apps.api.cloud_contexts import upload_context_metadata
+        import contexts as _contexts
+
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            upload_context_metadata(workspace_id, _contexts.current_contexts_root())
+    except Exception:
+        import logging as _logging
+
+        _logging.getLogger("workeros.cloud").warning(
+            "context metadata Storage backup failed",
+            exc_info=True,
+        )
+
+
+def _cloud_ensure_context_for_write(
+    name: str,
+    *,
+    payload: dict[str, Any] | None,
+    user_id: str,
+    repos: Any,
+    allow_existing: bool,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    import contexts as _contexts
+    from services import context_access as _context_access
+
+    safe_name = _context_access._context_name_or_400(name)
+    root = _contexts.context_dir(safe_name, hydrate=False)
+    metadata = _contexts.load_context_metadata()
+    owner_id = _contexts.context_owner_id(safe_name, metadata)
+
+    if root.exists() and owner_id:
+        if not _context_access._context_visible_to_user(
+            safe_name,
+            user_id=user_id,
+            metadata=metadata,
+            repos=repos,
+        ):
+            if allow_existing:
+                raise HTTPException(status_code=409, detail="Context already exists")
+            raise HTTPException(status_code=404, detail="Context not found")
+        return safe_name, metadata
+
+    _cloud_mark_context_materialized(root)
+    _contexts.set_context_metadata(
+        safe_name,
+        writeable=bool((payload or {}).get("writeable", False)),
+        sensitive=bool((payload or {}).get("sensitive", True)),
+        owner_id=user_id,
+        category=(payload or {}).get("category"),
+    )
+    _contexts.refresh_context_summary_metadata(safe_name)
+    _context_access._ensure_brain_pack_row(safe_name, owner_id=user_id, repos=repos)
+    _cloud_backup_context_metadata()
+    return safe_name, _contexts.load_context_metadata()
+
+
+@app.post("/contexts/{name}")
+@app.post("/api/contexts/{name}")
+@app.post("/v1/contexts/{name}")
+@app.post("/api/v1/contexts/{name}")
+async def cloud_create_context(
+    name: str,
+    request: Request,
+    payload: dict[str, Any] | None = None,
+) -> Any:
+    """Cloud override for context creation.
+
+    The engine's `context_dir()` hydrates missing or empty packs from remote
+    Storage. That is correct for reads, but create must check the target path
+    without hydration; otherwise a Storage stub or stale pack can make a create
+    look like an invisible existing pack and return 404.
+    """
+    from services import context_access as _context_access
+
+    auth, repos = await _cloud_engine_auth_and_repos(request)
+    context_user_id = _context_access._context_actor_user_id(auth.user_id)
+    safe_name, metadata = _cloud_ensure_context_for_write(
+        name,
+        payload=payload,
+        user_id=context_user_id,
+        repos=repos,
+        allow_existing=True,
+    )
+    return _context_access._context_detail(
+        safe_name,
+        metadata,
+        repos=repos,
+        user_id=context_user_id,
+    )
+
+
+@app.put("/contexts/{name}/files/{file_path:path}")
+@app.put("/api/contexts/{name}/files/{file_path:path}")
+@app.put("/v1/contexts/{name}/files/{file_path:path}")
+@app.put("/api/v1/contexts/{name}/files/{file_path:path}")
+async def cloud_put_context_file(
+    name: str,
+    file_path: str,
+    request: Request,
+) -> Any:
+    from services import context_access as _context_access
+    from services.git_service import _git_author
+    from models import ContextTextWriteRequest
+
+    auth, repos = await _cloud_engine_auth_and_repos(request)
+    context_user_id = _context_access._context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _cloud_ensure_context_for_write(
+        name,
+        payload=None,
+        user_id=context_user_id,
+        repos=repos,
+        allow_existing=False,
+    )
+    rel = _context_access._context_file_path_or_400(file_path)
+    content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if content_type == "application/json":
+        try:
+            text_payload = ContextTextWriteRequest(**(await request.json()))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}") from exc
+        data = text_payload.content.encode("utf-8")
+        tags = text_payload.tags
+        file_metadata = text_payload.metadata
+    else:
+        data = await request.body()
+        tags = None
+        file_metadata = None
+
+    result = _context_access._write_context_file(
+        safe_name,
+        rel,
+        data,
+        user_id=context_user_id,
+        tags=tags,
+        file_metadata=file_metadata,
+    )
+    author_name, author_email = _git_author(auth)
+    _context_access._git_commit_context(
+        safe_name,
+        rel,
+        message=f"context {safe_name}: update {rel}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+    _cloud_backup_context_metadata()
+    return result
 
 
 def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any, *, merge_existing: bool = False) -> None:
@@ -709,6 +1027,47 @@ def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any, *, merg
     manifest_json.pop("_files", None)
     manifest_json["_files"] = incoming_files
     svc.table("skill_versions").update({"manifest_json": manifest_json}).eq("id", sv_id).execute()
+
+
+def _install_cloud_mcp_worker_create_persistence() -> None:
+    """Make hosted HTTP MCP worker creation durable on cloud.
+
+    The normal REST create route is overridden below and persists worker source
+    into Supabase skill_versions.manifest_json._files. Hosted HTTP MCP dispatches
+    in-process through engine_main._mcp_call_workers_create, bypassing that REST
+    override, so workers created through /mcp/{workspace_id} could exist in DB
+    but be unrunnable on the runner's cold/ephemeral disk.
+    """
+    original = getattr(engine_main, "_mcp_call_workers_create", None)
+    if not callable(original) or getattr(original, "_workeros_cloud_persist_wrapper", False):
+        return
+
+    def _cloud_mcp_call_workers_create(arguments: dict, auth: Any, repos: Any) -> dict:
+        result = original(arguments, auth, repos)
+        if not isinstance(result, dict) or result.get("isError"):
+            return result
+
+        structured = result.get("structuredContent")
+        worker_id = ""
+        if isinstance(structured, dict):
+            worker_id = str(structured.get("id") or structured.get("worker_id") or "").strip()
+        if not worker_id:
+            return result
+
+        files = _read_worker_files_from_disk(worker_id)
+        if not files:
+            files = {
+                "worker.yml": str(arguments.get("worker_yml") or ""),
+                "run.py": str(arguments.get("run_py") or ""),
+            }
+            skill_md = arguments.get("skill_md")
+            if skill_md:
+                files["SKILL.md"] = str(skill_md)
+        _cloud_persist_worker_files(worker_id, files, repos)
+        return result
+
+    setattr(_cloud_mcp_call_workers_create, "_workeros_cloud_persist_wrapper", True)
+    engine_main._mcp_call_workers_create = _cloud_mcp_call_workers_create
 
 
 def _validate_cloud_worker_file_path(path: str) -> str:
@@ -763,6 +1122,9 @@ def _read_worker_files_from_disk(worker_id: str) -> dict:
             except Exception:
                 pass
     return files
+
+
+_install_cloud_mcp_worker_create_persistence()
 
 
 @app.post("/workers")
@@ -1563,6 +1925,9 @@ async def cloud_webhook_trigger(
         except Exception:
             inputs = {"raw": body.decode("utf-8", errors="replace")}
 
+    if not _webhook_github_issue_action_allowed(worker_id, inputs, config):
+        return engine_main.ActionResponse(status="ignored")
+
     delivery_id = (
         request.headers.get("webhook-id")
         or request.headers.get("X-Delivery-Id")
@@ -1627,8 +1992,17 @@ app.mount("/api", engine_main.app)
 
 
 @app.get("/healthz")
-def healthz() -> dict[str, str]:
-    return {"status": "ok", "deploy": "cloud"}
+def healthz() -> dict[str, object]:
+    from apps.api.build_identity import build_identity
+
+    return {"status": "ok", **build_identity(service="cloud-api")}
+
+
+@app.get("/version")
+def version() -> dict[str, object]:
+    from apps.api.build_identity import build_identity
+
+    return {"status": "ok", **build_identity(service="cloud-api")}
 
 
 app.include_router(slack_events_router)

@@ -1,4 +1,4 @@
 [submodule "engine"]
 	path = engine
-	url = https://github.com/floomhq/workeros.git
+	url = https://github.com/floomhq/floom.git
 	branch = main

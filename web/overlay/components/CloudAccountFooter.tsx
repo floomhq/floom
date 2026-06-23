@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LogOut, Settings } from "lucide-react";
 
+import { Avatar } from "@/components/ui/Avatar";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import {
   DropdownMenu,
@@ -29,25 +30,18 @@ function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
   return next;
 }
 
-function profileInitials(value: string) {
-  const local = value.includes("@") ? value.split("@", 1)[0] : value;
-  const parts = local
-    .split(/[\s._-]+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const letters = parts.length > 1 ? [parts[0][0], parts[1][0]] : [local[0], local[1]];
-  return (
-    letters
-      .filter(Boolean)
-      .join("")
-      .toUpperCase() || "LU"
-  );
-}
-
 // #1306: Google/GitHub login attaches a profile photo via the Cloud /me seam
 // (see overlay/app/lib/me.ts). The engine CurrentUser type has no avatar field,
 // so widen it locally here.
 type CloudUser = CurrentUser & { picture?: string | null };
+
+// Module-level cache for the signed-in cloud user.
+// Mirrors _cachedWorkspaceName in sidebar.engine: on remount (sidebar
+// collapse/expand or SPA navigation) the cache seeds useState immediately so
+// the Avatar never renders with a null/placeholder seed — no flash between
+// the "Local user" generated mark and the real user mark.
+// Populated on first successful /api/me fetch; cleared to null on logout.
+let _cachedCloudUser: CloudUser | null = null;
 
 export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
@@ -57,20 +51,22 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     pathname.startsWith("/login/") ||
     pathname === "/app/login" ||
     pathname.startsWith("/app/login/");
-  const [user, setUser] = useState<CloudUser | null>(null);
-  // #1306: when the photo URL 404s/expires, fall back to initials.
-  const [avatarFailed, setAvatarFailed] = useState(false);
+  // Seed from module-level cache: remounts (sidebar collapse/expand) render the
+  // correct mark immediately without waiting for /api/me to round-trip again.
+  const [user, setUser] = useState<CloudUser | null>(() => _cachedCloudUser);
 
   useEffect(() => {
     if (isLoginPath) return;
+    // Already cached: skip the fetch — the mark is stable from the prior load.
+    if (_cachedCloudUser) return;
     let cancelled = false;
     fetch("/app/api/me", { cache: "no-store" })
       .then((response) => response.json())
       .then((data) => {
         if (!cancelled && data?.user?.email) {
           const currentUser = data.user as CloudUser;
+          _cachedCloudUser = currentUser;
           setUser(currentUser);
-          setAvatarFailed(false);
           identifyPostHogUser(currentUser);
           fetch("/app/api/proxy/auth/tokens/bootstrap", {
             method: "POST",
@@ -101,13 +97,6 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     : user?.email
       ? "Signed in"
       : "Floom";
-  // #1306: show the real Google/GitHub photo when present; otherwise fall back
-  // to a DiceBear "glass" avatar deterministically seeded by the user's
-  // email/name — matching the engine UserDiceBearAvatar (sidebar.tsx) exactly,
-  // NOT a flat initials square. Squircle (radius-button), no border.
-  const avatarUrl = user?.picture && !avatarFailed ? user.picture : null;
-  const avatarSeed = encodeURIComponent(primary || "user");
-  const diceBearUrl = `https://api.dicebear.com/9.x/glass/svg?seed=${avatarSeed}&radius=0`;
 
   async function logout() {
     try {
@@ -115,6 +104,7 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     } catch {
       // Cookie clearing is best effort; navigate regardless.
     }
+    _cachedCloudUser = null;
     resetPostHogUser();
     onNavigate?.();
     window.location.replace("/app/login?next=/app");
@@ -133,24 +123,13 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
           )}
           aria-label="Profile menu"
         >
-          {/* #1306: real photo for OAuth logins; DiceBear "glass" avatar
-              otherwise — matching the engine UserDiceBearAvatar exactly. */}
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt="Profile avatar"
-              referrerPolicy="no-referrer"
-              onError={() => setAvatarFailed(true)}
-              className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
-            />
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={diceBearUrl}
-              alt="Profile avatar"
-              className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
-            />
-          )}
+          {/* #1306 / M36: profile photo (Google/GitHub) beats generated mark.
+              Avatar handles the override ladder: src present → real photo
+              cropped to the circle (user = human); absent → generated mark. */}
+          {/* Pass user_id as stable seed so the mark is fixed for this user
+              and does NOT change when display_name resolves (null → "Federico
+              De Ponte" would otherwise produce two different marks = flash). */}
+          <Avatar role="user" id={user?.user_id} name={primary} src={user?.picture ?? null} size={28} />
           <div className="min-w-0 leading-tight text-left">
             <p className="truncate text-xs font-medium text-foreground">{primary}</p>
             <p className="truncate text-[10px] text-muted-foreground">{secondary}</p>

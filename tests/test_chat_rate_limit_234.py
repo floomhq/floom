@@ -54,6 +54,8 @@ def test_chat_rule_present_and_scoped(monkeypatch, tmp_path):
     assert main._cloud_rate_limit_for_request(_fake("POST", "/chat/attachments")) is None
     # Pre-existing rules still resolve (no regression).
     assert main._cloud_rate_limit_for_request(_fake("POST", "/api/novasearch/match")) == (30, 60.0)
+    assert main._cloud_rate_limit_for_request(_fake("POST", "/api/workspaces/ws_abc/duplicate")) == (5, 3600.0)
+    assert main._cloud_rate_limit_for_request(_fake("POST", "/api/workspaces/ws_abc/select")) == (60, 60.0)
 
 
 def test_cli_exchange_polling_uses_dedicated_loose_rate_bucket(monkeypatch, tmp_path):

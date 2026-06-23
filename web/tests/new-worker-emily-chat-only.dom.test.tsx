@@ -1,21 +1,35 @@
-// Federico 2026-06-18: "The new worker should literally just be an Emily chat
-// with some pills. It's literally an Emily chat. That's it. Don't make it
-// anything more." This test pins the create-mode surface to that spec:
-//   - heading "Hire a new worker" + one-line subtext
-//   - 2-3 suggestion PILLS that prime the SAME Emily composer
-//   - the "Your previous chat is still running — find it in Recent chats" note
-//     when (and only when) a prior Emily chat id is persisted
-//   - it IS the EmilyChat component (real PromptInput composer), not a bespoke
-//     create-worker form (no "Hire worker" submit button, no example CARDS).
+// Federico 2026-06-19: "The bespoke 'Hire a new worker' screen should not exist!
+// Consistent Emily chat." Create is now visually the SAME as the home empty
+// state — greeting + pills (EmilyHomeEmpty) ABOVE a CENTERED real composer — NOT
+// a bespoke create-worker hero. This test pins create-mode to that consistency:
+//   - it renders the home empty state (greeting + pills), no "Hire a new worker"
+//     heading, no "ADD SOURCES"/source pills, no create-specific example pills
+//   - the composer is the real PromptInput (a <textarea>), centered, with the
+//     generic "Message Emily…" placeholder (consistent with home)
+//   - clicking a home pill primes that SAME composer
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { CONVERSATION_STORAGE_KEY } from "@/lib/emily-chat-storage";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/chat",
   useSearchParams: () => new URLSearchParams(),
+}));
+
+// EmilyHomeEmpty reads the overview/workers hooks — stub so it renders the
+// active-workspace empty state (greeting + ACTIVE_PILLS) without a QueryClient.
+vi.mock("@/lib/query/hooks", () => ({
+  useOverview: () => ({
+    data: { stats: { work_shipped_7d: 7 }, outcomes: [], recent_runs: [], scheduled_today: [], needs_attention: [] },
+    isError: false,
+    isLoading: false,
+  }),
+  useWorkers: () => ({
+    data: [{ id: "w1", archived: false, system: false, is_example: false }],
+    isError: false,
+    isLoading: false,
+  }),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -24,6 +38,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...mod,
     api: {
       ...(mod.api as Record<string, unknown>),
+      me: vi.fn().mockResolvedValue({ display_name: "Fede", email: "fede@floom.dev" }),
       contexts: { list: vi.fn().mockResolvedValue([]) },
       chat: { uploadAttachments: vi.fn().mockResolvedValue([]) },
       conversations: { list: vi.fn().mockResolvedValue([]) },
@@ -50,62 +65,44 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
 
 import { EmilyChatCore } from "@/components/emily/EmilyChat";
 
-const PILLS = [
-  "Summarise my Granola meetings → HubSpot daily",
-  "Send me a GitHub PR digest at 9am",
-  "Score new CRM contacts against a job brief",
-];
-
 afterEach(() => {
   window.localStorage.clear();
 });
 
-describe("new worker = literally an Emily chat with pills", () => {
-  it("shows the spec heading + one-line subtext", () => {
+describe("new worker = the consistent Emily empty state (no bespoke hero)", () => {
+  it("does NOT render the bespoke 'Hire a new worker' screen", () => {
     render(<EmilyChatCore fullPage createMode />);
-    expect(screen.getByRole("heading", { name: "Hire a new worker" })).toBeInTheDocument();
-    expect(
-      screen.getByText(/Describe the job in one sentence\./i),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
+    // No bespoke create chrome: no ADD SOURCES row, no create-specific examples.
+    expect(screen.queryByText(/Add sources/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Score new CRM contacts against a job brief/i)).not.toBeInTheDocument();
   });
 
-  it("renders the SAME Emily composer — not a bespoke form", () => {
+  it("renders the SAME home empty state (greeting + pills)", async () => {
     render(<EmilyChatCore fullPage createMode />);
-    const composer = screen.getByPlaceholderText("Create me: a worker that…");
-    // The real PromptInput is a <textarea>; the removed bespoke hero had a
-    // "Hire worker" submit button + example cards instead.
-    expect(composer.tagName).toBe("TEXTAREA");
-    expect(screen.queryByRole("button", { name: /hire worker/i })).not.toBeInTheDocument();
+    // Active-workspace pulse from the home empty state.
+    expect(await screen.findByText(/done this week/i)).toBeInTheDocument();
+    // Home active pills.
+    expect(screen.getByRole("button", { name: /What ran overnight/i })).toBeInTheDocument();
   });
 
-  it("renders the 2-3 suggestion pills (no example cards)", () => {
+  it("renders the real PromptInput composer, centered, with the generic placeholder", async () => {
     render(<EmilyChatCore fullPage createMode />);
-    for (const pill of PILLS) {
-      expect(screen.getByRole("button", { name: pill })).toBeInTheDocument();
-    }
-    expect(screen.queryByText(/Or start from an example/i)).not.toBeInTheDocument();
+    const composers = await screen.findAllByPlaceholderText("Message Emily...");
+    // Exactly one composer (centered in the empty state, no bottom clone).
+    expect(composers).toHaveLength(1);
+    expect(composers[0].tagName).toBe("TEXTAREA");
+    // #1706: the landing send CTA is now aria-label="Hire worker" (canonical action name).
+    // Assert the bespoke hero HEADING is absent, not the action button.
+    expect(screen.queryByRole("heading", { name: /hire a new worker/i })).not.toBeInTheDocument();
   });
 
-  it("clicking a pill primes the composer with that prompt", async () => {
+  it("clicking a home pill primes the composer with that prompt", async () => {
     const user = userEvent.setup();
     render(<EmilyChatCore fullPage createMode />);
-    const composer = screen.getByPlaceholderText("Create me: a worker that…") as HTMLTextAreaElement;
+    const composer = (await screen.findByPlaceholderText("Message Emily...")) as HTMLTextAreaElement;
     expect(composer.value).toBe("");
-    await user.click(screen.getByRole("button", { name: PILLS[0] }));
-    expect(composer.value).toBe(PILLS[0]);
-  });
-
-  it("shows the previous-chat note ONLY when a prior Emily chat is persisted", async () => {
-    window.localStorage.setItem(CONVERSATION_STORAGE_KEY, "conv-123");
-    render(<EmilyChatCore fullPage createMode />);
-    await waitFor(() =>
-      expect(screen.getByText(/Your previous chat is still running/i)).toBeInTheDocument(),
-    );
-    expect(screen.getByRole("button", { name: /find it in Recent chats/i })).toBeInTheDocument();
-  });
-
-  it("hides the previous-chat note when no prior chat exists", () => {
-    render(<EmilyChatCore fullPage createMode />);
-    expect(screen.queryByText(/Your previous chat is still running/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /What ran overnight/i }));
+    expect(composer.value).toBe("What ran overnight?");
   });
 });

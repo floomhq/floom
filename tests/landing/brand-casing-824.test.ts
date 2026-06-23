@@ -1,5 +1,5 @@
 // #824 — user-facing landing copy is Floom. Code identifiers (e.g.
-// @floomhq/workeros, workeros-mcp, cookie names, domains) are lowercase and
+// @floomhq/floom, workeros-mcp, cookie names, domains) are lowercase and
 // unaffected.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -43,8 +44,11 @@ from apps.api.db.supabase_repos import (
     SupabaseConnectionRepository,
     SupabaseFeedbackRepository,
     SupabaseMcpToolRepository,
+    SupabasePersonalAccessTokenRepository,
     SupabaseRunRepository,
     SupabaseSecretRepository,
+    SupabaseUserRepository,
+    SupabaseUserSessionRepository,
     SupabaseWorkerRepository,
 )
 from apps.api.db.supabase_members_repo import SupabaseWorkspaceMemberRepository
@@ -155,6 +159,9 @@ def _cloud_repositories() -> Repositories:
         alerts=SupabaseAlertRepository(),
         asset_access=SupabaseAssetAccessRepository(),
         mcp_tools=SupabaseMcpToolRepository(),
+        users=SupabaseUserRepository(),
+        tokens=SupabasePersonalAccessTokenRepository(),
+        sessions=SupabaseUserSessionRepository(),
         feedback=SupabaseFeedbackRepository(),
         # FW-02: wire engine-shaped membership so the dashboard's
         # `/workspace/members` surface stops returning HTTP 501. The
@@ -180,6 +187,99 @@ def _register_contexts_scope_resolver() -> None:
             "scoping hook before deploying cloud."
         )
     engine_contexts.set_context_scope_resolver(get_active_workspace_id)
+
+
+def _override_context_scope_for_cloud() -> None:
+    """Make explicit engine context scopes use workspace_id in cloud.
+
+    Engine worker creation validates ``source: local`` mounts by entering
+    ``use_context_scope(context_scope_for_user(user_id))``. In cloud, Brain
+    packs live under the active workspace id, not the auth user id, so worker
+    push must bind local context names against the workspace context store.
+    """
+    if getattr(engine_contexts.context_scope_for_user, "_workeros_cloud_patched", False):
+        return
+    _orig_context_scope_for_user = engine_contexts.context_scope_for_user
+
+    def _cloud_context_scope_for_user(user_id: str | None) -> str | None:
+        return get_active_workspace_id() or _orig_context_scope_for_user(user_id)
+
+    _cloud_context_scope_for_user._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    engine_contexts.context_scope_for_user = _cloud_context_scope_for_user
+
+
+def _override_connection_resolution_for_cloud() -> None:
+    """Resolve worker Composio requirements through cloud repositories.
+
+    The engine resolver uses local SQLite ``composio_connections`` directly.
+    Hosted cloud stores workspace connections in Supabase, so the pre-execution
+    "Resolving connections" step must use the registered cloud repository.
+    """
+    runner_utils = import_engine_module("runner_utils")
+    if getattr(runner_utils._resolve_connections, "_workeros_cloud_patched", False):
+        return
+    models = import_engine_module("models")
+
+    def _is_live(status: object) -> bool:
+        return str(status or "").strip().lower() in {
+            "active",
+            "valid",
+            "connected",
+            "enabled",
+            "success",
+        }
+
+    def _cloud_resolve_connections(
+        worker_id: str,
+        log_fn,
+        config=None,
+        user_id: str | None = None,
+    ):
+        config_obj = config or runner_utils.get_worker_config(worker_id)
+        declared = models.declared_composio_connections(config_obj)
+        if not declared:
+            return {}, None
+        if not user_id:
+            missing = list(declared.keys())
+            log_fn(f"Missing connections: {', '.join(missing)}", level="error")
+            return {}, f"missing_connection: {', '.join(missing)}"
+
+        repos = engine_db_factory.get_repositories()
+        rows = repos.connections.list(user_id=user_id)
+        by_app: dict[str, list[dict]] = {}
+        for row in rows:
+            if (row.get("kind") or "composio") != "composio":
+                continue
+            app = str(row.get("app_name") or "").strip().lower()
+            if app:
+                by_app.setdefault(app, []).append(dict(row))
+
+        missing: list[str] = []
+        connection_ids: dict[str, str] = {}
+        for app_name in declared:
+            app_key = str(app_name or "").strip().lower()
+            matches = [
+                row
+                for row in by_app.get(app_key, [])
+                if _is_live(row.get("status"))
+                and str(row.get("composio_connection_id") or "").strip()
+            ]
+            if not matches:
+                missing.append(app_name)
+                continue
+            matches.sort(
+                key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""),
+                reverse=True,
+            )
+            connection_ids[app_key] = str(matches[0]["composio_connection_id"])
+
+        if missing:
+            log_fn(f"Missing connections: {', '.join(missing)}", level="error")
+            return {}, f"missing_connection: {', '.join(missing)}"
+        return connection_ids, None
+
+    _cloud_resolve_connections._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    runner_utils._resolve_connections = _cloud_resolve_connections
 
 
 def _override_create_run_for_members() -> None:
@@ -260,6 +360,29 @@ def recover_cloud_runs_on_startup() -> int:
     return total_failed
 
 
+def _install_distributed_run_limiters() -> None:
+    """Install the PG-lease distributed concurrency limiters (gated).
+
+    When WORKEROS_RUN_LEASE_ENABLED is truthy, replace the engine's in-process
+    run/llm semaphores with Postgres-lease limiters so the E2B sandbox budget is
+    honored across horizontally-scaled executor tasks (see run_limiter_pg.py).
+    Unset = the engine keeps its in-process semaphores (single-task default).
+    Failure here is non-fatal: log and fall back to the in-process gate.
+    """
+    flag = (os.environ.get("WORKEROS_RUN_LEASE_ENABLED") or "").strip().lower()
+    if flag not in ("1", "true", "yes", "on"):
+        return
+    try:
+        from apps.api.run_limiter_pg import install_pg_run_limiters
+
+        install_pg_run_limiters()
+    except Exception:
+        logger.exception(
+            "Failed to install distributed run limiters; "
+            "falling back to the engine's in-process semaphores"
+        )
+
+
 def _override_worker_author_platform_secret() -> None:
     """Allow the first-party worker-author system worker to use platform OpenAI.
 
@@ -295,6 +418,8 @@ def _override_worker_author_platform_secret() -> None:
 def apply_cloud_slack_overrides() -> None:
     """Route engine Slack persistence through Supabase in cloud mode."""
     import json as _json
+
+    from fastapi import HTTPException
 
     from apps.api.db import slack_installations as slack_db
 
@@ -377,6 +502,26 @@ def apply_cloud_slack_overrides() -> None:
         claim["claim_url"] = engine_slack._slack_claim_url(claim["claim_token"])
         return claim
 
+    preserved_slack_state_secret = (
+        os.environ.get("FLOOM_SECRET")
+        or os.environ.get("WORKEROS_SLACK_STATE_SECRET")
+        or ""
+    ).strip()
+
+    def _cloud_slack_state_secret() -> str:
+        secret = (
+            preserved_slack_state_secret
+            or os.environ.get("WORKEROS_SLACK_STATE_SECRET")
+            or os.environ.get("SLACK_CLIENT_SECRET")
+            or ""
+        ).strip()
+        if not secret:
+            raise HTTPException(
+                status_code=503,
+                detail="FLOOM_SECRET or SLACK_CLIENT_SECRET is required for Slack OAuth state",
+            )
+        return secret
+
     patches = {
         "_slack_allowed_team_ids": _cloud_allowed_team_ids,
         "_get_slack_installation": _cloud_get_installation,
@@ -385,6 +530,7 @@ def apply_cloud_slack_overrides() -> None:
         "_append_slack_allowed_team_id": _cloud_append_allowed_team_id,
         "_slack_binding_user_id": _cloud_sender_user_id,
         "_slack_create_claim": _cloud_create_claim,
+        "_slack_state_secret": _cloud_slack_state_secret,
     }
     for name, fn in patches.items():
         if hasattr(engine_main_mod, name):
@@ -401,7 +547,7 @@ def _override_run_executor_workspace_context() -> None:
     after that request is gone). Without it the Supabase repos fall back to the
     default scope and the engine resolves contexts/git to the wrong (empty)
     workspace tree (runs "can't find workers"/contexts). We register the engine's
-    run-execution context provider (floomhq/workeros#1026): given a run_id, look
+    run-execution context provider (floomhq/floom#1026): given a run_id, look
     up its workspace_id (stamped on the row at create time) and return
     active_workspace(...). The engine enters it around execution — the single
     chokepoint for manual + scheduled + webhook + MCP + retry runs.
@@ -509,9 +655,9 @@ def _bootstrap_contexts_storage() -> None:
     if getattr(_original_context_dir, "_workeros_cloud_patched", False):
         return
 
-    def _cloud_context_dir(name: str) -> "Path":
-        d = _original_context_dir(name)
-        if not d.exists() or not any(d.iterdir() if d.exists() else []):
+    def _cloud_context_dir(name: str, *, hydrate: bool = True) -> "Path":
+        d = _original_context_dir(name, hydrate=hydrate)
+        if hydrate and (not d.exists() or not any(d.iterdir() if d.exists() else [])):
             workspace_id = get_active_workspace_id()
             if workspace_id:
                 try:
@@ -525,6 +671,87 @@ def _bootstrap_contexts_storage() -> None:
 
     _cloud_context_dir._workeros_cloud_patched = True  # type: ignore[attr-defined]
     engine_contexts.context_dir = _cloud_context_dir
+
+    # --- 3. Patch current_contexts_root so list_contexts sees Storage packs ---
+    # The engine's list_contexts iterates the disk root for the active workspace.
+    # On a fresh container that root is empty — packs that live in Supabase
+    # Storage (including worker memory packs written by previous runs) are
+    # invisible until accessed by name.  This patch:
+    #   a) Downloads the workspace-level .workeros-contexts.json metadata file
+    #      from Storage if it isn't on disk yet.  This gives the engine owner/
+    #      visibility info for every pack without downloading pack files.
+    #   b) Creates stub directories for each Storage-known context that isn't on
+    #      disk yet.  With the metadata file in place the engine can check
+    #      ownership/visibility and include those packs in the listing.  Actual
+    #      pack files are fetched lazily on first access via the hydration hook.
+    if not hasattr(engine_contexts, "current_contexts_root"):
+        return
+    _original_contexts_root = engine_contexts.current_contexts_root
+    if getattr(_original_contexts_root, "_workeros_cloud_patched", False):
+        return
+
+    def _cloud_contexts_root() -> "Path":
+        root = _original_contexts_root()
+        workspace_id = get_active_workspace_id()
+        if not workspace_id:
+            return root
+        # a) Ensure the workspace metadata file is on disk.
+        # The engine stores it at <root>/.workeros-contexts.json.
+        metadata_path = root / ".workeros-contexts.json"
+        if not metadata_path.exists():
+            try:
+                from apps.api.config import get_supabase_service_client
+                _BUCKET = "contexts"
+                svc = get_supabase_service_client()
+                storage_path = f"{workspace_id}/.workeros-contexts.json"
+                raw = svc.storage.from_(_BUCKET).download(storage_path)
+                if raw:
+                    root.mkdir(parents=True, exist_ok=True)
+                    metadata_path.write_bytes(raw)
+            except Exception as exc:
+                import logging as _log
+                _log.getLogger(__name__).debug(
+                    "cloud contexts_root metadata fetch failed for %s: %s", workspace_id, exc
+                )
+        # b) Create stub dirs for Storage-known packs not yet on disk. Also
+        # include metadata-only packs so a newly-created empty pack survives a
+        # fresh container before its first file write.
+        known: set[str] = set()
+        try:
+            from apps.api.cloud_contexts import list_context_names
+            known.update(list_context_names(workspace_id))
+        except Exception as exc:
+            import logging as _log
+            _log.getLogger(__name__).debug(
+                "cloud contexts_root Storage list failed for %s: %s", workspace_id, exc
+            )
+        try:
+            raw_metadata = metadata_path.read_text(encoding="utf-8") if metadata_path.is_file() else "{}"
+            parsed_metadata = json.loads(raw_metadata)
+            if isinstance(parsed_metadata, dict):
+                known.update(str(name) for name in parsed_metadata)
+        except Exception:
+            pass
+        for name in known:
+            safe_name = str(name or "").strip()
+            if (
+                not safe_name
+                or safe_name.startswith(".")
+                or "/" in safe_name
+                or "\\" in safe_name
+            ):
+                continue
+            stub = root / safe_name
+            if not stub.exists():
+                try:
+                    stub.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+        return root
+
+    _cloud_contexts_root._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    engine_contexts.current_contexts_root = _cloud_contexts_root
+    logger.info("Patched current_contexts_root to surface Supabase Storage packs in Library listing")
 
 
 def _override_git_cfg_for_cloud() -> None:
@@ -998,7 +1225,7 @@ def _override_workers_git_prefix_for_cloud() -> None:
     (the commit path's _dispatch_write writes 'workers/<id>' either way). Force
     the correct 'workers' prefix whenever a cloud workspace is active.
 
-    TODO(engine): upstream to floomhq/workeros services/git_service.py.
+    TODO(engine): upstream to floomhq/floom services/git_service.py.
     """
     from apps.api.auth.workspace_context import get_active_workspace_id
     try:
@@ -1041,7 +1268,7 @@ def _override_git_commit_context_for_cloud() -> None:
     hold credentials). Wrap _git_commit_context so a sensitive context still
     uploads to Storage on write; non-sensitive contexts keep the original path.
 
-    TODO(engine): upstream to floomhq/workeros (sensitive contexts should always
+    TODO(engine): upstream to floomhq/floom (sensitive contexts should always
     back up to the durable store).
     """
     from pathlib import Path as _Path
@@ -1150,7 +1377,11 @@ def _ensure_magic_link_secret() -> None:
     if os.environ.get("WORKEROS_MAGIC_LINK_SECRET", "").strip():
         return  # operator set an explicit key — honour it
 
-    service_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    service_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
     if not service_key:
         return  # no service key available — fall through to per-process fallback
 
@@ -1163,6 +1394,84 @@ def _ensure_magic_link_secret() -> None:
         hashlib.sha256,
     ).hexdigest()
     os.environ["WORKEROS_MAGIC_LINK_SECRET"] = derived
+
+
+def _ensure_approval_signing_secret() -> None:
+    """Derive a stable approval-share signing key from SUPABASE_SERVICE_ROLE_KEY.
+
+    Mirrors _ensure_magic_link_secret. The engine's
+    core.approval_signing._approval_signing_secret() resolves
+    WORKEROS_APPROVAL_SIGNING_SECRET -> FLOOM_SECRET -> None and FAILS CLOSED with
+    503 when none is set (#998 — never sign a public share token with a public
+    constant). In cloud, FLOOM_SECRET is deliberately stripped and
+    WORKEROS_APPROVAL_SIGNING_SECRET is typically unset, so every public
+    approval/review share-link mint 503'd — and because the approvals list/detail
+    serializer mints a link per row, GET /api/approvals 503'd the entire list
+    whenever any row was pending (#1716).
+
+    Derive a deterministic key so public approval/review links work in hosted mode
+    without an extra env var and survive restarts. Only runs when
+    WORKEROS_APPROVAL_SIGNING_SECRET is unset — an explicit env var always wins.
+
+    Derivation: HMAC-SHA256(SUPABASE_SERVICE_ROLE_KEY, "workeros-approval-signing-secret-v1")
+    Domain separation ("v1" suffix) keeps this key distinct from the magic-link
+    and worker-call keys derived from the same service-role secret. The service
+    key is read from SUPABASE_SERVICE_ROLE_KEY OR its WORKEROS_CLOUD_ alias, the
+    same way get_cloud_settings() resolves it — so an alias-only cloud deployment
+    still derives the key instead of silently leaving the engine fail-closed.
+    """
+    if os.environ.get("WORKEROS_APPROVAL_SIGNING_SECRET", "").strip():
+        return  # operator set an explicit key — honour it
+
+    service_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
+    if not service_key:
+        return  # no service key available — engine stays fail-closed (503)
+
+    import hashlib
+    import hmac as _hmac
+
+    derived = _hmac.new(
+        service_key.encode("utf-8"),
+        b"workeros-approval-signing-secret-v1",
+        hashlib.sha256,
+    ).hexdigest()
+    os.environ["WORKEROS_APPROVAL_SIGNING_SECRET"] = derived
+
+
+def _ensure_upload_signing_secret() -> None:
+    """Derive a stable upload download-token signing key in cloud.
+
+    The engine resolves upload signing as
+    WORKEROS_UPLOAD_URL_SIGNING_SECRET -> FLOOM_SECRET -> per-process random.
+    Cloud deliberately strips FLOOM_SECRET, so an unset dedicated upload secret
+    leaves download tokens invalid after every restart/redeploy. Reuse the
+    already-required Supabase service-role key with a domain-separated HMAC so
+    cloud uploads work without adding another env var.
+    """
+    if os.environ.get("WORKEROS_UPLOAD_URL_SIGNING_SECRET", "").strip():
+        return
+
+    service_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
+    if not service_key:
+        return
+
+    import hashlib
+    import hmac as _hmac
+
+    derived = _hmac.new(
+        service_key.encode("utf-8"),
+        b"workeros-upload-url-signing-secret-v1",
+        hashlib.sha256,
+    ).hexdigest()
+    os.environ["WORKEROS_UPLOAD_URL_SIGNING_SECRET"] = derived
 
 
 def _install_worker_call_signing_key() -> None:
@@ -1187,7 +1496,11 @@ def _install_worker_call_signing_key() -> None:
     Replaces the prior private-symbol monkeypatch of run_token._worker_call_
     signing_key now that #992 provides the public hook.
     """
-    service_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    service_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
     if not service_key:
         return  # no service key — leave the engine's fail-closed behaviour intact
 
@@ -1226,11 +1539,29 @@ def _bootstrap_git_bundles_storage() -> None:
         logging.getLogger(__name__).warning("git bundles bucket bootstrap failed: %s", exc)
 
 
+def _bootstrap_run_artifacts_storage() -> None:
+    """Create the run-artifacts Storage bucket used for multi-node downloads."""
+    from apps.api.config import get_supabase_service_client
+    bucket = "workeros-run-artifacts"
+    try:
+        get_supabase_service_client().storage.create_bucket(
+            bucket,
+            options={"public": False},
+        )
+    except Exception as exc:
+        import logging
+        message = str(exc).lower()
+        if "already" not in message and "exists" not in message:
+            logging.getLogger(__name__).warning("run artifacts bucket bootstrap failed: %s", exc)
+
+
 def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
     ensure_secret_crypto_ready()
     _ensure_magic_link_secret()
+    _ensure_approval_signing_secret()
+    _ensure_upload_signing_secret()
     _disable_postgrest_http2()
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)
@@ -1240,6 +1571,8 @@ def register_cloud_components() -> None:
     apply_cloud_slack_overrides()
     _install_worker_call_signing_key()
     _register_contexts_scope_resolver()
+    _override_context_scope_for_cloud()
+    _override_connection_resolution_for_cloud()
     _register_git_workspace_resolver()
     _override_workers_git_prefix_for_cloud()
     _override_git_commit_context_for_cloud()
@@ -1249,9 +1582,11 @@ def register_cloud_components() -> None:
     _suppress_secrets_enc_in_cloud()
     _bootstrap_contexts_storage()
     _bootstrap_git_bundles_storage()
+    _bootstrap_run_artifacts_storage()
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
     _override_run_executor_workspace_context()
+    _install_distributed_run_limiters()
     # Run the real init_db() once so the engine's local SQLite DB has the
     # full schema. Several engine endpoints (draft_and_create_worker,
     # _persist_discovered_workers, etc.) bypass the Supabase repos and call

@@ -413,6 +413,37 @@ export interface WorkerFeedback {
   created_at: string;
 }
 
+export interface RunFeedback {
+  id: string;
+  run_id: string;
+  worker_id: string;
+  author_id: string;
+  author_name?: string | null;
+  content: string;
+  rating?: string | null;
+  issue_id?: string | null;
+  created_at: string;
+}
+
+// A registered per-worker alert (email and/or outbound webhook) fired on run
+// terminal events. Maps to GET/POST/DELETE /workers/{id}/alerts.
+export interface WorkerAlert {
+  id: string;
+  worker_id: string;
+  url?: string | null;
+  email_to?: string[] | null;
+  on: string[]; // events: "failed" | "completed"
+  description?: string | null;
+  created_at: string;
+}
+
+export interface WorkerAlertCreate {
+  url?: string;
+  email_to?: string[];
+  on: string[];
+  description?: string;
+}
+
 // Read-only allow-list projection of a worker returned by
 // GET /workers/public/{id}?token=. Strictly a subset of WorkerDetail: no
 // secrets, source files, run history, owner id, or webhook url.
@@ -606,6 +637,37 @@ export interface ActionResponse {
   run_id?: string;
 }
 
+// #1781 git-backed workspace issue (subset surfaced to the run feedback flow).
+export interface WorkspaceIssue {
+  id: string;
+  status: string;
+  title: string;
+  body: string;
+  asset_type?: string | null;
+  asset_id?: string | null;
+  source?: string | null;
+  labels: string[];
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  comment_count: number;
+}
+
+// #1807 explicit, opt-in conversion of actionable run feedback into an issue.
+export interface RunFeedbackIssueRequest {
+  feedback_text?: string | null;
+  rating?: string | null;
+  title?: string | null;
+  feedback_id?: string | null;
+}
+
+export interface RunFeedbackIssueResponse {
+  issue_id: string;
+  created: boolean;
+  issue: WorkspaceIssue;
+  feedback?: RunFeedback | null;
+}
+
 export interface ApprovalRow {
   id: string;
   run_id: string;
@@ -661,6 +723,142 @@ export interface ImageAnnotation {
 export interface ApprovalAnnotations {
   text: TextAnnotation[];
   images: ImageAnnotation[];
+}
+
+// ---------------------------------------------------------------------------
+// ReviewPack Review Pack (demo-client pilot) - public client-facing review flow.
+// Schema: context/vault/review_pack/pack.schema.json (v1.0).
+// The public GET projection NEVER carries integrity.password_plain - the API
+// strips it at the public boundary (DoD: "password_plain never in public GET").
+// ---------------------------------------------------------------------------
+
+/** Vote enum. UI labels (DE): Interessiert | Vielleicht | Nein. */
+export type ReviewVerdict = "interested" | "maybe" | "pass";
+
+export interface ReviewPackCandidate {
+  /** Stable per-pack slug, e.g. "c_lisa-chen-01". Vote correlation key. */
+  id: string;
+  rank: number;
+  name: string;
+  title: string;
+  company: string;
+  location: string;
+  /** 0..100 match score. */
+  score: number;
+  linkedin?: string;
+  why: string;
+  source?: string;
+}
+
+export interface ReviewPackJob {
+  /** Stable slug: software-engineer | data-automation | property-manager-weg. */
+  id: string;
+  personio_id?: string;
+  title: string;
+  location: string;
+  department: string;
+  must_haves: string[];
+  sourcing_hint?: string;
+  /** PM honesty: thin-pool / coverage caveat surfaced on the job panel. */
+  coverage_note?: string;
+  candidates: ReviewPackCandidate[];
+}
+
+export interface ReviewPackClient {
+  slug: string;
+  name: string;
+}
+
+export interface ReviewPackMeta {
+  title: string;
+  published_at: string;
+  /** ISO timestamp the share link lapses (14 days from publish). */
+  expires_at: string;
+  locale: "de-DE" | string;
+  timezone?: string;
+}
+
+export interface ReviewPackReviewerSuggestion {
+  name: string;
+  role?: string;
+}
+
+export interface ReviewPackSummary {
+  total_candidates?: number;
+  generated_by?: string;
+  run_ids?: string[];
+}
+
+/** Public projection of pack.json (integrity stripped). */
+export interface ReviewPack {
+  schema_version: "1.0" | string;
+  id: string;
+  client: ReviewPackClient;
+  meta: ReviewPackMeta;
+  reviewers_suggested?: ReviewPackReviewerSuggestion[];
+  jobs: ReviewPackJob[];
+  coverage_notes?: string[];
+  summary?: ReviewPackSummary;
+}
+
+/** A single reviewer's recorded vote (one feedback event). */
+export interface ReviewPackFeedback {
+  uuid?: string;
+  pack_id: string;
+  job_id: string;
+  candidate_id: string;
+  /** Stable per-reviewer key (slug of name), idempotency dimension. */
+  reviewer_key: string;
+  reviewer_name: string;
+  reviewer_role?: string | null;
+  verdict: ReviewVerdict;
+  /** Optional <=240 chars; only collected on maybe/pass in the UI. */
+  note?: string | null;
+  ts?: string;
+}
+
+/** One chip in the team-consensus row on a candidate card. */
+export interface ReviewVoteChip {
+  reviewer_name: string;
+  verdict: ReviewVerdict;
+}
+
+/** Computed-on-read consensus for a single (job_id, candidate_id) pair. */
+export interface ReviewConsensus {
+  job_id: string;
+  candidate_id: string;
+  counts: { interested: number; maybe: number; pass: number };
+  chips: ReviewVoteChip[];
+}
+
+/** Response of GET /review/public/{token}?password= */
+export interface ReviewPackPublicResponse {
+  pack: ReviewPack;
+  consensus: ReviewConsensus[];
+  reviewer?: { key: string; name: string; role?: string | null } | null;
+}
+
+/** Response of GET /review/public/{token}/feedback?reviewer_key= */
+export interface ReviewPackFeedbackResponse {
+  my_votes: ReviewPackFeedback[];
+  consensus: ReviewConsensus[];
+  reviewer?: { key: string; name: string; role?: string | null } | null;
+}
+
+/** Body of POST /review/public/{token}/feedback */
+export interface ReviewPackFeedbackInput {
+  /** Included when the pack is password-gated. */
+  password?: string;
+  job_id: string;
+  candidate_id: string;
+  verdict: ReviewVerdict;
+  note?: string | null;
+}
+
+/** Response of POST /review/public/{token}/feedback (idempotent upsert). */
+export interface ReviewPackVoteResponse {
+  vote: ReviewPackFeedback;
+  consensus: ReviewConsensus[];
 }
 
 /** Response shape from the approval-scoped screenshot upload endpoints. */
@@ -776,6 +974,7 @@ export interface WorkspaceAgentInfo {
 export interface WorkspaceImportResult {
   workers_imported: string[];
   contexts_imported: string[];
+  issues_imported: string[];
   skipped: { type: string; id: string; reason: string }[];
   id_remaps: Record<string, string>;
   required_secrets: string[];

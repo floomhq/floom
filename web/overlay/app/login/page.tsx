@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
+import { AuthButton } from "@/components/AuthButton";
 import { cn } from "@/lib/utils";
 import { safeAppNext } from "@/lib/safe-next";
 
@@ -59,68 +60,68 @@ export default async function LoginPage({
         }
       `}</style>
 
-      <header className="px-6 py-5">
+      <header className="mx-auto flex w-full max-w-[1040px] px-6 py-6">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-[15px] font-[660] tracking-[-0.025em] transition-opacity hover:opacity-80"
-          style={{ color: "var(--text-primary)" }}
+          className="login-focus inline-flex items-center gap-2 rounded-[var(--radius-button)] text-[15px] font-semibold transition-opacity hover:opacity-80"
+          style={{ color: "var(--ink)" }}
         >
-          <FloomMark />
+          <FloomMark size={22} />
           Floom{" "}
-          <span style={{ color: "var(--text-muted)", fontWeight: 450, marginLeft: 2 }}>/ workeros</span>
+          <span style={{ color: "var(--muted-text)", fontWeight: 450, marginLeft: 2 }}>/ workeros</span>
         </Link>
       </header>
 
-      <section className="mx-auto grid w-full max-w-[900px] items-center gap-12 px-6 pb-24 pt-6 md:grid-cols-[1fr_380px] md:pt-16">
-        {/* LEFT: L2 refined activity-proof panel. Built from the dashboard's
-            own primitives — WorkerAvatar (rounded-[--radius-button] bg-muted
-            squircle) + the .c-pill ok/run status pills + design tokens — so it
-            reads as a slice of the real product, not a login mockup. Flat by
-            token (--shadow-card: none); separation via bg-step + hairline. */}
-        <div className="hidden max-w-[460px] md:block">
-          <h1
-            className="text-[40px] font-semibold leading-[1.04] tracking-[-0.034em]"
-            style={{ color: "var(--text-primary)" }}
-          >
-            Workers that{" "}
-            <span style={{ color: "var(--accent)" }}>actually run</span>.
-          </h1>
+      <section
+        className="mx-auto grid w-full max-w-[1040px] items-start gap-14 px-6 pb-24 pt-10 md:grid-cols-[minmax(0,1fr)_400px] md:gap-20 md:pt-20"
+        aria-labelledby="login-heading"
+      >
+        <div className="hidden max-w-[480px] md:block">
           <p
-            className="mt-4 max-w-[380px] text-[14px] leading-relaxed"
-            style={{ color: "var(--text-muted)" }}
+            className="font-mono text-[11px] font-medium uppercase leading-none tracking-[0.12em]"
+            style={{ color: "var(--accent)" }}
+          >
+            Floom Cloud
+          </p>
+          <h2
+            className="mt-5 text-[44px] font-semibold leading-[1.02]"
+            style={{ color: "var(--ink)", letterSpacing: 0 }}
+          >
+            Hire AI workers for your company.
+          </h2>
+          <p
+            className="mt-5 max-w-[390px] text-[15px] leading-7"
+            style={{ color: "var(--muted-text)" }}
           >
             {install
               ? `Sign in to install ${install} and put it to work.`
-              : "A glimpse of a workspace today:"}
+              : "Jobs that run on a schedule, from a message, or on demand. You get the output, not the mechanics."}
           </p>
 
-          {/* Activity feed, flat: bg-step + hairline only, no drop-shadow. */}
           <div
-            className="mt-7 overflow-hidden"
+            className="mt-10 overflow-hidden"
             style={{
               background: "var(--bg-card)",
               borderRadius: "var(--radius-card)",
-              boxShadow: "var(--hairline)",
+              border: "1px solid var(--border-default)",
             }}
           >
-            {/* Feed header */}
             <div
               className="flex items-center justify-between"
               style={{
-                padding: "13px 18px 12px",
+                padding: "14px 18px 13px",
                 borderBottom: "var(--bd-div)",
               }}
             >
               <span
-                className="text-[11px] font-medium uppercase tracking-[0.06em]"
-                style={{ color: "var(--muted-foreground)" }}
+                className="font-mono text-[11px] font-medium uppercase tracking-[0.08em]"
+                style={{ color: "var(--muted-text)" }}
               >
-                Today
+                Recent worker runs
               </span>
               <CPill tone="ok" label="6 active" />
             </div>
 
-            {/* Activity rows — same geometry as the dashboard's .c-lrow. */}
             {ACTIVITY_ROWS.map((row, i) => (
               <div
                 key={row.name}
@@ -133,23 +134,21 @@ export default async function LoginPage({
               >
                 <WorkerAvatar name={row.name} seed={row.name} size="size-10" />
 
-                {/* Name + outcome */}
                 <div className="min-w-0 flex-1 py-3">
                   <div
-                    className="truncate text-[14.5px] font-semibold tracking-[-0.01em]"
+                    className="truncate text-[14.5px] font-semibold"
                     style={{ color: "var(--ink)" }}
                   >
                     {row.name}
                   </div>
                   <div
                     className="mt-0.5 truncate text-[12.5px]"
-                    style={{ color: "var(--muted-foreground)" }}
+                    style={{ color: "var(--muted-text)" }}
                   >
                     {row.result}
                   </div>
                 </div>
 
-                {/* Status pill + timestamp */}
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
                   <CPill tone={row.status === "done" ? "ok" : "run"} />
                   <span
@@ -162,50 +161,38 @@ export default async function LoginPage({
               </div>
             ))}
           </div>
-
-          {/* Stat footer */}
-          <div
-            className="mt-4 flex items-center gap-2 text-[13px]"
-            style={{ color: "var(--muted-foreground)" }}
-          >
-            142 runs today
-            <Dot />
-            0 need attention
-            <Dot />
-            avg 38s
-          </div>
         </div>
 
-        {/* RIGHT: auth card. Dashboard auth wiring preserved verbatim. */}
         <div className="w-full md:max-w-[380px] md:justify-self-end">
           <div
-            className="rounded-[var(--radius-card)] p-8"
+            className="rounded-[var(--radius-card)] p-7 sm:p-8 md:p-9"
             style={{
               background: "var(--bg-card)",
-              boxShadow: "0 1px 2px rgba(16,17,20,.04), 0 16px 40px rgba(16,17,20,.07)",
             }}
           >
-            <div className="mb-7 space-y-1.5 text-center">
-              <h2 className="text-[22px] font-semibold leading-tight tracking-tight">Welcome back</h2>
-              <p className="text-[13px] leading-relaxed" style={{ color: "var(--ink-soft)" }}>
-                {install ? `Sign in to install ${install}` : "Magic link, password, or OAuth."}
+            <div className="mb-8 space-y-2">
+              <h1 id="login-heading" className="text-[28px] font-semibold leading-tight">
+                Sign in to Floom
+              </h1>
+              <p className="text-[14px] leading-6" style={{ color: "var(--muted-text)" }}>
+                {install ? `Install ${install} after signing in.` : "Use OAuth or a magic link to enter your workspace."}
               </p>
             </div>
 
-            <div className="space-y-2.5">
-              <a href={oauthLoginUrl("google", next)} className="auth-btn auth-btn-primary">
+            <div className="space-y-2">
+              <AuthButton method="google" href={oauthLoginUrl("google", next)} className="auth-btn auth-btn-primary">
                 <GoogleIcon />
                 <span>Continue with Google</span>
-              </a>
-              <a href={oauthLoginUrl("github", next)} className="auth-btn auth-btn-secondary">
+              </AuthButton>
+              <AuthButton method="github" href={oauthLoginUrl("github", next)} className="auth-btn auth-btn-secondary">
                 <GitHubIcon />
                 <span>Continue with GitHub</span>
-              </a>
+              </AuthButton>
             </div>
 
             <div className="my-5 flex items-center gap-3">
               <span className="h-px flex-1" style={{ background: "var(--line)" }} />
-              <span className="text-[11px] font-medium uppercase tracking-[0.08em]" style={{ color: "var(--ink-mute)" }}>
+              <span className="font-mono text-[11px] font-medium uppercase tracking-[0.08em]" style={{ color: "var(--ink-mute)" }}>
                 or
               </span>
               <span className="h-px flex-1" style={{ background: "var(--line)" }} />
@@ -215,11 +202,11 @@ export default async function LoginPage({
 
             <p className="mt-6 text-center text-[11.5px] leading-[1.6]" style={{ color: "var(--ink-mute)" }}>
               By signing in you agree to the{" "}
-              <Link href="/terms" className="underline underline-offset-2 transition-colors hover:text-[var(--ink)]">
+              <Link href="/terms" className="login-focus rounded-[4px] underline underline-offset-2 transition-colors hover:text-[var(--ink)]">
                 Terms
               </Link>{" "}
               and{" "}
-              <Link href="/privacy" className="underline underline-offset-2 transition-colors hover:text-[var(--ink)]">
+              <Link href="/privacy" className="login-focus rounded-[4px] underline underline-offset-2 transition-colors hover:text-[var(--ink)]">
                 Privacy Policy
               </Link>
               . We&apos;ll create your workspace automatically on first sign-in.
@@ -228,7 +215,7 @@ export default async function LoginPage({
 
           <p className="mt-5 text-center text-[12px]" style={{ color: "var(--ink-mute)" }}>
             New here?{" "}
-            <Link href={signupHref} className="underline underline-offset-2 transition-colors hover:text-[var(--ink)]" style={{ color: "var(--ink-soft)" }}>
+            <Link href={signupHref} className="login-focus rounded-[4px] underline underline-offset-2 transition-colors hover:text-[var(--ink)]" style={{ color: "var(--ink-soft)" }}>
               Create an account
             </Link>
           </p>
@@ -245,14 +232,19 @@ export default async function LoginPage({
           border-radius: var(--radius-button);
           font-size: 14px;
           font-weight: 500;
-          letter-spacing: -0.005em;
+          letter-spacing: 0;
           text-decoration: none;
-          transition: transform 120ms cubic-bezier(0.2, 0.7, 0.2, 1), background 120ms, opacity 120ms;
+          outline: none;
+          transition: background 120ms var(--ease), opacity 120ms var(--ease), color 120ms var(--ease);
         }
-        .auth-btn:active { transform: translateY(1px); }
+        .auth-btn:focus-visible,
+        .login-focus:focus-visible {
+          outline: none;
+          box-shadow: var(--focus);
+        }
         .auth-btn-primary {
-          background: var(--solid);
-          color: var(--solid-fg);
+          background: var(--ink);
+          color: var(--bg-card);
         }
         .auth-btn-primary:hover { background: var(--solid-2); }
         .auth-btn-secondary {
@@ -267,24 +259,6 @@ export default async function LoginPage({
   );
 }
 
-function Dot() {
-  return (
-    <span
-      style={{
-        width: 3,
-        height: 3,
-        borderRadius: "50%",
-        background: "var(--ink-faint)",
-        display: "inline-block",
-      }}
-    />
-  );
-}
-
-// Status pill: reuses the dashboard's own .c-pill primitive (globals.css)
-// with the real tones — ok = --success tint, run = --info tint — so it is the
-// exact pill the collection rows use, not a re-skin. The run dot pulses to
-// convey live state (the only login-scoped flourish).
 function CPill({ tone, label }: { tone: "ok" | "run"; label?: string }) {
   return (
     <span className={`c-pill ${tone}`} style={{ fontSize: 11, padding: "3px 9px" }}>
@@ -297,21 +271,20 @@ function CPill({ tone, label }: { tone: "ok" | "run"; label?: string }) {
   );
 }
 
-// Same play-arrow mark + lockup the landing nav uses (.ln-mark / "Floom /
-// workeros"). /app/login only imports globals.css, not landing.css, so the
-// mark is inlined here from the same SVG path rather than reusing the class.
 function FloomMark({ size = 20 }: { size?: number }) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 100 100"
+      xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
-      style={{ color: "var(--text-primary)" }}
+      style={{ borderRadius: "22%", color: "var(--ink)" }}
     >
+      <rect width="100" height="100" rx="22" fill="currentColor" />
       <path
-        d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z"
-        fill="currentColor"
+        d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z"
+        fill="var(--bg-app)"
       />
     </svg>
   );

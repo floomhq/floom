@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 
-const { authSetupRequired, authStatus, secretsList } = vi.hoisted(() => ({
+const { authSetupRequired, authStatus, me, secretsList, workersList } = vi.hoisted(() => ({
   authSetupRequired: vi.fn(),
   authStatus: vi.fn(),
+  me: vi.fn(),
   secretsList: vi.fn(),
+  workersList: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -15,7 +19,9 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api", () => ({
   api: {
+    me,
     auth: { setupRequired: authSetupRequired, status: authStatus },
+    workers: { list: workersList },
     secrets: { list: secretsList },
   },
 }));
@@ -26,8 +32,20 @@ beforeEach(() => {
   vi.clearAllMocks();
   authSetupRequired.mockResolvedValue({ required: false });
   authStatus.mockResolvedValue({ mode: "username" });
+  me.mockResolvedValue({ user_id: "u_1", email: "admin@floom.dev", roles: ["owner"] });
   secretsList.mockResolvedValue([]);
+  workersList.mockResolvedValue([]);
 });
+
+function renderWithQuery(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 describe("#987 login page renders the sign-in form", () => {
   it("shows sign-in controls, not a blank/not-found shell", async () => {
@@ -44,7 +62,7 @@ describe("#987 login page renders the sign-in form", () => {
 describe("#988 secrets page leaves the Suspense fallback and fetches", () => {
   it("calls api.secrets.list() for an admin and leaves 'Loading secrets...'", async () => {
     const mod = await import("@/app/connections/secrets/page");
-    render(<mod.default />);
+    renderWithQuery(<mod.default />);
     await waitFor(() => expect(secretsList).toHaveBeenCalled());
     await waitFor(() => {
       expect(document.body.textContent || "").not.toMatch(/Loading secrets\.\.\./);

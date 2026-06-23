@@ -4,7 +4,7 @@ import { Suspense, useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { PostHogProvider as ReactPostHogProvider } from "posthog-js/react";
 
-import { initPostHog, postHogClient } from "@/lib/posthog";
+import { initPostHog, postHogClient, sanitizedCurrentUrl, templateRoute } from "@/lib/posthog";
 
 function PostHogPageView() {
   const pathname = usePathname();
@@ -15,7 +15,8 @@ function PostHogPageView() {
     if (!client) return;
 
     client.capture("$pageview", {
-      $current_url: window.location.href,
+      $current_url: sanitizedCurrentUrl(pathname),
+      route: templateRoute(pathname),
     });
   }, [pathname, searchParams]);
 

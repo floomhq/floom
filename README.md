@@ -2,12 +2,16 @@
 
 Hosted multi-tenant workeros. Supabase auth, CLI login, runs on Floom infra.
 
-This is the **hosted product**. The runtime engine — agent runtime, sandbox, triggers, manifest parsing — lives in the open-source [`floomhq/workeros`](https://github.com/floomhq/workeros) repo. This repo wraps it with tenancy, auth, billing, and the cloud-native UX.
+<p align="center">
+  <img src="docs/media/hero.gif" alt="Ask Emily, your AI chief of staff — she runs the tools and answers" width="900">
+</p>
+
+This is the **hosted product**. The runtime engine — agent runtime, sandbox, triggers, manifest parsing — lives in the open-source [`floomhq/floom`](https://github.com/floomhq/floom) repo. This repo wraps it with tenancy, auth, billing, and the cloud-native UX.
 
 ## Relationship to `workeros` (open source)
 
 ```
-floomhq/workeros            (open source, MIT)        single-tenant runtime, x-floom-secret auth
+floomhq/floom            (open source, MIT)        single-tenant runtime, x-floom-secret auth
         |
         | imported / forked into
         v
@@ -16,7 +20,7 @@ floomhq/workeros-cloud      (private, hosted)         Supabase auth, RLS multi-t
 
 - Both speak the **same WorkerContract manifest** (`schema_version: 0.3`)
 - Both expose the **same MCP tool surface** (`workers.list/get/create/update/delete/run` + `runs.list/get/watch`)
-- The cloud version's `@floomhq/workeros` MCP package switches `WORKEROS_API_BASE` and uses Supabase JWT instead of `x-floom-secret`
+- The cloud version's `@floomhq/floom` MCP package switches `WORKEROS_API_BASE` and uses Supabase JWT instead of `x-floom-secret`
 
 ## Architecture (current shape)
 
@@ -42,7 +46,7 @@ floomhq/workeros-cloud      (private, hosted)         Supabase auth, RLS multi-t
                │ delegates execution to
                │
 ┌──────────────▼────────────────────────────────────────────┐
-│  workeros runtime (vendored from floomhq/workeros)        │
+│  workeros runtime (vendored from floomhq/floom)        │
 │  - AgentDriver, sandbox abstractions, run_service         │
 │  - Composio integration                                   │
 │  - LLM tool loop                                          │
@@ -56,7 +60,7 @@ Supabase (Postgres + Storage) is the source of truth; API servers are **stateles
 ## CLI login (mirrors skills-neo pattern)
 
 ```bash
-npx @floomhq/workeros@latest login
+npx @floomhq/floom@latest login
 # → opens browser to workeros.floom.dev/cli-auth
 # → Supabase OAuth (Google / email)
 # → returns short-lived code
@@ -181,7 +185,7 @@ Phase 3 — Frontend
 - Login routes and per-user dashboard shell are present.
 
 Phase 4 — CLI login flow
-- `@floomhq/workeros` supports `workeros login`, cloud credentials, workspace selection, and `workeros workers push`.
+- `@floomhq/floom` supports `workeros login`, cloud credentials, workspace selection, and `workeros workers push`.
 
 Phase 5 — Billing + quotas
 - Billing remains planned.
@@ -199,3 +203,6 @@ Phase 6 — Multi-tenant cron + webhooks
 ## License
 
 Private. Floom internal.
+
+## Hosting & worker storage (read before touching cloud workers/deploys)
+workeros.floom.dev = CLOUD = **Railway** backend (manual `railway up`) + Vercel frontend. workers.floom.dev = OSS = AX41. Cloud workers are stored portably in Supabase `_files` (never a disk path). Full model: [docs/CLOUD-WORKER-STORAGE-MODEL.md](docs/CLOUD-WORKER-STORAGE-MODEL.md).

@@ -18,10 +18,10 @@ jobs:
           submodules: false
 
       - name: Initialise engine submodule (runner-local gh auth)
-        # The private engine submodule (floomhq/workeros) is cloned with the
+        # The private engine submodule (floomhq/floom) is cloned with the
         # self-hosted runner's local gh credentials (gh auth token), not a
         # stored ENGINE_SUBMODULE_TOKEN secret. The runner user is logged in to
-        # gh with read access to floomhq/workeros, so this ALWAYS runs for real
+        # gh with read access to floomhq/floom, so this ALWAYS runs for real
         # on the self-hosted runner — no neutral skip.
         run: |
           set -euo pipefail
@@ -29,7 +29,7 @@ jobs:
           if [ -z "${TOKEN:-}" ]; then
             echo "::error::No gh token available on the self-hosted runner."
             echo "::error::Run 'gh auth login' as the runner user (github-runner)"
-            echo "::error::with read access to floomhq/workeros."
+            echo "::error::with read access to floomhq/floom."
             exit 1
           fi
           git config --global \

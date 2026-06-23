@@ -105,6 +105,10 @@ class FragmentSessionRequest(BaseModel):
     user_code: str | None = None
 
 
+class ProfileUpdateRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=120)
+
+
 def _gotrue_detail(exc: Exception) -> str:
     """Return a log-safe summary of a GoTrue/Supabase auth exception.
 
@@ -199,14 +203,40 @@ def _enforce_cli_approve_deny_rate_limit(*, request: Request, user_code: str) ->
         _cli_approve_deny_rate_buckets[key] = bucket
 
 
-def _frontend_redirect(next_path: str) -> str:
+def _first_forwarded_value(value: str | None) -> str | None:
+    first = (value or "").split(",", 1)[0].strip()
+    return first or None
+
+
+def _request_frontend_origin(request: Request | None) -> str | None:
+    if request is None:
+        return None
+
+    allowed_origins = _allowed_frontend_origins()
+    origin = _normalized_origin(request.headers.get("x-workeros-frontend-origin"))
+    if origin and origin in allowed_origins:
+        return origin
+
+    scheme = _first_forwarded_value(request.headers.get("x-forwarded-proto")) or request.url.scheme
+    for header_name in ("x-forwarded-host", "host"):
+        host = _first_forwarded_value(request.headers.get(header_name))
+        if not host:
+            continue
+        origin = _normalized_origin(f"{scheme}://{host}")
+        if origin and origin in allowed_origins:
+            return origin
+    return None
+
+
+def _frontend_redirect(next_path: str, request: Request | None = None) -> str:
     # Must use dashboard_origin (host only, no path) NOT frontend_url. The
     # engine's Composio /connections/callback requires WORKERS_FRONTEND_URL
     # to include the /app basePath, so frontend_url is "https://<host>/app".
     # Concatenating next_path (which already starts with /app/...) onto that
     # produces "/app/app/..." — the original double-basePath bug.
     settings = get_cloud_settings()
-    return f"{settings.dashboard_origin}{next_path}"
+    origin = _request_frontend_origin(request) or settings.dashboard_origin
+    return f"{origin}{next_path}"
 
 
 def _normalized_origin(value: str | None) -> str | None:
@@ -226,10 +256,8 @@ def _allowed_frontend_origins() -> set[str]:
 
 
 def _callback_base_from_request(request: Request | None) -> str | None:
-    if request is None:
-        return None
-    origin = _normalized_origin(request.headers.get("x-workeros-frontend-origin"))
-    if not origin or origin not in _allowed_frontend_origins():
+    origin = _request_frontend_origin(request)
+    if not origin:
         return None
     return f"{origin}/api/proxy"
 
@@ -397,10 +425,11 @@ def _script_json(value: Any) -> str:
 def _auth_fragment_bridge_html(
     *,
     next_path: str,
-    device_code: str | None,
-    user_code: str | None,
+    device_code: str | None = None,
+    user_code: str | None = None,
+    request: Request | None = None,
 ) -> str:
-    fallback_url = _frontend_redirect("/app/login?error=auth_callback_missing")
+    fallback_url = _frontend_redirect("/app/login?error=auth_callback_missing", request=request)
     payload = {
         "next": next_path,
         "device_code": device_code,
@@ -526,13 +555,34 @@ def _provider_flags() -> dict[str, bool | None]:
 
 def _upsert_user_row(user: Any) -> None:
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    new_supabase_service_client().table("users").upsert(
+    user_id = str(user.id)
+    client = new_supabase_service_client()
+    existing = (
+        client.table("users")
+        .select("id")
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if getattr(existing, "data", None):
+        client.table("users").update(
+            {
+                "email": getattr(user, "email", None),
+                "updated_at": now_iso,
+            }
+        ).eq("id", user_id).execute()
+        return
+    client.table("users").insert(
         {
-            "id": str(user.id),
+            "id": user_id,
             "email": getattr(user, "email", None),
+            "username": user_id,
+            "password_hash": "",
+            "role": "member",
+            "disabled": False,
+            "created_at": now_iso,
             "updated_at": now_iso,
-        },
-        on_conflict="id",
+        }
     ).execute()
 
 
@@ -819,7 +869,7 @@ def fragment_session(payload: FragmentSessionRequest, request: Request):
         expires_in=payload.expires_in,
         user=user,
     )
-    response = JSONResponse({"ok": True, "next": next_path, "redirect_to": _frontend_redirect(next_path)})
+    response = JSONResponse({"ok": True, "next": next_path, "redirect_to": _frontend_redirect(next_path, request)})
     _set_cookie(
         response,
         _SESSION_COOKIE_NAME,
@@ -981,6 +1031,7 @@ def callback(
             return HTMLResponse(
                 _auth_fragment_bridge_html(
                     next_path=next_path,
+                    request=request,
                 )
             )
     except HTTPException:
@@ -996,7 +1047,7 @@ def callback(
 
     _upsert_user_row(user)
     _maybe_send_welcome_email(user)
-    response = RedirectResponse(_frontend_redirect(next_path), status_code=303)
+    response = RedirectResponse(_frontend_redirect(next_path, request), status_code=303)
     _set_cookie(
         response,
         _SESSION_COOKIE_NAME,
@@ -1048,7 +1099,7 @@ def cli_exchange(payload: CliExchangeRequest):
 
 @router.get("/cli-bootstrap")
 def cli_bootstrap():
-    """Public bootstrap endpoint for the @floomhq/workeros CLI.
+    """Public bootstrap endpoint for the @floomhq/floom CLI.
 
     SECURITY (audit 2026-05-29, CRIT-1 — ACCEPTED, intentionally public):
     This endpoint is unauthenticated BY DESIGN and returns ONLY public
@@ -1074,6 +1125,19 @@ def cli_bootstrap():
         "supabase_url": settings.supabase_url,
         "supabase_anon_key": settings.supabase_anon_key,
         "api_base": settings.api_base,
+    }
+
+
+@router.get("/me")
+def cloud_auth_me(auth: AuthContext = Depends(get_auth_context)) -> dict:
+    """Return the current cloud-authenticated user's profile."""
+    return {
+        "user_id": auth.user_id,
+        "username": auth.username,
+        "email": auth.email,
+        "role": auth.role,
+        "auth_method": auth.auth_method,
+        "is_admin": auth.is_admin,
     }
 
 
@@ -1111,6 +1175,72 @@ def _session_user(request: Request) -> tuple[str, str]:
     if not user_id:
         raise HTTPException(status_code=401, detail="Not signed in")
     return user_id, refresh_token
+
+
+def _auth_user_from_admin_response(response: Any) -> Any:
+    return getattr(response, "user", None) or response
+
+
+def _auth_user_metadata(user: Any) -> dict[str, Any]:
+    metadata = getattr(user, "user_metadata", None) or {}
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+@router.patch("/profile")
+def update_profile(payload: ProfileUpdateRequest, request: Request):
+    """Update the signed-in user's display profile.
+
+    Cloud intentionally blocks the engine's broad /users endpoints; profile
+    editing needs a self-service route that derives identity from the verified
+    session cookie and can only update the caller's display metadata.
+    """
+    user_id, _refresh_token = _session_user(request)
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(status_code=400, detail="display_name is required")
+    if len(display_name) > 120:
+        raise HTTPException(status_code=400, detail="display_name is too long")
+
+    svc = new_supabase_service_client()
+    try:
+        user = _auth_user_from_admin_response(svc.auth.admin.get_user_by_id(user_id))
+    except Exception as exc:
+        logger.warning("auth/profile get_user_by_id failed for %s: %s", user_id, _gotrue_detail(exc))
+        raise HTTPException(status_code=502, detail="Could not load profile") from exc
+    if user is None or not getattr(user, "id", None):
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    metadata = _auth_user_metadata(user)
+    metadata.update(
+        {
+            "display_name": display_name,
+            "full_name": display_name,
+            "name": display_name,
+        }
+    )
+    try:
+        svc.auth.admin.update_user_by_id(user_id, {"user_metadata": metadata})
+    except Exception as exc:
+        logger.warning("auth/profile update_user_by_id failed for %s: %s", user_id, _gotrue_detail(exc))
+        raise HTTPException(status_code=502, detail="Could not update profile") from exc
+
+    row: dict[str, Any] | None = None
+    try:
+        row = get_repositories().users.update(user_id=user_id, display_name=display_name)
+    except Exception as exc:
+        logger.warning("auth/profile public users update failed for %s: %s", user_id, type(exc).__name__)
+
+    role = str((row or {}).get("role") or "")
+    email = getattr(user, "email", None) or (row or {}).get("email")
+    username = (row or {}).get("username")
+    return {
+        "user_id": user_id,
+        "email": email,
+        "display_name": display_name,
+        "role": role or None,
+        "is_admin": role in {"admin", "owner"},
+        "username": username,
+    }
 
 
 _OSS_PLACEHOLDER_USER_ID = "federico"

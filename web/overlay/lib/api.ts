@@ -262,6 +262,8 @@ export const api = {
       return fetchJson<import("@/lib/types").WorkerSummary[]>(`/workers?${qs.toString()}`);
     },
     get: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}`),
+    duplicate: (id: string) =>
+      fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: async (id: string) => {
@@ -437,18 +439,29 @@ export const api = {
     rollback: (id: string, versionId: string) =>
       fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
     // Worker feedback (SPEC §12) — anyone who can see the worker can comment.
-    feedback: {
-      list: (id: string) =>
-        fetchJson<import("@/lib/types").WorkerFeedback[]>(`/workers/${id}/feedback`),
-      create: (id: string, content: string) =>
-        fetchJson<import("@/lib/types").WorkerFeedback>(`/workers/${id}/feedback`, {
+      feedback: {
+        list: (id: string) =>
+          fetchJson<import("@/lib/types").WorkerFeedback[]>(`/workers/${id}/feedback`),
+        create: (id: string, content: string) =>
+          fetchJson<import("@/lib/types").WorkerFeedback>(`/workers/${id}/feedback`, {
           method: "POST",
           body: JSON.stringify({ content }),
         }),
-      remove: (id: string, feedbackId: string) =>
-        fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
+        remove: (id: string, feedbackId: string) =>
+          fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
+      },
+      alerts: {
+        list: (id: string) =>
+          fetchJson<import("@/lib/types").WorkerAlert[]>(`/workers/${id}/alerts`),
+        create: (id: string, body: import("@/lib/types").WorkerAlertCreate) =>
+          fetchJson<import("@/lib/types").WorkerAlert>(`/workers/${id}/alerts`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          }),
+        remove: (id: string, alertId: string) =>
+          fetchJson<void>(`/workers/${id}/alerts/${alertId}`, { method: "DELETE" }),
+      },
     },
-  },
   runs: {
     list: async (params?: {
       worker_id?: string;
@@ -481,6 +494,23 @@ export const api = {
       fetchJson<import("@/lib/types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
       }),
+    feedback: {
+      list: (id: string) =>
+        fetchJson<import("@/lib/types").RunFeedback[]>(`/runs/${encodeURIComponent(id)}/feedback`),
+      create: (id: string, content: string, rating?: string | null) =>
+        fetchJson<import("@/lib/types").RunFeedback>(`/runs/${encodeURIComponent(id)}/feedback`, {
+          method: "POST",
+          body: JSON.stringify({ content, rating: rating ?? null }),
+        }),
+    },
+    createFeedbackIssue: (
+      id: string,
+      payload: import("@/lib/types").RunFeedbackIssueRequest,
+    ) =>
+      fetchJson<import("@/lib/types").RunFeedbackIssueResponse>(
+        `/runs/${encodeURIComponent(id)}/feedback/issue`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
     // #765: mint a read-only public share link for a run (cloud overlay parity).
     shareLink: (id: string) =>
       fetchJson<import("@/lib/types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, {
@@ -673,6 +703,36 @@ export const api = {
       return res.json() as Promise<import("@/lib/types").ApprovalUploadResponse>;
     },
   },
+  // ReviewPack Review Pack (demo-client pilot) - public, no Workeros login.
+  // The token in the path is the share secret; the pack password gates reads.
+  review: {
+    publicGet: (token: string, password?: string, reviewerToken?: string) => {
+      const headers = new Headers();
+      if (password) headers.set("x-review-pack-password", password);
+      if (reviewerToken) headers.set("x-review-pack-reviewer-token", reviewerToken);
+      return fetchJson<import("@/lib/types").ReviewPackPublicResponse>(
+        `/review/public/${encodeURIComponent(token)}`,
+        { headers },
+      );
+    },
+    publicMyVotes: (token: string, reviewerToken: string, password?: string) => {
+      const headers = new Headers({ "x-review-pack-reviewer-token": reviewerToken });
+      if (password) headers.set("x-review-pack-password", password);
+      return fetchJson<import("@/lib/types").ReviewPackFeedbackResponse>(
+        `/review/public/${encodeURIComponent(token)}/feedback`,
+        { headers },
+      );
+    },
+    publicFeedback: (token: string, reviewerToken: string, input: import("@/lib/types").ReviewPackFeedbackInput) =>
+      fetchJson<import("@/lib/types").ReviewPackVoteResponse>(
+        `/review/public/${encodeURIComponent(token)}/feedback`,
+        {
+          method: "POST",
+          headers: { "x-review-pack-reviewer-token": reviewerToken },
+          body: JSON.stringify(input),
+        },
+      ),
+  },
   secrets: {
     list: () => fetchJson<import("@/lib/types").SecretItem[]>("/secrets"),
     upsert: (name: string, value: string) =>
@@ -730,6 +790,11 @@ export const api = {
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
         { method: "DELETE" }
+      ),
+    rename: (name: string, newName: string) =>
+      fetchJson<import("@/lib/types").ContextDetail>(
+        `/contexts/${encodeURIComponent(name)}/rename`,
+        { method: "POST", body: JSON.stringify({ new_name: newName }) }
       ),
     saveTextFile: async (name: string, path: string, content: string, tags?: string[]) => {
       const file = await fetchJson<import("@/lib/types").ContextFileItem>(
@@ -856,6 +921,8 @@ export const api = {
     clearRuns: () => fetchJson<import("@/lib/types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("@/lib/types").WorkspaceAgentInfo>("/system/workspace-agent"),
+    emailChannel: () =>
+      fetchJson<{ connected: boolean; email?: string | null }>("/channels/email"),
     // Members STEP 5: assistant Private <-> Shared with workspace.
     setAssistantVisibility: (visibility: import("@/lib/types").AssetVisibility) =>
       fetchJson<import("@/lib/types").WorkspaceAgentInfo>(

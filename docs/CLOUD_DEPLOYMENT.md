@@ -51,6 +51,18 @@ OPENAI_API_KEY=...
 COMPOSIO_API_KEY=...
 ```
 
+If the dashboard is reachable from more than one user-facing origin, allowlist
+each origin so auth callbacks return users to the same domain they started on:
+
+```bash
+WORKEROS_DASHBOARD_ORIGIN=https://workeros.floom.dev
+WORKEROS_ALLOWED_FRONTEND_ORIGINS=https://floom.dev,https://workeros.floom.dev
+```
+
+`WORKEROS_ALLOWED_FRONTEND_ORIGINS` is comma-separated and must include
+`https://floom.dev` when `https://floom.dev/app` is enabled. Unlisted forwarded
+origins are ignored and auth falls back to `WORKEROS_DASHBOARD_ORIGIN`.
+
 The scheduler is part of the API process and must hold a Postgres advisory lock
 in Cloud. The API now fails startup if the lock DB env is missing:
 

@@ -3,9 +3,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-// #1006: WorkersCollection accepts host-injected top-level views so
-// workeros-cloud can compose the engine component (its cross-tenant
-// workspace-admin view) instead of forking 869 lines.
+// #1006: WorkersCollection accepts host-injected top-level views so downstream
+// hosts can compose the engine component instead of forking it.
 
 // R9: WorkersCollection migrated to TanStack Query (useWorkers hook). Tests
 // must wrap renders in a QueryClientProvider.

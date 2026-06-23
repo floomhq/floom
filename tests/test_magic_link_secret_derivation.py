@@ -65,8 +65,10 @@ def test_explicit_env_var_wins(monkeypatch):
 
 
 def test_no_service_key_leaves_var_unset(monkeypatch):
-    """Without SUPABASE_SERVICE_ROLE_KEY, the function is a no-op."""
+    """Without ANY service-role key (bare or WORKEROS_CLOUD_ alias), the function
+    is a no-op. Both names must be cleared since the helper now reads either."""
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY", raising=False)
     _ensure_magic_link_secret()
     assert "WORKEROS_MAGIC_LINK_SECRET" not in os.environ
 

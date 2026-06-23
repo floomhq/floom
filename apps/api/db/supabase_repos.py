@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import json
 import logging
 import os
@@ -43,6 +44,9 @@ _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 
 _SYSTEM_RUN_WORKER_IDS = frozenset({"worker-author"})
 _ENGINE_WORKER_SERIALIZE: Any | None = None
+_RUN_ARTIFACTS_BUCKET = "workeros-run-artifacts"
+_COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success"}
+_COMPOSIO_PENDING_STATUSES = {"", "initiated", "pending", "unknown"}
 
 
 def _should_ignore_worker_file(rel_path: str) -> bool:
@@ -50,6 +54,50 @@ def _should_ignore_worker_file(rel_path: str) -> bool:
     if _ENGINE_WORKER_SERIALIZE is None:
         _ENGINE_WORKER_SERIALIZE = import_engine_module("services.worker_serialize")
     return bool(_ENGINE_WORKER_SERIALIZE._should_ignore_worker_file(rel_path))
+
+
+def _safe_storage_key_part(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "._=-" else "_" for ch in value) or "item"
+
+
+def _upload_run_artifact_to_storage(
+    client: Any,
+    *,
+    user_id: str,
+    run_id: str,
+    artifact_id: str,
+    name: str,
+    path: str,
+) -> str | None:
+    local_path = Path(path)
+    if not local_path.is_absolute():
+        try:
+            runner_utils = import_engine_module("runner_utils")
+            local_path = Path(runner_utils.ARTIFACTS_DIR) / local_path
+        except Exception:
+            return None
+    if not local_path.is_file():
+        return None
+
+    key = "/".join(
+        [
+            _safe_storage_key_part(user_id),
+            _safe_storage_key_part(run_id),
+            _safe_storage_key_part(artifact_id),
+            _safe_storage_key_part(name or local_path.name),
+        ]
+    )
+    data = local_path.read_bytes()
+    bucket = client.storage.from_(_RUN_ARTIFACTS_BUCKET)
+    try:
+        bucket.upload(key, data)
+    except Exception:
+        try:
+            bucket.update(key, data)
+        except Exception as exc:
+            _repo_logger.warning("run artifact storage upload failed for %s/%s: %s", run_id, artifact_id, exc)
+            return None
+    return f"supabase://{_RUN_ARTIFACTS_BUCKET}/{key}"
 
 # Curated catalog of ship-with-product stock/example workers that EVERY tenant
 # may run. On cloud these rows are seeded under DIFFERENT demo users in DIFFERENT
@@ -576,6 +624,10 @@ def _scope_by_workspace(
     return builder
 
 
+def _has_read_scope(*, user_id: str | None) -> bool:
+    return bool(get_active_workspace_id() or user_id)
+
+
 def _log_admin_access(
     *,
     workspace_id: str,
@@ -634,6 +686,319 @@ def _resolve_workspace_id_for_write(
 class _BaseSupabaseRepository:
     def __init__(self, client: Client | None = None) -> None:
         self._client = client or get_supabase_service_client()
+
+
+def _session_hash(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def _looks_like_session_hash(value: str | None) -> bool:
+    if not value or len(value) != 64:
+        return False
+    return all(ch in "0123456789abcdef" for ch in value)
+
+
+def _normalize_composio_status(status: Any) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in _COMPOSIO_ACTIVE_STATUSES:
+        return "active"
+    return normalized
+
+
+def _normalize_user_row(row: Mapping[str, Any], *, include_password: bool = False) -> dict[str, Any]:
+    item = dict(row)
+    user_id = str(item.get("id") or "")
+    username = item.get("username") or item.get("email") or user_id
+    normalized: dict[str, Any] = {
+        "id": user_id,
+        "username": str(username),
+        "display_name": item.get("display_name"),
+        "role": item.get("role") or "member",
+        "disabled": bool(item.get("disabled")),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+    if include_password:
+        normalized["password_hash"] = item.get("password_hash") or ""
+    return normalized
+
+
+class SupabaseUserRepository(_BaseSupabaseRepository):
+    _PUBLIC_COLUMNS = "id,email,username,display_name,role,disabled,created_at,updated_at"
+    _PRIVATE_COLUMNS = (
+        "id,email,username,display_name,password_hash,role,disabled,created_at,updated_at"
+    )
+
+    def count(self) -> int:
+        response = self._client.table("users").select("id", count="exact").execute()
+        count = getattr(response, "count", None)
+        if count is not None:
+            return int(count or 0)
+        return len(_response_rows(response))
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        username: str,
+        display_name: str | None,
+        password_hash: str,
+        role: str,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        payload = {
+            "id": user_id,
+            "username": username,
+            "display_name": display_name,
+            "password_hash": password_hash,
+            "role": role,
+            "disabled": False,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if "@" in username:
+            payload["email"] = username
+        self._client.table("users").insert(payload).execute()
+        result = self.get(user_id=user_id)
+        if result is None:
+            raise RuntimeError(f"failed to create user {user_id}")
+        return result
+
+    def get(self, *, user_id: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("users")
+            .select(self._PUBLIC_COLUMNS)
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        return _normalize_user_row(row) if row else None
+
+    def get_by_username(self, *, username: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("users")
+            .select(self._PRIVATE_COLUMNS)
+            .eq("username", username)
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        if row is None:
+            response = (
+                self._client.table("users")
+                .select(self._PRIVATE_COLUMNS)
+                .eq("email", username)
+                .limit(1)
+                .execute()
+            )
+            row = _first_row(response)
+        return _normalize_user_row(row, include_password=True) if row else None
+
+    def list(self) -> list[dict[str, Any]]:
+        response = (
+            self._client.table("users")
+            .select(self._PUBLIC_COLUMNS)
+            .order("created_at")
+            .order("id")
+            .execute()
+        )
+        return [_normalize_user_row(row) for row in _response_rows(response)]
+
+    def update(self, *, user_id: str, **fields: Any) -> dict[str, Any] | None:
+        allowed = {"display_name", "password_hash", "role", "disabled"}
+        payload = {key: value for key, value in fields.items() if key in allowed}
+        if payload:
+            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._client.table("users").update(payload).eq("id", user_id).execute()
+        return self.get(user_id=user_id)
+
+    def delete(self, *, user_id: str) -> bool:
+        response = self._client.table("users").delete().eq("id", user_id).execute()
+        return bool(_response_rows(response))
+
+
+class SupabasePersonalAccessTokenRepository(_BaseSupabaseRepository):
+    _PUBLIC_COLUMNS = "id,user_id,name,last_used_at,created_at,expires_at"
+
+    def create(
+        self,
+        *,
+        token_id: str,
+        user_id: str,
+        name: str,
+        token_hash: str,
+        expires_at: str | None,
+    ) -> dict[str, Any]:
+        created_at = datetime.now(timezone.utc).isoformat()
+        self._client.table("personal_access_tokens").insert(
+            {
+                "id": token_id,
+                "user_id": user_id,
+                "name": name,
+                "token_hash": token_hash,
+                "last_used_at": None,
+                "created_at": created_at,
+                "expires_at": expires_at,
+            }
+        ).execute()
+        return self._get(token_id=token_id)
+
+    def _get(self, *, token_id: str) -> dict[str, Any]:
+        response = (
+            self._client.table("personal_access_tokens")
+            .select(self._PUBLIC_COLUMNS)
+            .eq("id", token_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        if row is None:
+            raise RuntimeError(f"PAT {token_id} not found after insert")
+        return row
+
+    def get_by_hash(self, *, token_hash: str) -> dict[str, Any] | None:
+        token_response = (
+            self._client.table("personal_access_tokens")
+            .select(self._PUBLIC_COLUMNS)
+            .eq("token_hash", token_hash)
+            .limit(1)
+            .execute()
+        )
+        token = _first_row(token_response)
+        if token is None:
+            return None
+        user_response = (
+            self._client.table("users")
+            .select("id,email,username,role,disabled")
+            .eq("id", token["user_id"])
+            .limit(1)
+            .execute()
+        )
+        user = _first_row(user_response)
+        if user is None:
+            return None
+        return {
+            **token,
+            "email": user.get("email"),
+            "username": user.get("username") or user.get("email") or user.get("id"),
+            "role": user.get("role") or "member",
+            "disabled": bool(user.get("disabled")),
+        }
+
+    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+        response = (
+            self._client.table("personal_access_tokens")
+            .select(self._PUBLIC_COLUMNS)
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return _response_rows(response)
+
+    def delete(self, *, token_id: str, user_id: str) -> bool:
+        response = (
+            self._client.table("personal_access_tokens")
+            .delete()
+            .eq("id", token_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(_response_rows(response))
+
+    def touch_last_used(self, *, token_id: str, last_used_at: str) -> None:
+        self._client.table("personal_access_tokens").update(
+            {"last_used_at": last_used_at}
+        ).eq("id", token_id).execute()
+
+    def rotate(self, *, token_id: str, user_id: str, token_hash: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("personal_access_tokens")
+            .update({"token_hash": token_hash, "last_used_at": None})
+            .eq("id", token_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not _response_rows(response):
+            return None
+        return self._get(token_id=token_id)
+
+
+class SupabaseUserSessionRepository(_BaseSupabaseRepository):
+    def create(self, *, session_id: str, user_id: str, expires_at: str) -> dict[str, Any]:
+        created_at = datetime.now(timezone.utc).isoformat()
+        stored_session_id = _session_hash(session_id)
+        response = self._client.rpc(
+            "create_user_session_if_enabled",
+            {
+                "p_session_id": stored_session_id,
+                "p_user_id": user_id,
+                "p_expires_at": expires_at,
+                "p_created_at": created_at,
+            },
+        ).execute()
+        if not _response_rows(response):
+            raise ValueError("cannot create session: user is disabled or does not exist")
+        return {
+            "id": session_id,
+            "user_id": user_id,
+            "expires_at": expires_at,
+            "created_at": created_at,
+        }
+
+    def get(self, *, session_id: str) -> dict[str, Any] | None:
+        stored_session_id = session_id if _looks_like_session_hash(session_id) else _session_hash(session_id)
+        row = self._get_stored(session_id=stored_session_id)
+        if row is None and stored_session_id != session_id:
+            row = self._get_stored(session_id=session_id)
+            if row is not None:
+                self._client.table("user_sessions").update({"id": stored_session_id}).eq(
+                    "id",
+                    session_id,
+                ).execute()
+        return row
+
+    def _get_stored(self, *, session_id: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("user_sessions")
+            .select("id,user_id,expires_at,created_at")
+            .eq("id", session_id)
+            .limit(1)
+            .execute()
+        )
+        session = _first_row(response)
+        if session is None:
+            return None
+        user_response = (
+            self._client.table("users")
+            .select("id,email,username,role,disabled")
+            .eq("id", session["user_id"])
+            .limit(1)
+            .execute()
+        )
+        user = _first_row(user_response)
+        if user is None:
+            return None
+        return {
+            **session,
+            "username": user.get("username") or user.get("email") or user.get("id"),
+            "role": user.get("role") or "member",
+            "disabled": bool(user.get("disabled")),
+        }
+
+    def delete(self, *, session_id: str) -> bool:
+        stored_session_id = session_id if _looks_like_session_hash(session_id) else _session_hash(session_id)
+        response = (
+            self._client.table("user_sessions")
+            .delete()
+            .in_("id", [stored_session_id, session_id])
+            .execute()
+        )
+        return bool(_response_rows(response))
+
+    def prune_expired(self, *, now_iso: str) -> int:
+        response = self._client.table("user_sessions").delete().lt("expires_at", now_iso).execute()
+        return len(_response_rows(response))
 
 
 class SupabaseWorkerRepository(_BaseSupabaseRepository):
@@ -721,6 +1086,8 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         worker_id: str | None = None,
         worker_ids: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
+        if not _has_read_scope(user_id=user_id):
+            return []
         builder = self._client.table("workers").select("*")
         # Workspace scope: filter by workspace_id when set (per-request
         # contextvar). Falls back to user_id when out of request context.
@@ -1792,17 +2159,48 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             }
         ).eq("id", trigger_id).execute()
 
+    def claim_schedule_trigger(
+        self,
+        *,
+        trigger_id: str,
+        now_iso: str,
+        locked_until: str,
+    ) -> bool:
+        response = (
+            self._client.table("worker_triggers")
+            .update({"locked_until": locked_until, "updated_at": now_iso})
+            .eq("id", trigger_id)
+            .eq("type", "schedule")
+            .eq("enabled", True)
+            .or_(f"locked_until.is.null,locked_until.lte.{now_iso}")
+            .execute()
+        )
+        return bool(_response_rows(response))
+
     def find_trigger_by_external_id(
-        self, *, external_trigger_id: str
+        self,
+        *,
+        external_trigger_id: str,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any] | None:
-        return _first_row(
+        builder = (
             self._client.table("worker_triggers")
             .select("*")
             .eq("external_trigger_id", external_trigger_id)
             .eq("enabled", True)
-            .limit(1)
-            .execute()
         )
+        effective_workspace_id = workspace_id or get_active_workspace_id()
+        if effective_workspace_id:
+            builder = builder.eq("workspace_id", effective_workspace_id)
+        elif user_id:
+            workers = self._worker_rows(user_id=user_id)
+            worker_ids = [str(row["id"]) for row in workers if row.get("id")]
+            if not worker_ids:
+                return None
+            builder = builder.in_("worker_id", worker_ids)
+        rows = _response_rows(builder.order("worker_id").order("position").order("id").limit(2).execute())
+        return rows[0] if len(rows) == 1 else None
 
     def find_trigger_for_webhook(self, *, worker_id: str) -> dict[str, Any] | None:
         rows = _response_rows(
@@ -1865,6 +2263,8 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         order_created_desc: bool = False,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
+        if not _has_read_scope(user_id=user_id):
+            return []
         status_values = [str(status) for status in statuses or () if str(status)]
         worker_values = [str(worker_id) for worker_id in worker_ids or () if str(worker_id)]
         if statuses is not None and not status_values:
@@ -1892,7 +2292,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             if worker_values:
                 builder = builder.in_("worker_id", worker_values)
             if order_created_desc:
-                builder = builder.order("created_at", desc=True)
+                builder = builder.order("created_at", desc=True).order("id", desc=True)
 
             page = _response_rows(builder.range(offset, offset + page_size - 1).execute())
             rows.extend(page)
@@ -2208,6 +2608,8 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
+        if not _has_read_scope(user_id=user_id):
+            return []
         builder = self._client.table("runs").select(
             "id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error"
         )
@@ -2216,6 +2618,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             builder
             .eq("worker_id", worker_id)
             .order("created_at", desc=True)
+            .order("id", desc=True)
             .range(offset, offset + limit - 1)
             .execute()
         )
@@ -2232,12 +2635,15 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         limit: int = 50,
         offset: int = 0,
         include_total: bool = True,
+        workspace_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
+        if not _has_read_scope(user_id=user_id):
+            return [], 0
         builder = self._client.table("runs").select(
             "id,worker_id,status,trigger_source,input_json,error,started_at,completed_at,duration_ms,created_at,trigger_member_id",
             count="exact" if include_total else None,
         )
-        builder = _scope_by_workspace(builder, user_id=user_id)
+        builder = _scope_by_workspace(builder, user_id=user_id, explicit_workspace_id=workspace_id)
         if worker_id:
             builder = builder.eq("worker_id", worker_id)
         if statuses:
@@ -2246,7 +2652,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             builder = builder.gte("created_at", since)
         if until:
             builder = builder.lte("created_at", until)
-        response = builder.order("created_at", desc=True).range(
+        response = builder.order("created_at", desc=True).order("id", desc=True).range(
             offset,
             offset + limit - 1,
         ).execute()
@@ -2630,6 +3036,28 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             }
         ).execute()
 
+    def add_logs(self, *, rows: Iterable[dict[str, Any]]) -> None:
+        payload: list[dict[str, Any]] = []
+        for row in rows:
+            run_id = str(row.get("run_id") or "")
+            user_id = str(row.get("user_id") or "")
+            if not run_id or not user_id:
+                continue
+            if self.get(user_id=user_id, run_id=run_id) is None:
+                continue
+            payload.append(
+                {
+                    "user_id": user_id,
+                    "run_id": run_id,
+                    "level": row["level"],
+                    "message": row["message"],
+                    "timestamp": row["timestamp"],
+                    "trace_id": row.get("trace_id"),
+                }
+            )
+        if payload:
+            self._client.table("run_logs").insert(payload).execute()
+
     def list_logs(
         self, *, user_id: str, run_id: str, limit: int | None = 10_000
     ) -> list[dict[str, Any]]:
@@ -2706,6 +3134,17 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
     ) -> None:
         if self.get(user_id=user_id, run_id=run_id) is None:
             raise ValueError(f"run {run_id} not found for {user_id}")
+        stored_path = (
+            _upload_run_artifact_to_storage(
+                self._client,
+                user_id=user_id,
+                run_id=run_id,
+                artifact_id=artifact_id,
+                name=name,
+                path=path,
+            )
+            or path
+        )
         self._client.table("artifacts").insert(
             {
                 "id": artifact_id,
@@ -2713,7 +3152,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 "run_id": run_id,
                 "name": name,
                 "type": artifact_type,
-                "path": path,
+                "path": stored_path,
                 "size_bytes": size_bytes,
                 "created_at": created_at,
             }
@@ -3111,11 +3550,102 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         item["mcp_transport"] = item.get("mcp_transport") or "streamable_http"
         return item
 
+    def _reconcile_pending_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        """Refresh pending Composio OAuth rows from Composio before callers decide.
+
+        The engine callback can see a still-pending status even after provider
+        OAuth redirects back. Cloud list/run paths need a fresh app-level view,
+        so initiated/pending rows are reconciled lazily here.
+        """
+        item = self._normalize_row(row)
+        if (item.get("kind") or "composio") != "composio":
+            return item
+        status = _normalize_composio_status(item.get("status"))
+        if status not in _COMPOSIO_PENDING_STATUSES:
+            return item
+        composio_id = str(item.get("composio_connection_id") or "").strip()
+        if not composio_id:
+            return item
+        checked_at = datetime.now(timezone.utc).isoformat()
+        try:
+            from composio_client import check_status  # type: ignore
+
+            remote_status = _normalize_composio_status(check_status(composio_id))
+        except Exception as exc:
+            try:
+                updated = self.update(
+                    user_id=str(item["user_id"]),
+                    composio_id=str(item["id"]),
+                    last_checked_at=checked_at,
+                    last_check_status="failed",
+                    last_check_error=str(exc),
+                    updated_at=checked_at,
+                )
+                return updated or item
+            except Exception:
+                return item
+        updates: dict[str, Any] = {
+            "last_checked_at": checked_at,
+            "last_check_status": "valid" if remote_status == "active" else (remote_status or "unknown"),
+            "last_check_error": None,
+            "updated_at": checked_at,
+        }
+        if remote_status and remote_status != "not_found":
+            updates["status"] = remote_status
+        try:
+            updated = self.update(
+                user_id=str(item["user_id"]),
+                composio_id=str(item["id"]),
+                **updates,
+            )
+            return updated or item
+        except Exception:
+            return item
+
+    def _delete_other_pending_app_rows(
+        self,
+        *,
+        user_id: str,
+        app_name: str,
+        keep_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Keep at most one pending OAuth row per app/workspace.
+
+        Active rows are preserved for multi-account support; only unfinished
+        OAuth attempts are collapsed.
+        """
+        try:
+            rows = (
+                self._client.table("connections")
+                .select("id,status,kind,app_name,user_id,workspace_id")
+                .eq("workspace_id", workspace_id)
+                .eq("user_id", user_id)
+                .eq("app_name", app_name)
+                .execute()
+            )
+            for row in _response_rows(rows):
+                row_id = str(row.get("id") or "")
+                if row_id == keep_id:
+                    continue
+                if (row.get("kind") or "composio") != "composio":
+                    continue
+                if _normalize_composio_status(row.get("status")) not in _COMPOSIO_PENDING_STATUSES:
+                    continue
+                self._client.table("connections").delete().eq("id", row_id).execute()
+        except Exception:
+            _repo_logger.debug(
+                "pending Composio connection dedupe failed for %s/%s",
+                workspace_id,
+                app_name,
+                exc_info=True,
+            )
+
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
         builder = self._client.table("connections").select(self._CONNECTION_COLUMNS)
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.order("app_name").execute()
-        return [self._normalize_row(row) for row in _response_rows(response)]
+        return [self._reconcile_pending_row(row) for row in _response_rows(response)]
 
     def get(self, *, user_id: str, composio_id: str) -> dict[str, Any] | None:
         builder = self._client.table("connections").select(self._CONNECTION_COLUMNS)
@@ -3222,6 +3752,16 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
                 fields["mcp_allowed_tools_json"], []
             )
         self._client.table("connections").upsert(payload, on_conflict="id").execute()
+        if (
+            payload.get("kind", "composio") == "composio"
+            and _normalize_composio_status(payload.get("status")) in _COMPOSIO_PENDING_STATUSES
+        ):
+            self._delete_other_pending_app_rows(
+                user_id=user_id,
+                app_name=str(payload["app_name"]),
+                keep_id=str(connection_id),
+                workspace_id=str(workspace_id),
+            )
         item = self.get(user_id=user_id, composio_id=connection_id)
         if item is None:
             raise RuntimeError(f"failed to upsert connection {connection_id}")
@@ -3258,6 +3798,16 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
             payload["mcp_allowed_tools_json"] = _json_storage_value(
                 fields["mcp_allowed_tools_json"], []
             )
+        if (
+            _normalize_composio_status(fields.get("status")) == "active"
+            and "last_checked_at" not in fields
+        ):
+            checked_at = fields.get("updated_at") or datetime.now(timezone.utc).isoformat()
+            payload["last_checked_at"] = checked_at
+            if "last_check_status" not in fields:
+                payload["last_check_status"] = "valid"
+            if "last_check_error" not in fields:
+                payload["last_check_error"] = None
         if payload:
             builder = self._client.table("connections").update(payload).eq("id", composio_id)
             builder = _scope_by_workspace(builder, user_id=user_id)
@@ -3771,6 +4321,13 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
 
     _TABLE = "approvals"
 
+    @staticmethod
+    def _pending_not_expired(builder: Any, decided_at: str) -> Any:
+        or_filter = getattr(builder, "or_", None)
+        if callable(or_filter):
+            return or_filter(f"expires_at.is.null,expires_at.gte.{decided_at}")
+        return builder
+
     def create(self, *, owner_id: str, **fields: Any) -> dict[str, Any]:
         allowed = {
             "id", "run_id", "worker_id", "status", "label", "preview",
@@ -3981,15 +4538,13 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         # approve carrying annotations. Accept + persist (annotations_json
         # column added in migration 0034).
         #
-        # #280: the conditional `eq("status", "pending")` UPDATE is the atomic
-        # claim gate. The engine route only proceeds (spawns the follow-up run,
-        # double-spends) when this returns a row, and 409s when it returns None.
-        # Returning get_by_run_id() unconditionally defeated that: a race loser
-        # got the now-approved/rejected row back, so `claimed is None` never
-        # fired and concurrent approve+reject / double-approve both won. Postgres
-        # re-evaluates `status='pending'` after the row lock, so only the call
-        # that actually flipped the row gets data back -> return None otherwise.
-        response = (
+        # #280: the conditional UPDATE ... WHERE status='pending' is the atomic
+        # claim. PostgREST returns the rows it actually updated in `.data`, so an
+        # empty result means a concurrent caller already decided this approval —
+        # return None (NOT a re-read of get_by_run_id, which would surface the
+        # row the *other* caller flipped) so the route can 409 instead of
+        # spawning a duplicate / rejected-but-executed follow-up run.
+        builder = (
             self._client.table(self._TABLE)
             .update(
                 {
@@ -4004,12 +4559,12 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             .eq("run_id", run_id)
             .eq("owner_id", owner_id)
             .eq("status", "pending")
-            .or_(f"expires_at.is.null,expires_at.gte.{decided_at}")
-            .execute()
         )
-        if not (getattr(response, "data", None) or []):
-            return None  # lost the claim — another decision already won
-        return self.get_by_run_id(run_id=run_id)
+        resp = self._pending_not_expired(builder, decided_at).execute()
+        rows = getattr(resp, "data", None) or []
+        if not rows:
+            return None
+        return rows[0]
 
     def attach_follow_up(
         self,
@@ -4019,9 +4574,9 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         follow_up_run_id: str,
         edited_output_json: str | None = None,
     ) -> dict[str, Any] | None:
-        # #280: approve() claims pending->approved atomically *before* the
-        # follow-up run is spawned, so the spawned run id is recorded here in a
-        # second step. Scoped to the already-approved row this owner just won.
+        # #280: approve() claims the decision atomically *before* the follow-up
+        # run is spawned (so a lost race can never spawn one); the follow-up id
+        # is attached here in a second step, scoped to the just-approved row.
         update: dict[str, Any] = {"follow_up_run_id": follow_up_run_id}
         if edited_output_json is not None:
             update["edited_output_json"] = edited_output_json
@@ -4039,10 +4594,8 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         reason: str | None = None,
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
-        # #280: same atomic-claim semantics as approve() — return None when the
-        # conditional UPDATE flipped no pending row so the route's `claimed is
-        # None` 409 guard fires instead of letting a race loser proceed.
-        response = (
+        # #280: atomic claim — empty `.data` means already decided -> None.
+        builder = (
             self._client.table(self._TABLE)
             .update(
                 {
@@ -4055,12 +4608,12 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             .eq("run_id", run_id)
             .eq("owner_id", owner_id)
             .eq("status", "pending")
-            .or_(f"expires_at.is.null,expires_at.gte.{decided_at}")
-            .execute()
         )
-        if not (getattr(response, "data", None) or []):
-            return None  # lost the claim — another decision already won
-        return self.get_by_run_id(run_id=run_id)
+        resp = self._pending_not_expired(builder, decided_at).execute()
+        rows = getattr(resp, "data", None) or []
+        if not rows:
+            return None
+        return rows[0]
 
 
 class SupabaseApiTokenRepository(_BaseSupabaseRepository):
@@ -4178,6 +4731,41 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
             except Exception:
                 _repo_logger.warning("PAT cache eviction failed for token %s", token_id, exc_info=True)
         return deleted
+
+    def delete_cli_workspace_tokens_for_user(
+        self,
+        *,
+        user_id: str,
+        exclude_token_hash: str | None = None,
+    ) -> int:
+        """Delete generated CLI workspace tokens while preserving named PATs."""
+        builder = (
+            self._client.table("api_tokens")
+            .select("id,token_hash")
+            .eq("user_id", user_id)
+            .like("name", "CLI workspace:%")
+        )
+        if exclude_token_hash:
+            builder = builder.neq("token_hash", exclude_token_hash)
+        rows = _response_rows(builder.execute())
+        if not rows:
+            return 0
+        delete_builder = self._client.table("api_tokens").delete().eq("user_id", user_id).like(
+            "name", "CLI workspace:%"
+        )
+        if exclude_token_hash:
+            delete_builder = delete_builder.neq("token_hash", exclude_token_hash)
+        delete_builder.execute()
+        try:
+            from apps.api.auth.supabase_provider import evict_pat_cache
+
+            for row in rows:
+                token_hash = row.get("token_hash")
+                if token_hash:
+                    evict_pat_cache(str(token_hash))
+        except Exception:
+            _repo_logger.warning("PAT cache eviction failed for CLI workspace tokens", exc_info=True)
+        return len(rows)
 
 
 # ---------------------------------------------------------------------------

@@ -2,9 +2,9 @@ name: Landing app-route guard
 
 # Durable guard against re-introducing landing /app fall-through regressions.
 #
-# The landing project must not catch-all rewrite /app/* to another deployment.
-# Bare /app and every /app/* path redirect from next.config.ts to
-# NEXT_PUBLIC_APP_URL with the path and query preserved.
+# The landing project must proxy /app/* to the canonical fedes-projects
+# dashboard production domain. Re-introducing the old dashboard-three alias
+# freezes floom.dev/app on a stale build outside this token's Vercel team.
 
 on:
   pull_request:
@@ -30,40 +30,56 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Assert landing does not proxy /app catch-all
+      - name: Assert landing app routes use canonical dashboard
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, pathlib, sys
 
+          canonical = "https://r9-detail.floom.dev"
+          stale_fragments = [
+              "workeros-cloud-dashboard-" + "three.vercel.app",
+              "web-iota-five-" + "12.vercel.app",
+          ]
+
           with open("vercel.json") as f:
               cfg = json.load(f)
 
           errors = []
+          rewrites = {(r.get("source", ""), r.get("destination", "")) for r in cfg.get("rewrites", [])}
+          required_rewrites = {
+              ("/app", f"{canonical}/app"),
+              ("/app/:path*", f"{canonical}/app/:path*"),
+          }
+          missing = required_rewrites - rewrites
+          for source, dest in sorted(missing):
+              errors.append(f"vercel.json missing rewrite {source!r} -> {dest!r}")
+
           for r in cfg.get("rewrites", []):
-              src = r.get("source", "")
               dest = r.get("destination", "")
-              if src in {"/app", "/app/:path*"} or src.startswith("/app/"):
-                  errors.append(f"vercel.json still rewrites {src!r} to {dest!r}")
-              if "workeros-cloud-dashboard.vercel.app/app" in dest:
-                  errors.append(f"vercel.json still proxies to stale dashboard path {dest!r}")
+              for stale in stale_fragments:
+                  if stale in dest:
+                      errors.append(f"vercel.json still proxies to stale dashboard path {dest!r}")
 
           next_config = pathlib.Path("next.config.ts").read_text()
           required_fragments = [
-              "NEXT_PUBLIC_APP_URL",
-              "https://workers.floom.dev",
+              "CLOUD_DASHBOARD_URL",
+              canonical,
               'source: "/app"',
               'source: "/app/:path*"',
-              'destination: appDestination("/")',
-              'destination: appDestination("/:path*")',
-              "source: `/app/${route}`",
-              "source: `/app/${route}/:path*`",
-              "destination: appDestination(`/${route}`)",
-              "destination: appDestination(`/${route}/:path*`)",
+              'destination: cloudAppDestination("/")',
+              'destination: cloudAppDestination("/:path*")',
+              "source: `/${route}`",
+              "source: `/${route}/:path*`",
+              "destination: cloudAppDestination(`/${route}`)",
+              "destination: cloudAppDestination(`/${route}/:path*`)",
           ]
           for fragment in required_fragments:
               if fragment not in next_config:
                   errors.append(f"next.config.ts missing routing fragment {fragment!r}")
+          for stale in stale_fragments:
+              if stale in next_config:
+                  errors.append(f"next.config.ts still references stale dashboard {stale!r}")
 
           if errors:
               print("::error::landing app-route guard failed:")
@@ -71,5 +87,5 @@ jobs:
                   print(f"::error::  - {e}")
               sys.exit(1)
 
-          print("OK: landing app routes redirect known app entrypoints and do not catch-all proxy /app/*")
+          print("OK: landing app routes proxy to the canonical dashboard production domain")
           PY

@@ -6,7 +6,7 @@ import {
 } from "@/lib/web-session";
 import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
-const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
+const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 // #923: secret-mode logins were brute-forceable — the backend rate-limits

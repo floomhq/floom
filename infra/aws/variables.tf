@@ -89,3 +89,25 @@ variable "acm_certificate_arn" {
   type        = string
   default     = ""
 }
+
+# --- Web autoscaling (see autoscaling.tf) -----------------------------------
+variable "web_min_capacity" {
+  description = "Minimum web tasks under autoscaling (>=2 for AZ HA)."
+  type        = number
+  default     = 2
+}
+variable "web_max_capacity" {
+  description = "Maximum web tasks under autoscaling."
+  type        = number
+  default     = 8
+}
+variable "web_cpu_target" {
+  description = "Target average CPU %% for the web service (scale-out trigger)."
+  type        = number
+  default     = 60
+}
+variable "web_alb_requests_target" {
+  description = "Target ALB requests/min per web task (scale-out trigger)."
+  type        = number
+  default     = 400
+}

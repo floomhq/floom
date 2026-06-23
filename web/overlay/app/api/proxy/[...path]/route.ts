@@ -142,6 +142,7 @@ async function handler(
     forwardHeaders.Authorization = `Bearer ${accessToken}`;
   }
   if (isAuthPath) {
+    forwardHeaders["x-workeros-frontend-origin"] = req.nextUrl.origin;
     const cookieHeader = req.headers.get("cookie");
     if (cookieHeader) forwardHeaders.cookie = cookieHeader;
   }

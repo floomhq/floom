@@ -15,7 +15,9 @@ def _load_cloud_app(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEV", "1")
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
-    monkeypatch.setenv("FLOOM_SECRET", "test-secret-that-cloud-must-strip")
+    slack_state_secret = "test-secret-that-cloud-must-strip"
+    monkeypatch.setenv("FLOOM_SECRET", slack_state_secret)
+    monkeypatch.setenv("WORKEROS_SLACK_STATE_SECRET", slack_state_secret)
     monkeypatch.delenv("WORKEROS_RATE_LIMIT_DEV", raising=False)
 
     psycopg = types.ModuleType("psycopg")
@@ -62,6 +64,17 @@ def test_cloud_enables_engine_rate_limiter_without_floom_secret(monkeypatch, tmp
     assert main.os.environ["WORKEROS_RATE_LIMIT_DEV"] == "1"
     assert "FLOOM_SECRET" not in main.os.environ
     assert Counter(codes) == Counter({401: 20, 429: 5})
+
+
+def test_cloud_slack_state_uses_preserved_secret_without_auth_gate(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+
+    state, expires_at = main.engine_main._issue_slack_oauth_state(user_id="user-1")
+
+    assert state
+    assert expires_at
+    assert "FLOOM_SECRET" not in main.os.environ
+    assert main.engine_main._slack_state_secret() == "test-secret-that-cloud-must-strip"
 
 
 def test_cloud_versioned_api_prefixes_reach_engine_routes(monkeypatch, tmp_path):
@@ -349,6 +362,122 @@ def test_cloud_webhook_deduplicates_delivery_id(monkeypatch, tmp_path):
     assert second.status_code == 200
     assert second.json()["status"] == "duplicate_ignored"
     assert created == ["run"]
+
+
+def test_cloud_webhook_filters_github_issue_actions_before_run(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    created: list[str] = []
+
+    class _Workers:
+        def get_any(self, *, worker_id):
+            return {"id": worker_id, "owner_id": "owner-1"}
+
+    class _Repos:
+        workers = _Workers()
+
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: _Repos())
+    monkeypatch.setattr(main, "verify_webhook_token", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "_worker_has_webhook_trigger", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        main.engine_main,
+        "get_worker_config_for_run",
+        lambda _worker_id: {"webhook": {"github_issue_actions": ["opened"]}},
+    )
+    monkeypatch.setattr(main.engine_main, "_claim_webhook_delivery", lambda *_args: True)
+    monkeypatch.setattr(main.engine_main, "_check_webhook_rate_limit", lambda _key: True)
+    monkeypatch.setattr(main.engine_main, "create_run", lambda *_args, **_kwargs: created.append("run") or "run-1")
+    monkeypatch.setattr(main.engine_main, "start_run", lambda *_args, **_kwargs: None)
+
+    response = client.post(
+        "/api/webhooks/worker-1?token=good",
+        headers={"X-GitHub-Delivery": "delivery-1"},
+        json={
+            "action": "labeled",
+            "issue": {"number": 1781},
+            "repository": {"full_name": "floomhq/floom"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
+    assert created == []
+
+
+def test_cloud_webhook_allows_configured_github_issue_action(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    created: list[str] = []
+
+    class _Workers:
+        def get_any(self, *, worker_id):
+            return {"id": worker_id, "owner_id": "owner-1"}
+
+    class _Repos:
+        workers = _Workers()
+
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: _Repos())
+    monkeypatch.setattr(main, "verify_webhook_token", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "_worker_has_webhook_trigger", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        main.engine_main,
+        "get_worker_config_for_run",
+        lambda _worker_id: {"webhook": {"github_issue_actions": ["opened"]}},
+    )
+    monkeypatch.setattr(main.engine_main, "_claim_webhook_delivery", lambda *_args: True)
+    monkeypatch.setattr(main.engine_main, "_check_webhook_rate_limit", lambda _key: True)
+    monkeypatch.setattr(main.engine_main, "create_run", lambda *_args, **_kwargs: created.append("run") or "run-1")
+    monkeypatch.setattr(main.engine_main, "start_run", lambda *_args, **_kwargs: None)
+
+    response = client.post(
+        "/api/webhooks/worker-1?token=good",
+        headers={"X-GitHub-Delivery": "delivery-1"},
+        json={
+            "action": "opened",
+            "issue": {"number": 1781},
+            "repository": {"full_name": "floomhq/floom"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    assert created == ["run"]
+
+
+def test_cloud_webhook_filters_claude_codex_issue_labels_by_default(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    created: list[str] = []
+
+    class _Workers:
+        def get_any(self, *, worker_id):
+            return {"id": worker_id, "owner_id": "owner-1"}
+
+    class _Repos:
+        workers = _Workers()
+
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: _Repos())
+    monkeypatch.setattr(main, "verify_webhook_token", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "_worker_has_webhook_trigger", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "get_worker_config_for_run", lambda _worker_id: {})
+    monkeypatch.setattr(main.engine_main, "_claim_webhook_delivery", lambda *_args: True)
+    monkeypatch.setattr(main.engine_main, "_check_webhook_rate_limit", lambda _key: True)
+    monkeypatch.setattr(main.engine_main, "create_run", lambda *_args, **_kwargs: created.append("run") or "run-1")
+    monkeypatch.setattr(main.engine_main, "start_run", lambda *_args, **_kwargs: None)
+
+    response = client.post(
+        "/api/webhooks/claude-codex-pr-loop-v1?token=good",
+        headers={"X-GitHub-Delivery": "delivery-1"},
+        json={
+            "action": "labeled",
+            "issue": {"number": 1781},
+            "repository": {"full_name": "floomhq/floom"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
+    assert created == []
 
 
 def test_root_webhook_path_uses_cloud_wrapper(monkeypatch, tmp_path):

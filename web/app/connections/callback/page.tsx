@@ -55,9 +55,11 @@ function CallbackInner() {
         params.get("id") ||
         "";
       const status = params.get("status") || "";
+      const state = params.get("state") || "";
       const qs = new URLSearchParams();
       if (connectionId) qs.set("connection_id", connectionId);
       if (status) qs.set("status", status);
+      if (state) qs.set("state", state);
 
       const callbackPath = `/api/proxy/connections/callback?${qs.toString()}`;
 

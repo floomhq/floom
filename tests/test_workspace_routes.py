@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi import Response
 from starlette.requests import Request
 
 import apps.api.routes.workspaces as workspace_routes
@@ -118,6 +119,259 @@ def test_scoped_pat_cannot_select_other_workspace(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "token is not valid for this workspace"
+
+
+def test_pat_workspace_create_returns_replacement_token(monkeypatch):
+    created = {
+        "id": "ws_new",
+        "name": "New workspace",
+        "owner_user_id": "user-1",
+        "created_at": "2026-01-01",
+    }
+    token_calls = []
+    delete_calls = []
+    events = []
+
+    class FakeTokenRepo:
+        def delete_cli_workspace_tokens_for_user(self, **kwargs):
+            events.append("delete")
+            delete_calls.append(kwargs)
+            return 1
+
+        def create(self, **kwargs):
+            events.append("create")
+            token_calls.append(kwargs)
+            return {"id": "tok_1", **kwargs}
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", lambda owner_user_id, name: created)
+    monkeypatch.setattr(workspace_routes, "SupabaseApiTokenRepository", lambda: FakeTokenRepo())
+    monkeypatch.setattr(workspace_routes, "_new_pat", lambda: "floom_replacement")
+    monkeypatch.setattr(workspace_routes, "_hash_pat", lambda raw: f"hash:{raw}")
+
+    response = asyncio.run(
+        workspace_routes.create_workspace(
+            workspace_routes.CreateWorkspaceRequest(name="New workspace"),
+            Response(),
+            AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="pat"),
+        )
+    )
+
+    assert response.id == "ws_new"
+    assert response.api_token == "floom_replacement"
+    assert response.header == "x-floom-token"
+    assert events == ["create", "delete"]
+    assert delete_calls == [{"user_id": "user-1", "exclude_token_hash": "hash:floom_replacement"}]
+    assert token_calls == [
+        {
+            "user_id": "user-1",
+            "name": "CLI workspace: New workspace",
+            "token_hash": "hash:floom_replacement",
+            "workspace_id": "ws_new",
+        }
+    ]
+
+
+def test_browser_workspace_create_does_not_return_raw_token(monkeypatch):
+    created = {
+        "id": "ws_new",
+        "name": "New workspace",
+        "owner_user_id": "user-1",
+        "created_at": "2026-01-01",
+    }
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", lambda owner_user_id, name: created)
+
+    response = asyncio.run(
+        workspace_routes.create_workspace(
+            workspace_routes.CreateWorkspaceRequest(name="New workspace"),
+            Response(),
+            AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="jwt"),
+        )
+    )
+
+    assert response.id == "ws_new"
+    assert response.api_token is None
+    assert response.header is None
+
+
+def test_create_workspace_does_not_change_active_workspace(monkeypatch):
+    created = {
+        "id": "ws_new",
+        "name": "New workspace",
+        "owner_user_id": "user-1",
+        "created_at": "2026-01-01",
+    }
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", lambda owner_user_id, name: created)
+    response = Response()
+
+    with active_workspace("ws_existing", "admin"):
+        result = asyncio.run(
+            workspace_routes.create_workspace(
+                workspace_routes.CreateWorkspaceRequest(name="New workspace"),
+                response,
+                AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="jwt"),
+            )
+        )
+        assert workspace_routes.get_active_workspace_id() == "ws_existing"
+
+    assert result.id == "ws_new"
+    assert ACTIVE_WORKSPACE_COOKIE not in response.headers.get("set-cookie", "")
+
+
+def test_create_workspace_duplicate_name_returns_409(monkeypatch):
+    def create_duplicate(owner_user_id, name):
+        raise ValueError("workspace 'Acme' already exists")
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", create_duplicate)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.create_workspace(
+                workspace_routes.CreateWorkspaceRequest(name="Acme"),
+                Response(),
+                AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="jwt"),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "workspace 'Acme' already exists"
+
+
+def test_duplicate_workspace_uses_engine_template_pipeline(monkeypatch):
+    calls = []
+    source = {
+        "id": "ws_source",
+        "name": "Acme Ops",
+        "owner_user_id": "owner-1",
+        "created_at": "2026-01-01",
+    }
+    created = {
+        "id": "ws_copy",
+        "name": "Acme Ops (copy 2)",
+        "owner_user_id": "owner-1",
+        "created_at": "2026-01-02",
+    }
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "get", lambda workspace_id: source)
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "list_for_owner",
+        lambda owner_user_id: [source, {**source, "id": "ws_existing", "name": "Acme Ops (copy)"}],
+    )
+
+    def create_workspace(*, owner_user_id, name):
+        calls.append(("create", owner_user_id, name))
+        assert name == "Acme Ops (copy 2)"
+        return created
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", create_workspace)
+
+    def export_workspace(*, auth, repos):
+        calls.append(("export", workspace_routes.get_active_workspace_id(), auth.user_id))
+        return SimpleNamespace(body=b"zip-bytes")
+
+    async def import_workspace(*, bundle, request, auth, repos):
+        calls.append(("import", workspace_routes.get_active_workspace_id(), bundle.filename, auth.user_id))
+        return SimpleNamespace(
+            workers_imported=["worker-a"],
+            contexts_imported=["brain-a"],
+            skipped=[],
+            id_remaps={"old": "new"},
+            required_secrets=["OPENAI_API_KEY"],
+            required_connections=["gmail"],
+            workspace_md_present=True,
+        )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "main",
+        SimpleNamespace(
+            export_workspace=export_workspace,
+            import_workspace=import_workspace,
+            get_repositories=lambda: object(),
+        ),
+    )
+
+    result = asyncio.run(
+        workspace_routes.duplicate_workspace(
+            "ws_source",
+            AuthContext(user_id="owner-1", email="owner@example.com", scopes=(), auth_method="jwt"),
+        )
+    )
+
+    assert result.id == "ws_copy"
+    assert result.name == "Acme Ops (copy 2)"
+    assert result.workers_imported == ["worker-a"]
+    assert result.contexts_imported == ["brain-a"]
+    assert result.required_connections == ["gmail"]
+    assert calls == [
+        ("create", "owner-1", "Acme Ops (copy 2)"),
+        ("export", "ws_source", "owner-1"),
+        ("import", "ws_copy", "workspace-template.zip", "owner-1"),
+    ]
+
+
+def test_duplicate_workspace_hides_non_owner_workspace(monkeypatch):
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get",
+        lambda workspace_id: {
+            "id": workspace_id,
+            "name": "Team",
+            "owner_user_id": "owner-2",
+            "created_at": "2026-01-01",
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.duplicate_workspace(
+                "ws_a",
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+def test_duplicate_workspace_rejects_when_owner_hits_workspace_cap(monkeypatch):
+    source = {
+        "id": "ws_source",
+        "name": "Acme Ops",
+        "owner_user_id": "owner-1",
+        "created_at": "2026-01-01",
+    }
+    monkeypatch.setattr(workspace_routes.workspace_repo, "get", lambda workspace_id: source)
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "list_for_owner",
+        lambda owner_user_id: [
+            {
+                "id": f"ws_{idx}",
+                "name": f"Workspace {idx}",
+                "owner_user_id": owner_user_id,
+                "created_at": "2026-01-01",
+            }
+            for idx in range(workspace_routes._MAX_OWNED_WORKSPACES)
+        ],
+    )
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "create",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("create must not run")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.duplicate_workspace(
+                "ws_source",
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "workspace limit reached" in str(exc_info.value.detail)
 
 
 def test_create_share_link_returns_token_once(monkeypatch):

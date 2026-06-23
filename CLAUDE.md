@@ -2,7 +2,7 @@
 
 **This repo is the hosted, multi-tenant Cloud product** at `workeros.floom.dev`
 (landing) + `workeros-api.floom.dev` (FastAPI). It is a thin Supabase-backed
-**wrapper** around the **WorkerOS engine `floomhq/workeros`** (private repo,
+**wrapper** around the **WorkerOS engine `floomhq/floom`** (private repo,
 single-tenant), vendored as the `engine/` git submodule.
 
 ## CRITICAL: ALWAYS stay in sync with WorkerOS. You are building the WRAPPER ONLY.
@@ -10,7 +10,7 @@ single-tenant), vendored as the `engine/` git submodule.
 > **Federico, standing rule (2026-05-30):** "We ALWAYS want to stay in sync with
 > workeros. You are just building the cloud wrapper."
 
-`floomhq/workeros` (`engine/`) is the **single source of truth** for the product —
+`floomhq/floom` (`engine/`) is the **single source of truth** for the product —
 the worker model, the run engine, AND the entire dashboard UI. The cloud product
 is `engine` + a thin cloud overlay (auth, workspaces, hosting). **Nothing else.**
 
@@ -57,7 +57,7 @@ There is a hard ownership boundary. Respect it on every change.
 
 ### The rule (Federico, 2026-05-29)
 > Everything that's Supabase / auth / cloud stays on the cloud side. But if you
-> find a bug in the **app/engine layer**, you do a **PR to floomhq/workeros** so
+> find a bug in the **app/engine layer**, you do a **PR to floomhq/floom** so
 > we stay in sync — then bump the submodule here. Do NOT patch `engine/` locally.
 
 **Decision test for any fix:**
@@ -65,7 +65,7 @@ There is a hard ownership boundary. Respect it on every change.
    RLS, billing, or the apex landing/`/login`? → fix in THIS repo.
 2. Is it ANYTHING in the dashboard UI (a page, component, nav order, design,
    worker flow) or worker/run/contexts/scheduler/validator/LLM/MCP behavior, or
-   anything under `engine/`? → **PR `floomhq/workeros`**, merge it, then bump the
+   anything under `engine/`? → **PR `floomhq/floom`**, merge it, then bump the
    `engine/` submodule pin here. File an issue first if you can't fix it.
 3. Unsure? It's the engine. Default to a WorkerOS PR over a local patch — the
    dashboard UI is the engine's, not ours to fork.
@@ -74,20 +74,42 @@ There is a hard ownership boundary. Respect it on every change.
 must add one to unblock prod (e.g. a manifest-lift shim), open the matching
 WorkerOS PR in the same session and delete the workaround once it merges.
 
-### Sync workflow
+### Sync workflow — the engine bump is the ONLY step; deploy is automatic
+A push to cloud `main` **auto-deploys the backend** (api/web + worker) to Railway
+via `.github/workflows/railway-deploy.yml` (mirrors `vercel-deploy.yml` for the
+dashboard), then runs the smoke gate. So **do NOT `railway up` by hand** — shipping
+a new engine version is just: **open a PR that bumps the `engine/` submodule pin to
+the version you need; merging it to `main` deploys both services + smoke-gates.**
+
 ```bash
-# After a WorkerOS PR merges:
-cd engine && git fetch origin && git checkout <new-sha> && cd ..
+# After a WorkerOS PR merges, on a cloud branch -> PR:
+cd engine && git fetch origin && git checkout <new-engine-sha> && cd ..
 git add engine && git commit -m "chore(engine): bump to <sha> (<what>)"
-# deploy: railway up --service workeros-cloud-api, then run smoke gate
+# push the branch, open a PR, merge to main  ->  CI deploys api+worker + smoke gate.
 ```
 
+- **Engine bumps are a reviewed PR, never auto-merged.** Engine is source of truth
+  and a bad bump can break the overlay (e.g. an `engine/apps/api/requirements.txt`
+  dep conflict — keep the cloud `apps/api/requirements.txt` from pinning shared
+  deps the engine also pins). The PR review + the post-deploy smoke gate are the
+  safety; the deploy is the only thing that's automated, not the decision to bump.
+- The deploy workflow needs the `RAILWAY_TOKEN` repo secret (a Railway project
+  token) and the `workeros-ci` self-hosted runner; it ships the working tree
+  (engine submodule files included) and **fails red if smoke fails**.
+- **Manual fallback** (runner/token down): `railway up --service
+  workeros-cloud-worker && railway up --service workeros-cloud-api`, then
+  `bash ops/smoke-routes.sh cloud`.
+
 ## Live deployment
+- **Deploys are automated on push to `main`** (`.github/workflows/railway-deploy.yml`
+  → `railway up` for both services + smoke gate). The commands below are the manual
+  fallback only.
 - API: Railway service `workeros-cloud-api`, public base
-  `https://workeros-api.floom.dev`. Deploy from this repo after the engine
-  submodule is pinned:
+  `https://workeros-api.floom.dev`. Worker: `workeros-cloud-worker`. Manual deploy
+  (fallback) after the engine submodule is pinned:
 
   ```bash
+  railway up --service workeros-cloud-worker
   railway up --service workeros-cloud-api
   bash ops/smoke-routes.sh cloud
   ```
@@ -130,7 +152,7 @@ git add engine && git commit -m "chore(engine): bump to <sha> (<what>)"
   seams `NEXT_PUBLIC_BASE_PATH=/app` + `NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy`
   are baked into `web/package.json`'s build script. `npm run check-drift` (CI)
   fails if the synced tree differs from the engine — it can never silently drift.
-  Engine seams live upstream (floomhq/workeros#324: env api-base, env basePath,
+  Engine seams live upstream (floomhq/floom#324: env api-base, env basePath,
   exported sidebar parts). Landing deploys with `npm run deploy:prod` from the
   repo root, or `vercel deploy --prod --yes && bash ops/smoke-routes.sh`.
 - Supabase project `sgizlsyygvlqosgwdimb`. Backend uses the **service_role** key

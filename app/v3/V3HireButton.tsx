@@ -5,7 +5,8 @@
  * we mirror V3Shell (#821): ask /api/session, then route accordingly:
  *   - signed in  -> open the app (no pointless re-login)
  *   - signed out -> /login?next=<this page> so they return here after auth
- * Renders the login path first (safe) and flips once the session resolves.
+ * Holds the CTA until the session resolves so signed-in users are not raced
+ * through the login path by a fast click.
  *
  * NOTE: this does not yet PROVISION the template into a workspace — that's the
  * engine-coupled import flow (docs/TEMPLATES-IMPORT-FLOW.md). It fixes the
@@ -14,6 +15,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+
+type SessionState = "checking" | "authed" | "guest";
 
 export function V3HireButton({
   label,
@@ -24,22 +27,39 @@ export function V3HireButton({
   returnPath: string;
   className?: string;
 }) {
-  const [authed, setAuthed] = useState(false);
+  const [sessionState, setSessionState] = useState<SessionState>("checking");
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/session", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { authed: false }))
       .then((d) => {
-        if (!cancelled && d && typeof d.authed === "boolean") setAuthed(d.authed);
+        if (!cancelled) setSessionState(d?.authed === true ? "authed" : "guest");
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setSessionState("guest");
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const href = authed ? "/app/overview" : `/login?next=${encodeURIComponent(returnPath)}`;
+  const href =
+    sessionState === "authed" ? "/app/overview" : `/login?next=${encodeURIComponent(returnPath)}`;
+
+  if (sessionState === "checking") {
+    return (
+      <span
+        aria-busy="true"
+        aria-disabled="true"
+        className={`${className} pointer-events-none opacity-70`}
+        role="link"
+        style={{ background: "var(--v3-accent)" }}
+      >
+        {label}
+      </span>
+    );
+  }
 
   return (
     <Link href={href} className={className} style={{ background: "var(--v3-accent)" }}>

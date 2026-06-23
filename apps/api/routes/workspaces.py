@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import io
 import copy
+import hashlib
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
@@ -28,6 +30,7 @@ from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.workspace_context import active_workspace, get_active_workspace_id, get_active_member_role
 from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, ACTIVE_WORKSPACE_HEADER
 from apps.api.config import get_cloud_settings
+from apps.api.db.supabase_repos import SupabaseApiTokenRepository
 from apps.api.db import workspaces as workspace_repo
 
 ensure_engine_api_path()
@@ -41,6 +44,7 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 # 30 days, matching the brief.
 _COOKIE_MAX_AGE_SECONDS = 30 * 24 * 3600
 _WORKSPACE_LIST_CACHE_TTL_SECONDS = 15.0
+_MAX_OWNED_WORKSPACES = 50
 _workspace_list_cache_lock = threading.Lock()
 _workspace_list_cache: dict[str, tuple[float, list["WorkspaceOut"]]] = {}
 
@@ -55,6 +59,11 @@ class WorkspaceOut(BaseModel):
     owner_user_id: str
     created_at: str
     role: str = "admin"  # caller's role: 'admin' for owners, 'admin'/'member' for members
+
+
+class WorkspaceCreateResponse(WorkspaceOut):
+    api_token: str | None = None
+    header: str | None = None
 
 
 class WorkspaceListResponse(BaseModel):
@@ -112,6 +121,16 @@ class WorkspaceShareImportResponse(BaseModel):
     workspace_md_present: bool = False
 
 
+class WorkspaceDuplicateResponse(WorkspaceOut):
+    workers_imported: list[str] = Field(default_factory=list)
+    contexts_imported: list[str] = Field(default_factory=list)
+    skipped: list[dict] = Field(default_factory=list)
+    id_remaps: dict[str, str] = Field(default_factory=dict)
+    required_secrets: list[str] = Field(default_factory=list)
+    required_connections: list[str] = Field(default_factory=list)
+    workspace_md_present: bool = False
+
+
 class WorkspaceTransferResponse(BaseModel):
     workspace: WorkspaceOut
     previous_owner_user_id: str
@@ -146,7 +165,7 @@ def _cookie_domain() -> str | None:
     return "." + ".".join(parts[-2:])
 
 
-def _set_active_cookie(response: JSONResponse, workspace_id: str) -> None:
+def _set_active_cookie(response: Response, workspace_id: str) -> None:
     response.set_cookie(
         key=ACTIVE_WORKSPACE_COOKIE,
         value=workspace_id,
@@ -159,6 +178,14 @@ def _set_active_cookie(response: JSONResponse, workspace_id: str) -> None:
     )
 
 
+def _new_pat() -> str:
+    return "floom_" + secrets.token_urlsafe(32)
+
+
+def _hash_pat(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def _to_out(row: dict, role: str = "admin") -> WorkspaceOut:
     return WorkspaceOut(
         id=str(row["id"]),
@@ -167,6 +194,31 @@ def _to_out(row: dict, role: str = "admin") -> WorkspaceOut:
         created_at=str(row["created_at"]),
         role=role,
     )
+
+
+def _duplicate_workspace_name(name: str, existing_names: set[str] | None = None) -> str:
+    base = (name or "").strip() or "Untitled"
+    existing = existing_names or set()
+
+    def candidate_for(index: int) -> str:
+        suffix = " (copy)" if index == 1 else f" (copy {index})"
+        if len(base) + len(suffix) <= 80:
+            return f"{base}{suffix}"
+        return f"{base[: 80 - len(suffix)].rstrip()}{suffix}"
+
+    for index in range(1, 100):
+        candidate = candidate_for(index)
+        if candidate not in existing:
+            return candidate
+    raise ValueError("could not allocate duplicate workspace name")
+
+
+def _enforce_workspace_count_cap(owned_rows: list[dict]) -> None:
+    if len(owned_rows) >= _MAX_OWNED_WORKSPACES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"workspace limit reached ({_MAX_OWNED_WORKSPACES})",
+        )
 
 
 def _workspace_cache_get(user_id: str) -> list[WorkspaceOut] | None:
@@ -313,14 +365,35 @@ async def list_workspaces(
     )
 
 
-@router.post("", response_model=WorkspaceOut)
+@router.post("", response_model=WorkspaceCreateResponse)
 async def create_workspace(
     payload: CreateWorkspaceRequest,
+    response: Response,
     auth: AuthContext = Depends(get_auth_context),
-) -> WorkspaceOut:
-    created = workspace_repo.create(owner_user_id=auth.user_id, name=payload.name)
+) -> WorkspaceCreateResponse:
+    try:
+        created = workspace_repo.create(owner_user_id=auth.user_id, name=payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _workspace_cache_clear(auth.user_id)
-    return _to_out(created)
+    body = WorkspaceCreateResponse(**_to_out(created).model_dump()).model_dump()
+    if auth.auth_method == "pat":
+        raw = _new_pat()
+        token_repo = SupabaseApiTokenRepository()
+        token_hash = _hash_pat(raw)
+        token_repo.create(
+            user_id=auth.user_id,
+            name=f"CLI workspace: {created['name']}",
+            token_hash=token_hash,
+            workspace_id=str(created["id"]),
+        )
+        token_repo.delete_cli_workspace_tokens_for_user(
+            user_id=auth.user_id,
+            exclude_token_hash=token_hash,
+        )
+        body["api_token"] = raw
+        body["header"] = "x-floom-token"
+    return WorkspaceCreateResponse(**body)
 
 
 @router.post("/{workspace_id}/select")
@@ -357,6 +430,56 @@ async def update_workspace(
     updated = workspace_repo.rename(workspace_id=workspace_id, name=payload.name.strip())
     _workspace_cache_clear(auth.user_id)
     return _to_out(updated)
+
+
+@router.post("/{workspace_id}/duplicate", response_model=WorkspaceDuplicateResponse)
+async def duplicate_workspace(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceDuplicateResponse:
+    source = workspace_repo.get(workspace_id=workspace_id)
+    if source is None or str(source["owner_user_id"]) != auth.user_id:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    owned = workspace_repo.list_for_owner(owner_user_id=auth.user_id)
+    _enforce_workspace_count_cap(owned)
+    existing_names = {str(row.get("name") or "") for row in owned}
+    duplicate_name = _duplicate_workspace_name(str(source.get("name") or ""), existing_names)
+    try:
+        created = workspace_repo.create(owner_user_id=auth.user_id, name=duplicate_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    import_engine = __import__("main")
+    with active_workspace(workspace_id):
+        export_response = import_engine.export_workspace(
+            auth=AuthContext(user_id=auth.user_id, email=auth.email, scopes=()),
+            repos=import_engine.get_repositories(),
+        )
+    payload = bytes(getattr(export_response, "body", b""))
+    if not payload:
+        raise HTTPException(status_code=500, detail="workspace export failed")
+
+    with active_workspace(str(created["id"])):
+        upload = UploadFile(filename="workspace-template.zip", file=io.BytesIO(payload))
+        result = await import_engine.import_workspace(
+            bundle=upload,
+            request=None,
+            auth=auth,
+            repos=import_engine.get_repositories(),
+        )
+
+    _workspace_cache_clear(auth.user_id)
+    return WorkspaceDuplicateResponse(
+        **_to_out(created).model_dump(),
+        workers_imported=list(result.workers_imported),
+        contexts_imported=list(result.contexts_imported),
+        skipped=list(result.skipped),
+        id_remaps=dict(result.id_remaps),
+        required_secrets=list(result.required_secrets),
+        required_connections=list(result.required_connections),
+        workspace_md_present=bool(result.workspace_md_present),
+    )
 
 
 @router.post("/{workspace_id}/transfer", response_model=WorkspaceTransferResponse)

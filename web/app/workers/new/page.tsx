@@ -5,6 +5,7 @@
 // route survives only as a redirect so old links keep working; ?prompt= text
 // carries into the composer via `&prime=`.
 import { redirect } from "next/navigation";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 
 export default async function NewWorkerRedirect({
   searchParams,
@@ -12,6 +13,5 @@ export default async function NewWorkerRedirect({
   searchParams: Promise<{ prompt?: string }>;
 }) {
   const { prompt } = await searchParams;
-  const prime = typeof prompt === "string" && prompt ? `&prime=${encodeURIComponent(prompt)}` : "";
-  redirect(`/?create=1${prime}`);
+  redirect(createWorkerHref(typeof prompt === "string" ? prompt : undefined));
 }

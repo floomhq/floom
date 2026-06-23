@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
+import { Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useConnections, useMembers, useSecrets, useWorkers } from "@/lib/query/hooks";
@@ -11,7 +11,6 @@ import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
-import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
 import { RunStatusBadge } from "@/components/RunStatus";
 import { StatusPill } from "@/components/collection/StatusPill";
 import {
@@ -27,102 +26,26 @@ import {
   STATUS_PILL,
   TYPE_LABEL,
   toUnified,
-  collectionCounts,
   humaniseAppName,
 } from "@/lib/connections/unify";
+import { resolveUserLabel } from "@/lib/workspace/display-name";
 
 // ---------------------------------------------------------------------------
 // #1233: Resolve owner_id to display name / email.
 // Works client-side from the workspace members list fetched on load.
 // If backend later populates owner_display_name on ConnectionItem, prefer that.
 // ---------------------------------------------------------------------------
-function resolveOwner(
+export function resolveOwner(
   ownerId: string | null | undefined,
   members: WorkspaceMember[],
 ): string {
   if (!ownerId) return "Not set";
   const member = members.find((m) => m.user_id === ownerId);
-  if (member) return member.display_name || member.email || ownerId;
-  // Fallback: truncate UUID so it's friendlier than the full 36-char string
-  return ownerId.length > 8 ? `${ownerId.slice(0, 8)}...` : ownerId;
-}
-
-// ---------------------------------------------------------------------------
-// #813 — Setup required callout
-// Computes which connection slugs are needed by workers but not yet connected.
-// missing_connections is populated by the backend (#556) on WorkerSummary.
-// ---------------------------------------------------------------------------
-
-function computeMissingBySlug(
-  workers: WorkerSummary[],
-  connections: ConnectionItem[],
-): Map<string, string[]> {
-  // Build the set of connected app slugs (lower-cased, composio kind only)
-  const connected = new Set(
-    connections
-      .filter((c) => !c.kind || c.kind === "composio")
-      .map((c) => c.app_name.toLowerCase()),
-  );
-
-  // Aggregate: slug -> worker names that still need it
-  const missing = new Map<string, string[]>();
-  for (const worker of workers) {
-    for (const slug of worker.missing_connections ?? []) {
-      const key = slug.toLowerCase();
-      if (!connected.has(key)) {
-        if (!missing.has(key)) missing.set(key, []);
-        missing.get(key)!.push(worker.name);
-      }
-    }
-  }
-  return missing;
-}
-
-function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, string[]> }) {
-  if (missingBySlug.size === 0) return null;
-  const slugs = Array.from(missingBySlug.keys());
-  const totalWorkers = new Set(Array.from(missingBySlug.values()).flat()).size;
-  return (
-    <div
-      className="flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--ink)]"
-      role="alert"
-    >
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <div className="min-w-0">
-        <span className="font-medium">Setup required: </span>
-        {totalWorkers} worker{totalWorkers !== 1 ? "s" : ""} need{totalWorkers === 1 ? "s" : ""}{" "}
-        {slugs.length === 1 ? (
-          <Link
-            href={`/connections/connect/${encodeURIComponent(slugs[0])}?return_to=${encodeURIComponent("/connections")}`}
-            className="font-medium underline underline-offset-2"
-          >
-            {humaniseAppName(slugs[0])}
-          </Link>
-        ) : (
-          <>
-            {slugs.slice(0, -1).map((slug, i) => (
-              <span key={slug}>
-                <Link
-                  href={`/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`}
-                  className="font-medium underline underline-offset-2"
-                >
-                  {humaniseAppName(slug)}
-                </Link>
-                {i < slugs.length - 2 ? ", " : ""}
-              </span>
-            ))}
-            {" and "}
-            <Link
-              href={`/connections/connect/${encodeURIComponent(slugs[slugs.length - 1])}?return_to=${encodeURIComponent("/connections")}`}
-              className="font-medium underline underline-offset-2"
-            >
-              {humaniseAppName(slugs[slugs.length - 1])}
-            </Link>
-          </>
-        )}
-        .
-      </div>
-    </div>
+  // #1728: never surface a raw UUID/ws_ owner id. When the id cannot be
+  // resolved to a real member label, fall back to the friendly workspace label.
+  return resolveUserLabel(
+    [member?.display_name, member?.email],
+    "My workspace",
   );
 }
 
@@ -735,9 +658,9 @@ export default function ConnectionsCollection({
   const loading = firstLoadPending && !timedOut;
   const error =
     timedOut && !hasCachedData
-      ? "Could not load integrations. Check your connection and try again."
+      ? "Could not load connections. Check your connection and try again."
       : connectionsQuery.isError && !connectionsQuery.data
-        ? "Could not load integrations. Check your connection and try again."
+        ? "Could not load connections. Check your connection and try again."
         : null;
   // Pinned advanced connection tabs (per-session): the "Advanced ▾" group on the
   // tab row pins/opens secondary tabs (Recent emails, Config). Mirrors the
@@ -770,12 +693,6 @@ export default function ConnectionsCollection({
   }, [firstLoadPending]);
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
-
-  // #813: compute which slugs workers need but haven't been connected yet
-  const missingBySlug = useMemo(
-    () => computeMissingBySlug(workers, connections),
-    [workers, connections],
-  );
 
   // #1226: name -> worker id map for clickable used-by links
   const workersByName = useMemo(
@@ -811,34 +728,37 @@ export default function ConnectionsCollection({
   };
 
   const config: CollectionConfig<UnifiedConn> = {
-    title: "Integrations",
+    title: "Connections",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
-    headerSlot: <ConnectionsChips />,
+    restingMaxWidth: 1120,
     items,
     loading,
     error,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
-    // The TYPE dimension (connection / mcp / secret) is the job of the
-    // ConnectionsChips surface-nav (Connected / Browse apps / MCP / Secrets), so
-    // duplicating it as filter chips here was redundant (P0-2, Federico
-    // 2026-06-19). Chips answer "which surface"; the TagBar answers "which status
-    // within it". Only the STATUS chips remain, the one dimension the chips do
-    // not cover. Type stays in searchOf so a search like "mcp" still matches.
+    // IA (Federico 2026-06-19): Connected / MCP / Secrets are TYPE filters on the
+    // one unified list, surfaced through the STANDARD `filters` affordance the
+    // Workers/Runs collections use (the TagBar's collapsible filter button), not a
+    // bespoke top chip-row. "Browse apps" is no longer a section — it is the Add
+    // button (the add-app action), so it is dropped from this filter set. Status
+    // (active / reauth / error) stays as a second family for credential health.
     tagsOf: (i) =>
-      ({ status: [i.statusKey] }) as Partial<Record<TagFamilyKey, string[]>>,
+      ({ type: [i.kind], status: [i.statusKey] }) as Partial<
+        Record<TagFamilyKey, string[]>
+      >,
     tags: {
+      type: [
+        { value: "connection", label: "Connected" },
+        { value: "mcp", label: "MCP" },
+        { value: "secret", label: "Secrets" },
+      ],
       status: [
         { value: "active", label: "active" },
         { value: "reauth", label: "reauth" },
         { value: "error", label: "error" },
       ],
     },
-    // round-09 #6: secrets are NOT connections — count connections + secrets
-    // separately and scope the active/reauth/error health tiles to real
-    // connections, so a "set" secret can never read as an "active connection".
-    counts: collectionCounts(items),
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
       headers: ["Connects to", "Type", "Detail", "Status", ""],
@@ -1009,7 +929,7 @@ export default function ConnectionsCollection({
                     </span>,
                   ],
                   ["Transport", c.mcp_transport || "—"],
-                  ["Auth secret", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
+                  ["Secret name", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
                   ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
                   ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
                   ["Last used", formatLastUsed(c)],
@@ -1159,7 +1079,7 @@ export default function ConnectionsCollection({
     add: {
       label: "Add",
       panel: {
-        title: "Add an integration",
+        title: "Add a connection",
         render: () => (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 460 }}>
             <p style={pad}>Connect an app, register an MCP server, or store a secret.</p>
@@ -1188,7 +1108,7 @@ export default function ConnectionsCollection({
     },
     states: {
       empty: {
-        title: "No integrations yet",
+        title: "No connections yet",
         help: "Connect an app, add an MCP server, or store a secret your workers can use.",
       },
       errorRetry: () => {
@@ -1198,12 +1118,7 @@ export default function ConnectionsCollection({
     },
   };
 
-  return (
-    <>
-      <SetupRequiredCallout missingBySlug={missingBySlug} />
-      <Collection config={config} />
-    </>
-  );
+  return <Collection config={config} />;
 }
 
 const pad: React.CSSProperties = { color: "var(--muted-foreground)", padding: "8px 2px" };

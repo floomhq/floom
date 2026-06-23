@@ -42,6 +42,20 @@ describe("#616 Settings Developer section", () => {
     expect(s.slice(connectSectionIdx, connectSectionIdx + 5000)).toContain("<GitWorkspacePanel />");
   });
 
+  it("uses Bearer auth for account-scoped API snippets", () => {
+    const s = src("app/settings/page.tsx");
+    const snippetIdx = s.indexOf("const API_CALL_SNIPPET");
+    const connectSectionIdx = s.indexOf("function ConnectSection()");
+    expect(snippetIdx).toBeGreaterThanOrEqual(0);
+    expect(connectSectionIdx).toBeGreaterThanOrEqual(0);
+
+    const snippet = s.slice(snippetIdx, snippetIdx + 600);
+    const connectSection = s.slice(connectSectionIdx, connectSectionIdx + 2500);
+    expect(snippet).toContain('Authorization: Bearer <your-token>');
+    expect(snippet).not.toContain("x-floom-secret");
+    expect(connectSection).toContain("Authorization: Bearer");
+  });
+
   it("keeps GitWorkspacePanel wired to the /system/git API wrappers", () => {
     const s = src("components/GitWorkspacePanel.tsx");
     for (const method of [

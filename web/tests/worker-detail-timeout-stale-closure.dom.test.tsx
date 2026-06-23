@@ -121,19 +121,22 @@ describe("useWorkerDetail stale-closure timeout bug (P0)", () => {
       // so the useEffect sets up the 25 s safety timeout.
       fireEvent.click(await screen.findByRole("button", { name: /Timeout Test Worker/i }));
 
-      // Navigate to the Setup tab → Alerts & webhooks.
-      // OpsAlertsPanel also calls useWorkerDetail(WORKER_ID). At this point:
+      // Navigate to the Setup tab → Limits.
+      // OpsLimitsPanel also calls useWorkerDetail(WORKER_ID). At this point:
       //   - OverviewTab is UNMOUNTED (tabs render lazily — only the active tab renders)
-      //   - OpsAlertsPanel is MOUNTED and also has a pending 25 s timeout
+      //   - OpsLimitsPanel is MOUNTED and also has a pending 25 s timeout
       //   - The detail cache is still empty (mock not yet resolved)
       // Both conditions hold: the timeout is active and `settled = false`.
+      // (The Limits sub-panel is used as the useWorkerDetail vehicle because the
+      // Alerts panel no longer reads useWorkerDetail — it fetches its own alert
+      // list — but the timeout under test lives in useWorkerDetail.)
       fireEvent.click(await screen.findByRole("tab", { name: "Setup" }));
-      fireEvent.click(await screen.findByRole("tab", { name: "Alerts & webhooks" }));
+      fireEvent.click(await screen.findByRole("tab", { name: "Limits" }));
 
       // While the API is still pending, the panel shows a loading state (spinner).
-      // "Alerts (email on event)" is NOT yet shown.
+      // "Spend cap" is NOT yet shown.
       expect(
-        screen.queryByText("Alerts (email on event)"),
+        screen.queryByText("Spend cap"),
       ).not.toBeInTheDocument();
 
       // Now resolve the detail. This simulates the API returning after 1-2 seconds
@@ -143,10 +146,10 @@ describe("useWorkerDetail stale-closure timeout bug (P0)", () => {
         resolveDetail(workerDetail);
       });
 
-      // After resolution, the loaded alert content should appear.
+      // After resolution, the loaded limits content should appear.
       await waitFor(
         () => {
-          expect(screen.getByText("Alerts (email on event)")).toBeInTheDocument();
+          expect(screen.getByText("Spend cap")).toBeInTheDocument();
         },
         { timeout: 5_000 },
       );
@@ -170,7 +173,7 @@ describe("useWorkerDetail stale-closure timeout bug (P0)", () => {
       expect(
         screen.queryByText("Could not load details. Check your connection and try again."),
       ).not.toBeInTheDocument();
-      expect(screen.getByText("Alerts (email on event)")).toBeInTheDocument();
+      expect(screen.getByText("Spend cap")).toBeInTheDocument();
     },
     30_000,
   );

@@ -1,5 +1,7 @@
 {
   "redirects": [
+    {"source":"/","has":[{"type":"query","key":"create","value":"(?<create>.+)"},{"type":"query","key":"prime","value":"(?<prime>.+)"}],"destination":"/app?create=:create&prime=:prime","permanent":false},
+    {"source":"/","has":[{"type":"query","key":"create","value":"(?<create>.+)"}],"destination":"/app?create=:create","permanent":false},
     {"source":"/overview","destination":"/app/overview","permanent":false},
     {"source":"/overview/:path*","destination":"/app/overview/:path*","permanent":false},
     {"source":"/workers","destination":"/app/workers","permanent":false},
@@ -16,7 +18,7 @@
     {"source":"/approvals/:path*","destination":"/app/approvals/:path*","permanent":false}
   ],
   "rewrites": [
-    {"source":"/app","destination":"https://workeros-cloud-dashboard.vercel.app/app"},
-    {"source":"/app/:path*","destination":"https://workeros-cloud-dashboard.vercel.app/app/:path*"}
+    {"source":"/app","destination":"https://r9-detail.floom.dev/app"},
+    {"source":"/app/:path*","destination":"https://r9-detail.floom.dev/app/:path*"}
   ]
 }

@@ -10,7 +10,7 @@ Final Cloud `engine/` pin:
 e8fd80c8d7f673cacc445cd9d5fc09ecd26ffb35
 ```
 
-Current OSS `floomhq/workeros` `main` at deploy time:
+Current OSS `floomhq/floom` `main` at deploy time:
 
 ```text
 e8fd80c8d7f673cacc445cd9d5fc09ecd26ffb35

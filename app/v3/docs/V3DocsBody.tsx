@@ -75,7 +75,7 @@ function McpInstall() {
         ))}
       </div>
       <Code>
-        <CopyLine text={`npx -y @floomhq/workeros mcp install --target ${target}`} />
+        <CopyLine text={`npx -y @floomhq/floom mcp install --target ${target}`} />
       </Code>
     </div>
   );
@@ -172,7 +172,7 @@ export function V3DocsBody() {
               Floom speaks MCP. Add it to Claude Code, Cursor, Codex, or any client and drive workers from where you already work.
             </p>
             <McpInstall />
-            <p className="mt-2 text-[12px] text-muted-foreground">Ships the `workeros-mcp` stdio server from the `@floomhq/workeros` package.</p>
+            <p className="mt-2 text-[12px] text-muted-foreground">Ships the `workeros-mcp` stdio server from the `@floomhq/floom` package.</p>
             <p className="mt-3 text-[12.5px] text-muted-foreground">
               Then: &quot;run client-follow-up for the Acme call&quot; from your agent. The run lands on the record like any other.
             </p>

@@ -64,7 +64,7 @@ export const FILTER_TOOLS = [
 
 export const FILTER_TRIGGERS = ["Schedule", "New email", "On demand", "Webhook"];
 
-// Real workers, drawn from the proven WorkerOS bench. `runs` = cadence.
+// Real workers, drawn from the proven Floom bench. `runs` = cadence.
 export const TEMPLATES: Template[] = [
   // --- Sales ---
   {

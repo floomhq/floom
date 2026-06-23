@@ -76,6 +76,11 @@ export function workerStageKey(w: WorkerSummary): "draft" | "live" {
   return "draft";
 }
 
+/** Capitalized stage label for the per-card / header badge ("Draft" | "Live"). */
+export function workerStageLabel(w: WorkerSummary): "Draft" | "Live" {
+  return workerStageKey(w) === "live" ? "Live" : "Draft";
+}
+
 export function workerTags(
   w: WorkerSummary,
   opts: { starred: boolean; now: number },

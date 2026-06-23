@@ -77,12 +77,15 @@ export const OVERLAY_FILES = [
   "app/invite/[token]/page.tsx",
   "app/api/me/route.ts",
   "app/api/cli-auth/[action]/route.ts",
+  "app/cli-auth/page.engine.tsx",
   "app/cli-auth/page.tsx",
+  "app/lib/me.ts",
   "app/connections/connected-accounts/[id]/route.ts",
   // app/page.tsx de-forked 2026-06-13: was a bare redirect("/overview"); the engine
   // root page renders the overview dashboard at "/" directly (engine serves it at
   // both "/" and "/overview"), so the redirect was redundant.
   "app/privacy/page.tsx",
+  "app/version/route.ts",
   // app/settings/page.tsx de-forked 2026-06-13: the overlay copy was a stale
   // subset (1063 vs engine 2223 lines) missing WorkspaceTokensPanel /
   // BehaviourSettings / ModelDefaults / WorkspaceInfoSettings. The engine
@@ -99,6 +102,7 @@ export const OVERLAY_FILES = [
   "app/workspace/share/[token]/page.tsx",
   "components/CloudAppChrome.tsx",
   "components/CloudAccountFooter.tsx",
+  "components/LoginEmailPanel.tsx",
   "components/PostHogProvider.tsx",
   "components/VersionHistoryMenu.tsx",
   "components/TelemetryProvider.tsx",
@@ -116,9 +120,14 @@ export const OVERLAY_FILES = [
   // dashboard renders CloudAppChrome (overlay), not the engine AppShell, so its
   // fullscreen page-pane-hide needs its own guard (Federico 2026-06-17).
   "tests/cloud-emily-fullscreen-r9.dom.test.tsx",
+  "tests/cloud-cli-auth-endpoint.test.ts",
+  "tests/cloud-cli-auth-signin-redirect.dom.test.tsx",
+  "tests/cloud-overlay-parity.test.ts",
   "lib/api.ts",
   "lib/server-api.ts",
   "lib/posthog.ts",
+  "lib/safe-next.ts",
+  "lib/safe-storage.ts",
   // lib/api.ts de-forked 2026-06-12: the engine version consumes the cloud env
   // seams (NEXT_PUBLIC_API_PROXY_BASE / NEXT_PUBLIC_BASE_PATH) directly; the
   // overlay copy had silently fallen behind (missing workspace.getSettings,
@@ -132,6 +141,7 @@ export const OVERLAY_FILES = [
   "tests/me-cache-941.test.ts",
   "tests/csrf-origin-947.test.ts",
   "tests/proxy-route.test.ts",
+  "tests/cli-auth-seams.dom.test.tsx",
   "tests/files-editor-markdown-sanitize-190.dom.test.tsx",
 ];
 

@@ -25,7 +25,7 @@ describe("middleware auth gate", () => {
   });
 
   it("blocks anonymous /api/proxy/* with 401 JSON", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     for (const p of [
       "/api/proxy/connections",
       "/api/proxy/secrets",
@@ -40,7 +40,7 @@ describe("middleware auth gate", () => {
   });
 
   it("forwards /api/proxy/* when a valid session cookie is present", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/api/proxy/connections", await validCookie()));
     // NextResponse.next() carries the rewrite header and is NOT a 401/redirect.
     expect(res.status).toBe(200);
@@ -48,14 +48,14 @@ describe("middleware auth gate", () => {
   });
 
   it("rejects /api/proxy/* with a tampered cookie", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const { SESSION_COOKIE } = await import("@/lib/web-session");
     const res = await middleware(req("/api/proxy/secrets", `${SESSION_COOKIE}=deadbeef`));
     expect(res.status).toBe(401);
   });
 
   it("keeps the PUBLIC approvals proxy reachable for signed-link approvers", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const paths = [
       "/api/proxy/approvals/public/abc-123?token=xyz",
       "/api/proxy/approvals/public/abc-123/approve?token=xyz",
@@ -69,8 +69,27 @@ describe("middleware auth gate", () => {
     }
   });
 
+  it("keeps basePath cli-auth proxy approval reachable before login", async () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/app";
+    try {
+      const { proxy: middleware } = await import("@/proxy");
+      const res = await middleware(new NextRequest("https://workers.floom.dev/app/api/proxy/cli-auth/approve", {
+        method: "POST",
+        headers: {
+          origin: "https://workers.floom.dev",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ user_code: "ABCD-2345" }),
+      }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    } finally {
+      delete process.env.NEXT_PUBLIC_BASE_PATH;
+    }
+  });
+
   it("keeps the OAuth callback page and exact proxy callback reachable without login", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
 
     const page = await middleware(req("/connections/callback?status=success&connection_id=ca_test"));
     expect(page.status).toBe(200);
@@ -82,14 +101,14 @@ describe("middleware auth gate", () => {
   });
 
   it("does NOT leak the authed approvals proxy through the public prefix", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     // The plain /api/proxy/approvals list is NOT public.
     const res = await middleware(req("/api/proxy/approvals"));
     expect(res.status).toBe(401);
   });
 
   it("does NOT leak neighboring connections proxy routes through the callback exception", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     for (const p of ["/api/proxy/connections", "/api/proxy/connections/callback-extra"]) {
       const res = await middleware(req(p));
       expect(res.status).toBe(401);
@@ -97,7 +116,7 @@ describe("middleware auth gate", () => {
   });
 
   it("lets the auth endpoints through unauthenticated", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     for (const p of ["/api/auth/login", "/api/auth/logout"]) {
       const res = await middleware(req(p));
       expect(res.headers.get("x-middleware-next")).toBe("1");
@@ -105,7 +124,7 @@ describe("middleware auth gate", () => {
   });
 
   it("redirects anonymous app pages to /login with next param", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/connections"));
     expect(res.status).toBe(307);
     const location = res.headers.get("location")!;
@@ -114,7 +133,7 @@ describe("middleware auth gate", () => {
   });
 
   it("keeps public pages reachable without login", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     for (const p of ["/login", "/connections/callback?status=success", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {
       const res = await middleware(req(p));
       expect(res.headers.get("x-middleware-next")).toBe("1");
@@ -122,7 +141,7 @@ describe("middleware auth gate", () => {
   });
 
   it("keeps the exact legal pages /privacy and /terms public (OW-02)", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     for (const p of ["/privacy", "/terms"]) {
       const res = await middleware(req(p));
       expect(res.headers.get("x-middleware-next")).toBe("1");
@@ -133,7 +152,7 @@ describe("middleware auth gate", () => {
     // Exact-match only: a future auth-gated route that merely starts with
     // /privacy or /terms (e.g. /privacy-settings, /terms-admin) must stay behind
     // the login gate, not silently become public.
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     for (const p of ["/privacy-settings", "/terms-admin", "/privacyx", "/terms-of-fraud"]) {
       const res = await middleware(req(p));
       expect(res.status).toBe(307);
@@ -144,25 +163,25 @@ describe("middleware auth gate", () => {
   it("keeps the branded claim short-link /c/:token reachable without login", async () => {
     // /c/:token is rewritten to the API /c/{token} redirect (public hop). It
     // must NOT be auth-gated, or the WhatsApp/Slack claim flow bounces to /login.
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/c/sometoken123"));
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("allows authed users into app pages", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/connections", await validCookie()));
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("lets authenticated unknown app routes reach the branded not-found page", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/this-does-not-exist-xyz", await validCookie()));
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("keeps anonymous unknown app routes behind the login gate", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/this-does-not-exist-xyz"));
     expect(res.status).toBe(307);
     const location = res.headers.get("location")!;
@@ -180,7 +199,7 @@ describe("middleware: #974 proxy rejections are never shared-cacheable", () => {
   });
 
   it("401 (anonymous) /api/proxy carries private no-store, not the Next public default", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/api/proxy/secrets"));
     expect(res.status).toBe(401);
     expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
@@ -188,7 +207,7 @@ describe("middleware: #974 proxy rejections are never shared-cacheable", () => {
   });
 
   it("403 (CSRF) /api/proxy carries private no-store", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const evil = new NextRequest("https://workers.floom.dev/api/proxy/auth/tokens", {
       method: "POST",
       headers: { origin: "https://evil.com" },

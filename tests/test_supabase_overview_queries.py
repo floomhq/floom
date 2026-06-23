@@ -19,7 +19,7 @@ class _Table:
         self._in: list[tuple[str, set[Any]]] = []
         self._gte: list[tuple[str, Any]] = []
         self._lte: list[tuple[str, Any]] = []
-        self._order: tuple[str, bool] | None = None
+        self._orders: list[tuple[str, bool]] = []
         self._range: tuple[int, int] | None = None
 
     def select(self, *_args: Any, **_kwargs: Any) -> "_Table":
@@ -42,7 +42,7 @@ class _Table:
         return self
 
     def order(self, key: str, *, desc: bool = False) -> "_Table":
-        self._order = (key, desc)
+        self._orders.append((key, desc))
         return self
 
     def range(self, start: int, end: int) -> "_Table":
@@ -59,8 +59,7 @@ class _Table:
             rows = [row for row in rows if str(row.get(key) or "") >= str(value)]
         for key, value in self._lte:
             rows = [row for row in rows if str(row.get(key) or "") <= str(value)]
-        if self._order is not None:
-            key, desc = self._order
+        for key, desc in reversed(self._orders):
             rows = sorted(rows, key=lambda row: str(row.get(key) or ""), reverse=desc)
         if self._range is not None:
             start, end = self._range
@@ -267,3 +266,64 @@ def test_supabase_overview_queries_match_engine_shapes_and_workspace_scope(monke
         (9, "completed", 1),
         (10, "running", 1),
     }
+
+
+def test_supabase_run_list_is_fail_closed_and_stably_ordered() -> None:
+    repo = SupabaseRunRepository(
+        client=_Client(
+            {
+                "runs": [
+                    {
+                        "id": "run_a",
+                        "user_id": "user_1",
+                        "workspace_id": "ws_1",
+                        "worker_id": "w1",
+                        "status": "completed",
+                        "created_at": "2026-06-15T09:00:00+00:00",
+                    },
+                    {
+                        "id": "run_c",
+                        "user_id": "user_1",
+                        "workspace_id": "ws_1",
+                        "worker_id": "w1",
+                        "status": "completed",
+                        "created_at": "2026-06-15T09:00:00+00:00",
+                    },
+                    {
+                        "id": "run_b",
+                        "user_id": "user_1",
+                        "workspace_id": "ws_1",
+                        "worker_id": "w1",
+                        "status": "completed",
+                        "created_at": "2026-06-15T09:00:00+00:00",
+                    },
+                    {
+                        "id": "run_foreign",
+                        "user_id": "user_1",
+                        "workspace_id": "ws_2",
+                        "worker_id": "w1",
+                        "status": "completed",
+                        "created_at": "2026-06-15T10:00:00+00:00",
+                    },
+                ],
+                "workers": [
+                    {
+                        "id": "w1",
+                        "workspace_id": "ws_1",
+                        "user_id": "user_1",
+                        "name": "Worker One",
+                        "skill_version_id": None,
+                    },
+                ],
+                "skill_versions": [],
+            }
+        )
+    )
+
+    rows, _total = repo.list(user_id=None)  # type: ignore[arg-type]
+    assert rows == []
+
+    with active_workspace("ws_1"):
+        rows, _total = repo.list(user_id="user_1", limit=10)
+
+    assert [row["id"] for row in rows] == ["run_c", "run_b", "run_a"]

@@ -174,7 +174,8 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
         if (subscribedCardIds.current.has(card.card_id)) continue;
 
         const cardId = card.card_id;
-        const streamPath = card.streams.parts;
+        const streamPath = safeRunPartsStreamPath(card.streams.parts);
+        if (!streamPath) continue;
         // Extract run_id for fallback REST poll: path is /runs/{id}/stream
         const runId = streamPath.match(/\/runs\/([^/]+)\//)?.[1];
 
@@ -530,6 +531,14 @@ const TOOL_LABELS: Record<string, ToolLabel> = {
     running: "Cancelling run",
     completed: "Cancelled run",
   },
+  cancel_run: {
+    running: "Cancelling run",
+    completed: "Cancelled run",
+  },
+  cancel_run_post: {
+    running: "Cancelling run",
+    completed: "Cancelled run",
+  },
   "runs.get": {
     running: "Opening run details",
     completed: "Opened run details",
@@ -577,6 +586,14 @@ const TOOL_LABELS: Record<string, ToolLabel> = {
   "workers.create": {
     running: "Creating worker",
     completed: "Created worker",
+  },
+  "workers.create_from_prompt": {
+    running: "Creating worker",
+    completed: "Created worker",
+  },
+  "workers.delete": {
+    running: "Deleting worker",
+    completed: "Deleted worker",
   },
   "workers.get": {
     running: "Opening worker details",
@@ -670,6 +687,18 @@ export function getToolCardTitle(toolName: string, status: ToolCard["status"]): 
   }
 
   return fallbackToolLabel(toolName, done);
+}
+
+function toolProgressTitle(toolName: string | null, label: string | undefined, status: CardStatus): string | undefined {
+  if (!label) return toolName ? getToolCardTitle(toolName, status) : undefined;
+  const normalizedLabel = normalizeToolName(label);
+  const normalizedTool = toolName ? normalizeToolName(toolName) : "";
+  const looksLikeRawTool =
+    Boolean(normalizedTool && normalizedLabel === normalizedTool) ||
+    /(?:^|[._])(?:get|list|create|update|delete|cancel|run|read|write|set)(?:[._]|$)/i.test(normalizedLabel) ||
+    /(?:_get|_post|_delete|_put|_patch)$/.test(normalizedLabel);
+  if (looksLikeRawTool && toolName) return getToolCardTitle(toolName, status);
+  return label;
 }
 
 function normalizeCardStatus(status: unknown): CardStatus {
@@ -779,6 +808,7 @@ function runCardFromResult(
   const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
   const isRun =
     event.card?.kind === "run" ||
+    normalizedTool === "workers.create_from_prompt" ||
     normalizedTool === "workers.run" ||
     normalizedTool === "runs.get";
   const resource = event.resource?.kind === "run" ? event.resource : null;
@@ -794,7 +824,9 @@ function runCardFromResult(
     optionalString(resource?.worker_id) ??
     optionalString(nestedRun?.worker_id) ??
     optionalString(args?.id);
-  const workerName = optionalString(resource?.worker_name) ?? workerId ?? "Worker run";
+  const workerName =
+    optionalString(resource?.worker_name) ??
+    (normalizedTool === "workers.create_from_prompt" ? "Creating worker" : workerId ?? "Worker run");
   const actions =
     event.actions && event.actions.length > 0
       ? event.actions
@@ -809,6 +841,15 @@ function runCardFromResult(
                 href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
               },
             ]
+          : normalizedTool === "workers.create_from_prompt"
+            ? [
+                {
+                  id: "open_run",
+                  label: "View progress",
+                  method: "GET" as const,
+                  href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
+                },
+              ]
           : event.actions;
 
   return {
@@ -957,7 +998,7 @@ export function reduceSSEEvent(
             ...p.card,
             ...(newStatus !== undefined ? { status: newStatus } : {}),
             ...(event.type === "tool-progress" && event.label
-              ? { title: event.label }
+              ? { title: toolProgressTitle(toolName, event.label, newStatus ?? p.card.status) ?? event.label }
               : newStatus !== undefined && toolName
                 ? { title: getToolCardTitle(toolName, newStatus) }
                 : {}),
@@ -1049,6 +1090,13 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
     card.status === "completed" &&
     Boolean(card.runId)
   );
+}
+
+export function safeRunPartsStreamPath(path: unknown): string | null {
+  if (typeof path !== "string") return null;
+  const trimmed = path.trim();
+  if (!/^\/runs\/[A-Za-z0-9_-]+\/stream$/.test(trimmed)) return null;
+  return trimmed;
 }
 
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {

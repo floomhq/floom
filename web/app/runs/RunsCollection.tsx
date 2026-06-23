@@ -15,7 +15,7 @@ import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
 import { ShareModal } from "@/components/sharing/ShareModal";
-import { useRuns } from "@/lib/query/hooks";
+import { useRuns, RUNS_FIRST_PAGE_QUERY_PARAMS } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
@@ -29,6 +29,7 @@ import { RunTranscript } from "@/components/RunDetailSplitPane";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
 import { useRunLogStream } from "@/lib/useRunLogStream";
 import { contentTagOptions } from "@/lib/workers/derive";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 import {
   formatDuration,
   formatTrigger,
@@ -49,11 +50,19 @@ export function isCancellableRunStatus(status?: string): boolean {
   return status === "running" || status === "queued";
 }
 
-function useRunDetail(id: string, status?: string): RunDetail | undefined {
-  const [d, setD] = useState<RunDetail | undefined>(detailCache.get(id));
+// Exported for the cache-on-cancel regression test (P0-2). The cache write must
+// survive a fetch that resolves after unmount so a remount reads it synchronously.
+export function useRunDetail(id: string, status?: string): RunDetail | undefined {
+  // Derive the initial state synchronously from the cache so a REMOUNT shows
+  // data immediately (no skeleton, no waiting on a fresh fetch). The cache is
+  // only served as the seed for terminal runs — active runs still refetch below
+  // (§2.1) so the detail updates when the run completes.
+  const isActive = status === "running" || status === "queued";
+  const [d, setD] = useState<RunDetail | undefined>(() =>
+    isActive ? undefined : detailCache.get(id),
+  );
   // §2.1: never serve a cached entry for an active (running/queued) run so the
   // detail re-fetches when the run completes and the OutputTab shows final output.
-  const isActive = status === "running" || status === "queued";
   useEffect(() => {
     if (!isActive && detailCache.has(id)) {
       setD(detailCache.get(id));
@@ -63,6 +72,11 @@ function useRunDetail(id: string, status?: string): RunDetail | undefined {
     api.runs
       .get(id)
       .then((rd) => {
+        // P0-2 fetch race: ALWAYS write the resolved result into the cache, even
+        // when the effect was already cleaned up (`!alive`). A dropped/cancelled
+        // fetch must never strand the skeleton — the next mount reads this cache
+        // synchronously via the lazy initial state above. (Terminal runs only;
+        // an active run's pre-completion snapshot is not cached so it refetches.)
         if (!isActive) detailCache.set(id, rd);
         if (alive) setD(rd);
       })
@@ -121,6 +135,7 @@ function RunMetricsStrip({ d }: { d: RunDetail }) {
     ["Files", String(d.artifacts?.length ?? 0)],
   ];
   if (tokenCount != null) items.push(["Tokens", tokenCount.toLocaleString()]);
+  items.push(["Cost", d.total_cost_usd != null ? `$${d.total_cost_usd.toFixed(2)}` : "Not reported"]);
   return (
     <div
       style={{
@@ -286,11 +301,15 @@ function LogsTab({ r }: { r: RunSummary }) {
         <span>{formatDuration(d.duration_ms)}</span>
         <span style={kvK}>Tokens</span>
         <span style={{ fontFamily: "var(--font-mono)" }}>
-          {tokenCount != null ? tokenCount.toLocaleString() : "—" /* em-dash-ok: blank-value glyph */}
+          {tokenCount != null ? tokenCount.toLocaleString() : "Not reported"}
+        </span>
+        <span style={kvK}>Cost</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>
+          {d.total_cost_usd != null ? `$${d.total_cost_usd.toFixed(2)}` : "Not reported"}
         </span>
       </div>
       <div>
-        <h4 style={h4}>Steps</h4>
+        <h4 style={h4}>Activity</h4>
         {/* R9: reuse RunDetailSplitPane's real ai-elements (Tool / Task /
             StackTrace) transcript renderer, no hand-rolled steps table. The
             tool-call blocks, step tasks, and failure banners are the same
@@ -302,7 +321,7 @@ function LogsTab({ r }: { r: RunSummary }) {
           Logs
           {/* Live indicator while stream is open and run is active */}
           {logConnected && isActive && (
-            <span style={{ marginLeft: 8, color: "var(--accent, #3E6FE0)", fontWeight: 500, fontSize: 10 }}>
+            <span style={{ marginLeft: 8, color: "var(--accent, #3661C7)", fontWeight: 500, fontSize: 10 }}>
               Live
             </span>
           )}
@@ -386,7 +405,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
   // on return; a slow or failed refetch keeps the cached rows instead of going
   // blank or flashing an error. Pagination (loadMore) and the bell refresh stay local.
   const runsQuery = useRuns(
-    { limit: PAGE_SIZE, offset: 0 },
+    RUNS_FIRST_PAGE_QUERY_PARAMS,
     initialRuns.length > 0 ? initialRuns : undefined,
   );
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
@@ -556,6 +575,36 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     items: sorted,
     loading,
     idOf: (r) => r.id,
+    invalidSelectionMessage: "Run not found. It may have been deleted or you may not have access.",
+    // #1558: a run deep-linked via ?sel that isn't on the current page (Runs is
+    // paginated, PAGE_SIZE=50) is hydrated on demand instead of false-toasting.
+    // RunDetail is a superset of RunSummary, so we project it down for the list.
+    resolveMissing: async (id) => {
+      try {
+        const d = await api.runs.get(id);
+        // #1701: guard against a non-throwing phantom response. If the backend
+        // ever returns a body whose id does not match the requested id, treat it
+        // as a miss so the dead-link toast fires instead of opening a wrong/empty
+        // detail panel silently.
+        if (!d || !d.id || d.id !== id) return null;
+        detailCache.set(d.id, d); // warm the detail-pane cache too
+        const summary: RunSummary = {
+          id: d.id,
+          worker_id: d.worker_id,
+          worker_name: d.worker_name,
+          status: d.status,
+          trigger_source: d.trigger_source,
+          created_at: d.created_at,
+          started_at: d.started_at,
+          completed_at: d.completed_at,
+          duration_ms: d.duration_ms,
+          error: d.error,
+        };
+        return summary;
+      } catch {
+        return null; // genuinely missing/inaccessible → real not-found toast
+      }
+    },
     view: { default: "list", grid: true },
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
@@ -618,9 +667,8 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
       primary: r.worker_name ?? r.worker_id,
-      // secondary shows status + relative time in compact (split-left) mode where
-      // c-cell children are hidden (#1132).
-      secondary: `${runStatusPill(r.status).label} · ${formatRelative(r.created_at ?? r.started_at ?? "")}`,
+      // Keep compact/split-left text distinct from the Status and Started columns.
+      secondary: formatTrigger(r.trigger_source),
       cols: [
         formatTrigger(r.trigger_source),
         formatDuration(r.duration_ms),
@@ -709,7 +757,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         help: "Runs appear here when your workers execute.",
         action: (
           <Link
-            href="/workers/new"
+            href={createWorkerHref()}
             className="c-addbtn"
             style={{ display: "inline-block", marginTop: 8, padding: "6px 16px", fontSize: 13 }}
           >

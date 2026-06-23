@@ -25,7 +25,8 @@ from urllib.parse import urljoin
 # are safe under uvicorn's threaded worker model (default sync workers).
 # ---------------------------------------------------------------------------
 _cache_lock = Lock()
-_pat_cache: dict[str, tuple[str, str | None, float]] = {}   # hash → (user_id, workspace_id, ts)
+_pat_cache: dict[str, tuple[str, str | None, str | None, str | None, float]] = {}
+# hash -> (user_id, workspace_id, username, email, ts)
 _ws_cache:  dict[str, tuple[str, str | None, float]] = {}   # key → (workspace_id, role, ts)
 _PAT_TTL = 60.0
 _WS_TTL  = 30.0
@@ -66,6 +67,9 @@ logger = get_logger(__name__)
 ensure_engine_api_path()
 
 from auth.context import AuthContext  # noqa: E402
+from auth.multi_member import _hash_token as _hash_pat  # noqa: E402
+from auth.multi_member import _is_expired  # noqa: E402
+from db import now_iso  # noqa: E402
 
 PAT_HEADER = "x-floom-token"
 
@@ -78,7 +82,7 @@ def _hash_token(raw: str) -> str:
 # (via Set-Cookie on .floom.dev). HttpOnly + Secure, 30d lifetime.
 ACTIVE_WORKSPACE_COOKIE = "workeros_active_workspace"
 
-# Header used by the @floomhq/workeros CLI (cloud mode) to scope a request
+# Header used by the @floomhq/floom CLI (cloud mode) to scope a request
 # to a specific workspace. Mirrors the cookie-based dashboard flow.
 # Ownership is validated by workspace_repo.resolve_active_workspace, exactly
 # like the cookie path; an attacker can NOT scope themselves into another
@@ -242,7 +246,7 @@ class SupabaseAuthProvider:
             return await self._verify_worker_call_token(token, request)
         if token.startswith("wst_"):
             return await self._verify_workspace_token(token)
-        if token.startswith("floom_"):
+        if token.startswith(("floom_", "wos_")):
             return await self._verify_pat(token, request)
         claims = _verify_jwt(token, self._settings.supabase_url)
         user_id = claims.get("sub")
@@ -370,18 +374,23 @@ class SupabaseAuthProvider:
         )
 
     async def _verify_pat(self, raw: str, request: Request) -> AuthContext:
-        token_hash = _hash_token(raw)
+        if raw.startswith("wos_"):
+            return await self._verify_account_pat(raw, request)
+
+        token_hash = _hash_pat(raw)
         now = time.time()
 
         # Fast path: PAT already in cache and not expired.
         with _cache_lock:
             cached = _pat_cache.get(token_hash)
-        if cached and (now - cached[2]) < _PAT_TTL:
+        if cached and (now - cached[4]) < _PAT_TTL:
             user_id = cached[0]
             workspace_id = cached[1]
             return await self._build_pat_context(
                 user_id=user_id,
                 workspace_id=workspace_id,
+                username=cached[2],
+                email=cached[3],
                 request=request,
             )
 
@@ -398,7 +407,7 @@ class SupabaseAuthProvider:
         user_id = str(row["user_id"])
         workspace_id = str(row["workspace_id"]) if row.get("workspace_id") else None
         with _cache_lock:
-            _pat_cache[token_hash] = (user_id, workspace_id, now)
+            _pat_cache[token_hash] = (user_id, workspace_id, None, None, now)
 
         # Touch last_used_at at most once per cache TTL, not on every request.
         repo.touch(token_id=str(row["id"]))
@@ -409,11 +418,60 @@ class SupabaseAuthProvider:
             request=request,
         )
 
+    async def _verify_account_pat(self, raw: str, request: Request) -> AuthContext:
+        token_hash = _hash_pat(raw)
+        now = time.time()
+
+        with _cache_lock:
+            cached = _pat_cache.get(token_hash)
+        if cached and (now - cached[4]) < _PAT_TTL:
+            return await self._build_pat_context(
+                user_id=cached[0],
+                workspace_id=None,
+                username=cached[2],
+                email=cached[3],
+                request=request,
+            )
+
+        from apps.api.db.supabase_repos import SupabasePersonalAccessTokenRepository
+
+        repo = SupabasePersonalAccessTokenRepository()
+        row = repo.get_by_hash(token_hash=token_hash)
+        if row is None:
+            with _cache_lock:
+                _pat_cache.pop(token_hash, None)
+            raise HTTPException(status_code=401, detail="invalid token")
+        if row.get("disabled"):
+            raise HTTPException(status_code=401, detail="account disabled")
+        if _is_expired(row.get("expires_at")):
+            raise HTTPException(status_code=401, detail="token expired")
+
+        user_id = str(row["user_id"])
+        username = str(row.get("username") or row.get("email") or row["user_id"])
+        email = str(row["email"]) if row.get("email") else None
+        with _cache_lock:
+            _pat_cache[token_hash] = (user_id, None, username, email, now)
+
+        try:
+            repo.touch_last_used(token_id=str(row["id"]), last_used_at=now_iso())
+        except Exception:
+            pass
+
+        return await self._build_pat_context(
+            user_id=user_id,
+            workspace_id=None,
+            username=username,
+            email=email,
+            request=request,
+        )
+
     async def _build_pat_context(
         self,
         *,
         user_id: str,
         workspace_id: str | None,
+        username: str | None = None,
+        email: str | None = None,
         request: Request,
     ) -> AuthContext:
         header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
@@ -444,18 +502,21 @@ class SupabaseAuthProvider:
             obs.set_context(user_id=user_id)
             return AuthContext(
                 user_id=user_id,
-                email=None,
+                email=email,
                 scopes=("api",),
                 role=role,
                 auth_method="pat",
+                username=username,
             )
 
         # Legacy safety path for rows created before the workspace_id
         # migration is applied. Once migrated, all PAT rows have workspace_id.
         return await self._resolve_workspace_and_build_context(
             user_id=user_id,
-            email=None,
+            email=email,
+            username=username,
             scopes=("api",),
+            auth_method="pat",
             request=request,
         )
 
@@ -464,7 +525,9 @@ class SupabaseAuthProvider:
         *,
         user_id: str,
         email: str | None,
+        username: str | None = None,
         scopes: tuple[str, ...],
+        auth_method: str = "supabase",
         request: Request,
     ) -> AuthContext:
         # Workspace resolution: header (CLI) -> cookie (dashboard) -> owner
@@ -556,4 +619,6 @@ class SupabaseAuthProvider:
             email=email,
             scopes=scopes,
             role=role or "member",
+            auth_method=auth_method,
+            username=username,
         )

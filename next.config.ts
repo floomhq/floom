@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const CLOUD_DASHBOARD_URL = (
-  process.env.CLOUD_DASHBOARD_URL || "https://web-iota-five-12.vercel.app"
+  process.env.CLOUD_DASHBOARD_URL || "https://r9-detail.floom.dev"
 ).replace(/\/+$/, "");
 
 const APP_ROUTES = [
@@ -26,6 +26,25 @@ function cloudAppDestination(path: string): string {
 const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
+  },
+  async redirects() {
+    return [
+      {
+        source: "/",
+        has: [
+          { type: "query", key: "create", value: "(?<create>.+)" },
+          { type: "query", key: "prime", value: "(?<prime>.+)" },
+        ],
+        destination: "/app?create=:create&prime=:prime",
+        permanent: false,
+      },
+      {
+        source: "/",
+        has: [{ type: "query", key: "create", value: "(?<create>.+)" }],
+        destination: "/app?create=:create",
+        permanent: false,
+      },
+    ];
   },
   async rewrites() {
     return [
