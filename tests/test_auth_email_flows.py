@@ -13,6 +13,7 @@ def _settings() -> SimpleNamespace:
         api_base="https://workeros-api.floom.dev",
         dashboard_origin="https://workeros.floom.dev",
         frontend_url="https://workeros.floom.dev/app",
+        supabase_url="https://test.supabase.co",
     )
 
 
@@ -65,6 +66,39 @@ class _AuthClient:
 class _Client:
     def __init__(self, auth_client: _AuthClient) -> None:
         self.auth = auth_client
+
+
+class _ProfileAdmin:
+    def __init__(self) -> None:
+        self.updated: list[tuple[str, dict]] = []
+        self.user = SimpleNamespace(
+            id="user-1",
+            email="new@example.com",
+            user_metadata={"picture": "https://example.test/avatar.png"},
+        )
+
+    def get_user_by_id(self, user_id: str):
+        assert user_id == "user-1"
+        return SimpleNamespace(user=self.user)
+
+    def update_user_by_id(self, user_id: str, payload: dict):
+        self.updated.append((user_id, payload))
+        return SimpleNamespace(user=self.user)
+
+
+class _ProfileUsersRepo:
+    def __init__(self) -> None:
+        self.updated: list[tuple[str, dict]] = []
+
+    def update(self, *, user_id: str, **fields):
+        self.updated.append((user_id, fields))
+        return {
+            "id": user_id,
+            "email": "new@example.com",
+            "username": "new",
+            "display_name": fields.get("display_name"),
+            "role": "admin",
+        }
 
 
 def _app(monkeypatch, auth_client: _AuthClient) -> TestClient:
@@ -338,6 +372,55 @@ def test_session_token_refreshes_near_expiry_cookie(monkeypatch):
     cookie_value = response.headers["set-cookie"].split("workeros_cloud_session=", 1)[1].split(";", 1)[0]
     assert cookie_value.startswith("v2.")
     assert "rotated-refresh-token-123" not in cookie_value
+
+
+def test_profile_update_uses_verified_session_identity_and_updates_metadata(monkeypatch):
+    client = _app(monkeypatch, _AuthClient())
+    admin = _ProfileAdmin()
+    users = _ProfileUsersRepo()
+    monkeypatch.setenv("WORKEROS_SESSION_COOKIE_SECRET", "profile-test-secret")
+    monkeypatch.setattr(auth, "new_supabase_service_client", lambda: SimpleNamespace(auth=SimpleNamespace(admin=admin)))
+    monkeypatch.setattr(auth, "get_repositories", lambda: SimpleNamespace(users=users))
+
+    import apps.api.auth.supabase_provider as provider_module
+
+    monkeypatch.setattr(
+        provider_module,
+        "_verify_jwt",
+        lambda token, _supabase_url: {"sub": "user-1", "email": "new@example.com"}
+        if token == "verified-access-token"
+        else {},
+    )
+    session = SimpleNamespace(
+        access_token="verified-access-token",
+        refresh_token="refresh-token-123",
+        expires_at=1_900_000_000,
+        expires_in=3600,
+        user=SimpleNamespace(id="user-1", email="new@example.com"),
+    )
+
+    response = client.patch(
+        "/auth/profile",
+        json={"display_name": "Federico"},
+        cookies={"workeros_cloud_session": auth._encode_session_cookie(session)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["display_name"] == "Federico"
+    assert admin.updated == [
+        (
+            "user-1",
+            {
+                "user_metadata": {
+                    "picture": "https://example.test/avatar.png",
+                    "display_name": "Federico",
+                    "full_name": "Federico",
+                    "name": "Federico",
+                }
+            },
+        )
+    ]
+    assert users.updated == [("user-1", {"display_name": "Federico"})]
 
 
 def test_fragment_session_verifies_token_and_sets_cookie(monkeypatch):
