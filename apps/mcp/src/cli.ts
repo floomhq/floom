@@ -6,6 +6,13 @@ import { dirname, join, resolve } from "node:path";
 import { runLoginCommand } from "./commands/login.js";
 import { runLogoutCommand } from "./commands/logout.js";
 import { runWhoamiCommand } from "./commands/whoami.js";
+import {
+  authListCommand,
+  authLoginCommand,
+  authLogoutCommand,
+  authStatusCommand,
+  authSwitchCommand,
+} from "./commands/auth.js";
 import { runWorkerCommand } from "./commands/run.js";
 import {
   workersListCommand,
@@ -119,6 +126,28 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .description("Show current auth identity")
     .option("--json", "Print raw JSON")
     .action(async (options: { json?: boolean }) => runAction(runWhoamiCommand(options)));
+
+  const auth = program.command("auth").description("Manage saved accounts");
+  auth.command("list")
+    .description("List saved accounts")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(authListCommand(options)));
+  auth.command("login")
+    .description("Add or refresh an account via browser device authorization")
+    .option("--cloud", "Authenticate against a hosted Floom instance")
+    .action(async (options: { cloud?: boolean }) => runAction(authLoginCommand(options)));
+  auth.command("switch")
+    .description("Set the active saved account")
+    .argument("<account>", "Account id, label, user, email, or workspace")
+    .action(async (account: string) => runAction(authSwitchCommand(account)));
+  auth.command("status")
+    .description("Show current auth identity")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(authStatusCommand(options)));
+  auth.command("logout")
+    .description("Remove a saved account, or all credentials if no account is supplied")
+    .argument("[account]", "Account id, label, user, email, or workspace")
+    .action(async (account?: string) => runAction(authLogoutCommand(account)));
 
   program.command("run")
     .description("Start and monitor a worker run")

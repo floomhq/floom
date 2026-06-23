@@ -270,6 +270,8 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
           api_base: polled.api_base,
           mode: "oss",
           api_secret: polled.api_secret,
+          account_id: "oss",
+          account_label: "OSS",
           authed_at: new Date().toISOString(),
         };
         await writeCredentials(creds);
@@ -349,6 +351,8 @@ async function pollCloudExchange(args: {
       api_base: apiBase,
       mode: "cloud",
       api_token: exchanged.api_token,
+      account_id: exchanged.user_id,
+      account_label: exchanged.user_id,
       authed_at: new Date().toISOString(),
     };
     return saveCloudCredentials(creds, apiBase);
@@ -375,6 +379,8 @@ async function pollCloudExchange(args: {
     refresh_token: exchanged.refresh_token,
     supabase_url: supabaseUrl,
     supabase_anon_key: supabaseAnonKey,
+    account_id: exchanged.user_id,
+    account_label: exchanged.user_id,
     authed_at: new Date().toISOString(),
   };
   return saveCloudCredentials(creds, apiBase);

@@ -1,16 +1,24 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { readCredentials, writeCredentials } from "../dist/lib/credentials.js";
+import {
+  activeAccountPath,
+  credentialsAccountsDir,
+  credentialsPath,
+  listCredentialAccounts,
+  readCredentials,
+  writeCredentials,
+} from "../dist/lib/credentials.js";
 import { FloomApiClient } from "../dist/lib/api.js";
 import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
 import { connectionsAddCommand, connectionsListCommand } from "../dist/commands/connections.js";
 import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
+import { authLogoutCommand, authSwitchCommand } from "../dist/commands/auth.js";
 
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-ctx-"));
@@ -163,6 +171,53 @@ test("workspace switch persists and validates via /select in OSS mode", async ()
       assert.equal(creds.workspace_name, "Team A");
       assert.ok(calls.includes("POST /workspaces/ws_0123456789abcd/select"));
     });
+  });
+});
+
+test("auth switch selects between stored accounts without deleting siblings", async () => {
+  await withTempHome(async () => {
+    await writeCredentials({
+      api_base: "https://workeros-api.floom.dev",
+      mode: "cloud",
+      api_token: "pat-personal",
+      account_id: "personal@example.com",
+      account_label: "personal@example.com",
+      workspace_id: "ws_personal",
+      workspace_name: "Personal",
+      authed_at: "2026-01-01T00:00:00.000Z",
+    });
+    await writeCredentials({
+      api_base: "https://workeros-api.floom.dev",
+      mode: "cloud",
+      api_token: "pat-work",
+      account_id: "work@example.com",
+      account_label: "work@example.com",
+      workspace_id: "ws_work",
+      workspace_name: "Work",
+      authed_at: "2026-01-02T00:00:00.000Z",
+    });
+
+    let accounts = await listCredentialAccounts();
+    assert.deepEqual(accounts.map((account) => account.id).sort(), ["personal@example.com", "work@example.com"]);
+    assert.equal(accounts.find((account) => account.id === "work@example.com")?.active, true);
+
+    assert.equal(await authSwitchCommand("personal@example.com"), 0);
+    let creds = await readCredentials();
+    assert.equal(creds?.api_token, "pat-personal");
+    assert.equal(creds?.workspace_id, "ws_personal");
+
+    assert.equal(await authLogoutCommand("work@example.com"), 0);
+    accounts = await listCredentialAccounts();
+    assert.deepEqual(accounts.map((account) => account.id), ["personal@example.com"]);
+    creds = await readCredentials();
+    assert.equal(creds?.api_token, "pat-personal");
+
+    if (process.platform !== "win32") {
+      assert.equal((await stat(credentialsPath())).mode & 0o077, 0);
+      assert.equal((await stat(activeAccountPath())).mode & 0o077, 0);
+      assert.equal((await stat(credentialsAccountsDir())).mode & 0o077, 0);
+      assert.equal((await stat(join(credentialsAccountsDir(), "personal@example.com.json"))).mode & 0o077, 0);
+    }
   });
 });
 

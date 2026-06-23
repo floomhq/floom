@@ -7,7 +7,8 @@ _${name}_completion() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  local commands="login logout whoami run workers workspaces workspace runs secrets connections contexts context mcp completion --help --version"
+  local commands="login logout whoami auth run workers workspaces workspace runs secrets connections contexts context mcp completion --help --version"
+  local auth_sub="list login switch status logout"
   local workers_sub="list show"
   local workspaces_sub="list create show switch use"
   local runs_sub="list show logs download approve reject cancel"
@@ -23,6 +24,7 @@ _${name}_completion() {
 
   case "\${COMP_WORDS[1]}" in
     workers) COMPREPLY=( $(compgen -W "\${workers_sub}" -- "\${cur}") ) ;;
+    auth) COMPREPLY=( $(compgen -W "\${auth_sub}" -- "\${cur}") ) ;;
     workspaces|workspace) COMPREPLY=( $(compgen -W "\${workspaces_sub}" -- "\${cur}") ) ;;
     runs) COMPREPLY=( $(compgen -W "\${runs_sub}" -- "\${cur}") ) ;;
     secrets) COMPREPLY=( $(compgen -W "\${secrets_sub}" -- "\${cur}") ) ;;
@@ -43,6 +45,7 @@ _${name}() {
     'login:Login via device code'
     'logout:Clear local credentials'
     'whoami:Show current identity'
+    'auth:Manage saved accounts'
     'run:Run a worker'
     'workers:List or show workers'
     'workspaces:Manage workspaces'
@@ -60,7 +63,8 @@ compdef _${name} ${name}
 }
 
 function fishCompletion(name: string): string {
-  return `complete -c ${name} -f -a "login logout whoami run workers workspaces workspace runs secrets connections contexts context mcp completion"
+  return `complete -c ${name} -f -a "login logout whoami auth run workers workspaces workspace runs secrets connections contexts context mcp completion"
+complete -c ${name} -n "__fish_seen_subcommand_from auth" -a "list login switch status logout"
 complete -c ${name} -n "__fish_seen_subcommand_from workers" -a "list show"
 complete -c ${name} -n "__fish_seen_subcommand_from workspaces workspace" -a "list create show switch use"
 complete -c ${name} -n "__fish_seen_subcommand_from runs" -a "list show logs download approve reject cancel"
@@ -75,8 +79,9 @@ function powershellCompletion(name: string): string {
   return `# ${name} PowerShell completion
 Register-ArgumentCompleter -Native -CommandName ${name} -ScriptBlock {
   param($wordToComplete, $commandAst, $cursorPosition)
-  $commands = @('login','logout','whoami','run','workers','workspaces','workspace','runs','secrets','connections','contexts','context','mcp','completion')
+  $commands = @('login','logout','whoami','auth','run','workers','workspaces','workspace','runs','secrets','connections','contexts','context','mcp','completion')
   $subcommands = @{
+    auth = @('list','login','switch','status','logout')
     workers = @('list','show','info','validate','push','delete','rm','disable','enable','run')
     workspaces = @('list','create','show','switch','use')
     workspace = @('list','create','show','switch','use')
