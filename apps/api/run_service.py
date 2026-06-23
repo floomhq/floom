@@ -2459,6 +2459,15 @@ def _is_engine_approved_execution_run(run_id: str, repos: Repositories) -> bool:
             logger.exception("approval follow-up lookup failed for run %s", current)
             approval = None
         if approval and approval.get("status") == "approved":
+            try:
+                decision_input = json.loads(approval.get("decision_input_json") or "{}")
+            except Exception:
+                decision_input = {}
+            if (
+                isinstance(decision_input, dict)
+                and decision_input.get("kind") == _AWAIT_EXTERNAL_KIND
+            ):
+                return False
             return True
         run_row = repos.runs.get_any(run_id=current)
         parent = (run_row or {}).get("retry_of_run_id")
@@ -2621,6 +2630,119 @@ def _pause_run_for_required_approval(
         )
     except Exception:
         logger.warning("Slack approval notify failed for run %s", run_id, exc_info=True)
+
+
+_AWAIT_EXTERNAL_KIND = "await_external"
+
+
+def _await_external_expires_at(await_external: Dict[str, Any]) -> str:
+    timeout_seconds = await_external.get("timeout_seconds")
+    if timeout_seconds is not None:
+        try:
+            seconds = max(1, int(timeout_seconds))
+            return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+        except (TypeError, ValueError):
+            pass
+    try:
+        ttl_hours = float(os.environ.get("APPROVAL_TTL_HOURS", "24") or "24")
+    except ValueError:
+        ttl_hours = 24.0
+    return (datetime.now(timezone.utc) + timedelta(hours=ttl_hours)).isoformat()
+
+
+def _pause_run_for_await_external(
+    *,
+    run_id: str,
+    worker_id: str,
+    owner_id: str,
+    effective_inputs: Dict[str, Any],
+    await_external: Dict[str, Any],
+    outputs: Dict[str, Any],
+    repos_obj: Repositories,
+    log_fn: Callable[[str, str], None],
+    run_secrets: Optional[Dict[str, str]] = None,
+) -> None:
+    key = str(await_external.get("key") or "").strip()
+    if not key:
+        err = "await_external.key is required"
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error=err,
+            error_code="invalid_await_external",
+            user_id=owner_id,
+            repos=repos_obj,
+        )
+        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
+        log_fn(err, level="error")
+        return
+
+    approval_id = f"apr_{uuid.uuid4().hex[:12]}"
+    label = str(await_external.get("label") or "Await external result")
+    decision_input = {
+        "kind": _AWAIT_EXTERNAL_KIND,
+        "key": key,
+        "await_external": await_external,
+        "original_inputs": {
+            k: v for k, v in effective_inputs.items()
+            if k not in (_APPROVAL_DECISION_KEY, _APPROVAL_PHASE_KEY)
+        },
+    }
+    try:
+        repos_obj.approvals.create(
+            owner_id=owner_id,
+            id=approval_id,
+            run_id=run_id,
+            worker_id=worker_id,
+            status="pending",
+            label=label,
+            preview=f"Waiting for external result: {key}",
+            created_at=_now_iso(),
+            expires_at=_await_external_expires_at(await_external),
+            preview_type=_AWAIT_EXTERNAL_KIND,
+            preview_payload_json=json.dumps(await_external),
+            decision_input_json=json.dumps(decision_input),
+        )
+    except Exception as exc:
+        logger.error("Failed to create await_external row for run %s: %s", run_id, exc)
+        err = "Failed to persist await_external wait record"
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error=err,
+            error_code="await_external_persist_failed",
+            user_id=owner_id,
+            repos=repos_obj,
+        )
+        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
+        log_fn(err, level="error")
+        return
+
+    safe_outputs = (
+        _scrub_run_output(
+            outputs,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            repos=repos_obj,
+            run_secrets=run_secrets,
+        )
+        if outputs
+        else {}
+    )
+    repos_obj.runs.update_status(
+        user_id=owner_id,
+        run_id=run_id,
+        status=RunStatus.PENDING_APPROVAL.value,
+        output_json=safe_outputs,
+    )
+    _publish_sse(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.PENDING_APPROVAL.value,
+        "await_external": {"key": key, "label": label},
+    })
+    publish_run_part(run_id, {"type": "finish", "status": "pending_approval"})
+    log_fn(f"Run awaiting external result: {label} ({key})")
 
 
 def execute_run(
@@ -2954,6 +3076,7 @@ def execute_run(
             worker_needs_approval
             and not approval_follow_up
             and not result.decision_required
+            and not result.await_external
             and result.status not in _non_approval_terminal
         ):
             approval_label = (
@@ -3017,6 +3140,21 @@ def execute_run(
                 result_error_code=result_error_code,
                 repos=repos_obj,
                 log_fn=log_fn,
+            )
+            return
+
+        await_external = result.await_external
+        if await_external and result.status not in _non_approval_terminal:
+            _pause_run_for_await_external(
+                run_id=run_id,
+                worker_id=worker_id,
+                owner_id=owner_id,
+                effective_inputs=effective_inputs,
+                await_external=await_external,
+                outputs=outputs,
+                repos_obj=repos_obj,
+                log_fn=log_fn,
+                run_secrets=run_secrets,
             )
             return
 

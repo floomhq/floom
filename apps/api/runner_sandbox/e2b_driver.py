@@ -1126,6 +1126,7 @@ def _read_result_json(
                 "error",
                 "error_code",
                 "decision_required",
+                "await_external",
             }
         }
         if legacy_outputs:
@@ -2431,6 +2432,9 @@ class E2BSandboxDriver(SandboxDriver):
             decision_required = result_data.get("decision_required")
             if not isinstance(decision_required, dict):
                 decision_required = None
+            await_external = result_data.get("await_external")
+            if not isinstance(await_external, dict):
+                await_external = None
             return WorkerResult(
                 status=result_status,
                 outputs=outputs,
@@ -2438,6 +2442,7 @@ class E2BSandboxDriver(SandboxDriver):
                 error=result_error,
                 error_code=result_error_code,
                 decision_required=decision_required,
+                await_external=await_external,
             )
 
         finally:

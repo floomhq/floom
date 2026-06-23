@@ -6914,6 +6914,202 @@ class WebhookSecretResponse(BaseModel):
     webhook_url: Optional[str] = None
 
 
+async def _verified_worker_webhook_body(
+    *,
+    worker_id: str,
+    request: Request,
+    token: Optional[str],
+    repos: Repositories,
+) -> bytes:
+    """Verify per-worker webhook token/signature and return the raw body."""
+    from webhook_service import get_webhook_secret_hash, verify_signature, verify_webhook_token
+
+    body = await request.body()
+    if token is not None:
+        if not verify_webhook_token(worker_id, token, repos=repos):
+            raise HTTPException(status_code=401, detail="Invalid webhook token")
+        return body
+
+    secret_hash = get_webhook_secret_hash(worker_id, repos=repos)
+    if not secret_hash:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Webhook secret not configured — call POST "
+                f"/workers/{worker_id}/webhook-secret/rotate first"
+            ),
+        )
+    sig_header = (
+        request.headers.get("X-Floom-Signature", "")
+        or request.headers.get("X-Workeros-Signature", "")
+    )
+    if not verify_signature(body, sig_header, secret_hash):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    return body
+
+
+def _parse_webhook_json_body(body: bytes) -> Dict[str, Any]:
+    if not body:
+        return {}
+    try:
+        parsed = json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Resume body must be valid JSON")
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="Resume body must be a JSON object")
+    return parsed
+
+
+def _external_result_from_resume_payload(payload: Dict[str, Any]) -> Any:
+    if "result" in payload:
+        return payload["result"]
+    return {k: v for k, v in payload.items() if k not in {"key", "run_id"}}
+
+
+def _find_pending_await_external(
+    *,
+    worker_id: str,
+    key: str,
+    run_id: Optional[str],
+) -> Dict[str, Any]:
+    with get_db() as conn:
+        params: list[Any] = [worker_id, RunStatus.PENDING_APPROVAL.value]
+        run_clause = ""
+        if run_id:
+            run_clause = "AND a.run_id = ?"
+            params.append(run_id)
+        rows = conn.execute(
+            f"""
+            SELECT a.*, r.status AS run_status
+            FROM approvals a
+            JOIN runs r ON r.id = a.run_id
+            WHERE a.worker_id = ?
+              AND a.status = 'pending'
+              AND r.status = ?
+              {run_clause}
+            ORDER BY a.created_at ASC
+            """,
+            tuple(params),
+        ).fetchall()
+
+    matches: list[Dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        try:
+            decision_input = json.loads(item.get("decision_input_json") or "{}")
+        except Exception:
+            decision_input = {}
+        if not isinstance(decision_input, dict):
+            continue
+        if decision_input.get("kind") != "await_external":
+            continue
+        if str(decision_input.get("key") or "") != key:
+            continue
+        item["_decision_input"] = decision_input
+        matches.append(item)
+
+    if not matches:
+        raise HTTPException(status_code=404, detail="No pending await_external run found")
+    if len(matches) > 1:
+        raise HTTPException(status_code=409, detail="Multiple pending await_external runs match; include run_id")
+    return matches[0]
+
+
+@app.post("/webhooks/{worker_id}/resume", response_model=ActionResponse)
+async def webhook_resume(
+    worker_id: str,
+    request: Request,
+    token: Optional[str] = Query(None),
+) -> ActionResponse:
+    """Resume a run parked by await_external using per-worker webhook auth."""
+    repos = get_repositories()
+
+    client_ip = (request.client.host if request.client else "unknown")
+    rl_key = f"{worker_id}:resume:{client_ip}"
+    if not _check_webhook_rate_limit(rl_key):
+        raise HTTPException(status_code=429, detail="Too many webhook requests")
+
+    worker = repos.workers.get_any(worker_id=worker_id) or get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    owner_id = worker.get("owner_id")
+    if not owner_id:
+        raise HTTPException(status_code=404, detail="Worker owner not found")
+
+    body = await _verified_worker_webhook_body(
+        worker_id=worker_id,
+        request=request,
+        token=token,
+        repos=repos,
+    )
+    payload = _parse_webhook_json_body(body)
+    key = str(payload.get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Resume body must include key")
+    requested_run_id = str(payload.get("run_id") or "").strip() or None
+    wait_row = _find_pending_await_external(
+        worker_id=worker_id,
+        key=key,
+        run_id=requested_run_id,
+    )
+
+    parked_run_id = str(wait_row.get("run_id") or "")
+    decision_input = wait_row.get("_decision_input") or {}
+    original_inputs = decision_input.get("original_inputs")
+    if not isinstance(original_inputs, dict):
+        original_inputs = {}
+    external_result = _external_result_from_resume_payload(payload)
+    follow_up_inputs = {
+        **original_inputs,
+        "external_result": external_result,
+        "_workeros_await_external": {
+            "key": key,
+            "run_id": parked_run_id,
+        },
+    }
+
+    claimed = repos.approvals.approve(
+        owner_id=str(owner_id),
+        run_id=parked_run_id,
+        decided_at=now_iso(),
+        reason="External result received",
+    )
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="Await external run already resumed")
+
+    repos.runs.update_status(
+        user_id=str(owner_id),
+        run_id=parked_run_id,
+        status=RunStatus.COMPLETED.value,
+    )
+    try:
+        follow_up_run_id = create_run(
+            worker_id,
+            follow_up_inputs,
+            trigger_source="webhook_resume",
+            status=RunStatus.RUNNING.value,
+            user_id=str(owner_id),
+            repos=repos,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to spawn resumed run: {exc}") from exc
+
+    attach = getattr(repos.approvals, "attach_follow_up", None)
+    if callable(attach):
+        attach(
+            owner_id=str(owner_id),
+            run_id=parked_run_id,
+            follow_up_run_id=follow_up_run_id,
+        )
+    repos.runs.update_status(
+        user_id=str(owner_id),
+        run_id=follow_up_run_id,
+        status=RunStatus.QUEUED.value,
+    )
+    start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=str(owner_id), repos=repos)
+    return ActionResponse(status="resumed", run_id=follow_up_run_id)
+
+
 
 
 @app.post("/webhooks/{worker_id}", response_model=ActionResponse)

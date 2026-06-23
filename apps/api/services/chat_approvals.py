@@ -35,7 +35,8 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
         with _get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT a.id, a.run_id, a.worker_id, a.owner_id, a.label, a.preview, a.created_at,
+                SELECT a.id, a.run_id, a.worker_id, a.owner_id, a.label, a.preview,
+                       a.created_at, a.decision_input_json,
                        w.name AS worker_name
                 FROM approvals a
                 LEFT JOIN workers w ON w.id = a.worker_id
@@ -46,6 +47,12 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
             ).fetchall()
         result = []
         for row in rows:
+            try:
+                decision_input = json.loads(row["decision_input_json"] or "{}")
+            except Exception:
+                decision_input = {}
+            if isinstance(decision_input, dict) and decision_input.get("kind") == "await_external":
+                continue
             approval_id = row["id"]
             # Authoritative, tokenised deep link on the configured public host so
             # Emily surfaces a working link instead of inventing a fake URL.

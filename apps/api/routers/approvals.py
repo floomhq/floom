@@ -89,6 +89,14 @@ def _is_row_past_expiry(approval: Dict[str, Any]) -> bool:
     return str(expires_at) < now_iso()
 
 
+def _is_await_external_approval(approval: Dict[str, Any]) -> bool:
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        decision_input = {}
+    return isinstance(decision_input, dict) and decision_input.get("kind") == "await_external"
+
+
 def _lazy_expire(approval_id: str, repos: Repositories) -> bool:
     """Flip one stale pending approval to 'expired' (and move its run off
     pending_approval) if it is past expires_at. Returns True iff flipped.
@@ -245,6 +253,7 @@ def list_approvals(
             for r in stale:
                 _lazy_expire(str(dict(r).get("id") or ""), repos)
             rows = repos.approvals.list_pending(owner_id=auth.user_id, limit=limit)
+        rows = [row for row in rows if not _is_await_external_approval(dict(row))]
     else:
         # For non-pending statuses, query directly
         with get_db() as conn:
@@ -272,7 +281,8 @@ def count_pending_approvals(
     repos: Repositories = Depends(get_repos),
 ):
     """Return count of pending approvals for the authenticated user."""
-    count = repos.approvals.count_pending(owner_id=auth.user_id)
+    rows = repos.approvals.list_pending(owner_id=auth.user_id, limit=200)
+    count = sum(1 for row in rows if not _is_await_external_approval(dict(row)))
     return {"pending": count}
 
 
@@ -773,6 +783,11 @@ def approve_run(
             status_code=400,
             detail="This approval was created by request_approval(). Use POST /approvals/{approval_id}/approve instead.",
         )
+    if _di.get("kind") == "await_external":
+        raise HTTPException(
+            status_code=400,
+            detail="This run is awaiting an external result. Use POST /webhooks/{worker_id}/resume.",
+        )
 
     # Load original inputs
     original_inputs: Dict[str, Any] = {}
@@ -943,6 +958,11 @@ def reject_run(
         raise HTTPException(
             status_code=400,
             detail="This approval was created by request_approval(). Use POST /approvals/{approval_id}/reject instead.",
+        )
+    if _di_r.get("kind") == "await_external":
+        raise HTTPException(
+            status_code=400,
+            detail="This run is awaiting an external result. Use POST /webhooks/{worker_id}/resume.",
         )
 
     # #280: claim the decision atomically — reject() flips pending->rejected and
