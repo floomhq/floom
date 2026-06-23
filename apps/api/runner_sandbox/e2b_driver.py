@@ -16,6 +16,7 @@ import tarfile
 import threading
 import time
 import hashlib
+import hmac
 from dataclasses import dataclass, field
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -1565,6 +1566,41 @@ def _hash_tree(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _hash_embedded_worker_files(root: Path) -> str | None:
+    """Hash the same text source-file set persisted in manifest_json._files."""
+    if not root.is_dir():
+        return None
+    try:
+        from services.worker_registry_ops import _should_embed_file
+    except Exception:
+        return None
+    digest = hashlib.sha256()
+    included = 0
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            rel = path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if not _should_embed_file(rel):
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        path_bytes = rel.encode("utf-8")
+        content_bytes = content.encode("utf-8")
+        digest.update(len(path_bytes).to_bytes(8, "big"))
+        digest.update(path_bytes)
+        digest.update(len(content_bytes).to_bytes(8, "big"))
+        digest.update(content_bytes)
+        included += 1
+    if included == 0:
+        return None
+    return digest.hexdigest()
+
+
 def _effective_context_inputs(config: WorkerConfig | None, inputs: Dict[str, Any] | None) -> Dict[str, Any]:
     effective = dict(inputs or {})
     if not config:
@@ -1615,7 +1651,17 @@ def _warm_pool_sensitive_run_material(
 def _bundle_fingerprint_for_warm_key(worker_dir: Path, config: WorkerConfig | None) -> str:
     trusted = getattr(getattr(config, "runtime", None), "bundle_sha256", None)
     if isinstance(trusted, str) and trusted.strip():
-        return f"sha256:{trusted.strip()}"
+        trusted = trusted.strip()
+        embedded_sha = _hash_embedded_worker_files(worker_dir)
+        if embedded_sha and hmac.compare_digest(trusted, embedded_sha):
+            return f"sha256:{trusted}"
+        disk_sha = _hash_tree(worker_dir)
+        logger.warning(
+            "Worker bundle_sha256 does not match disk bundle for %s; "
+            "using disk fingerprint for warm-pool key",
+            worker_dir,
+        )
+        return f"tree:{disk_sha}"
     return f"tree:{_hash_tree(worker_dir)}"
 
 

@@ -1673,6 +1673,13 @@ class WorkerContract(BaseModel):
         if isinstance(value, dict) and not str(value.get("description") or "").strip():
             fallback = str(value.get("title") or value.get("name") or "Floom worker").strip()
             value = {**value, "description": fallback[:500]}
+        if isinstance(value, dict) and isinstance(value.get("trigger"), list):
+            trigger_items = [
+                item for item in value.get("trigger") or []
+                if isinstance(item, dict)
+            ]
+            if len(trigger_items) == 1 and "triggers" not in value:
+                value = {**value, "trigger": trigger_items[0]}
         if isinstance(value, dict) and "resources" not in value:
             exec_block = value.get("exec")
             if isinstance(exec_block, dict) and isinstance(exec_block.get("resources"), dict):

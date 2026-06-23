@@ -754,7 +754,10 @@ test("workers run --json surfaces output_schema values when output is empty", as
   const result = await runCli(["workers", "run", "cli-test-worker", "--json"], { HOME: home });
 
   assert.equal(result.code, 0);
-  const body = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
+  assert.match(result.stdout.trimStart(), /^\{/);
+  assert.doesNotMatch(result.stdout, /Run started/);
+  assert.doesNotMatch(result.stdout, /Status:/);
+  const body = JSON.parse(result.stdout);
   assert.deepEqual(body.output, { result: "hello" });
   assert.deepEqual(body.outputs, { result: "hello" });
   assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs", "GET /runs/run_1"]);

@@ -4400,7 +4400,10 @@ def create_worker_run(
         )
 
     # #551: Reject the run if any required secret or connection is not configured.
-    _run_available_secrets = _available_secret_names_for_user(auth.user_id, repos)
+    # Runs execute with the worker owner's secrets. Preflight must check that
+    # same owner scope; checking the caller scope can pass while the sandbox gets
+    # an empty owner-scoped secret bundle for shared/workspace-visible workers.
+    _run_available_secrets = _available_secret_names_for_user(true_owner_id, repos)
     _run_required_secrets = _worker_required_secret_names(worker)
     _run_missing_secrets = [s for s in _run_required_secrets if s not in _run_available_secrets]
     if _run_missing_secrets:

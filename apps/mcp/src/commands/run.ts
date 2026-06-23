@@ -172,14 +172,18 @@ export async function runWorkerCommand(
     throw new Error("Run creation did not return run_id");
   }
 
-  log.step(`Run started: ${runId}`);
+  if (!options.json) {
+    log.step(`Run started: ${runId}`);
+  }
   let latest: RunDetail | null = null;
   let lastStatus = "";
   const terminal = new Set(["completed", "failed", "error", "approved", "rejected"]);
   while (true) {
     latest = (await client.requestJson("GET", `/runs/${encodeURIComponent(runId)}`)) as RunDetail;
     if (latest.status !== lastStatus) {
-      log.step(`Status: ${latest.status}`);
+      if (!options.json) {
+        log.step(`Status: ${latest.status}`);
+      }
       lastStatus = latest.status;
     }
     if (terminal.has(latest.status)) break;
