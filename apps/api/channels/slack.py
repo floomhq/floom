@@ -113,8 +113,18 @@ def _public_api_base_url() -> str:
     return raw.rstrip("/")
 
 
-def _slack_oauth_callback_url() -> str:
-    return f"{_public_api_base_url()}/slack/oauth/callback"
+def _request_public_api_base_url(request: Request) -> str:
+    forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    host = forwarded_host or (request.headers.get("host") or "").strip()
+    if not host:
+        return _public_api_base_url()
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    scheme = forwarded_proto or request.url.scheme or "https"
+    return f"{scheme}://{host}".rstrip("/")
+
+
+def _slack_oauth_callback_url(public_api_base_url: Optional[str] = None) -> str:
+    return f"{(public_api_base_url or _public_api_base_url()).rstrip('/')}/slack/oauth/callback"
 
 
 def _append_slack_oauth_success_params(return_to: str, *, team_id: str) -> str:
@@ -248,14 +258,14 @@ def _consume_slack_oauth_state(state: str) -> Dict[str, Any]:
     return payload
 
 
-def _slack_install_url(*, state: str) -> str:
+def _slack_install_url(*, state: str, public_api_base_url: Optional[str] = None) -> str:
     client_id = os.environ.get("SLACK_CLIENT_ID", "").strip()
     if not client_id:
         raise HTTPException(status_code=503, detail="SLACK_CLIENT_ID is not configured")
     params = urllib.parse.urlencode({
         "client_id": client_id,
         "scope": ",".join(_slack_install_scopes()),
-        "redirect_uri": _slack_oauth_callback_url(),
+        "redirect_uri": _slack_oauth_callback_url(public_api_base_url),
         "state": state,
     })
     return f"https://slack.com/oauth/v2/authorize?{params}"
@@ -447,7 +457,7 @@ def _extract_slack_oauth_scopes(payload: Dict[str, Any]) -> List[str]:
     return [part for part in re.split(r"[,\s]+", str(raw).strip()) if part]
 
 
-def _exchange_slack_oauth_code(code: str) -> Dict[str, Any]:
+def _exchange_slack_oauth_code(code: str, *, public_api_base_url: Optional[str] = None) -> Dict[str, Any]:
     client_id = os.environ.get("SLACK_CLIENT_ID", "").strip()
     client_secret = os.environ.get("SLACK_CLIENT_SECRET", "").strip()
     if not client_id or not client_secret:
@@ -458,7 +468,7 @@ def _exchange_slack_oauth_code(code: str) -> Dict[str, Any]:
             "client_id": client_id,
             "client_secret": client_secret,
             "code": code,
-            "redirect_uri": _slack_oauth_callback_url(),
+            "redirect_uri": _slack_oauth_callback_url(public_api_base_url),
         },
         timeout=15,
     )
@@ -516,18 +526,20 @@ def slack_setup_config(
 
 @slack_router.post("/slack/oauth/install", response_model=SlackInstallUrlResponse)
 def slack_oauth_install(
+    request: Request,
     return_to: Optional[str] = Body(default="/assistant", embed=True),
     auth: AuthContext = Depends(get_auth_context),
 ) -> SlackInstallUrlResponse:
     state, expires_at = _issue_slack_oauth_state(user_id=auth.user_id, return_to=return_to)
+    public_api_base = _request_public_api_base_url(request)
     return SlackInstallUrlResponse(
-        install_url=_slack_install_url(state=state),
+        install_url=_slack_install_url(state=state, public_api_base_url=public_api_base),
         expires_at=expires_at.isoformat(),
     )
 
 
 @slack_router.get("/slack/oauth/callback")
-def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
+def slack_oauth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     from fastapi.responses import RedirectResponse
     from core.config import _bootstrap_user_id
     from services.secrets_env import _upsert_env_var
@@ -540,7 +552,7 @@ def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
 
     state_payload = _consume_slack_oauth_state(state)
     installed_by_user_id = str(state_payload.get("user_id") or _bootstrap_user_id())
-    oauth_payload = _exchange_slack_oauth_code(code)
+    oauth_payload = _exchange_slack_oauth_code(code, public_api_base_url=_request_public_api_base_url(request))
     bot_token = str(oauth_payload.get("access_token") or "").strip()
     if not bot_token:
         raise HTTPException(status_code=502, detail="Slack OAuth response did not include a bot token")

@@ -23,6 +23,30 @@ def test_public_api_base_prefers_api_base_and_uses_local_default(monkeypatch):
     assert _public_api_base_url() == "http://localhost:8000"
 
 
+def test_slack_oauth_uses_forwarded_public_host(monkeypatch):
+    from starlette.requests import Request
+    import channels.slack as slack
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/slack/oauth/install",
+        "headers": [
+            (b"host", b"internal:8000"),
+            (b"x-forwarded-proto", b"https"),
+            (b"x-forwarded-host", b"workeros-api.floom.dev"),
+        ],
+    }
+    request = Request(scope)
+
+    assert slack._request_public_api_base_url(request) == "https://workeros-api.floom.dev"
+    assert (
+        slack._slack_oauth_callback_url(slack._request_public_api_base_url(request))
+        == "https://workeros-api.floom.dev/slack/oauth/callback"
+    )
+
+
 def test_session_ids_are_hashed_and_legacy_plaintext_migrates(tmp_path, monkeypatch):
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     import db
