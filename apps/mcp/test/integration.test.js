@@ -788,6 +788,37 @@ test("mcp add patches agent config", async () => {
   }
 });
 
+test("mcp install generic redacts credentials by default", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-generic-home-"));
+  try {
+    const result = await runCli(["mcp", "install", "--target", "generic"], {
+      HOME: home,
+      WORKEROS_API_SECRET: "test-secret",
+    });
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /"x-floom-secret": "<x-floom-secret>"/);
+    assert.doesNotMatch(result.stdout, /test-secret/);
+    assert.match(result.stdout, /Credentials are redacted by default/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("mcp install generic requires explicit show-token for live credentials", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-generic-show-home-"));
+  try {
+    const result = await runCli(["mcp", "install", "--target", "generic", "--show-token"], {
+      HOME: home,
+      WORKEROS_API_SECRET: "test-secret",
+    });
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /"x-floom-secret": "test-secret"/);
+    assert.match(result.stderr, /Printing a live credential/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test("install subcommand prints manual snippets when no agent config file exists", async () => {
   const home = await mkdtemp(join(tmpdir(), "workeros-mcp-home-"));
   try {

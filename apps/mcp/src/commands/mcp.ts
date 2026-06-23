@@ -199,7 +199,7 @@ async function resolveMcpConfig(
   };
 }
 
-export async function mcpInstallCommand(options: { target?: ClientTarget }): Promise<number> {
+export async function mcpInstallCommand(options: { target?: ClientTarget; showToken?: boolean }): Promise<number> {
   const home = resolveHomeDir();
   if (!home) throw new Error("HOME is required");
 
@@ -228,7 +228,17 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
 
   // "generic" — print snippet for manual paste, no file written.
   if (options.target === "generic") {
-    process.stdout.write(genericSnippet(mcpUrl, headers) + "\n");
+    if (options.showToken) {
+      log.warn(
+        "Printing a live credential. Do not paste this into logs, screenshots, support tickets, or shared terminals.",
+      );
+      process.stdout.write(genericSnippet(mcpUrl, headers) + "\n");
+    } else {
+      process.stdout.write(genericSnippet(mcpUrl, redactedHeaders(headers)) + "\n");
+      log.info(
+        `Credentials are redacted by default. Re-run \`${getCommandName()} mcp install --target generic --show-token\` only when you are ready to paste into a private MCP config.`,
+      );
+    }
     return 0;
   }
 
