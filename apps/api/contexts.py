@@ -234,6 +234,11 @@ def _current_scope() -> Optional[str]:
     return text
 
 
+def current_context_scope() -> Optional[str]:
+    """Return the active context scope after applying request/override rules."""
+    return _current_scope()
+
+
 def current_contexts_root() -> Path:
     """Return the active CONTEXTS_DIR root for the current request.
 

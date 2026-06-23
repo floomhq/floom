@@ -92,7 +92,7 @@ def create_worker(
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
     _reject_raw_local_runner_on_create(worker_yml)
     worker_yml = _apply_workspace_approval_default(worker_yml)  # #794
-    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id, repos=repos)
     if payload.files:
         file_map = {item.path: item.content for item in payload.files}
         file_map["worker.yml"] = worker_yml
@@ -191,7 +191,7 @@ async def create_worker_from_bundle(
     worker_yml_path_in_zip = f"{prefix}worker.yml"
     worker_yml = zf.read(worker_yml_path_in_zip).decode("utf-8")
 
-    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id, repos=repos)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():

@@ -156,3 +156,24 @@ def test_detach_missing_context_404(client):
 def test_attach_unknown_worker_404(client):
     c, _ = client
     assert c.post("/workers/nope/contexts", json={"name": "x"}).status_code == 404
+
+
+def test_worker_payload_validation_uses_active_context_scope(client):
+    c, _ = client
+    assert c.get("/auth/me").status_code == 200
+
+    import contexts
+    from services.worker_registry_ops import _parse_worker_payload
+
+    scoped_root = contexts.CONTEXTS_DIR / "workspace-launch"
+    (scoped_root / "crm-pack").mkdir(parents=True)
+    worker_yml = _YML.replace("contexts: []", "contexts:\n  - crm-pack\n")
+
+    contexts.set_context_scope_resolver(lambda: "workspace-launch")
+    try:
+        worker_id, config = _parse_worker_payload(worker_yml, user_id="member-a")
+    finally:
+        contexts.set_context_scope_resolver(None)
+
+    assert worker_id == "ctx-worker"
+    assert "crm-pack" in config.contexts

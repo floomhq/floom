@@ -319,6 +319,7 @@ def _parse_json_string_list(value: Optional[str]) -> List[str]:
 
 
 _COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success"}
+_COMPOSIO_LIST_REFRESH_STATUSES = {"", "initiated", "pending", "unknown", "created"}
 
 
 def _normalize_composio_connection_status(status: Optional[str]) -> str:
@@ -326,6 +327,17 @@ def _normalize_composio_connection_status(status: Optional[str]) -> str:
     if normalized in _COMPOSIO_ACTIVE_STATUSES:
         return "active"
     return normalized
+
+
+def _connection_list_item_needs_status_refresh(item: Any) -> bool:
+    kind = getattr(item, "kind", None)
+    status = getattr(item, "status", None)
+    if isinstance(item, dict):
+        kind = item.get("kind")
+        status = item.get("status")
+    if (kind or "composio") != "composio":
+        return False
+    return _normalize_composio_connection_status(status) in _COMPOSIO_LIST_REFRESH_STATUSES
 
 
 def _callback_persisted_status(existing_status: str, remote_status: str) -> str:
@@ -387,8 +399,71 @@ def _refresh_connection_status_for_list(
     repos: Repositories,
     now: object = None,
 ) -> Dict[str, Any]:
-    """Compatibility shim: list responses never block on remote status refresh."""
-    return row
+    """Reconcile pending Composio OAuth rows without slowing normal list loads.
+
+    Active rows deliberately do not hit Composio here; the list endpoint is a hot
+    UI path and already has tests guarding that behavior. Pending/initiated rows
+    are different: after OAuth callback delivery races, the local row can stay
+    "initiated" even though Composio has activated the account. A single best-
+    effort refresh lets the list recover those rows and persist the live status.
+    """
+    if (row.get("kind") or "composio") != "composio":
+        return row
+    current_status = _normalize_composio_connection_status(row.get("status"))
+    if current_status in _COMPOSIO_ACTIVE_STATUSES or current_status == "active":
+        return row
+    if current_status not in _COMPOSIO_LIST_REFRESH_STATUSES:
+        return row
+    composio_connection_id = str(row.get("composio_connection_id") or "").strip()
+    connection_id = str(row.get("id") or "").strip()
+    if not composio_connection_id or not connection_id:
+        return row
+
+    checked_at = now if isinstance(now, str) else now_iso()
+    try:
+        from composio_client import check_status
+
+        remote_status = _normalize_composio_connection_status(check_status(composio_connection_id))
+        updates: Dict[str, Any] = {
+            "last_checked_at": checked_at,
+            "last_check_status": remote_status,
+            "last_check_error": None,
+            "updated_at": checked_at,
+        }
+        if remote_status and remote_status != "not_found":
+            updates["status"] = remote_status
+        updated = repos.connections.update(
+            user_id=user_id,
+            composio_id=connection_id,
+            **updates,
+        )
+        if remote_status == "active":
+            try:
+                _cache_connection_account_info(
+                    repos=repos,
+                    user_id=user_id,
+                    connection_id=connection_id,
+                    composio_connection_id=composio_connection_id,
+                    now=checked_at,
+                )
+                updated = repos.connections.get(user_id=user_id, composio_id=connection_id) or updated
+            except Exception as exc:
+                logger.debug("Could not cache Composio account info for %s: %s", connection_id, exc)
+        return row_to_dict(updated) if updated else {**row, **updates}
+    except Exception as exc:
+        logger.debug("Could not refresh pending Composio status for %s: %s", connection_id, exc)
+        try:
+            updated = repos.connections.update(
+                user_id=user_id,
+                composio_id=connection_id,
+                last_checked_at=checked_at,
+                last_check_status=current_status or "unknown",
+                last_check_error=str(exc),
+                updated_at=checked_at,
+            )
+            return row_to_dict(updated) if updated else row
+        except Exception:
+            return row
 
 
 def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
@@ -890,7 +965,7 @@ def list_connections(
     # no-blocking-Composio-on-list behavior live in the body below and are
     # independent of which cache backs the read, so both are preserved.
     cached = _connection_list_cache_get(auth.user_id)
-    if cached is not None:
+    if cached is not None and not any(_connection_list_item_needs_status_refresh(item) for item in cached):
         return cached
     rows = repos.connections.list(user_id=auth.user_id)
     if not rows:
@@ -900,7 +975,11 @@ def list_connections(
 
     refreshed: List[Dict[str, Any]] = []
     for row in rows:
-        d = row_to_dict(row)
+        d = _refresh_connection_status_for_list(
+            row_to_dict(row),
+            user_id=auth.user_id,
+            repos=repos,
+        )
         d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
         used = last_used.get(str(d.get("app_name") or "").lower())
         if used:
@@ -972,7 +1051,8 @@ def list_connections(
             best_by_key[key] = d
 
     result = [_public_connection_item(best_by_key[key]) for key in order]
-    _connection_list_cache_set(auth.user_id, result)
+    if not any(_connection_list_item_needs_status_refresh(item) for item in result):
+        _connection_list_cache_set(auth.user_id, result)
     return result
 
 
