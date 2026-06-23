@@ -1614,7 +1614,7 @@ async def auth_middleware(request: Request, call_next):
     When FLOOM_SECRET is not set (localhost dev mode), all requests pass.
     """
     from fastapi.responses import JSONResponse as _JSONResponse  # noqa: PLC0415
-    from run_token import validate_worker_call_token, verify_run_token  # noqa: PLC0415
+    from run_token import validate_worker_call_token  # noqa: PLC0415
 
     secret = os.environ.get("FLOOM_SECRET", "")
     if request.method == "OPTIONS":
@@ -1674,7 +1674,7 @@ async def auth_middleware(request: Request, call_next):
     # authenticated operator/server paths, never this sandbox token.
     run_token_header = _run_token_header(request)
     if run_token_header:
-        run_id_from_token = verify_run_token(run_token_header, secret=secret)
+        run_id_from_token = _run_scoped_token_run_id(run_token_header, secret=secret)
         if run_id_from_token is None:
             return _JSONResponse(
                 status_code=401,
@@ -1790,6 +1790,31 @@ _RE_RUN_EMBEDDINGS_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/embeddings$")
 _RE_RUN_STREAM = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/stream$")
 _RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
 _RE_RUN_DETAIL = _re.compile(r"^/runs/([a-zA-Z0-9_-]+)$")
+
+
+def _run_scoped_token_run_id(raw_token: str | None, *, secret: str | None = None) -> str | None:
+    """Return the run id authorized by a sandbox callback token.
+
+    Script workers historically received a simple ``run:`` token for platform
+    proxy callbacks. Workers that declare ``calls:`` receive a ``wrt_`` token in
+    the same ``WORKEROS_RUN_TOKEN`` env var so ``workeros.call_worker()`` works.
+    Both token families are run-scoped for platform proxy callbacks: simple
+    tokens carry ``run_id`` and worker-call tokens carry ``parent_run_id``.
+    """
+    token = (raw_token or "").strip()
+    if not token:
+        return None
+    from run_token import WORKER_CALL_TOKEN_PREFIX
+    from run_token import validate_worker_call_token as _validate_worker_call_token
+    from run_token import verify_run_token as _verify_run_token
+
+    if token.startswith(WORKER_CALL_TOKEN_PREFIX):
+        try:
+            payload = _validate_worker_call_token(token)
+        except ValueError:
+            return None
+        return str(payload.get("parent_run_id") or "") or None
+    return _verify_run_token(token, secret=secret)
 
 
 def _worker_call_run_metadata(auth: AuthContext) -> tuple[str | None, str | None]:
@@ -4668,11 +4693,10 @@ def _require_running_run_for_platform_proxy(run_id: str, repos: Repositories) ->
 
 def _authorize_run_platform_proxy(request: Request, run_id: str) -> None:
     from run_token import validate_worker_call_token as _validate_worker_call_token
-    from run_token import verify_run_token as _verify_run_token
 
     simple_token = _run_token_header(request)
     if simple_token:
-        token_run_id = _verify_run_token(simple_token)
+        token_run_id = _run_scoped_token_run_id(simple_token)
         if token_run_id is None:
             raise HTTPException(status_code=401, detail="Missing or invalid run token")
         if token_run_id != run_id:
@@ -4781,13 +4805,7 @@ def composio_execute_proxy(
       4. Returns Composio's JSON response verbatim.
     """
     import requests as _req_lib
-    from run_token import verify_run_token as _verify_run_token
-
-    token_run_id = _verify_run_token(_run_token_header(request))
-    if token_run_id is None:
-        raise HTTPException(status_code=401, detail="Missing or invalid run token")
-    if token_run_id != run_id:
-        raise HTTPException(status_code=403, detail="Run token does not match request run_id")
+    _authorize_run_platform_proxy(request, run_id)
 
     # 1. Validate run_id — must exist in DB and be RUNNING.
     #    NOTE: get_any() is the UNSCOPED run lookup. That is correct *here* and
