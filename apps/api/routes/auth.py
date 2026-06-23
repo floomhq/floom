@@ -203,14 +203,40 @@ def _enforce_cli_approve_deny_rate_limit(*, request: Request, user_code: str) ->
         _cli_approve_deny_rate_buckets[key] = bucket
 
 
-def _frontend_redirect(next_path: str) -> str:
+def _first_forwarded_value(value: str | None) -> str | None:
+    first = (value or "").split(",", 1)[0].strip()
+    return first or None
+
+
+def _request_frontend_origin(request: Request | None) -> str | None:
+    if request is None:
+        return None
+
+    allowed_origins = _allowed_frontend_origins()
+    origin = _normalized_origin(request.headers.get("x-workeros-frontend-origin"))
+    if origin and origin in allowed_origins:
+        return origin
+
+    scheme = _first_forwarded_value(request.headers.get("x-forwarded-proto")) or request.url.scheme
+    for header_name in ("x-forwarded-host", "host"):
+        host = _first_forwarded_value(request.headers.get(header_name))
+        if not host:
+            continue
+        origin = _normalized_origin(f"{scheme}://{host}")
+        if origin and origin in allowed_origins:
+            return origin
+    return None
+
+
+def _frontend_redirect(next_path: str, request: Request | None = None) -> str:
     # Must use dashboard_origin (host only, no path) NOT frontend_url. The
     # engine's Composio /connections/callback requires WORKERS_FRONTEND_URL
     # to include the /app basePath, so frontend_url is "https://<host>/app".
     # Concatenating next_path (which already starts with /app/...) onto that
     # produces "/app/app/..." — the original double-basePath bug.
     settings = get_cloud_settings()
-    return f"{settings.dashboard_origin}{next_path}"
+    origin = _request_frontend_origin(request) or settings.dashboard_origin
+    return f"{origin}{next_path}"
 
 
 def _normalized_origin(value: str | None) -> str | None:
@@ -230,10 +256,8 @@ def _allowed_frontend_origins() -> set[str]:
 
 
 def _callback_base_from_request(request: Request | None) -> str | None:
-    if request is None:
-        return None
-    origin = _normalized_origin(request.headers.get("x-workeros-frontend-origin"))
-    if not origin or origin not in _allowed_frontend_origins():
+    origin = _request_frontend_origin(request)
+    if not origin:
         return None
     return f"{origin}/api/proxy"
 
@@ -401,10 +425,11 @@ def _script_json(value: Any) -> str:
 def _auth_fragment_bridge_html(
     *,
     next_path: str,
-    device_code: str | None,
-    user_code: str | None,
+    device_code: str | None = None,
+    user_code: str | None = None,
+    request: Request | None = None,
 ) -> str:
-    fallback_url = _frontend_redirect("/app/login?error=auth_callback_missing")
+    fallback_url = _frontend_redirect("/app/login?error=auth_callback_missing", request=request)
     payload = {
         "next": next_path,
         "device_code": device_code,
@@ -844,7 +869,7 @@ def fragment_session(payload: FragmentSessionRequest, request: Request):
         expires_in=payload.expires_in,
         user=user,
     )
-    response = JSONResponse({"ok": True, "next": next_path, "redirect_to": _frontend_redirect(next_path)})
+    response = JSONResponse({"ok": True, "next": next_path, "redirect_to": _frontend_redirect(next_path, request)})
     _set_cookie(
         response,
         _SESSION_COOKIE_NAME,
@@ -1006,6 +1031,7 @@ def callback(
             return HTMLResponse(
                 _auth_fragment_bridge_html(
                     next_path=next_path,
+                    request=request,
                 )
             )
     except HTTPException:
@@ -1021,7 +1047,7 @@ def callback(
 
     _upsert_user_row(user)
     _maybe_send_welcome_email(user)
-    response = RedirectResponse(_frontend_redirect(next_path), status_code=303)
+    response = RedirectResponse(_frontend_redirect(next_path, request), status_code=303)
     _set_cookie(
         response,
         _SESSION_COOKIE_NAME,
