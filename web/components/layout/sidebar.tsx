@@ -270,7 +270,10 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
             onMouseEnter={() => warm(item.href)}
             onPointerDown={() => warm(item.href)}
             onFocus={() => warm(item.href)}
-            onClick={onNavigate}
+            onClick={() => {
+              warm(item.href);
+              onNavigate?.();
+            }}
             title={item.hint}
             className={cn(
               "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",

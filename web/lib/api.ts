@@ -222,12 +222,6 @@ export const api = {
     }
     return res.json() as Promise<import("@/lib/types").CurrentUser>;
   },
-  updateMe: async (displayName: string, _userId: string) =>
-    fetchJson<import("@/lib/types").CurrentUser>("/auth/profile", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display_name: displayName }),
-    }),
   // #778: Emily chat attachments — upload to extract text for the next message.
   chat: {
     uploadAttachments: async (files: File[]): Promise<import("@/lib/types").ChatAttachment[]> => {
@@ -268,10 +262,10 @@ export const api = {
       return fetchJson<import("@/lib/types").WorkerSummary[]>(`/workers?${qs.toString()}`);
     },
     get: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}`),
-    sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
-    restore: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     duplicate: (id: string) =>
       fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
+    sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
+    restore: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: async (id: string) => {
       const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" });
       return worker;

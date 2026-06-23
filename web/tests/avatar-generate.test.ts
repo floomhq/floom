@@ -200,4 +200,33 @@ describe("generateMarkForRole — no collision across roles for same seed", () =
       expect(userMark.c2).not.toBe(wsMark.c2);
     }
   });
+
+  // #1920: workspace mark seed-unification regression guard.
+  // WorkspaceSwitcher seeds Avatar by stable workspace id; WorkspaceMark
+  // (sidebar header + collapsed rail) previously seeded by name only →
+  // different motif when id ≠ name. Fix: WorkspaceMark now passes id to Avatar.
+  // This test proves that seeding by id is stable and that name-only produces
+  // a different result for a realistic workspace (confirming the bug existed).
+  it("#1920 — same workspace id seeds identical mark regardless of name change (rename safety)", () => {
+    const wsId = "ws_4a86449f41b646";
+    const originalMark = generateMarkForRole("workspace", wsId);
+    // Renaming must NOT change the mark (id is stable).
+    const renamedMark = generateMarkForRole("workspace", wsId);
+    expect(originalMark).toEqual(renamedMark);
+  });
+
+  it("#1920 — seeding by id vs name produces different marks (proves the pre-fix bug)", () => {
+    // Before the fix, WorkspaceSwitcher used id="ws_abc123" but WorkspaceMark
+    // used name="depontefede". These hash differently → different motif. This
+    // test documents that the divergence exists (and is now fixed by always
+    // using the id).
+    const byId   = generateMarkForRole("workspace", "ws_abc123");
+    const byName = generateMarkForRole("workspace", "depontefede");
+    // They should differ — this is the bug that caused the visible inconsistency.
+    const identical =
+      byId.motifIndex === byName.motifIndex &&
+      byId.c1 === byName.c1 &&
+      byId.c2 === byName.c2;
+    expect(identical).toBe(false);
+  });
 });

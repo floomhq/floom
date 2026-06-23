@@ -76,7 +76,7 @@ describe("WORKER_DETAIL_TABS (§4 contract)", () => {
       "Setup",
       "Source",
       "Versions",
-      "Library",
+      "Brain",
       "Tools",
     ]);
   });

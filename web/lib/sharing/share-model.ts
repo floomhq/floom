@@ -78,7 +78,7 @@ export function publicLinkScope(type: ShareAssetType): string {
     case "run":
       return "They can view this run, including inputs, steps, tool calls, output, and cost.";
     case "brain_pack":
-      return "They can view and duplicate this library folder.";
+      return "They can view and duplicate this brain pack.";
     case "brain_file":
       return "They can view and duplicate this file.";
     case "approval":

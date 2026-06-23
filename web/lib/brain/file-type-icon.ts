@@ -24,14 +24,14 @@ export interface BrainFileMeta {
 }
 
 export const BRAIN_FILE_META: Record<BrainFileType, BrainFileMeta> = {
-  pdf:    { ext: "PDF",  Icon: FileText,        tint: "var(--warning)" },
-  doc:    { ext: "DOC",  Icon: FileText,        tint: "var(--accent)" },
-  md:     { ext: "MD",   Icon: FileCode,        tint: "var(--ink)" },
-  xlsx:   { ext: "XLSX", Icon: FileSpreadsheet, tint: "var(--positive)" },
-  url:    { ext: "URL",  Icon: Link2,           tint: "var(--accent)" },
-  png:    { ext: "PNG",  Icon: FileImage,       tint: "var(--ink-soft)" },
-  folder: { ext: "DIR",  Icon: Folder,          tint: "var(--warning)" },
-  other:  { ext: "FILE", Icon: FileText,        tint: "var(--ink-mute)" },
+  pdf:    { ext: "PDF",  Icon: FileText,        tint: "#D14343" },
+  doc:    { ext: "DOC",  Icon: FileText,        tint: "#2563eb" },
+  md:     { ext: "MD",   Icon: FileCode,        tint: "#181818" },
+  xlsx:   { ext: "XLSX", Icon: FileSpreadsheet, tint: "#0F9D58" },
+  url:    { ext: "URL",  Icon: Link2,           tint: "#3a6ea5" },
+  png:    { ext: "PNG",  Icon: FileImage,       tint: "#9d6df1" },
+  folder: { ext: "DIR",  Icon: Folder,          tint: "#B45309" },
+  other:  { ext: "FILE", Icon: FileText,        tint: "#6b7280" },
 };
 
 /** Infer file type from a context folder name and optional category. */

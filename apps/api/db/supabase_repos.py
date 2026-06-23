@@ -2159,17 +2159,48 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             }
         ).eq("id", trigger_id).execute()
 
+    def claim_schedule_trigger(
+        self,
+        *,
+        trigger_id: str,
+        now_iso: str,
+        locked_until: str,
+    ) -> bool:
+        response = (
+            self._client.table("worker_triggers")
+            .update({"locked_until": locked_until, "updated_at": now_iso})
+            .eq("id", trigger_id)
+            .eq("type", "schedule")
+            .eq("enabled", True)
+            .or_(f"locked_until.is.null,locked_until.lte.{now_iso}")
+            .execute()
+        )
+        return bool(_response_rows(response))
+
     def find_trigger_by_external_id(
-        self, *, external_trigger_id: str
+        self,
+        *,
+        external_trigger_id: str,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any] | None:
-        return _first_row(
+        builder = (
             self._client.table("worker_triggers")
             .select("*")
             .eq("external_trigger_id", external_trigger_id)
             .eq("enabled", True)
-            .limit(1)
-            .execute()
         )
+        effective_workspace_id = workspace_id or get_active_workspace_id()
+        if effective_workspace_id:
+            builder = builder.eq("workspace_id", effective_workspace_id)
+        elif user_id:
+            workers = self._worker_rows(user_id=user_id)
+            worker_ids = [str(row["id"]) for row in workers if row.get("id")]
+            if not worker_ids:
+                return None
+            builder = builder.in_("worker_id", worker_ids)
+        rows = _response_rows(builder.order("worker_id").order("position").order("id").limit(2).execute())
+        return rows[0] if len(rows) == 1 else None
 
     def find_trigger_for_webhook(self, *, worker_id: str) -> dict[str, Any] | None:
         rows = _response_rows(
@@ -2604,6 +2635,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         limit: int = 50,
         offset: int = 0,
         include_total: bool = True,
+        workspace_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         if not _has_read_scope(user_id=user_id):
             return [], 0
@@ -2611,7 +2643,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             "id,worker_id,status,trigger_source,input_json,error,started_at,completed_at,duration_ms,created_at,trigger_member_id",
             count="exact" if include_total else None,
         )
-        builder = _scope_by_workspace(builder, user_id=user_id)
+        builder = _scope_by_workspace(builder, user_id=user_id, explicit_workspace_id=workspace_id)
         if worker_id:
             builder = builder.eq("worker_id", worker_id)
         if statuses:
@@ -3003,6 +3035,28 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 "trace_id": trace_id,
             }
         ).execute()
+
+    def add_logs(self, *, rows: Iterable[dict[str, Any]]) -> None:
+        payload: list[dict[str, Any]] = []
+        for row in rows:
+            run_id = str(row.get("run_id") or "")
+            user_id = str(row.get("user_id") or "")
+            if not run_id or not user_id:
+                continue
+            if self.get(user_id=user_id, run_id=run_id) is None:
+                continue
+            payload.append(
+                {
+                    "user_id": user_id,
+                    "run_id": run_id,
+                    "level": row["level"],
+                    "message": row["message"],
+                    "timestamp": row["timestamp"],
+                    "trace_id": row.get("trace_id"),
+                }
+            )
+        if payload:
+            self._client.table("run_logs").insert(payload).execute()
 
     def list_logs(
         self, *, user_id: str, run_id: str, limit: int | None = 10_000
@@ -4267,6 +4321,13 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
 
     _TABLE = "approvals"
 
+    @staticmethod
+    def _pending_not_expired(builder: Any, decided_at: str) -> Any:
+        or_filter = getattr(builder, "or_", None)
+        if callable(or_filter):
+            return or_filter(f"expires_at.is.null,expires_at.gte.{decided_at}")
+        return builder
+
     def create(self, *, owner_id: str, **fields: Any) -> dict[str, Any]:
         allowed = {
             "id", "run_id", "worker_id", "status", "label", "preview",
@@ -4483,7 +4544,7 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         # return None (NOT a re-read of get_by_run_id, which would surface the
         # row the *other* caller flipped) so the route can 409 instead of
         # spawning a duplicate / rejected-but-executed follow-up run.
-        resp = (
+        builder = (
             self._client.table(self._TABLE)
             .update(
                 {
@@ -4498,9 +4559,8 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             .eq("run_id", run_id)
             .eq("owner_id", owner_id)
             .eq("status", "pending")
-            .or_(f"expires_at.is.null,expires_at.gte.{decided_at}")
-            .execute()
         )
+        resp = self._pending_not_expired(builder, decided_at).execute()
         rows = getattr(resp, "data", None) or []
         if not rows:
             return None
@@ -4535,7 +4595,7 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
         # #280: atomic claim — empty `.data` means already decided -> None.
-        resp = (
+        builder = (
             self._client.table(self._TABLE)
             .update(
                 {
@@ -4548,9 +4608,8 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             .eq("run_id", run_id)
             .eq("owner_id", owner_id)
             .eq("status", "pending")
-            .or_(f"expires_at.is.null,expires_at.gte.{decided_at}")
-            .execute()
         )
+        resp = self._pending_not_expired(builder, decided_at).execute()
         rows = getattr(resp, "data", None) or []
         if not rows:
             return None

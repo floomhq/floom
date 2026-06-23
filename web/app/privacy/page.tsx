@@ -28,8 +28,8 @@ export default function PrivacyPage() {
             artifacts.
           </li>
           <li>
-            <strong>Library folders</strong> - files and notes added to workspace
-            knowledge folders, plus version history where enabled.
+            <strong>Brain packs</strong> - files and notes added to workspace
+            knowledge packs, plus version history where enabled.
           </li>
           <li>
             <strong>Connections and secrets</strong> - OAuth connection metadata,

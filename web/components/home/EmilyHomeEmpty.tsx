@@ -249,31 +249,26 @@ export function EmilyHomeEmpty({
     <div className="flex w-full max-w-[600px] flex-col items-center px-6">
       {/* greeting / hero */}
       {isFirstWorker ? (
-        <div className="flex flex-col items-center pb-8">
-          <div className="mb-4">
-            <EmilyRadarMark size={46} variant="ink" />
-          </div>
-          <div className="text-center text-[26px] font-semibold tracking-[-0.02em] text-ink leading-tight">
+        <div className="flex flex-col items-center pb-[22px]">
+          <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
             Let&apos;s hire your first worker
           </div>
-          <div className="mt-2 max-w-[360px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
+          <div className="mt-[7px] max-w-[360px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
             Describe what you want automated. {assistantName} builds it, connects the
             tools, and runs it.
           </div>
         </div>
       ) : (
-        /* Active-state greeting hero — bigger text, generous vertical breathing room
-           so it reads as a centred hero landmark, not cramped 12-15px label. */
-        <div className="pb-8 text-center">
-          <div className="text-[26px] font-semibold tracking-[-0.02em] text-ink leading-tight">
+        <div className="pb-[22px] text-center">
+          <div className="text-[15px] font-medium tracking-[-0.01em] text-ink">
             {greeting}
             {firstName ? `, ${firstName}` : ""}
           </div>
-          <div className="mt-2 text-[13.5px] text-[var(--text-muted)]">{todayLabel}</div>
+          <div className="mt-[3px] text-[12.5px] text-[var(--text-muted)]">{todayLabel}</div>
           {/* Lean pulse — only when the overview actually loaded (degrade to
               just the greeting on a failed/loading overview, never a broken pulse). */}
           {pulseOk && (
-            <div className="mt-5 inline-flex flex-wrap items-center justify-center gap-2.5 text-[13.5px] text-[var(--text-muted)]">
+            <div className="mt-3.5 inline-flex flex-wrap items-center justify-center gap-2.5 text-[13px] text-[var(--text-muted)]">
               <span>
                 <b className="font-semibold text-ink">{workDoneThisWeek}</b>&nbsp;done this week
               </span>
