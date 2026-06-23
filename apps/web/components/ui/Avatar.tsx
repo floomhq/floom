@@ -1,16 +1,21 @@
 // Floom identity mark — the ONE shared avatar component.
 // SPEC: /root/workeros-design-baseline/SPEC.md (locked 2026-06-22).
 //
-// Shape encodes ROLE:
-//   - "user"      -> CIRCLE (human). Real provider photo when `src` present,
-//                    else a chunky 2-tone generated mark. NEVER initials.
-//   - "workspace" -> SQUIRCLE (non-human). Uploaded logo/favicon when `src`
-//                    present, else the SAME generated mark.
-//   - "worker"    -> SQUIRCLE (non-human). Same as workspace; workers are
+// Shape + COLOR both encode ROLE (two independent visual axes):
+//   - "user"      -> CIRCLE + NEUTRAL GRAPHITE palette. Real provider photo
+//                    when `src` present, else a chunky 2-tone graphite mark.
+//                    NEVER initials. onError falls back to generated mark.
+//   - "workspace" -> SQUIRCLE + ACCENT BLUE palette. Favicon/logo when `src`
+//                    present, else a blue generated mark. onError falls back
+//                    to generated mark so a broken/globe favicon never shows.
+//   - "worker"    -> SQUIRCLE + ACCENT BLUE. Same as workspace; workers are
 //                    non-human entities (run cards, share cards).
 //   - "emily"     -> SQUIRCLE, solid accent-blue, fixed A4 mark (white core
 //                    disc + two white@55% energy arcs). Gentle arc PULSE when
 //                    `active`, respecting prefers-reduced-motion.
+//
+// A user and any workspace are ALWAYS visually distinguishable: circle vs
+// squircle AND graphite vs blue, so shape alone never carries the burden.
 //
 // No gradients, no faces, no stock glyphs (radar/orbit/star), no letters.
 // Tokens only: --accent (Emily blue), --radius-squircle (squircle radius).

@@ -5,6 +5,7 @@ import {
   generateMarkForRole,
   namespacedSeed,
   MARK_PAIRS,
+  USER_MARK_PAIRS,
   MARK_GROUND,
   MARK_MOTIF_COUNT,
 } from "@/lib/avatar/generate";
@@ -54,7 +55,7 @@ describe("palette constraints (restrained cool palette, no rainbow)", () => {
     expect(MARK_GROUND).toBe("#F3F4F6");
   });
 
-  it("has 5 two-tone pairs, every tone a 6-digit hex", () => {
+  it("MARK_PAIRS (workspace/worker) has 5 two-blue pairs, every tone a 6-digit hex", () => {
     expect(MARK_PAIRS).toHaveLength(5);
     for (const pair of MARK_PAIRS) {
       expect(pair).toHaveLength(2);
@@ -62,13 +63,41 @@ describe("palette constraints (restrained cool palette, no rainbow)", () => {
     }
   });
 
-  it("every tone is a cool blue (blue channel dominates red)", () => {
+  it("workspace tones are cool blue (blue channel dominates red)", () => {
     for (const pair of MARK_PAIRS) {
       for (const c of pair) {
         const r = parseInt(c.slice(1, 3), 16);
         const b = parseInt(c.slice(5, 7), 16);
         expect(b).toBeGreaterThan(r);
       }
+    }
+  });
+
+  it("USER_MARK_PAIRS (user) has 5 graphite pairs, every tone a 6-digit hex", () => {
+    expect(USER_MARK_PAIRS).toHaveLength(5);
+    for (const pair of USER_MARK_PAIRS) {
+      expect(pair).toHaveLength(2);
+      for (const c of pair) expect(c).toMatch(/^#[0-9A-Fa-f]{6}$/);
+    }
+  });
+
+  it("user tones are graphite — low chroma, no dominant hue (max-min < 60)", () => {
+    for (const pair of USER_MARK_PAIRS) {
+      for (const c of pair) {
+        const r = parseInt(c.slice(1, 3), 16);
+        const g = parseInt(c.slice(3, 5), 16);
+        const b = parseInt(c.slice(5, 7), 16);
+        const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+        expect(chroma).toBeLessThan(60);
+      }
+    }
+  });
+
+  it("user and workspace palettes are fully disjoint — no shared tones", () => {
+    const userTones = USER_MARK_PAIRS.flat();
+    const wsTones = MARK_PAIRS.flat();
+    for (const t of userTones) {
+      expect(wsTones).not.toContain(t);
     }
   });
 });
@@ -133,5 +162,42 @@ describe("generateMarkForRole — no collision across roles for same seed", () =
   it("namespacedSeed helper (legacy) prefixes the role", () => {
     expect(namespacedSeed("user", "Nova Search")).toBe("user:Nova Search");
     expect(namespacedSeed("workspace", "Nova Search")).toBe("workspace:Nova Search");
+  });
+
+  it("user marks use USER_MARK_PAIRS (graphite) — never blue", () => {
+    for (const s of ["Federico", "user@example.com", "Alice", "Bob"]) {
+      const m = generateMarkForRole("user", s);
+      expect(USER_MARK_PAIRS.some(([c1, c2]) => c1 === m.c1 && c2 === m.c2)).toBe(true);
+      expect(MARK_PAIRS.some(([c1, c2]) => c1 === m.c1 && c2 === m.c2)).toBe(false);
+    }
+  });
+
+  it("workspace marks use MARK_PAIRS (accent blue) — never graphite", () => {
+    for (const s of ["Nova Search", "reltix", "Acme", "Heidi Health"]) {
+      const m = generateMarkForRole("workspace", s);
+      expect(MARK_PAIRS.some(([c1, c2]) => c1 === m.c1 && c2 === m.c2)).toBe(true);
+      expect(USER_MARK_PAIRS.some(([c1, c2]) => c1 === m.c1 && c2 === m.c2)).toBe(false);
+    }
+  });
+
+  it("worker marks use MARK_PAIRS (accent blue) — same family as workspace", () => {
+    for (const s of ["EmailWorker", "ReportBot"]) {
+      const m = generateMarkForRole("worker", s);
+      expect(MARK_PAIRS.some(([c1, c2]) => c1 === m.c1 && c2 === m.c2)).toBe(true);
+      expect(USER_MARK_PAIRS.some(([c1, c2]) => c1 === m.c1 && c2 === m.c2)).toBe(false);
+    }
+  });
+
+  it("user and workspace with the SAME seed always differ in BOTH motif AND color", () => {
+    const liveBugSeeds = ["Federico De Ponte", "Nova Search", "reltix", "Heidi Health", "Acme"];
+    for (const s of liveBugSeeds) {
+      const userMark = generateMarkForRole("user", s);
+      const wsMark = generateMarkForRole("workspace", s);
+      // Motif MUST differ (coprimality guarantee).
+      expect(userMark.motifIndex).not.toBe(wsMark.motifIndex);
+      // Colors MUST differ (different palettes).
+      expect(userMark.c1).not.toBe(wsMark.c1);
+      expect(userMark.c2).not.toBe(wsMark.c2);
+    }
   });
 });
