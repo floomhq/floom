@@ -101,6 +101,16 @@ function isPublicProxy(pathname: string): boolean {
   return PUBLIC_PROXY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+function stripConfiguredBasePath(pathname: string): string {
+  const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+  if (!basePath || basePath === "/") return pathname;
+  if (pathname === basePath) return "/";
+  if (pathname.startsWith(`${basePath}/`)) {
+    return pathname.slice(basePath.length) || "/";
+  }
+  return pathname;
+}
+
 // #947 — CSRF defence-in-depth. The /api/proxy/* surface injects the server
 // secret and forwards mutations to the backend; SameSite=lax is the only thing
 // stopping a cross-site POST today. Validate Origin (#986: no Referer fallback)
@@ -196,7 +206,8 @@ export function buildCsp(nonce: string): string {
 }
 
 export async function proxy(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+  const rawPathname = req.nextUrl.pathname;
+  const pathname = stripConfiguredBasePath(rawPathname);
 
   // Per-request CSP nonce, threaded to Next via the request headers so SSR
   // stamps it onto inline/framework scripts (#926).
@@ -282,7 +293,7 @@ export async function proxy(req: NextRequest) {
   const loginUrl = req.nextUrl.clone();
   loginUrl.pathname = "/login";
   loginUrl.search = "";
-  const next = pathname + (req.nextUrl.search || "");
+  const next = rawPathname + (req.nextUrl.search || "");
   if (next && next !== "/") {
     loginUrl.searchParams.set("next", next);
   }

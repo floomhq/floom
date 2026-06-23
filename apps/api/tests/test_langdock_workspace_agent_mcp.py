@@ -386,6 +386,47 @@ def test_remote_mcp_direct_tools_can_list_workers_and_roundtrip_context_file(mon
     assert read_result["structuredContent"]["content"] == "hello from remote mcp"
 
 
+def test_remote_mcp_runs_list_returns_result_not_internal_error(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    repos = main.get_repositories()
+    user_id = main._workspace_agent_mcp_auth_context().user_id
+    repos.workers.upsert(
+        user_id=user_id,
+        worker_id="remote-runs-worker",
+        name="Remote Runs Worker",
+        manifest_json={"id": "remote-runs-worker", "name": "Remote Runs Worker"},
+        bundle_path="workers/remote-runs-worker",
+    )
+    repos.runs.create(
+        user_id=user_id,
+        run_id="run-remote-mcp-list",
+        worker_id="remote-runs-worker",
+        input_json={"notes": "remote mcp list"},
+        status=main.RunStatus.COMPLETED.value,
+        trigger_source="manual",
+        runner="e2b",
+    )
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/call", params={
+                "name": "runs.list",
+                "arguments": {"limit": 3},
+            })),
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "error" not in body, body
+    result = body["result"]
+    assert result["isError"] is False
+    runs = result["structuredContent"]["data"]
+    assert isinstance(runs, list)
+    assert any(row["id"] == "run-remote-mcp-list" for row in runs)
+
+
 def test_langdock_setup_card_exposes_self_service_metadata(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
 

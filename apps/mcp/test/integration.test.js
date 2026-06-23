@@ -316,6 +316,25 @@ async function startMockApi() {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/runs/run_sse_timeout/events") {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      });
+      response.write(`data: ${JSON.stringify({ type: "status", run_id: "run_sse_timeout", status: "running" })}\n\n`);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/runs/run_sse_timeout") {
+      json(response, 200, {
+        id: "run_sse_timeout",
+        worker_id: "mcp-test-worker",
+        status: "completed",
+        output: { result: "finished while SSE was stale" },
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/runs/missing/events") {
       json(response, 404, { detail: "Run not found" });
       return;
@@ -631,6 +650,23 @@ test("runs.watch returns on terminal status even without a close event", async (
     assert.equal(watched.structuredContent.status, "completed");
     assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status"]);
   });
+});
+
+test("runs.watch does a final run status check before timing out", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_sse_timeout", timeout_ms: 1000 } });
+    assert.equal(watched.structuredContent.status, "completed");
+    assert.equal(watched.structuredContent.run.output.result, "finished while SSE was stale");
+    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.status), ["running"]);
+  });
+
+  assert.deepEqual(mock.seen.filter((entry) => entry.includes("run_sse_timeout")), [
+    "GET /runs/run_sse_timeout/events",
+    "GET /runs/run_sse_timeout",
+  ]);
 });
 
 test("workeros CLI without a subcommand serves MCP over stdio", async (t) => {

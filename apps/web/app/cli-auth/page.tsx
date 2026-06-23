@@ -7,7 +7,8 @@ import { Check, ChevronDown, ShieldCheck, Terminal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloomMark } from "@/components/layout/sidebar";
 
-const DEFAULT_CLI_AUTH_ENDPOINT_BASE = "/api/proxy/cli-auth";
+const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+const DEFAULT_CLI_AUTH_ENDPOINT_BASE = `${BASE_PATH}/api/proxy/cli-auth`;
 const DEFAULT_CLI_CLIENT_NAME = "floom-cli";
 
 export type CliAuthContentProps = {

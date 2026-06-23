@@ -6364,8 +6364,26 @@ def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: R
     return _mcp_call_result(data, "Worker run started.")
 
 
+def _mcp_request_for_runs_list(arguments: Dict[str, Any]) -> Request:
+    from urllib.parse import urlencode
+
+    query: Dict[str, Any] = {}
+    for key in ("worker_id", "status", "limit", "offset"):
+        value = arguments.get(key)
+        if value is not None:
+            query[key] = value
+    return Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/runs",
+        "headers": [],
+        "query_string": urlencode(query).encode("utf-8"),
+    })
+
+
 def _mcp_call_runs_list(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     data = list_runs(
+        _mcp_request_for_runs_list(arguments),
         Response(),
         worker_id=arguments.get("worker_id") or None,
         status=arguments.get("status") or None,

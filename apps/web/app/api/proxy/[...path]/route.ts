@@ -90,10 +90,13 @@ async function handler(
   };
   const activeWorkspace = req.headers.get("x-workeros-workspace");
   if (activeWorkspace) forwardHeaders["x-workeros-workspace"] = activeWorkspace;
-  // Multi-member: forward the backend session cookie so per-user identity reaches the API
-  const backendSession = req.cookies.get("wos_session")?.value;
-  if (backendSession) {
-    forwardHeaders["cookie"] = `wos_session=${backendSession}`;
+  // Multi-member/cloud: forward the browser's backend session cookies so
+  // per-user identity reaches the API. Prod cloud may use deployment-specific
+  // cookie names in addition to wos_session; forwarding only wos_session broke
+  // CLI device approval even while /api/me succeeded with the same cookie.
+  const cookie = req.headers.get("cookie");
+  if (cookie) {
+    forwardHeaders["cookie"] = cookie;
   }
   const contentType = req.headers.get("content-type");
   if (contentType) forwardHeaders["content-type"] = contentType;
