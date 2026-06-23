@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { getWorkspaceActionCopy } from "@/lib/workspace/action-copy";
+import { getWorkspaceActionAvailability, getWorkspaceActionCopy } from "@/lib/workspace/action-copy";
 
 describe("getWorkspaceActionCopy (#1005)", () => {
   it("uses OSS template-zip vocabulary when not in cloud mode", () => {
@@ -23,6 +23,17 @@ describe("getWorkspaceActionCopy (#1005)", () => {
     expect(copy.shareLabel).toBe("Invite someone by link");
     expect(copy.shareCopied).toBe("Invite link copied to clipboard");
     expect(copy.shareFailed).toBe("Failed to create invite link");
+  });
+
+  it("hides engine-local duplicate/share-template actions in cloud mode", () => {
+    expect(getWorkspaceActionAvailability(false)).toEqual({
+      duplicate: true,
+      shareTemplateLink: true,
+    });
+    expect(getWorkspaceActionAvailability(true)).toEqual({
+      duplicate: false,
+      shareTemplateLink: false,
+    });
   });
 
   it("flips every visible action + toast string between modes", () => {
