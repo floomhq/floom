@@ -575,6 +575,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     items: sorted,
     loading,
     idOf: (r) => r.id,
+    invalidSelectionMessage: "Run not found. It may have been deleted or you may not have access.",
     // #1558: a run deep-linked via ?sel that isn't on the current page (Runs is
     // paginated, PAGE_SIZE=50) is hydrated on demand instead of false-toasting.
     // RunDetail is a superset of RunSummary, so we project it down for the list.
@@ -666,9 +667,8 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
       primary: r.worker_name ?? r.worker_id,
-      // secondary shows status + relative time in compact (split-left) mode where
-      // c-cell children are hidden (#1132).
-      secondary: `${runStatusPill(r.status).label} · ${formatRelative(r.created_at ?? r.started_at ?? "")}`,
+      // Keep compact/split-left text distinct from the Status and Started columns.
+      secondary: formatTrigger(r.trigger_source),
       cols: [
         formatTrigger(r.trigger_source),
         formatDuration(r.duration_ms),

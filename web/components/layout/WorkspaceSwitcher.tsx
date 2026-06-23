@@ -43,19 +43,22 @@ type WorkspaceState = {
   activeId: string;
 };
 
-/** Identity mark for a workspace — squircle (non-human), seeded by name.
+/** Identity mark for a workspace — squircle (non-human), seeded by id then name.
+ *  Prefer the stable `id` so the mark survives workspace renames.
  *  Company logo/favicon overrides the generated mark when available. */
 function WorkspaceAvatar({
+  id,
   name,
   size,
   logoUrl,
 }: {
+  id?: string;
   name: string;
   size: number;
   logoUrl?: string | null;
 }) {
   const seed = resolveWorkspaceName(name) || name || "workspace";
-  return <Avatar role="workspace" name={seed} src={logoUrl ?? undefined} size={size} />;
+  return <Avatar role="workspace" id={id} name={seed} src={logoUrl ?? undefined} size={size} />;
 }
 
 export function WorkspaceSwitcher() {
@@ -283,7 +286,7 @@ export function WorkspaceSwitcher() {
           onPointerDown={(e) => e.stopPropagation()}
         >
           {/* Workspace mark: generative avatar, seeded by workspace name */}
-          <WorkspaceAvatar name={active.name} size={24} logoUrl={companyLogoUrl(active.name)} />
+          <WorkspaceAvatar id={active.id} name={active.name} size={24} logoUrl={companyLogoUrl(active.name)} />
           <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
           <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
@@ -313,7 +316,7 @@ export function WorkspaceSwitcher() {
                   className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
                 >
-                  <WorkspaceAvatar name={w.name} size={20} logoUrl={companyLogoUrl(w.name)} />
+                  <WorkspaceAvatar id={w.id} name={w.name} size={20} logoUrl={companyLogoUrl(w.name)} />
                   <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
                   {isActive ? <Check className="size-4 opacity-80" /> : null}
                 </DropdownMenuItem>
@@ -369,7 +372,7 @@ export function WorkspaceSwitcher() {
               {/* M34/M35: clarified labels. Export = download a zip anyone can
                   import; Share template link = a signed URL to that zip (no
                   secrets, no connections); Duplicate = live copy in this
-                  instance with agents + instructions, connections & secrets
+                  instance with workers + instructions, connections & secrets
                   NOT copied (intentional: they must be reconnected). */}
               <DropdownMenuSubContent className="w-64 border-0 p-1 ![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]">
                 {canExportWorkspace && (

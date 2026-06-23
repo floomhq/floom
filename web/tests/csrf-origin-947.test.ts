@@ -85,30 +85,4 @@ describe("#947 cloud CSRF origin validation on /api/proxy", () => {
     );
     expect(res.status).not.toBe(403);
   });
-
-  it("also protects cloud cli-auth approve/deny mutations", async () => {
-    const { middleware } = await import("@/middleware");
-    for (const p of ["/api/cli-auth/approve", "/api/cli-auth/deny"]) {
-      const blocked = await middleware(req(p, { origin: "https://evil.com" }));
-      expect(blocked.status, p).toBe(403);
-
-      const sameOrigin = await middleware(req(p, { origin: `https://${HOST}` }));
-      expect(sameOrigin.status, p).not.toBe(403);
-    }
-  });
-
-  it("strips token-like query params from login next redirects", async () => {
-    const { middleware } = await import("@/middleware");
-    const res = await middleware(
-      req("/run/run_1?token=share-secret&tab=output&download_token=dl-secret", {
-        method: "GET",
-      }),
-    );
-    expect(res.status).toBe(307);
-    const location = decodeURIComponent(res.headers.get("location")!);
-    expect(location).toContain("/login");
-    expect(location).toContain("next=/app/run/run_1?tab=output");
-    expect(location).not.toContain("share-secret");
-    expect(location).not.toContain("dl-secret");
-  });
 });

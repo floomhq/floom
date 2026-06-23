@@ -15,26 +15,28 @@ export function guessDomain(company: string): string | null {
   return slug ? `${slug}.com` : null;
 }
 
-/** Favicon/logo URL for a company domain input (Google's favicon service, no API key).
+/** Favicon/logo URL for a workspace or company name.
  *
- *  Only returns a URL when the input looks like a real company domain — i.e. when
- *  it already contains a dot (e.g. "acme.com", "https://acme.io/about"). A plain
- *  slug like "depontefede" or "content-pipeline" is NOT a company domain: the guessed
- *  `slug.com` would almost always resolve to a generic globe favicon from the service,
- *  making workspace avatars inconsistent (globe in some places, gradient squircle in
- *  others). Return null in that case so the caller falls back to the deterministic
- *  gradient squircle.
+ *  Uses DuckDuckGo's favicon proxy (`https://icons.duckduckgo.com/ip3/<domain>.ico`).
+ *  This service returns a real HTTP 404 when no logo exists, so the browser's
+ *  `<img onError>` handler fires and the Avatar component can cleanly fall back to
+ *  the deterministic generated mark. Google's s2/favicons was replaced because it
+ *  returns a generic globe placeholder with HTTP 200 on misses, making it impossible
+ *  to detect a miss client-side.
+ *
+ *  For plain workspace names (e.g. "reltix", "Heidi Health") we guess `<slug>.com`.
+ *  Most company-named workspaces have a corresponding .com — if the guess is wrong,
+ *  DuckDuckGo returns 404 → `onError` → generated mark. This is strictly better than
+ *  the previous behaviour that returned null for every non-dotted name (showing only
+ *  generated marks even for real companies).
+ *
+ *  The `size` parameter is kept for API compatibility but DuckDuckGo always returns
+ *  a fixed-size icon; callers may ignore it.
  */
-export function companyLogoUrl(company: string, size = 128): string | null {
-  const v = company.trim();
-  if (!v) return null;
-  // Only fetch a favicon when the input is dot-qualified (an explicit domain or URL).
-  // A plain word without a dot is guessed as `<slug>.com` but almost never has a
-  // real logo — the favicon service returns a generic globe, which looks wrong.
-  const hasDot = v.includes(".");
-  if (!hasDot) return null;
-  const domain = guessDomain(v);
-  return domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}` : null;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function companyLogoUrl(company: string, _size = 128): string | null {
+  const domain = guessDomain(company);
+  return domain ? `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico` : null;
 }
 
 /** Prefilled, human workspace name from the company input (TLD stripped, title-cased). */

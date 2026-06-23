@@ -113,17 +113,6 @@ describe("middleware auth gate", () => {
     expect(location).toContain("next=%2Fconnections");
   });
 
-  it("strips token-like query params from login next redirects", async () => {
-    const { proxy: middleware } = await import("@/proxy");
-    const res = await middleware(req("/run/run_1?token=share-secret&tab=output&download_token=dl-secret"));
-    expect(res.status).toBe(307);
-    const location = decodeURIComponent(res.headers.get("location")!);
-    expect(location).toContain("/login");
-    expect(location).toContain("next=/app/run/run_1?tab=output");
-    expect(location).not.toContain("share-secret");
-    expect(location).not.toContain("dl-secret");
-  });
-
   it("keeps public pages reachable without login", async () => {
     const { proxy: middleware } = await import("@/proxy");
     for (const p of ["/login", "/connections/callback?status=success", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {

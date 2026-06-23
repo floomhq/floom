@@ -72,7 +72,7 @@ function CollectionInner<T>({ config }: { config: CollectionConfig<T> }) {
 
   const onInvalidSel = useCallback(
     (id: string) => {
-      toast.error("Couldn't open that item; it may have been deleted.");
+      toast.error(config.invalidSelectionMessage ?? "Couldn't open that item; it may have been deleted.");
       const next = { ...stateRef.current, sel: null, tab: null };
       setState(next);
       const qs = serializeCollectionState(next, defaultView).toString();
@@ -83,7 +83,7 @@ function CollectionInner<T>({ config }: { config: CollectionConfig<T> }) {
       );
       void id;
     },
-    [defaultView],
+    [config.invalidSelectionMessage, defaultView],
   );
 
   return (

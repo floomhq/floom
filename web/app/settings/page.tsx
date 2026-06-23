@@ -70,6 +70,7 @@ import {
   History,
   Info,
   KeyRound,
+  Mail,
   MessageSquare,
   Palette,
   QrCode,
@@ -122,6 +123,15 @@ function ScopeBanner({ scope, name, detail }: { scope: SettingsScope; name?: str
 
 // Cross-link callout that disambiguates the two token scopes in-place
 // (mockup .note). "This is not your personal token → see …" and vice-versa.
+function navigateSettingsSelection(targetSel: string) {
+  const params = new URLSearchParams(window.location.search);
+  params.set("sel", targetSel);
+  params.delete("tab");
+  const nextUrl = `${window.location.pathname}?${params.toString()}`;
+  window.history.pushState(null, "", nextUrl);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 function ScopeCrossLink({
   title,
   body,
@@ -142,10 +152,7 @@ function ScopeCrossLink({
           type="button"
           className="font-medium text-[var(--accent)] hover:underline"
           onClick={() => {
-            const params = new URLSearchParams(window.location.search);
-            params.set("sel", targetSel);
-            params.delete("tab");
-            window.location.href = `/settings?${params.toString()}`;
+            navigateSettingsSelection(targetSel);
           }}
         >
           {linkLabel}
@@ -1163,15 +1170,15 @@ floom run <worker>`;
 
 // API base comes from the same env seam lib/api uses (NEXT_PUBLIC_API_PROXY_BASE
 // → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
-// hardcoded host. The token header (x-floom-secret) matches the CLI/MCP curl
-// examples in CliCommandPanel; create the token in the Tokens tab.
+// hardcoded host. Account-scoped PATs authenticate as bearer tokens; the OSS
+// x-floom-secret examples live in CliCommandPanel.
 const API_CALL_SNIPPET = `# List your workers
 curl -sS ${API_BASE}/workers?shape=list \\
-  -H "x-floom-secret: <your-token>"
+  -H "Authorization: Bearer <your-token>"
 
 # Run a worker
 curl -sS -X POST ${API_BASE}/workers/<worker>/runs \\
-  -H "x-floom-secret: <your-token>" \\
+  -H "Authorization: Bearer <your-token>" \\
   -H "content-type: application/json" \\
   -d '{"inputs": {}}'`;
 
@@ -1266,12 +1273,10 @@ function ConnectSection() {
         <div className="space-y-1">
           <h2 className="text-sm font-medium">REST API</h2>
           <p className="text-xs text-muted-foreground">
-            Call your workspace over HTTP. Authenticate every request with a token
-            in the <code className="font-mono">x-floom-secret</code> header: a{" "}
+            Call your workspace over HTTP. Authenticate with{" "}
+            <code className="font-mono">Authorization: Bearer</code> and a{" "}
             <span className="font-medium text-foreground">personal access token</span>{" "}
-            (Account scope) or the{" "}
-            <span className="font-medium text-foreground">workspace access key</span>{" "}
-            (Workspace scope, admin only).
+            from your account.
           </p>
         </div>
         <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
@@ -1306,10 +1311,7 @@ function ConnectSection() {
             type="button"
             className="font-medium text-[var(--accent)] hover:underline"
             onClick={() => {
-              const params = new URLSearchParams(window.location.search);
-              params.set("sel", "personal_tokens");
-              params.delete("tab");
-              window.location.href = `/settings?${params.toString()}`;
+              navigateSettingsSelection("personal_tokens");
             }}
           >
             Account · Personal access tokens
@@ -2262,8 +2264,10 @@ function memberInitial(m: WorkspaceMember, currentUser?: CurrentUser | null, isM
   return base.slice(0, 2).toUpperCase();
 }
 
+let membersSettingsCache: WorkspaceMembersResponse | null = null;
+
 function MembersSettingsPanel() {
-  const [data, setData] = useState<WorkspaceMembersResponse | null>(null);
+  const [data, setData] = useState<WorkspaceMembersResponse | null>(() => membersSettingsCache);
   const [error, setError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
@@ -2279,6 +2283,7 @@ function MembersSettingsPanel() {
   const load = useCallback(async () => {
     try {
       const res = await api.members.list();
+      membersSettingsCache = res;
       setData(res);
       setError(null);
     } catch (err) {
@@ -2287,9 +2292,23 @@ function MembersSettingsPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
-    api.me().then(setCurrentUser).catch(() => setCurrentUser(null));
-  }, [load]);
+    let alive = true;
+    api.members.list()
+      .then((res) => {
+        membersSettingsCache = res;
+        if (alive) {
+          setData(res);
+          setError(null);
+        }
+      })
+      .catch((err: Error) => {
+        if (alive) setError(err.message || "Failed to load members");
+      });
+    api.me()
+      .then((user) => { if (alive) setCurrentUser(user); })
+      .catch(() => { if (alive) setCurrentUser(null); });
+    return () => { alive = false; };
+  }, []);
 
   const myRole = data?.my_role ?? null;
   const myMember = data?.members.find((m) => m.user_id === data.my_user_id) ?? null;
@@ -2891,6 +2910,49 @@ function WhatsAppBindingStatus() {
 // ---------------------------------------------------------------------------
 // ChannelsTab — Slack + WhatsApp + Agent install
 // ---------------------------------------------------------------------------
+function EmailChannelStatus() {
+  const [status, setStatus] = useState<{ connected: boolean; email?: string | null } | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    api.system.emailChannel()
+      .then((next) => {
+        if (alive) setStatus(next);
+      })
+      .catch((err: Error) => {
+        if (alive) setError(err.message || "Could not load email status");
+      });
+    return () => { alive = false; };
+  }, []);
+
+  if (error) {
+    return <p className="text-sm text-[var(--warning)]">{error}</p>;
+  }
+  if (!status) {
+    return <Skeleton className="h-16 w-full rounded-[var(--radius-ui)]" />;
+  }
+
+  return (
+    <div className="c-ltable">
+      <div className="c-lrow" style={{ gridTemplateColumns: "auto 1fr auto", cursor: "default" }}>
+        <div className="grid size-9 place-items-center rounded-[var(--radius-ui)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
+          <Mail className="size-4" />
+        </div>
+        <div className="c-lp-tx">
+          <div className="nm">Email</div>
+          <div className="sub">
+            {status.connected && status.email
+              ? `Notifications can be sent to ${status.email}.`
+              : "Add an email address to your account to receive notification emails."}
+          </div>
+        </div>
+        <span className="c-vpill">{status.connected ? "Connected" : "Not connected"}</span>
+      </div>
+    </div>
+  );
+}
+
 function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [qrOpen, setQrOpen] = useState(false);
   return (
@@ -2899,6 +2961,7 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
         <TabsList className="mb-4">
           <TabsTrigger value="slack">Slack</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+          <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="agent-install">Agent install</TabsTrigger>
         </TabsList>
         <TabsContent value="slack" className="space-y-4">
@@ -2945,6 +3008,9 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
               WhatsApp not configured. Set <code className="font-mono">WA_BOT_NUMBER</code>.
             </p>
           )}
+        </TabsContent>
+        <TabsContent value="email" className="space-y-4">
+          <EmailChannelStatus />
         </TabsContent>
         <TabsContent value="agent-install" className="space-y-5">
           <McpInstallPanel />

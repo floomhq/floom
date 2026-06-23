@@ -6,7 +6,9 @@ describe("getWorkspaceActionCopy (#1005)", () => {
   it("uses OSS template-zip vocabulary when not in cloud mode", () => {
     const copy = getWorkspaceActionCopy(false);
     expect(copy.exportLabel).toBe("Export workspace");
+    expect(copy.exportHelp).toContain("workers + instructions");
     expect(copy.duplicateLabel).toBe("Duplicate workspace");
+    expect(copy.duplicateHelp).toContain("workers + instructions");
     expect(copy.shareLabel).toBe("Share as template link");
     expect(copy.shareCopied).toBe("Template link copied to clipboard");
     expect(copy.shareFailed).toBe("Failed to create template link");
@@ -15,7 +17,9 @@ describe("getWorkspaceActionCopy (#1005)", () => {
   it("uses cloud invite vocabulary in cloud mode", () => {
     const copy = getWorkspaceActionCopy(true);
     expect(copy.exportLabel).toBe("Download copy");
+    expect(copy.exportHelp).toContain("workers + instructions");
     expect(copy.duplicateLabel).toBe("Make a local copy");
+    expect(copy.duplicateHelp).toContain("workers + instructions");
     expect(copy.shareLabel).toBe("Invite someone by link");
     expect(copy.shareCopied).toBe("Invite link copied to clipboard");
     expect(copy.shareFailed).toBe("Failed to create invite link");
@@ -41,6 +45,7 @@ describe("getWorkspaceActionCopy (#1005)", () => {
     // No string is left blank in either mode.
     for (const v of [...Object.values(oss), ...Object.values(cloud)]) {
       expect(v.trim().length).toBeGreaterThan(0);
+      expect(v).not.toMatch(/agents \+ instructions/i);
     }
   });
 });

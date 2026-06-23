@@ -157,7 +157,7 @@ type NavItem = {
 // Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is gone,
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
-// Connections. (MCP is a pinned item above the profile footer, see below.)
+// Connections. (Agent setup is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
@@ -209,13 +209,12 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   // source, which revalidates on focus + after any approve/reject — G5 P2).
   const badgeCounts = useNavBadgeSources();
   // Data prefetch: warm the destination route's TanStack cache on hover/focus
-  // so the tab switch is instant. Link already prefetches the route's JS/RSC;
-  // this adds the DATA. Cache-first + idempotent (see prefetch.ts).
+  // so the tab switch is instant. Keep Next route prefetch disabled here:
+  // these persistent sidebar links otherwise issue basePath RSC segment
+  // prefetches that prod can answer with `_not-found` payloads.
   const queryClient = useQueryClient();
-  const router = useRouter();
   const warm = (href: string) => {
     prefetchRouteData(queryClient, href);
-    router.prefetch(href);
   };
 
   return (
@@ -227,7 +226,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
           <Link
             key={item.href}
             href={item.href}
-            prefetch
+            prefetch={false}
             onMouseEnter={() => warm(item.href)}
             onPointerDown={() => warm(item.href)}
             onFocus={() => warm(item.href)}
@@ -261,7 +260,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   );
 }
 
-// MCP item, pinned LOW, just above the profile footer (Emily-home redesign).
+// Agent setup item, pinned LOW, just above the profile footer (Emily-home redesign).
 // Opens the MCP-install POPUP modal (not a page). The badge mirrors the v6
 // "12" affordance but is informational chrome only; the count is omitted here
 // since the OSS engine has no live "installed clients" count to show honestly.
@@ -276,10 +275,11 @@ function SidebarMcpItem({ onNavigate }: { onNavigate?: () => void }) {
           mcpModal.open();
         }}
         title="Add Floom to your AI client"
+        aria-label="Add Floom to your AI client"
         className="flex h-9 w-full items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
       >
         <Terminal className="w-4 h-4" />
-        MCP
+        Agent setup
       </button>
     </div>
   );
@@ -300,6 +300,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
           create-worker Link. Same primary token + label everywhere. */}
       <Link
         href={createWorkerHref()}
+        prefetch={false}
         onClick={() => onNavigate?.()}
         className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
@@ -379,12 +380,11 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   const mcpModal = useMcpModal();
   // Data prefetch (collapsed icon rail uses this `warm`; the expanded nav warms
   // inside NavLinks). After first paint, warm the highest-value routes once on
-  // idle so the first tab switch is already instant.
+  // idle so the first tab switch is already instant. Keep Next route prefetch
+  // off for the same basePath RSC segment reason as NavLinks above.
   const queryClient = useQueryClient();
-  const router = useRouter();
   const warm = (href: string) => {
     prefetchRouteData(queryClient, href);
-    router.prefetch(href);
   };
   useEffect(() => {
     // Warm ALL main routes' data immediately (parallel, cache-first/idempotent)
@@ -402,7 +402,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 lg:hidden">
         {/* #1305: white-label, workspace mark + name, not the Floom brand. */}
-        <Link href="/overview" className="flex items-center gap-2 min-w-0">
+        <Link href="/overview" prefetch={false} className="flex items-center gap-2 min-w-0">
           <WorkspaceMark size={22} />
           <MobileWorkspaceName />
         </Link>
@@ -496,7 +496,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  prefetch
+                  prefetch={false}
                   onMouseEnter={() => warm(item.href)}
                   onPointerDown={() => warm(item.href)}
                   onFocus={() => warm(item.href)}
@@ -527,18 +527,19 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             })}
             {/* Settings icon at bottom */}
             <div className="flex-1" />
-            {/* MCP, opens the install popup modal (above Settings). */}
+            {/* Agent setup, opens the install popup modal (above Settings). */}
             <button
               type="button"
               onClick={() => mcpModal.open()}
-              title="MCP, add Floom to your AI client"
-              aria-label="MCP, add Floom to your AI client"
+              title="Add Floom to your AI client"
+              aria-label="Add Floom to your AI client"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 hover:bg-[var(--active-nav-bg)] hover:text-ink"
             >
               <Terminal className="w-4 h-4" />
             </button>
             <Link
               href="/settings"
+              prefetch={false}
               title="Settings"
               className={cn(
                 "inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
@@ -704,7 +705,8 @@ export function UserProfileFooter({
           {/* #1306 / M36: profile photo (Google/GitHub) beats generated mark.
               Avatar handles the override ladder: src present → real photo
               cropped to the circle (user = human); absent → generated mark. */}
-          <Avatar role="user" name={primary} src={photoUrl} size={28} />
+          {/* Pass user_id as stable seed so the mark survives display-name changes. */}
+          <Avatar role="user" id={user?.user_id} name={primary} src={photoUrl} size={28} />
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
             <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>

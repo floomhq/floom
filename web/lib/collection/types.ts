@@ -6,6 +6,7 @@
  * thin configs of `<Collection>`; this file is the shared type surface.
  */
 import type { ReactNode } from "react";
+import type { ConfirmDialogProps } from "@/components/ui/confirm-dialog";
 
 /** Tag families, rendered left→right in this order (SPEC §1, §11). */
 export type TagFamilyKey =
@@ -74,6 +75,10 @@ export interface RowMenuItem {
   label: string;
   onSelect: () => void;
   danger?: boolean;
+  confirm?: Pick<
+    ConfirmDialogProps,
+    "title" | "body" | "confirmLabel" | "cancelLabel" | "destructive" | "requireTypedConfirmation"
+  >;
 }
 
 /** Grid column headers, aligned to ListRowSpec.cols (resting list only). */
@@ -153,6 +158,12 @@ export interface CollectionConfig<T> {
    * whose list is always complete (they keep the toast-on-miss behavior).
    */
   resolveMissing?: (id: string) => Promise<T | null>;
+  /**
+   * Optional copy for a genuinely missing deep-linked item. Collections with
+   * partial lists can use this to give route-specific feedback after
+   * resolveMissing returns null or throws.
+   */
+  invalidSelectionMessage?: string;
   /** Free-text fields searched by the search box. */
   searchOf: (item: T) => string;
   /** Optional placeholder override for the shared collection search box. */
@@ -197,6 +208,11 @@ export interface CollectionConfig<T> {
   };
   /** Extra control-bar actions (e.g. Runs "Export CSV"), left of +Add. */
   toolbarActions?: ReactNode;
+  /**
+   * Optional maximum width for the resting collection chrome and list. Split
+   * detail mode remains full-width so the 30/70 pane can use the available room.
+   */
+  restingMaxWidth?: number;
   /** Optional banner above the list (e.g. member-visibility note). When a
    *  function, CollectionView passes an `openAdd` callback that opens the +Add
    *  panel — used by Brain's unified drop-zone banner ("+ New folder"). */
