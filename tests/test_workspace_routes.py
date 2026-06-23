@@ -335,6 +335,45 @@ def test_duplicate_workspace_hides_non_owner_workspace(monkeypatch):
     assert exc_info.value.status_code == 404
 
 
+def test_duplicate_workspace_rejects_when_owner_hits_workspace_cap(monkeypatch):
+    source = {
+        "id": "ws_source",
+        "name": "Acme Ops",
+        "owner_user_id": "owner-1",
+        "created_at": "2026-01-01",
+    }
+    monkeypatch.setattr(workspace_routes.workspace_repo, "get", lambda workspace_id: source)
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "list_for_owner",
+        lambda owner_user_id: [
+            {
+                "id": f"ws_{idx}",
+                "name": f"Workspace {idx}",
+                "owner_user_id": owner_user_id,
+                "created_at": "2026-01-01",
+            }
+            for idx in range(workspace_routes._MAX_OWNED_WORKSPACES)
+        ],
+    )
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "create",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("create must not run")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.duplicate_workspace(
+                "ws_source",
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "workspace limit reached" in str(exc_info.value.detail)
+
+
 def test_create_share_link_returns_token_once(monkeypatch):
     captured = {}
 

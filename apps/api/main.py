@@ -283,6 +283,9 @@ _CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], in
     (None, _re.compile(r"^/auth/(?:password-login|password-signup|login|fragment-session|cli-approve|cli-deny)$"), 5, 60.0),
     (("POST",), _re.compile(r"^/api/cli-auth/devices$"), 5, 60.0),
     (("POST", "DELETE"), _re.compile(r"^/auth/tokens(?:/.*)?$"), 20, 60.0),
+    # Workspace duplicate internally exports + imports a template bundle. Keep
+    # it much tighter than ordinary workspace metadata mutations.
+    (("POST",), _re.compile(r"^/api/workspaces/[^/]+/duplicate$"), 5, 3600.0),
     (("POST", "PATCH", "DELETE"), _re.compile(r"^/api/workspaces(?:/.*)?$"), 60, 60.0),
     (("POST",), _re.compile(r"^/api/novasearch(?:/.*)?$"), 30, 60.0),
     # #288: exact list endpoints can enumerate tenant-owned resources. Keep
