@@ -9,15 +9,15 @@ import { NextRequest } from "next/server";
 const APP_ORIGIN = "https://workers.floom.dev";
 const API_BASE = "https://workers-api.floom.dev";
 
-async function proxyWithLocation(location: string) {
+async function proxyWithLocation(location: string, path = "/api/proxy/connections/callback") {
   process.env.FLOOM_API_BASE = API_BASE;
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(null, { status: 302, headers: { location } }),
   );
   const { GET } = await import("@/app/api/proxy/[...path]/route");
   const res = await GET(
-    new NextRequest(`${APP_ORIGIN}/api/proxy/connections/callback`),
-    { params: Promise.resolve({ path: ["connections", "callback"] }) },
+    new NextRequest(`${APP_ORIGIN}${path}`),
+    { params: Promise.resolve({ path: path.replace(/^\/api\/proxy\/?/, "").split("/") }) },
   );
   return res;
 }
@@ -58,5 +58,14 @@ describe("#1044 proxy Location header validation", () => {
   it("drops scheme-downgrade same-host redirects", async () => {
     const res = await proxyWithLocation("http://workers.floom.dev/callback");
     expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("allows Composio redirects only from signed connection authorize proxy links", async () => {
+    const composio = "https://connect.composio.dev/link/lk_test";
+    const allowed = await proxyWithLocation(composio, "/api/proxy/connections/authorize/signed-token");
+    expect(allowed.headers.get("location")).toBe(composio);
+
+    const notAuthorize = await proxyWithLocation(composio, "/api/proxy/connections/callback");
+    expect(notAuthorize.headers.get("location")).toBeNull();
   });
 });

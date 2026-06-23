@@ -117,10 +117,15 @@ def test_concurrent_record_candidate_feedback_calls_create_distinct_files(monkey
     assert {item["outcome"] for item in stored} == {"good", "miss"}
 
 
-def test_mcp_record_candidate_feedback_writes_event_file(monkeypatch, tmp_path):
-    main, contexts_dir = _load_api(monkeypatch, tmp_path)
+def test_mcp_record_candidate_feedback_is_not_generic_mcp_surface(monkeypatch, tmp_path):
+    main, _contexts_dir = _load_api(monkeypatch, tmp_path)
     with TestClient(main.app) as client:
         created = client.post("/contexts/review_pack-data", json={"writeable": True}, headers=_secret_headers())
+        listed = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/list")),
+            headers=_mcp_headers(),
+        )
         response = client.post(
             "/api/mcp",
             data=json.dumps(
@@ -145,14 +150,10 @@ def test_mcp_record_candidate_feedback_writes_event_file(monkeypatch, tmp_path):
         )
 
     assert created.status_code == 200, created.text
+    assert listed.status_code == 200, listed.text
+    names = {tool["name"] for tool in listed.json()["result"]["tools"]}
+    assert "record_candidate_feedback" not in names
     assert response.status_code == 200, response.text
     result = response.json()["result"]
-    assert result["isError"] is False
-    record = result["structuredContent"]
-    assert record["path"].startswith("feedback/raw/")
-    stored_path = contexts_dir / "review_pack-data" / record["path"]
-    stored = json.loads(stored_path.read_text())
-    assert stored["uuid"] == record["uuid"]
-    assert stored["run_id"] == "run-mcp"
-    assert stored["candidate_id"] == "candidate-mcp"
-    assert stored["outcome"] == "bad"
+    assert result["isError"] is True
+    assert "Unknown tool" in result["content"][0]["text"]

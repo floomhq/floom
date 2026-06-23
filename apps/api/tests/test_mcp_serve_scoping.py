@@ -110,6 +110,19 @@ def test_tools_list_hides_admin_tools_from_members(monkeypatch, tmp_path):
     assert "workers.list" in member_tools  # read tools stay visible
 
 
+def test_tools_list_uses_dotted_tool_admin_names_and_no_domain_specific_feedback(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+
+    tools = _list_tools(main, _admin(main))
+
+    assert {"tools.list", "tools.register", "tools.delete", "tools.update"} <= tools
+    assert "tools_list" not in tools
+    assert "tools_register" not in tools
+    assert "tools_delete" not in tools
+    assert "tools_update" not in tools
+    assert "record_candidate_feedback" not in tools
+
+
 def test_enabled_tools_allowlist_restricts_serving(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
     monkeypatch.setenv("WORKEROS_MCP_ENABLED_TOOLS", "workers.list, runs.get")

@@ -1719,6 +1719,8 @@ async def auth_middleware(request: Request, call_next):
             or path == "/workspace-agent/mcp"
             or path == "/api/langdock/mcp"
             or path == "/api/workspace-agent/mcp"
+            or path in {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+            or path.startswith("/connections/authorize/")
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
             or path.startswith("/drop/public/")
@@ -6261,20 +6263,6 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
                 "content": {"type": "string"},
             }, ["name", "path", "content"]),
         },
-        {
-            "name": "record_candidate_feedback",
-            "description": "Record one immutable candidate feedback JSON event into a writable brain pack.",
-            "inputSchema": _mcp_json_schema({
-                "name": {"type": "string"},
-                "run_id": {"type": "string"},
-                "candidate_id": {"type": "string"},
-                "rank": {"type": "integer"},
-                "feedback_text": {"type": "string"},
-                "outcome": {"type": "string", "enum": ["good", "bad", "miss"]},
-                "scope": {"type": "string", "enum": ["global", "client"], "default": "global"},
-                "reporter": {"type": "string"},
-            }, ["name", "run_id", "candidate_id", "rank", "feedback_text", "outcome"]),
-        },
     ]
 
 
@@ -6564,23 +6552,6 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(result, message)
 
 
-def _mcp_call_record_candidate_feedback(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
-    try:
-        payload = CandidateFeedbackCreateRequest(
-            run_id=_mcp_arg(arguments, "run_id"),
-            candidate_id=_mcp_arg(arguments, "candidate_id"),
-            rank=int(_mcp_arg(arguments, "rank")),
-            feedback_text=_mcp_arg(arguments, "feedback_text"),
-            outcome=_mcp_arg(arguments, "outcome"),
-            scope=str(arguments.get("scope") or "global"),
-            reporter=arguments.get("reporter"),
-        )
-    except (TypeError, ValueError, ValidationError) as exc:
-        raise ValueError(str(exc)) from exc
-    data = _record_candidate_feedback_event(_mcp_arg(arguments, "name"), payload, auth=auth, repos=repos)
-    return _mcp_call_result(data, "Candidate feedback recorded.")
-
-
 async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     auth = _workspace_agent_mcp_auth_context()
     repos = get_repositories()
@@ -6628,8 +6599,6 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_contexts_read(arguments, auth)
         if tool_name == "contexts.write":
             return _mcp_call_contexts_write(arguments, auth, repos)
-        if tool_name == "record_candidate_feedback":
-            return _mcp_call_record_candidate_feedback(arguments, auth, repos)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
     except ValidationError:
         raise
@@ -7272,7 +7241,6 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
     {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
-    {"name": "record_candidate_feedback", "description": "Record one immutable candidate feedback JSON event into a writable context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "run_id": {"type": "string"}, "candidate_id": {"type": "string"}, "rank": {"type": "integer"}, "feedback_text": {"type": "string"}, "outcome": {"type": "string", "enum": ["good", "bad", "miss"]}, "scope": {"type": "string", "enum": ["global", "client"], "default": "global"}, "reporter": {"type": "string"}}, "required": ["name", "run_id", "candidate_id", "rank", "feedback_text", "outcome"]}},
     {"name": "contexts.delete", "description": "Delete a brain pack context and all its files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
     {"name": "contexts.delete_file", "description": "Delete a specific file from a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
@@ -7300,10 +7268,10 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "conversations.list", "description": "List past workspace agent conversations.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
     {"name": "conversations.get", "description": "Retrieve a full conversation history by ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     # --- custom tools management ---
-    {"name": "tools_list", "description": "List custom MCP tools registered for this workspace.", "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "tools_register", "description": "Register a custom MCP tool backed by a worker. Once registered the tool appears in tools/list and can be called directly by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Tool name agents will use."}, "description": {"type": "string"}, "worker_id": {"type": "string", "description": "Worker ID or name."}, "input_schema": {"type": "object", "description": "JSON Schema for inputs (optional — defaults to worker schema)."}}, "required": ["name", "description", "worker_id"]}},
-    {"name": "tools_delete", "description": "Delete a custom MCP tool by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
-    {"name": "tools_update", "description": "Update an existing custom MCP tool. Only the fields you provide are changed.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Name of the tool to update."}, "description": {"type": "string", "description": "New description."}, "worker_id": {"type": "string", "description": "New worker ID or name to back this tool."}, "input_schema": {"type": "object", "description": "New JSON Schema for inputs."}}, "required": ["name"]}},
+    {"name": "tools.list", "description": "List custom MCP tools registered for this workspace.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "tools.register", "description": "Register a custom MCP tool backed by a worker. Once registered the tool appears in tools/list and can be called directly by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Tool name agents will use."}, "description": {"type": "string"}, "worker_id": {"type": "string", "description": "Worker ID or name."}, "input_schema": {"type": "object", "description": "JSON Schema for inputs (optional — defaults to worker schema)."}}, "required": ["name", "description", "worker_id"]}},
+    {"name": "tools.delete", "description": "Delete a custom MCP tool by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "tools.update", "description": "Update an existing custom MCP tool. Only the fields you provide are changed.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Name of the tool to update."}, "description": {"type": "string", "description": "New description."}, "worker_id": {"type": "string", "description": "New worker ID or name to back this tool."}, "input_schema": {"type": "object", "description": "New JSON Schema for inputs."}}, "required": ["name"]}},
 ]
 
 
@@ -7560,14 +7528,6 @@ async def _mcp_dispatch(
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
         return _mcp_api_result(data, s)
-    if name == "record_candidate_feedback":
-        body = {k: a[k] for k in ("run_id", "candidate_id", "rank", "feedback_text", "outcome") if k in a}
-        if "scope" in a:
-            body["scope"] = a["scope"]
-        if "reporter" in a:
-            body["reporter"] = a["reporter"]
-        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/record-candidate-feedback", request, body=body)
-        return _mcp_api_result(data, s)
     if name == "contexts.delete":
         qs = "?force=true" if a.get("force") else ""
         data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
@@ -7660,11 +7620,11 @@ async def _mcp_dispatch(
         return _mcp_api_result(data, s)
 
     # --- custom tools management ---
-    if name == "tools_list":
+    if name in {"tools.list", "tools_list"}:
         tools = repos.mcp_tools.list(user_id=auth.user_id)
         return _mcp_content(json.dumps(tools, indent=2, default=str))
 
-    if name == "tools_register":
+    if name in {"tools.register", "tools_register"}:
         tool_name = a.get("name", "")
         description = a.get("description", "")
         worker_ref = a.get("worker_id", "")
@@ -7678,7 +7638,7 @@ async def _mcp_dispatch(
         if not worker:
             return _mcp_content(f"Worker {worker_ref!r} not found", is_error=True)
         if repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name):
-            return _mcp_content(f"Tool {tool_name!r} already exists — use tools_delete first to replace it", is_error=True)
+            return _mcp_content(f"Tool {tool_name!r} already exists — use tools.delete first to replace it", is_error=True)
         if not input_schema:
             input_schema = _mcp_input_schema_from_worker_record(worker)
         tool = repos.mcp_tools.create(
@@ -7690,7 +7650,7 @@ async def _mcp_dispatch(
         )
         return _mcp_content(json.dumps(tool, indent=2, default=str))
 
-    if name == "tools_delete":
+    if name in {"tools.delete", "tools_delete"}:
         tool_name = a.get("name", "")
         tool = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name)
         if not tool:
@@ -7698,7 +7658,7 @@ async def _mcp_dispatch(
         repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool["id"])
         return _mcp_content(f"Tool {tool_name!r} deleted")
 
-    if name == "tools_update":
+    if name in {"tools.update", "tools_update"}:
         tool_name = a.get("name", "")
         tool = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name)
         if not tool:

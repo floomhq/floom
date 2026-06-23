@@ -203,6 +203,10 @@ def _get_callback_url() -> str:
     return f"{base}/connections/callback"
 
 
+def _get_frontend_url() -> str:
+    return os.environ.get("WORKERS_FRONTEND_URL", "http://localhost:3000").rstrip("/")
+
+
 def _oauth_state_secret() -> str:
     return (
         os.environ.get("WORKEROS_OAUTH_STATE_SECRET")
@@ -257,6 +261,60 @@ def _validate_oauth_state(state: str) -> str:
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
     return user_id
+
+
+def _issue_authorize_token(*, redirect_url: str, user_id: str, ttl_seconds: int = 900) -> str:
+    payload = {
+        "redirect_url": redirect_url,
+        "user_id": user_id,
+        "nonce": pysecrets.token_urlsafe(18),
+        "exp": int(time.time()) + ttl_seconds,
+    }
+    encoded = _b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    signature = hmac.new(
+        _oauth_state_secret().encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _validate_authorize_token(token: str) -> str:
+    try:
+        encoded, signature = token.split(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid authorization link") from exc
+    expected = hmac.new(
+        _oauth_state_secret().encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=400, detail="Invalid authorization link")
+    try:
+        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid authorization link") from exc
+    if int(payload.get("exp") or 0) < int(time.time()):
+        raise HTTPException(status_code=400, detail="Authorization link expired")
+    redirect_url = str(payload.get("redirect_url") or "")
+    if not _is_allowed_composio_redirect_url(redirect_url):
+        raise HTTPException(status_code=400, detail="Invalid authorization target")
+    return redirect_url
+
+
+def _is_allowed_composio_redirect_url(redirect_url: str) -> bool:
+    parsed = urllib.parse.urlsplit(redirect_url)
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and (
+        host == "composio.dev"
+        or host.endswith(".composio.dev")
+    )
+
+
+def _branded_authorize_url(redirect_url: str, user_id: str) -> str:
+    token = _issue_authorize_token(redirect_url=redirect_url, user_id=user_id)
+    return f"{_get_frontend_url()}/api/proxy/connections/authorize/{token}"
 
 
 def _callback_url_with_state(callback_url: str, state: str) -> str:
@@ -1160,7 +1218,7 @@ def initiate_connection(
         _raise_composio_unavailable(exc)
 
     composio_conn_id = result["composio_connection_id"]
-    redirect_url = result["redirect_url"]
+    redirect_url = _branded_authorize_url(result["redirect_url"], auth.user_id)
     # Always insert a new row — multiple accounts per app are allowed.
     # Each Composio connected_account is a distinct row identified by its own UUID.
     # (Stale expired siblings are hidden from the UI by list_connections once an
@@ -1184,6 +1242,13 @@ def initiate_connection(
         redirect_url=redirect_url,
         composio_connection_id=composio_conn_id,
     )
+
+
+@connections_router.get("/connections/authorize/{token}")
+def authorize_connection(token: str):
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url=_validate_authorize_token(token))
 
 
 @connections_router.post("/connections/mcp", response_model=ConnectionItem)
