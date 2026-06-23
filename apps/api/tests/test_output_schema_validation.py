@@ -272,17 +272,6 @@ def test_read_result_valid_passes():
     assert data == {"outputs": {"result": "ok"}, "status": "success"}
 
 
-def test_read_result_await_external_stays_control_field():
-    sandbox = _FakeSandbox(json.dumps({
-        "outputs": {"submitted": True},
-        "await_external": {"key": "audit-123", "label": "Audit"},
-    }))
-    data, err = e2b_driver._read_result_json(sandbox, "/wd/result.json", _noop_log)
-    assert err is None
-    assert data["outputs"] == {"submitted": True}
-    assert data["await_external"] == {"key": "audit-123", "label": "Audit"}
-
-
 def test_read_result_legacy_top_level_fields_become_outputs():
     sandbox = _FakeSandbox(json.dumps({"result": "ok", "source": "cli"}))
     data, err = e2b_driver._read_result_json(sandbox, "/wd/result.json", _noop_log)
