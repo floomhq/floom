@@ -14,6 +14,8 @@
 //
 // No gradients, no faces, no stock glyphs (radar/orbit/star), no letters.
 // Tokens only: --accent (Emily blue), --radius-squircle (squircle radius).
+"use client";
+import { useState } from "react";
 import { generateMarkForRole, MARK_GROUND, type MarkMotif } from "@/lib/avatar/generate";
 
 export type AvatarRole = "user" | "workspace" | "worker" | "emily";
@@ -136,6 +138,11 @@ export function Avatar({
   "aria-label": ariaLabel,
   active,
 }: AvatarProps) {
+  // Track whether the logo src failed to load so we can fall back to the
+  // generated mark. This fires client-side only; SSR renders the <img> first
+  // and the client hides it on onError (e.g. DuckDuckGo favicon 404).
+  const [logoError, setLogoError] = useState(false);
+
   const numericSize = typeof size === "number" ? size : undefined;
   const sizeClass = typeof size === "string" ? size : undefined;
   const combinedClass = [sizeClass, className].filter(Boolean).join(" ") || undefined;
@@ -148,7 +155,9 @@ export function Avatar({
   };
 
   // Photo / logo override (user photo, workspace/worker logo). Emily is fixed.
-  if (role !== "emily" && src) {
+  // If the logo URL fails to load (onError), we fall back to the generated mark
+  // below. This is essential for DuckDuckGo favicon 404s on non-company names.
+  if (role !== "emily" && src && !logoError) {
     const imgAlt = ariaLabel ?? "";
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -159,6 +168,7 @@ export function Avatar({
         referrerPolicy="no-referrer"
         className={combinedClass}
         style={{ ...baseStyle, objectFit: "cover" }}
+        onError={() => setLogoError(true)}
         {...(numericSize ? { width: numericSize, height: numericSize } : {})}
       />
     );
