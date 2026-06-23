@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("Cloud app routing", () => {
@@ -43,6 +45,38 @@ describe("Cloud app routing", () => {
     expect(JSON.stringify(rewrites)).not.toContain("workers.floom.dev");
   });
 
+  it("defaults app rewrites to the dashboard alias refreshed by CI", async () => {
+    const config = (await import("../../next.config")).default;
+    const dashboard = "https://workeros-cloud-dashboard-three.vercel.app";
+    const staleDashboardHosts = [
+      "web-iota-five-12.vercel.app",
+      "workeros-cloud-dashboard.vercel.app",
+    ];
+
+    const rewrites = config.rewrites ? await config.rewrites() : [];
+    expect(rewrites).toContainEqual({
+      source: "/cli-auth",
+      destination: `${dashboard}/app/cli-auth`,
+    });
+
+    const vercelConfig = JSON.parse(
+      readFileSync(path.join(process.cwd(), "vercel.json"), "utf8"),
+    ) as { rewrites?: Array<{ source: string; destination: string }> };
+    expect(vercelConfig.rewrites).toContainEqual({
+      source: "/app",
+      destination: `${dashboard}/app`,
+    });
+    expect(vercelConfig.rewrites).toContainEqual({
+      source: "/app/:path*",
+      destination: `${dashboard}/app/:path*`,
+    });
+
+    const routingConfig = JSON.stringify({ rewrites, vercelConfig });
+    for (const host of staleDashboardHosts) {
+      expect(routingConfig).not.toContain(host);
+    }
+  });
+
   it("keeps landing app URLs relative by default and ignores the legacy OSS host", async () => {
     let mod = await import("../../lib/app-url");
     expect(mod.appUrl("/workers/new", { prompt: "draft job" })).toBe("/workers/new?prompt=draft+job");
@@ -53,4 +87,3 @@ describe("Cloud app routing", () => {
     expect(mod.appUrl("/workers/new")).toBe("/workers/new");
   });
 });
-
