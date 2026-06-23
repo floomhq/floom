@@ -37,3 +37,22 @@ Verification:
 Remaining flaws:
 - Browser rendering is hook-blocked, so heading layout is verified by DOM semantics and TypeScript rather than screenshots.
 - `tests/collection-pages.dom.test.tsx` was included in the command but not discovered by the active Vitest project for that run.
+
+## PR 4 - focus rings, hit areas, and tokenized warning colors
+
+Score: 8/10
+
+Closed audit items:
+- Base `Button` now has visible `focus-visible` rings using app tokens.
+- Button sizes and icon-button defaults now use larger interactive hit areas while preserving compact icon/text interiors.
+- `IconButton` now defaults to the 44px `icon` size instead of the old 28px `icon-sm`.
+- Brain file type icons now use semantic CSS tokens instead of hardcoded hex colors; PDF/folder warning states use `--warning`.
+- Terminal dark mode and error output now use semantic tokens instead of hardcoded hex or red/error classes.
+
+Verification:
+- `npm exec vitest -- run tests/ui-audit-a11y-tokens.test.ts tests/a11y-contrast-tokens-1712.test.ts tests/flat-by-token.test.ts` - 3 files / 46 tests passed.
+- `npm exec tsc -- --project tsconfig.ui-audit-pr4.tmp.json --noEmit --pretty false` - passed for PR 4 changed files and relevant tests; temporary config was removed after the run.
+
+Remaining flaws:
+- Browser rendering is hook-blocked, so focus-ring and hit-area behavior is verified by source/tests, not screenshot or keyboard traversal.
+- This PR fixes the audited shared primitives and named color files only; it does not sweep every bespoke raw button in the app.
