@@ -43,6 +43,7 @@ from services.worker_serialize import (
     _worker_bundle_dir,
     _worker_files_from_manifest,
 )
+from services.product_events import emit_worker_lifecycle_event
 from worker_registry import invalidate_worker_cache
 
 worker_lifecycle_router = APIRouter()

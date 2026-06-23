@@ -114,7 +114,7 @@ describe("CLI auth seams", () => {
     });
     render(<CliAuthContent loginPath="/login" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve & connect" }));
 
     await waitFor(() => {
       expect(assign).toHaveBeenCalledWith("/login?next=%2Fcli-auth%3Fcode%3DABCD-2345");
@@ -138,10 +138,10 @@ describe("CLI auth seams", () => {
     );
     render(<CliAuthContent />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve & connect" }));
 
     expect(await screen.findByText(/not logged in to the account/i)).toBeInTheDocument();
-    expect(screen.queryByText("Approved")).toBeNull();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.queryByText("Your agents are connected")).toBeNull();
+    expect(screen.getByRole("button", { name: "Approve & connect" })).toBeInTheDocument();
   });
 });
