@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import sys
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -35,6 +37,9 @@ class _FakeTable:
         self.limit_value = None
         self.selected = None
         self.update_values = None
+        self.insert_values = None
+        self.upsert_values = None
+        self.delete_requested = False
 
     def select(self, value, **_kwargs):
         self.selected = value
@@ -42,6 +47,18 @@ class _FakeTable:
 
     def update(self, values):
         self.update_values = values
+        return self
+
+    def insert(self, values):
+        self.insert_values = values
+        return self
+
+    def upsert(self, values, **_kwargs):
+        self.upsert_values = values
+        return self
+
+    def delete(self):
+        self.delete_requested = True
         return self
 
     def eq(self, key, value):
@@ -85,6 +102,24 @@ class _FakeTable:
             for row in rows:
                 row.update(self.update_values)
             return _FakeResponse(rows)
+        if self.delete_requested:
+            for row in list(rows):
+                if row in self.rows:
+                    self.rows.remove(row)
+            return _FakeResponse(rows)
+        if self.upsert_values is not None:
+            values = dict(self.upsert_values)
+            for row in self.rows:
+                if row.get("id") == values.get("id"):
+                    row.update(values)
+                    return _FakeResponse([row])
+            self.rows.append(values)
+            return _FakeResponse([values])
+        if self.insert_values is not None:
+            values = self.insert_values
+            inserted = [dict(v) for v in values] if isinstance(values, list) else [dict(values)]
+            self.rows.extend(inserted)
+            return _FakeResponse(inserted)
         if self.limit_value is not None:
             rows = rows[: self.limit_value]
         return _FakeResponse(rows)
@@ -115,6 +150,111 @@ class _FakeRpc:
 
     def execute(self):
         return _FakeResponse(self.data)
+
+
+def test_connection_list_reconciles_pending_composio_status(monkeypatch):
+    rows = {
+        "connections": [
+            {
+                "id": "conn_1",
+                "user_id": "user_1",
+                "workspace_id": "ws_1",
+                "app_name": "gmail",
+                "composio_connection_id": "ca_gmail",
+                "status": "initiated",
+                "created_at": "2026-06-23T00:00:00+00:00",
+                "updated_at": "2026-06-23T00:00:00+00:00",
+                "scopes_json": [],
+            }
+        ]
+    }
+    monkeypatch.setitem(
+        sys.modules,
+        "composio_client",
+        SimpleNamespace(check_status=lambda composio_id: "enabled"),
+    )
+    repo = SupabaseConnectionRepository(client=_FakeClient(rows))
+
+    with active_workspace("ws_1"):
+        result = repo.list(user_id="user_1")
+
+    assert result[0]["status"] == "active"
+    assert result[0]["last_checked_at"]
+    assert result[0]["last_check_status"] == "valid"
+    assert rows["connections"][0]["status"] == "active"
+
+
+def test_connection_upsert_dedupes_other_pending_rows_same_app_workspace():
+    rows = {
+        "connections": [
+            {
+                "id": "old_pending",
+                "user_id": "user_1",
+                "workspace_id": "ws_1",
+                "app_name": "gmail",
+                "composio_connection_id": "ca_old",
+                "status": "initiated",
+                "created_at": "2026-06-23T00:00:00+00:00",
+                "updated_at": "2026-06-23T00:00:00+00:00",
+                "scopes_json": [],
+            },
+            {
+                "id": "active_other",
+                "user_id": "user_1",
+                "workspace_id": "ws_1",
+                "app_name": "gmail",
+                "composio_connection_id": "ca_active",
+                "status": "active",
+                "created_at": "2026-06-23T00:00:00+00:00",
+                "updated_at": "2026-06-23T00:00:00+00:00",
+                "scopes_json": [],
+            },
+        ]
+    }
+    repo = SupabaseConnectionRepository(client=_FakeClient(rows))
+
+    with active_workspace("ws_1"):
+        repo.upsert(
+            user_id="user_1",
+            id="new_pending",
+            app_name="gmail",
+            composio_connection_id="ca_new",
+            status="initiated",
+        )
+
+    assert {row["id"] for row in rows["connections"]} == {"new_pending", "active_other"}
+
+
+def test_connection_update_to_active_records_last_checked_at():
+    rows = {
+        "connections": [
+            {
+                "id": "conn_1",
+                "user_id": "user_1",
+                "workspace_id": "ws_1",
+                "app_name": "gmail",
+                "composio_connection_id": "ca_gmail",
+                "status": "initiated",
+                "created_at": "2026-06-23T00:00:00+00:00",
+                "updated_at": "2026-06-23T00:00:00+00:00",
+                "scopes_json": [],
+            }
+        ]
+    }
+    repo = SupabaseConnectionRepository(client=_FakeClient(rows))
+
+    with active_workspace("ws_1"):
+        row = repo.update(
+            user_id="user_1",
+            composio_id="conn_1",
+            status="active",
+            updated_at="2026-06-23T00:02:00+00:00",
+        )
+
+    assert row is not None
+    assert row["status"] == "active"
+    assert row["last_checked_at"] == "2026-06-23T00:02:00+00:00"
+    assert row["last_check_status"] == "valid"
 
 
 def test_approval_repository_get_public_loads_by_id_without_owner_scope():
@@ -410,8 +550,20 @@ def test_supabase_repositories_enforce_rls_between_users():
 
         service.table("users").upsert(
             [
-                {"id": user_a["id"], "email": user_a["email"], "updated_at": now_iso},
-                {"id": user_b["id"], "email": user_b["email"], "updated_at": now_iso},
+                {
+                    "id": user_a["id"],
+                    "email": user_a["email"],
+                    "username": user_a["id"],
+                    "password_hash": "",
+                    "updated_at": now_iso,
+                },
+                {
+                    "id": user_b["id"],
+                    "email": user_b["email"],
+                    "username": user_b["id"],
+                    "password_hash": "",
+                    "updated_at": now_iso,
+                },
             ],
             on_conflict="id",
         ).execute()

@@ -188,6 +188,99 @@ def _register_contexts_scope_resolver() -> None:
     engine_contexts.set_context_scope_resolver(get_active_workspace_id)
 
 
+def _override_context_scope_for_cloud() -> None:
+    """Make explicit engine context scopes use workspace_id in cloud.
+
+    Engine worker creation validates ``source: local`` mounts by entering
+    ``use_context_scope(context_scope_for_user(user_id))``. In cloud, Brain
+    packs live under the active workspace id, not the auth user id, so worker
+    push must bind local context names against the workspace context store.
+    """
+    if getattr(engine_contexts.context_scope_for_user, "_workeros_cloud_patched", False):
+        return
+    _orig_context_scope_for_user = engine_contexts.context_scope_for_user
+
+    def _cloud_context_scope_for_user(user_id: str | None) -> str | None:
+        return get_active_workspace_id() or _orig_context_scope_for_user(user_id)
+
+    _cloud_context_scope_for_user._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    engine_contexts.context_scope_for_user = _cloud_context_scope_for_user
+
+
+def _override_connection_resolution_for_cloud() -> None:
+    """Resolve worker Composio requirements through cloud repositories.
+
+    The engine resolver uses local SQLite ``composio_connections`` directly.
+    Hosted cloud stores workspace connections in Supabase, so the pre-execution
+    "Resolving connections" step must use the registered cloud repository.
+    """
+    runner_utils = import_engine_module("runner_utils")
+    if getattr(runner_utils._resolve_connections, "_workeros_cloud_patched", False):
+        return
+    models = import_engine_module("models")
+
+    def _is_live(status: object) -> bool:
+        return str(status or "").strip().lower() in {
+            "active",
+            "valid",
+            "connected",
+            "enabled",
+            "success",
+        }
+
+    def _cloud_resolve_connections(
+        worker_id: str,
+        log_fn,
+        config=None,
+        user_id: str | None = None,
+    ):
+        config_obj = config or runner_utils.get_worker_config(worker_id)
+        declared = models.declared_composio_connections(config_obj)
+        if not declared:
+            return {}, None
+        if not user_id:
+            missing = list(declared.keys())
+            log_fn(f"Missing connections: {', '.join(missing)}", level="error")
+            return {}, f"missing_connection: {', '.join(missing)}"
+
+        repos = engine_db_factory.get_repositories()
+        rows = repos.connections.list(user_id=user_id)
+        by_app: dict[str, list[dict]] = {}
+        for row in rows:
+            if (row.get("kind") or "composio") != "composio":
+                continue
+            app = str(row.get("app_name") or "").strip().lower()
+            if app:
+                by_app.setdefault(app, []).append(dict(row))
+
+        missing: list[str] = []
+        connection_ids: dict[str, str] = {}
+        for app_name in declared:
+            app_key = str(app_name or "").strip().lower()
+            matches = [
+                row
+                for row in by_app.get(app_key, [])
+                if _is_live(row.get("status"))
+                and str(row.get("composio_connection_id") or "").strip()
+            ]
+            if not matches:
+                missing.append(app_name)
+                continue
+            matches.sort(
+                key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""),
+                reverse=True,
+            )
+            connection_ids[app_key] = str(matches[0]["composio_connection_id"])
+
+        if missing:
+            log_fn(f"Missing connections: {', '.join(missing)}", level="error")
+            return {}, f"missing_connection: {', '.join(missing)}"
+        return connection_ids, None
+
+    _cloud_resolve_connections._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    runner_utils._resolve_connections = _cloud_resolve_connections
+
+
 def _override_create_run_for_members() -> None:
     """Patch engine_main.create_run so members can trigger shared workers.
 
@@ -1363,6 +1456,8 @@ def register_cloud_components() -> None:
     apply_cloud_slack_overrides()
     _install_worker_call_signing_key()
     _register_contexts_scope_resolver()
+    _override_context_scope_for_cloud()
+    _override_connection_resolution_for_cloud()
     _register_git_workspace_resolver()
     _override_workers_git_prefix_for_cloud()
     _override_git_commit_context_for_cloud()

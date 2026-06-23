@@ -194,6 +194,50 @@ def test_browser_workspace_create_does_not_return_raw_token(monkeypatch):
     assert response.header is None
 
 
+def test_create_workspace_does_not_change_active_workspace(monkeypatch):
+    created = {
+        "id": "ws_new",
+        "name": "New workspace",
+        "owner_user_id": "user-1",
+        "created_at": "2026-01-01",
+    }
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", lambda owner_user_id, name: created)
+    response = Response()
+
+    with active_workspace("ws_existing", "admin"):
+        result = asyncio.run(
+            workspace_routes.create_workspace(
+                workspace_routes.CreateWorkspaceRequest(name="New workspace"),
+                response,
+                AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="jwt"),
+            )
+        )
+        assert workspace_routes.get_active_workspace_id() == "ws_existing"
+
+    assert result.id == "ws_new"
+    assert ACTIVE_WORKSPACE_COOKIE not in response.headers.get("set-cookie", "")
+
+
+def test_create_workspace_duplicate_name_returns_409(monkeypatch):
+    def create_duplicate(owner_user_id, name):
+        raise ValueError("workspace 'Acme' already exists")
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", create_duplicate)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.create_workspace(
+                workspace_routes.CreateWorkspaceRequest(name="Acme"),
+                Response(),
+                AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="jwt"),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "workspace 'Acme' already exists"
+
+
 def test_create_share_link_returns_token_once(monkeypatch):
     captured = {}
 
