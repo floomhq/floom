@@ -128,6 +128,91 @@ export async function workspacesShowCommand(options: { json?: boolean }): Promis
   }
 }
 
+export async function workspacesRenameCommand(
+  first: string,
+  second?: string,
+  options: { json?: boolean } = {},
+): Promise<number> {
+  try {
+    // `rename <new-name>` renames the active workspace; `rename <name-or-id>
+    // <new-name>` renames the matched one (mirrors the web switcher rename).
+    const renamingActive = second === undefined;
+    const target = renamingActive ? "" : first;
+    const newName = (renamingActive ? first : (second as string)).trim();
+    if (!newName) {
+      log.err("new workspace name is required");
+      return 1;
+    }
+
+    const { client, credentials } = await createAuthenticatedClient();
+    const data = await fetchWorkspaces(client);
+    const activeId = activeWorkspaceId(credentials, data);
+
+    let match: WorkspaceRow | undefined;
+    if (renamingActive) {
+      if (!activeId) {
+        log.err("No active workspace to rename.");
+        process.stderr.write(
+          `Run \`${getCommandName()} workspaces switch <name-or-id>\` first, or name the workspace: ${getCommandName()} workspaces rename <name-or-id> <new-name>.\n`,
+        );
+        return 1;
+      }
+      match = (data.workspaces || []).find((row) => row.id === activeId);
+    } else {
+      const needle = target.trim().toLowerCase();
+      match = (data.workspaces || []).find(
+        (row) =>
+          row.id.toLowerCase() === needle ||
+          (row.name || "").toLowerCase() === needle,
+      );
+    }
+
+    if (!match) {
+      const label = renamingActive ? "the active workspace" : `"${target}"`;
+      log.err(`No authenticated workspace matches ${label}.`);
+      process.stderr.write(
+        `Run \`${getCommandName()} workspaces list\` to see workspaces your credentials can access.\n`,
+      );
+      return 1;
+    }
+
+    let updated: WorkspaceRow;
+    try {
+      updated = (await client.requestJson("PATCH", `/workspaces/${match.id}`, {
+        body: { name: newName },
+      })) as WorkspaceRow;
+    } catch (error) {
+      if (error instanceof FloomApiError && error.status === 409) {
+        // #1738 duplicate-name guard.
+        log.err(`A workspace named "${newName}" already exists. Pick a different name.`);
+        return 1;
+      }
+      if (error instanceof FloomApiError && error.status === 404) {
+        log.err("Renaming workspaces is not supported by this Floom server.");
+        return 1;
+      }
+      throw error;
+    }
+
+    const finalName = updated?.name || newName;
+    // Keep the persisted active workspace name in sync when we renamed it.
+    if (match.id === activeId) {
+      await updateCredentials({ workspace_id: match.id, workspace_name: finalName });
+    }
+
+    if (options.json) {
+      printJson(updated);
+    } else {
+      log.ok(`Renamed workspace to ${finalName} (${match.id}).`);
+    }
+    return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    throw error;
+  }
+}
+
 export async function workspacesSwitchCommand(target: string): Promise<number> {
   try {
     const { client, credentials } = await createAuthenticatedClient();

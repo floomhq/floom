@@ -22,6 +22,10 @@ _DERIVED_USER_RE = re.compile(r"^(?P<base>.+)__ws_[a-f0-9]{14}$")
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 
 
+class WorkspaceNameConflictError(ValueError):
+    """#1738 — another workspace for this owner already uses the requested name."""
+
+
 def _strip_html_tags(text: str) -> str:
     """Remove HTML tags from a display-string field (defense-in-depth).
 
@@ -124,17 +128,29 @@ def get_local_workspace(owner_user_id: str, workspace_id: str) -> dict[str, Any]
     return dict(row) if row else None
 
 
+def _assert_name_available(
+    owner_user_id: str, clean_name: str, *, exclude_id: str | None = None
+) -> None:
+    """#1738 — reject a duplicate name (case-insensitive) for this owner. A
+    transient create failure (e.g. the #1687 session death) used to be retried
+    into a SECOND identically-named workspace, leaving an ambiguous switcher and
+    orphaned duplicates. A clear conflict lets the caller reuse the existing one.
+
+    Pass ``exclude_id`` when renaming so a workspace can keep (or re-case) its
+    own name without colliding with itself.
+    """
+    for existing in list_local_workspaces(owner_user_id):
+        if exclude_id is not None and str(existing.get("id")) == exclude_id:
+            continue
+        if str(existing.get("name", "")).strip().lower() == clean_name.lower():
+            raise WorkspaceNameConflictError(f"a workspace named '{clean_name}' already exists")
+
+
 def create_local_workspace(owner_user_id: str, name: str) -> dict[str, Any]:
     ensure_default_workspace(owner_user_id)
     workspace_id = "ws_" + uuid.uuid4().hex[:14]
     clean_name = _strip_html_tags((name or "").strip()) or "Untitled"
-    # #1738 — reject a duplicate name (case-insensitive) for this owner. A
-    # transient create failure (e.g. the #1687 session death) used to be retried
-    # into a SECOND identically-named workspace, leaving an ambiguous switcher and
-    # orphaned duplicates. A clear conflict lets the caller reuse the existing one.
-    for existing in list_local_workspaces(owner_user_id):
-        if str(existing.get("name", "")).strip().lower() == clean_name.lower():
-            raise ValueError(f"a workspace named '{clean_name}' already exists")
+    _assert_name_available(owner_user_id, clean_name)
     created_at = now_iso()
     with get_db() as conn:
         conn.execute(
@@ -179,6 +195,8 @@ def update_local_workspace(
         clean_name = _strip_html_tags(name.strip())
         if not clean_name:
             raise ValueError("workspace name required")
+        # #1738 — renaming must honor the same duplicate-name guard as create.
+        _assert_name_available(owner_user_id, clean_name, exclude_id=workspace_id)
         sets.append("name = ?")
         params.append(clean_name)
     if region is not None:

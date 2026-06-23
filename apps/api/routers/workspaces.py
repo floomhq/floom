@@ -159,7 +159,11 @@ def rename_workspace(
     auth: AuthContext = Depends(get_auth_context),
 ) -> LocalWorkspaceOut:
     """#791: update a local OSS workspace's name/region/timezone (owner-scoped)."""
-    from auth.local_workspaces import local_workspace_base_user_id, update_local_workspace
+    from auth.local_workspaces import (
+        WorkspaceNameConflictError,
+        local_workspace_base_user_id,
+        update_local_workspace,
+    )
 
     _require_local_workspace_mode()
     if payload.name is None and payload.region is None and payload.timezone is None:
@@ -170,6 +174,9 @@ def rename_workspace(
             base_user_id, workspace_id,
             name=payload.name, region=payload.region, timezone=payload.timezone,
         )
+    except WorkspaceNameConflictError as exc:
+        # #1738 — renaming to an existing name is a conflict, mirror create.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if updated is None:

@@ -80,3 +80,21 @@ def test_patch_empty_payload_422(client):
 
 def test_patch_unknown_workspace_404(client):
     assert client.patch("/workspaces/ws_unknownunknow", json={"region": "X"}).status_code == 404
+
+
+def test_patch_duplicate_name_returns_409(client):
+    """#1738 — renaming onto an existing name (case-insensitive) is a 409."""
+    a_id = client.post("/workspaces", json={"name": "Alpha"}).json()["id"]
+    client.post("/workspaces", json={"name": "Beta"})
+
+    # Exact clash with the sibling "Beta".
+    dup = client.patch(f"/workspaces/{a_id}", json={"name": "Beta"})
+    assert dup.status_code == 409, dup.text
+    assert "already exists" in dup.json()["detail"]
+
+    # Case-insensitive clash.
+    assert client.patch(f"/workspaces/{a_id}", json={"name": "beta"}).status_code == 409
+
+    # Renaming to a fresh name still works, and re-casing its own name is allowed.
+    assert client.patch(f"/workspaces/{a_id}", json={"name": "Gamma"}).status_code == 200
+    assert client.patch(f"/workspaces/{a_id}", json={"name": "GAMMA"}).status_code == 200
