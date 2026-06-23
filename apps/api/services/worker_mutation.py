@@ -85,7 +85,14 @@ def _set_worker_enabled(
     update_fields: Dict[str, Any] = {"enabled": enabled}
     if not enabled:
         update_fields["next_run_at"] = None  # unschedule pending cron fire
-    repos.workers.update(user_id=auth.user_id, worker_id=worker_id, **update_fields)
+    # _worker_for_mutation allows either the owner or a workspace admin mutating
+    # a workspace-shared worker. The repository update is owner-scoped, so write
+    # through the row owner instead of the acting admin to avoid an authorized
+    # no-op that returns a stale enabled=false detail.
+    owner_id = str(worker.get("owner_id") or auth.user_id)
+    updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
     # Re-reconcile triggers so resume re-enqueues and pause tears down.
     try:
         triggers = (worker.get("config") or {}).get("triggers") or worker.get("triggers_json") or []

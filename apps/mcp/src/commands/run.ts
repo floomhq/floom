@@ -18,6 +18,15 @@ type RunDetail = {
   artifacts?: Array<{ id: string; name?: string }>;
 };
 
+function apiErrorDetail(error: FloomApiError): string {
+  const body = error.body;
+  if (body && typeof body === "object" && "detail" in body) {
+    const detail = (body as { detail: unknown }).detail;
+    return typeof detail === "string" ? detail : JSON.stringify(detail);
+  }
+  return error.message;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -92,15 +101,18 @@ export async function runWorkerCommand(
   workerId: string,
   options: { input?: string[]; inputsFile?: string; outputDir?: string; json?: boolean },
 ): Promise<number> {
-  const { client } = await createAuthenticatedClient().catch((error) => {
+  let client;
+  try {
+    ({ client } = await createAuthenticatedClient());
+  } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
       log.err("Not authenticated.");
       log.info(`Run: ${getCommandName()} login`);
-      process.exit(1);
+      return 1;
     }
     throw error;
-  });
+  }
   const parsedInputs = parseInputAssignments(options.input || [], options.inputsFile);
 
   const resolvedInputs: Record<string, unknown> = { ...parsedInputs.values };
@@ -131,6 +143,10 @@ export async function runWorkerCommand(
     if (error instanceof FloomApiError && error.status && error.status >= 500) {
       log.err(`API error starting run.`);
       log.info("Check API status, then retry. Report: https://github.com/floomhq/floom/issues");
+      return 1;
+    }
+    if (error instanceof FloomApiError && error.status && error.status >= 400) {
+      log.err(`API rejected run request: ${apiErrorDetail(error)}`);
       return 1;
     }
     throw error;

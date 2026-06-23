@@ -63,13 +63,20 @@ export function CliAuthContent({
         },
         body: JSON.stringify({ user_code: code }),
       });
-      const body = (await response.json().catch(() => ({}))) as { detail?: string };
+      const contentType = response.headers.get("content-type") || "";
+      const isJson = contentType.toLowerCase().includes("application/json");
+      const body = (isJson ? await response.json().catch(() => ({})) : {}) as { ok?: boolean; detail?: string };
       if (!response.ok) {
         if (response.status === 401) {
           window.location.assign(cliAuthLoginRedirect(loginPath));
           return;
         }
         setErrorText(body.detail || "Authorization failed");
+        setState("error");
+        return;
+      }
+      if (!isJson || body.ok !== true) {
+        setErrorText("You are not logged in to the account that can approve this CLI request. Sign in and try again.");
         setState("error");
         return;
       }

@@ -60,7 +60,7 @@ import {
   mcpTestCommand,
   mcpUninstallCommand,
 } from "./commands/mcp.js";
-import { completionCommand } from "./commands/completion.js";
+import { completionCommand, type CompletionShell } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { main as runServer } from "./server.js";
 import {
@@ -387,10 +387,10 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
 
   program.command("completion")
     .description("Print shell completion script")
-    .argument("<shell>", "bash | zsh | fish")
-    .action(async (shell: "bash" | "zsh" | "fish") => {
-      if (!["bash", "zsh", "fish"].includes(shell)) {
-        throw new Error("Shell must be one of: bash, zsh, fish");
+    .argument("<shell>", "bash | zsh | fish | powershell")
+    .action(async (shell: CompletionShell) => {
+      if (!["bash", "zsh", "fish", "powershell", "pwsh"].includes(shell)) {
+        throw new Error("Shell must be one of: bash, zsh, fish, powershell");
       }
       await runAction(completionCommand(shell));
     });

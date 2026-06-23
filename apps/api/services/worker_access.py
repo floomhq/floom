@@ -288,9 +288,40 @@ def _worker_for_mutation(
         return worker
     if auth.is_admin:
         any_row = repos.workers.get_any(worker_id=worker_id)
-        if any_row and str(any_row.get("visibility") or "private") == "workspace":
+        if (
+            any_row
+            and str(any_row.get("visibility") or "private") == "workspace"
+            and _workspace_member_for_worker_row(any_row, auth=auth, repos=repos)
+        ):
             return any_row
     return None
+
+
+def _workspace_member_for_worker_row(
+    worker: Dict[str, Any],
+    *,
+    auth: "AuthContext",
+    repos: Repositories,
+) -> bool:
+    """Return whether auth.user_id belongs to the worker's workspace.
+
+    The admin mutation fallback must not use get_any alone: worker ids are
+    global and get_any is intentionally unscoped. Mirror the normal view path by
+    requiring active workspace membership before a global admin can mutate a
+    workspace-visible worker.
+    """
+    workspace_id = str(worker.get("workspace_id") or "").strip()
+    if not workspace_id:
+        return False
+    members = getattr(repos, "members", None)
+    if members is None:
+        return False
+    try:
+        row = members.get(workspace_id=workspace_id, user_id=auth.user_id)
+    except Exception:
+        logger.debug("worker mutation workspace-membership check failed for %s", worker.get("id"), exc_info=True)
+        return False
+    return bool(row) and str(row.get("status") or "") == "active"
 
 
 def _get_worker_for_workspace_share_source(
