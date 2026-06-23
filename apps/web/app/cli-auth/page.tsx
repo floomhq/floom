@@ -140,7 +140,7 @@ export function CliAuthContent({
 
                 <div className="mt-5 flex items-start gap-2 rounded-[10px] bg-[#FFF8EA] px-3.5 py-3 text-xs leading-5 text-[#7A560F]">
                   <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#C98A1A]" />
-                  <span>Approve only when this code matches your terminal.</span>
+                  <span>Only approve if this code matches your terminal.</span>
                 </div>
 
                 {state === "error" && errorText && (

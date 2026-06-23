@@ -231,6 +231,10 @@ def list_runs(
     if (before_created_at and not before_id) or (before_id and not before_created_at):
         raise HTTPException(status_code=400, detail="before_created_at and before_id must be supplied together")
 
+    # Defense-in-depth only: this value comes from a client header/query param.
+    # The authorization gate is auth.user_id, which local workspace middleware
+    # rewrites to the scoped owner id before run repository queries execute.
+    # A forged workspace value must only narrow the already owner-scoped rows.
     workspace_key = requested_local_workspace_id(request)
     cache_key = (
         "runs",
@@ -330,6 +334,9 @@ def export_runs_csv(
     until_dt = _parse_iso8601(until) if until else None
     if until and until_dt is None:
         raise HTTPException(status_code=400, detail="Invalid until value")
+    # Keep CSV export on the same scoped visibility path as GET /runs. The
+    # workspace value is a client-selected filter, not an authorization gate;
+    # auth.user_id owner scoping must remain the primary boundary.
     rows, _total = _list_visible_runs(
         user_id=auth.user_id,
         repos=repos,
