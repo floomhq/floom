@@ -28,8 +28,10 @@ exec:
   entry: SKILL.md
 `;
 
-const runPy = `def run(inputs, context):
-    return {"ok": True}
+const runPy = `import json
+
+with open("result.json", "w", encoding="utf-8") as f:
+    json.dump({"status": "success", "outputs": {"ok": True}, "artifacts": []}, f)
 `;
 
 const skillMd = `# CLI Test Worker
@@ -114,6 +116,7 @@ async function startMockApi({
   deleteStatus = 204,
   runPostStatus = 200,
   runPostDetail = "Unsupported",
+  runDetail = { id: "run_1", status: "completed", output: { ok: true }, artifacts: [] },
 } = {}) {
   const seen = [];
   const bodies = [];
@@ -203,7 +206,7 @@ async function startMockApi({
     }
 
     if (request.method === "GET" && url.pathname === "/runs/run_1") {
-      json(response, 200, { id: "run_1", status: "completed", output: { ok: true }, artifacts: [] });
+      json(response, 200, runDetail);
       return;
     }
 
@@ -263,6 +266,18 @@ test("workers validate rejects Composio CLI subprocess in E2B worker", async () 
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /shells out to `composio execute`/);
+});
+
+test("workers validate rejects SDK-style return shape for script workers", async () => {
+  const dir = await makeWorkerDir({
+    run: `def run(inputs, context):
+    return {"ok": True}
+`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /must read inputs\.json and write result\.json/);
 });
 
 test("workers validate rejects invalid trigger timezones before push", async () => {
@@ -404,7 +419,7 @@ test("workers push creates a new worker with POST /workers", async (t) => {
     "POST /workers",
   ]);
   assert.match(mock.bodies[0].worker_yml, /name: cli-test-worker/);
-  assert.match(mock.bodies[0].run_py, /def run/);
+  assert.match(mock.bodies[0].run_py, /result\.json/);
   assert.equal(mock.bodies[0].skill_md, undefined);
 });
 
@@ -467,7 +482,7 @@ test("workers push strips UTF-8 BOMs before sending source to the API", async (t
 
   assert.equal(result.code, 0);
   assert.equal(mock.bodies[0].worker_yml.charCodeAt(0), "s".charCodeAt(0));
-  assert.equal(mock.bodies[0].run_py.charCodeAt(0), "d".charCodeAt(0));
+  assert.equal(mock.bodies[0].run_py.charCodeAt(0), "i".charCodeAt(0));
 });
 
 test("workers push updates an existing worker with PUT /workers/:id/files", async (t) => {
@@ -687,6 +702,30 @@ test("workers run reports paused-worker 409 without top-level crash", async (t) 
   assert.match(result.stderr, /API rejected run request: Worker is paused/);
   assert.doesNotMatch(result.stderr, /floom failed/);
   assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs"]);
+});
+
+test("workers run --json surfaces output_schema values when output is empty", async (t) => {
+  const mock = await startMockApi({
+    existing: true,
+    runDetail: {
+      id: "run_1",
+      status: "completed",
+      output: {},
+      outputs: {},
+      output_schema: [{ name: "result", type: "text", label: "Result", value: "hello" }],
+      artifacts: [],
+    },
+  });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "run", "cli-test-worker", "--json"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  const body = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
+  assert.deepEqual(body.output, { result: "hello" });
+  assert.deepEqual(body.outputs, { result: "hello" });
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs", "GET /runs/run_1"]);
 });
 
 test("workers push renders structured backend validation details and exits cleanly", async (t) => {

@@ -14,6 +14,8 @@ type RunDetail = {
   id: string;
   status: string;
   output?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
+  output_schema?: Array<{ name?: string; value?: unknown }>;
   error?: string | null;
   artifacts?: Array<{ id: string; name?: string }>;
 };
@@ -71,15 +73,16 @@ export function parseInputAssignments(inputs: string[] = [], inputsFile?: string
 }
 
 function printPrettyRun(run: RunDetail, savedPaths: string[]): void {
+  const output = effectiveRunOutput(run);
   log.heading(`Run ${run.id}`);
   log.kv("Status", run.status);
   if (run.error) {
     log.err(run.error);
   }
-  if (run.output && Object.keys(run.output).length) {
+  if (Object.keys(output).length) {
     log.blank();
     log.info("Output:");
-    for (const [key, value] of Object.entries(run.output)) {
+    for (const [key, value] of Object.entries(output)) {
       log.step(`${key}:`);
       if (typeof value === "string") {
         process.stdout.write(value + "\n");
@@ -95,6 +98,18 @@ function printPrettyRun(run: RunDetail, savedPaths: string[]): void {
       log.step(path);
     }
   }
+}
+
+function effectiveRunOutput(run: RunDetail): Record<string, unknown> {
+  if (run.output && Object.keys(run.output).length) return run.output;
+  if (run.outputs && Object.keys(run.outputs).length) return run.outputs;
+  const fromSchema: Record<string, unknown> = {};
+  for (const field of run.output_schema || []) {
+    if (typeof field.name === "string" && field.name && field.value !== undefined && field.value !== null) {
+      fromSchema[field.name] = field.value;
+    }
+  }
+  return fromSchema;
 }
 
 export async function runWorkerCommand(
@@ -189,6 +204,11 @@ export async function runWorkerCommand(
 
   if (!latest) {
     throw new Error("Run polling ended without a run payload");
+  }
+
+  const output = effectiveRunOutput(latest);
+  if (Object.keys(output).length) {
+    latest = { ...latest, output, outputs: output };
   }
 
   if (options.json) {

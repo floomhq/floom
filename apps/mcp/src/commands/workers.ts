@@ -259,6 +259,13 @@ function validateNativeRuntimeContract(
       "run.py shells out to `composio execute`; E2B workers must call the Floom proxy at /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}",
     );
   }
+  const definesSdkStyleRun = /^\s*def\s+run\s*\(\s*inputs\s*,\s*context\s*\)\s*:/m.test(runPy);
+  const returnsFromRun = /^\s*return\b/m.test(runPy);
+  if (definesSdkStyleRun && returnsFromRun && !/result\.json/.test(runPy)) {
+    errors.push(
+      "script run.py defines `run(inputs, context)` and returns a value, but production script workers must read inputs.json and write result.json",
+    );
+  }
 
   const usesProxy = /composio-execute\/[A-Z0-9_]+/.test(runPy);
   const readsConnections = /connections\.json/.test(runPy);

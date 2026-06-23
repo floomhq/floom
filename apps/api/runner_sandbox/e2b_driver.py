@@ -1115,6 +1115,27 @@ def _read_result_json(
             error_code="invalid_result_json",
         )
 
+    if "outputs" not in result_data:
+        legacy_outputs = {
+            key: value
+            for key, value in result_data.items()
+            if key
+            not in {
+                "status",
+                "artifacts",
+                "error",
+                "error_code",
+                "decision_required",
+            }
+        }
+        if legacy_outputs:
+            log_fn(
+                "[e2b] result.json has no 'outputs' object; treating top-level "
+                "fields as outputs for compatibility",
+                "warning",
+            )
+            result_data = {**result_data, "outputs": legacy_outputs}
+
     # 5. `outputs` must be a dict. A worker returning a list/string/number was
     #    previously coerced to {} and silently completed green (audit P1).
     outputs = result_data.get("outputs", {})
