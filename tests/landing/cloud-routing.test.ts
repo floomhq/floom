@@ -45,11 +45,12 @@ describe("Cloud app routing", () => {
     expect(JSON.stringify(rewrites)).not.toContain("workers.floom.dev");
   });
 
-  it("defaults app rewrites to the dashboard alias refreshed by CI", async () => {
+  it("defaults app rewrites to the canonical dashboard production domain", async () => {
     const config = (await import("../../next.config")).default;
-    const dashboard = "https://workeros-cloud-dashboard-three.vercel.app";
+    const dashboard = "https://r9-detail.floom.dev";
     const staleDashboardHosts = [
-      "web-iota-five-12.vercel.app",
+      ["workeros-cloud-dashboard", "three.vercel.app"].join("-"),
+      [["web", "iota", "five"].join("-"), "12.vercel.app"].join("-"),
       "workeros-cloud-dashboard.vercel.app",
     ];
 
