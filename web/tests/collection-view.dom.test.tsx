@@ -83,6 +83,7 @@ describe("CollectionView — list & grid (§8e)", () => {
     // List view is the default: column headers visible, no grid.
     expect(container.querySelector(".c-grid")).not.toBeInTheDocument();
     expect(screen.getByText("Worker")).toBeInTheDocument(); // list header column
+    expect(screen.getByRole("heading", { level: 1, name: "Workers" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Grid view" }));
     expect(container.querySelector(".c-grid")).toBeInTheDocument();

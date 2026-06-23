@@ -502,7 +502,7 @@ function SettingsContent() {
   );
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
-    ...emptyState("grid"),
+    ...emptyState("list"),
     sel: null,
   }));
 
@@ -772,7 +772,7 @@ function SettingsContent() {
         { value: settingsGroup("workspace").length, label: "workspace" },
         { value: settingsGroup("account").length, label: "account" },
       ],
-      view: { default: "grid", grid: true },
+      view: { default: "list", grid: true },
       group: (item) =>
         item.scope === "workspace"
           ? groupLabel("workspace", workspaceName)

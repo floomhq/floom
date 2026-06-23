@@ -20,3 +20,20 @@ Remaining flaws:
 - Browser rendering is hook-blocked, so visual confirmation of inline error layout is not available in this PR.
 - Repo-wide `npm exec tsc -- --noEmit --pretty false` still fails on unrelated existing baseline issues (`EmilyRadarMark`, `@/proxy` test imports, and older test fixture type drift).
 - MCP and secrets still use bespoke list shells; this PR only fixes the secret dependency fail-open path requested for PR 1.
+
+## PR 3 - list defaults and semantic collection heading
+
+Score: 9/10
+
+Closed audit items:
+- Settings now defaults to list view through both initial collection state and collection config.
+- `CollectionView` renders its route title as an `h1` while keeping the existing title sizing/weight.
+- Workers, Library, and Connections were already list-default on current `origin/main`; this PR verifies and preserves the shared list-default behavior through collection tests.
+
+Verification:
+- `npm exec vitest -- run tests/collection-view.dom.test.tsx tests/settings-collection.dom.test.tsx tests/collection-pages.dom.test.tsx` - 2 discovered files / 36 tests passed.
+- `npm exec tsc -- --project tsconfig.ui-audit-pr3.tmp.json --noEmit --pretty false` - passed for PR 3 changed files and relevant tests; temporary config was removed after the run.
+
+Remaining flaws:
+- Browser rendering is hook-blocked, so heading layout is verified by DOM semantics and TypeScript rather than screenshots.
+- `tests/collection-pages.dom.test.tsx` was included in the command but not discovered by the active Vitest project for that run.

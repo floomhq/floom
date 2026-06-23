@@ -251,9 +251,9 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           squishing the description or clipping the rightmost chip. */}
       <div className="c-headrow">
         <div className="c-headtitle">
-          <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.02em" }}>
+          <h1 style={{ margin: 0, fontSize: 23, fontWeight: 600, letterSpacing: 0 }}>
             {config.title}
-          </div>
+          </h1>
           {config.subtitle && (
             <div style={{ color: "var(--muted-foreground)", marginTop: 2 }}>{config.subtitle}</div>
           )}
