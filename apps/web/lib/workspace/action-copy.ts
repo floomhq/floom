@@ -29,12 +29,12 @@ export interface WorkspaceActionCopy {
 const OSS_COPY: WorkspaceActionCopy = {
   exportLabel: "Export workspace",
   exporting: "Exporting…",
-  exportHelp: "Download a zip of agents + instructions (no secrets)",
+  exportHelp: "Download a zip of workers + instructions (no secrets)",
   exportToast: "Workspace template exported",
   duplicateLabel: "Duplicate workspace",
   duplicating: "Duplicating…",
   duplicateHelp:
-    "Copies agents + instructions. Connections & secrets are not copied; reconnect after.",
+    "Copies workers + instructions. Connections & secrets are not copied; reconnect after.",
   shareLabel: "Share as template link",
   sharing: "Creating link…",
   shareHelp: "Shareable link to the exported zip (no secrets included)",
@@ -46,12 +46,12 @@ const OSS_COPY: WorkspaceActionCopy = {
 const CLOUD_COPY: WorkspaceActionCopy = {
   exportLabel: "Download copy",
   exporting: "Downloading…",
-  exportHelp: "Download a zip of agents + instructions (no secrets)",
+  exportHelp: "Download a zip of workers + instructions (no secrets)",
   exportToast: "Workspace downloaded",
   duplicateLabel: "Make a local copy",
   duplicating: "Copying…",
   duplicateHelp:
-    "Copies agents + instructions into a new workspace. Connections & secrets are not copied; reconnect after.",
+    "Copies workers + instructions into a new workspace. Connections & secrets are not copied; reconnect after.",
   shareLabel: "Invite someone by link",
   sharing: "Creating invite…",
   shareHelp: "Shareable invite link to this workspace (no secrets included)",

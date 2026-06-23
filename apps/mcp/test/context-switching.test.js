@@ -224,7 +224,7 @@ test("workspace create posts to API and persists new active workspace", async ()
   });
 });
 
-test("cloud workspace create persists replacement workspace-scoped token", async () => {
+test("cloud workspace create preserves the existing token", async () => {
   await withTempHome(async () => {
     await withStubServer(async (base) => {
       await writeCredentials({
@@ -240,7 +240,7 @@ test("cloud workspace create persists replacement workspace-scoped token", async
       const creds = await readCredentials();
       assert.equal(creds.workspace_id, "ws_created");
       assert.equal(creds.workspace_name, "Customer A");
-      assert.equal(creds.api_token, "floom_new_workspace_token");
+      assert.equal(creds.api_token, "floom_old_workspace_token");
     }, { cloud: true });
   });
 });

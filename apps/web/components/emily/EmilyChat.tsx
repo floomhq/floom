@@ -501,7 +501,7 @@ interface EmilyChatCoreProps {
   homeInitialData?: SystemOverview | null;
 }
 
-const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
+const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__create_from_prompt", "workers__update", "workers__delete"]);
 
 // Exported so the Emily HOME (components/home/EmilyHome) can render the SAME
 // real chat core inline for its drafting state — reusing the live conversation

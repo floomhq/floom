@@ -667,9 +667,8 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
       primary: r.worker_name ?? r.worker_id,
-      // secondary shows status + relative time in compact (split-left) mode where
-      // c-cell children are hidden (#1132).
-      secondary: `${runStatusPill(r.status).label} · ${formatRelative(r.created_at ?? r.started_at ?? "")}`,
+      // Keep compact/split-left text distinct from the Status and Started columns.
+      secondary: formatTrigger(r.trigger_source),
       cols: [
         formatTrigger(r.trigger_source),
         formatDuration(r.duration_ms),

@@ -372,7 +372,7 @@ export function WorkspaceSwitcher() {
               {/* M34/M35: clarified labels. Export = download a zip anyone can
                   import; Share template link = a signed URL to that zip (no
                   secrets, no connections); Duplicate = live copy in this
-                  instance with agents + instructions, connections & secrets
+                  instance with workers + instructions, connections & secrets
                   NOT copied (intentional: they must be reconnected). */}
               <DropdownMenuSubContent className="w-64 border-0 p-1 ![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]">
                 {canExportWorkspace && (
