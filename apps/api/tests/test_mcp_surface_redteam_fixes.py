@@ -431,6 +431,30 @@ def test_mcp_proxy_contexts_read_text_response_is_structured_content(monkeypatch
     assert "Internal server error" not in result["content"][0]["text"]
 
 
+def test_mcp_workers_run_exposes_run_id_structured_content(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+
+    async def _fake_api_call(method, path, request, **kwargs):
+        assert method == "POST"
+        assert path == "/workers/worker-1/runs"
+        assert kwargs["body"] == {"inputs": {"echo": "hi"}, "trigger_source": "manual"}
+        return {"status": "running", "run_id": "run_structured_1"}, 200
+
+    monkeypatch.setattr(main, "_api_call", _fake_api_call)
+    payload = _rpc("tools/call", params={
+        "name": "workers.run",
+        "arguments": {"id": "worker-1", "inputs": {"echo": "hi"}},
+    })
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["result"]
+    assert result["isError"] is False
+    assert result["structuredContent"]["status"] == "running"
+    assert result["structuredContent"]["run_id"] == "run_structured_1"
+
+
 def test_mcp_internal_proxy_parser_handles_text_empty_and_binary_success(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
 
