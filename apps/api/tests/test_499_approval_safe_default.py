@@ -10,9 +10,10 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 
-def test_required_approval_pauses_before_secrets_connections_or_sandbox(monkeypatch):
+def test_required_approval_proposal_gets_declared_secrets_but_not_connections(monkeypatch):
     import run_service
-    from models import WorkerApprovals, WorkerConfig, WorkerRuntime, WorkerTrigger
+    import runner_utils
+    from models import WorkerApprovals, WorkerConfig, WorkerResult, WorkerRuntime, WorkerTrigger
 
     config = WorkerConfig(
         id="approval-worker",
@@ -22,13 +23,14 @@ def test_required_approval_pauses_before_secrets_connections_or_sandbox(monkeypa
         inputs=[],
         outputs=[],
         secrets=["REAL_API_KEY"],
-        connections=[],
+        connections=["github"],
         approvals=WorkerApprovals(required=True, label="Approve first"),
     )
 
     approvals_created = []
     statuses = []
     logs = []
+    driver_calls = []
 
     class _Runs:
         def get_any(self, *, run_id):
@@ -43,6 +45,16 @@ def test_required_approval_pauses_before_secrets_connections_or_sandbox(monkeypa
         workers=SimpleNamespace(get_any=lambda **_kwargs: {"name": "Approval Worker"}),
     )
 
+    class _Driver:
+        def run(self, **kwargs):
+            driver_calls.append(kwargs)
+            return WorkerResult(
+                status="success",
+                outputs={"summary": "ready"},
+                artifacts=[],
+                decision_required={"label": "Approve first", "preview": "ready"},
+            )
+
     monkeypatch.setattr(run_service, "_load_worker_recipe", lambda *_args, **_kwargs: (None, config, {"enabled": True}))
     monkeypatch.setattr(run_service, "_worker_owner_id", lambda *_args, **_kwargs: "owner-1")
     monkeypatch.setattr(run_service, "_is_engine_approved_execution_run", lambda *_args, **_kwargs: False)
@@ -51,11 +63,21 @@ def test_required_approval_pauses_before_secrets_connections_or_sandbox(monkeypa
     monkeypatch.setattr(run_service, "_publish_sse", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(run_service, "_emit_approval_requested", lambda **_kwargs: None)
     monkeypatch.setattr(run_service, "_mark_active_run_stage", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(run_service, "get_secrets_for_worker", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("secrets resolved before approval")))
-    monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("sandbox started before approval")))
+    monkeypatch.setattr(run_service, "get_secrets_for_worker", lambda *_args, **_kwargs: {"REAL_API_KEY": "secret-value"})
+    monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *_args, **_kwargs: _Driver())
+    monkeypatch.setattr(
+        runner_utils,
+        "_resolve_connections",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("connections resolved before approval")
+        ),
+    )
 
     run_service.execute_run("run-approval", "approval-worker", {"text": "send it"}, user_id="owner-1", repos=repos)
 
+    assert len(driver_calls) == 1
+    assert driver_calls[0]["secrets"] == {"REAL_API_KEY": "secret-value"}
+    assert driver_calls[0]["connection_ids"] == {}
     assert approvals_created
     assert approvals_created[0]["status"] == "pending"
     assert approvals_created[0]["label"] == "Approve first"
