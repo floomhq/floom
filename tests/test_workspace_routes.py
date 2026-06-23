@@ -238,6 +238,103 @@ def test_create_workspace_duplicate_name_returns_409(monkeypatch):
     assert exc_info.value.detail == "workspace 'Acme' already exists"
 
 
+def test_duplicate_workspace_uses_engine_template_pipeline(monkeypatch):
+    calls = []
+    source = {
+        "id": "ws_source",
+        "name": "Acme Ops",
+        "owner_user_id": "owner-1",
+        "created_at": "2026-01-01",
+    }
+    created = {
+        "id": "ws_copy",
+        "name": "Acme Ops (copy 2)",
+        "owner_user_id": "owner-1",
+        "created_at": "2026-01-02",
+    }
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "get", lambda workspace_id: source)
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "list_for_owner",
+        lambda owner_user_id: [source, {**source, "id": "ws_existing", "name": "Acme Ops (copy)"}],
+    )
+
+    def create_workspace(*, owner_user_id, name):
+        calls.append(("create", owner_user_id, name))
+        assert name == "Acme Ops (copy 2)"
+        return created
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "create", create_workspace)
+
+    def export_workspace(*, auth, repos):
+        calls.append(("export", workspace_routes.get_active_workspace_id(), auth.user_id))
+        return SimpleNamespace(body=b"zip-bytes")
+
+    async def import_workspace(*, bundle, request, auth, repos):
+        calls.append(("import", workspace_routes.get_active_workspace_id(), bundle.filename, auth.user_id))
+        return SimpleNamespace(
+            workers_imported=["worker-a"],
+            contexts_imported=["brain-a"],
+            skipped=[],
+            id_remaps={"old": "new"},
+            required_secrets=["OPENAI_API_KEY"],
+            required_connections=["gmail"],
+            workspace_md_present=True,
+        )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "main",
+        SimpleNamespace(
+            export_workspace=export_workspace,
+            import_workspace=import_workspace,
+            get_repositories=lambda: object(),
+        ),
+    )
+
+    result = asyncio.run(
+        workspace_routes.duplicate_workspace(
+            "ws_source",
+            AuthContext(user_id="owner-1", email="owner@example.com", scopes=(), auth_method="jwt"),
+        )
+    )
+
+    assert result.id == "ws_copy"
+    assert result.name == "Acme Ops (copy 2)"
+    assert result.workers_imported == ["worker-a"]
+    assert result.contexts_imported == ["brain-a"]
+    assert result.required_connections == ["gmail"]
+    assert calls == [
+        ("create", "owner-1", "Acme Ops (copy 2)"),
+        ("export", "ws_source", "owner-1"),
+        ("import", "ws_copy", "workspace-template.zip", "owner-1"),
+    ]
+
+
+def test_duplicate_workspace_hides_non_owner_workspace(monkeypatch):
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get",
+        lambda workspace_id: {
+            "id": workspace_id,
+            "name": "Team",
+            "owner_user_id": "owner-2",
+            "created_at": "2026-01-01",
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.duplicate_workspace(
+                "ws_a",
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+
+
 def test_create_share_link_returns_token_once(monkeypatch):
     captured = {}
 
