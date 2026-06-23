@@ -9,6 +9,7 @@ Run: cd apps/api && python -m pytest tests/test_998_signer_fallback_removed.py -
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 from pathlib import Path
 
@@ -122,3 +123,15 @@ def test_startup_guard_allows_explicit_dev_and_cloud_exemption(monkeypatch, tmp_
     monkeypatch.delenv("WORKEROS_DEV", raising=False)
     monkeypatch.setattr(main, "get_auth_provider", lambda: object())
     main._validate_startup_configuration()
+
+
+def test_startup_warns_when_upload_signing_missing_in_cloud(monkeypatch, tmp_path, caplog):
+    main = _load_main_for_startup_guard(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.delenv("WORKEROS_UPLOAD_URL_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+
+    with caplog.at_level(logging.ERROR, logger="floom.api"):
+        main._warn_if_upload_signing_unconfigured()
+
+    assert any("WORKEROS_UPLOAD_URL_SIGNING_SECRET is not configured" in r.getMessage() for r in caplog.records)

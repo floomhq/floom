@@ -242,9 +242,17 @@ def _parse_worker_payload(
     worker_yml: str,
     *,
     user_id: str | None = None,
+    repos: Any | None = None,
     allow_protected_worker_id: bool = False,
 ) -> tuple[str, WorkerConfig]:
-    from contexts import context_dir, context_scope_for_user, load_context_metadata, normalize_context_mount, use_context_scope
+    from contexts import (
+        context_dir,
+        context_scope_for_user,
+        current_context_scope,
+        load_context_metadata,
+        normalize_context_mount,
+        use_context_scope,
+    )
     from models import WorkerConfig
     import yaml as pyyaml
 
@@ -331,7 +339,8 @@ def _parse_worker_payload(
         from models import memory_context_mount_for_worker
         memory_mount = memory_context_mount_for_worker(config.id, config.memory)
         memory_context_name = (memory_mount or {}).get("name")
-        with use_context_scope(context_scope_for_user(user_id)):
+        context_scope = current_context_scope() or context_scope_for_user(user_id)
+        with use_context_scope(context_scope):
             metadata = load_context_metadata()
             for raw_context in config.contexts or []:
                 try:
@@ -350,6 +359,7 @@ def _parse_worker_payload(
                     context_name,
                     user_id=user_id,
                     metadata=metadata,
+                    repos=repos,
                 )
                 if not context_dir(context_name).is_dir() or not context_is_mountable:
                     raise HTTPException(status_code=400, detail=f"Context not found: {context_name}")
@@ -446,7 +456,7 @@ def _register_worker_from_files(
     if not worker_yml_file:
         raise HTTPException(status_code=400, detail="files must include worker.yml")
 
-    worker_id, _config = _parse_worker_payload(worker_yml_file.content, user_id=user_id)
+    worker_id, _config = _parse_worker_payload(worker_yml_file.content, user_id=user_id, repos=repos)
 
     # The author hook can collide on a reused suggested id; allocate a free id
     # and rewrite the manifest identity so dir + worker.yml + DB row all agree.

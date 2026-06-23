@@ -1112,7 +1112,7 @@ def test_run_events_redact_trace_ids_and_internal_metadata(monkeypatch, tmp_path
     assert "[redacted-metadata]" in body
 
 
-def test_cancel_completed_run_does_not_reveal_existence(monkeypatch, tmp_path):
+def test_cancel_completed_owned_run_is_idempotent_but_missing_stays_404(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
     run_id, _transcript_artifact_id = _insert_sensitive_run(main, tmp_path)
@@ -1120,11 +1120,10 @@ def test_cancel_completed_run_does_not_reveal_existence(monkeypatch, tmp_path):
     existing = client.post(f"/runs/{run_id}/cancel", headers=_AUTH_HEADER)
     missing = client.post("/runs/run_missing_cancel_probe/cancel", headers=_AUTH_HEADER)
 
-    assert existing.status_code == 404, existing.text
+    assert existing.status_code == 200, existing.text
+    assert existing.json() == {"status": "completed", "run_id": run_id}
     assert missing.status_code == 404, missing.text
-    assert existing.json() == missing.json() == {"detail": "Run not found"}
-    assert "completed" not in existing.text
-    assert run_id not in existing.text
+    assert missing.json() == {"detail": "Run not found"}
 
 
 def test_bundle_snapshot_missing_does_not_reveal_run_existence(monkeypatch, tmp_path):

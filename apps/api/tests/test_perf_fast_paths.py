@@ -241,6 +241,69 @@ def test_list_connections_does_not_refresh_composio_status(monkeypatch):
     assert result[0].scopes == ["gmail.readonly"]
 
 
+def test_list_connections_refreshes_pending_composio_status(monkeypatch):
+    from routers import connections
+
+    row = {
+        "id": "conn-1",
+        "app_name": "gmail",
+        "composio_connection_id": "ca_123",
+        "status": "initiated",
+        "created_at": "2026-06-18T00:00:00+00:00",
+        "updated_at": "2026-06-18T00:00:00+00:00",
+        "scopes_json": "[]",
+        "account_label": None,
+        "display_name": None,
+        "last_checked_at": None,
+        "last_check_status": None,
+        "last_check_error": None,
+        "user_id": "user-a",
+        "kind": "composio",
+        "mcp_label": None,
+        "mcp_url": None,
+        "mcp_transport": "streamable_http",
+        "mcp_command": None,
+        "mcp_args_json": None,
+        "mcp_env_json": None,
+        "mcp_cwd": None,
+        "mcp_auth_secret": None,
+        "mcp_allowed_tools_json": None,
+    }
+    updates: dict[str, object] = {}
+
+    class ConnectionsRepo:
+        def list(self, *, user_id):
+            assert user_id == "user-a"
+            return [dict(row)]
+
+        def update(self, *, user_id, composio_id, **kwargs):
+            assert user_id == "user-a"
+            assert composio_id == "conn-1"
+            updates.update(kwargs)
+            return {**row, **kwargs}
+
+        def get(self, *, user_id, composio_id):
+            assert user_id == "user-a"
+            assert composio_id == "conn-1"
+            return {**row, **updates}
+
+    repos = SimpleNamespace(connections=ConnectionsRepo())
+    auth = SimpleNamespace(user_id="user-a")
+    monkeypatch.setattr(connections, "_connection_list_cache_get", lambda _user_id: None)
+    monkeypatch.setattr(connections, "_connection_list_cache_set", lambda _user_id, _value: None)
+    monkeypatch.setattr(connections, "_connections_last_used", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("composio_client.check_status", lambda _connection_id: "ACTIVE")
+    monkeypatch.setattr(connections, "_cache_connection_account_info", lambda **_kwargs: {})
+
+    result = connections.list_connections(auth=auth, repos=repos)
+
+    assert len(result) == 1
+    assert result[0].status == "active"
+    assert updates["status"] == "active"
+    assert updates["last_check_status"] == "active"
+    assert updates["last_check_error"] is None
+
+
 def test_list_secrets_uses_listed_worker_configs_for_used_by(monkeypatch):
     import sys
     from routers import secrets

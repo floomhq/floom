@@ -898,6 +898,7 @@ async def lifespan(app: FastAPI):
     register_part_publisher(_run_part_publish)
     # Startup
     _validate_startup_configuration()
+    _warn_if_upload_signing_unconfigured()
     _warn_if_composio_webhook_unconfigured()
     # #603: migrate any DB rows that still store exec.mode="hybrid" to "pure-script".
     # The "hybrid" mode was a deprecated alias; removing it from the Literal without
@@ -1218,6 +1219,22 @@ def _validate_startup_configuration() -> None:
             )
     if deploy != "local":
         get_auth_provider()
+
+
+def _warn_if_upload_signing_unconfigured() -> None:
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local":
+        return
+    if (os.environ.get("WORKEROS_UPLOAD_URL_SIGNING_SECRET") or "").strip():
+        return
+    if (os.environ.get("FLOOM_SECRET") or "").strip():
+        return
+    logger.error(
+        "WORKEROS_UPLOAD_URL_SIGNING_SECRET is not configured and FLOOM_SECRET "
+        "is absent; /uploads download token minting will return 503. Set "
+        "WORKEROS_UPLOAD_URL_SIGNING_SECRET in the API environment before "
+        "using file-input workers (#1892)."
+    )
 
 
 def _warn_if_composio_webhook_unconfigured() -> None:
@@ -3581,7 +3598,7 @@ async def draft_and_create_worker(
             draft_files_from_llm.append(DraftFile(path="SKILL.md", content=skill_md_str))
 
     # Parse worker_id from validated YAML
-    worker_id, _config2 = _parse_worker_payload(worker_yml_str, user_id=auth.user_id)
+    worker_id, _config2 = _parse_worker_payload(worker_yml_str, user_id=auth.user_id, repos=repos)
 
     # #186: the LLM author often returns the same suggested id regardless of
     # prompt. Rather than 409 on collision, allocate a free id and rewrite the
@@ -3762,7 +3779,7 @@ def update_worker(
         )
     _raise_if_protected_worker_mutation(worker_id)
 
-    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
+    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id, repos=repos)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
@@ -3994,7 +4011,7 @@ def update_worker_files(
 
     # Validate worker.yml is parseable
     yml_item = next(f for f in payload.files if f.path == "worker.yml")
-    parsed_worker_id, _config = _parse_worker_payload(yml_item.content, user_id=auth.user_id)
+    parsed_worker_id, _config = _parse_worker_payload(yml_item.content, user_id=auth.user_id, repos=repos)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
