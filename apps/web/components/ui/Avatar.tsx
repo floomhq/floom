@@ -23,6 +23,14 @@
 import { useState } from "react";
 import { generateMarkForRole, MARK_GROUND, type MarkMotif } from "@/lib/avatar/generate";
 
+// Module-level sets for logo URL load outcomes. Populated on first load per
+// URL so every subsequent mount (e.g. sidebar collapse/expand) renders the
+// final state immediately — no blank-then-logo flash on re-mount.
+// - _logoLoaded: URLs that loaded successfully → render <img> right away.
+// - _logoFailed: URLs that 404'd or errored → skip <img> immediately.
+const _logoLoaded = new Set<string>();
+const _logoFailed = new Set<string>();
+
 export type AvatarRole = "user" | "workspace" | "worker" | "emily";
 
 export interface AvatarProps {
@@ -144,9 +152,12 @@ export function Avatar({
   active,
 }: AvatarProps) {
   // Track whether the logo src failed to load so we can fall back to the
-  // generated mark. This fires client-side only; SSR renders the <img> first
-  // and the client hides it on onError (e.g. DuckDuckGo favicon 404).
-  const [logoError, setLogoError] = useState(false);
+  // generated mark. Seed from the module-level cache: if this URL previously
+  // 404'd we skip the <img> immediately (no blank flash on re-mount); if it
+  // previously loaded we skip the generated fallback immediately (no flash).
+  const [logoError, setLogoError] = useState(() =>
+    src ? _logoFailed.has(src) : false
+  );
 
   const numericSize = typeof size === "number" ? size : undefined;
   const sizeClass = typeof size === "string" ? size : undefined;
@@ -173,7 +184,12 @@ export function Avatar({
         referrerPolicy="no-referrer"
         className={combinedClass}
         style={{ ...baseStyle, objectFit: "cover" }}
-        onError={() => setLogoError(true)}
+        onLoad={() => { _logoLoaded.add(src); }}
+        onError={() => {
+          _logoFailed.add(src);
+          _logoLoaded.delete(src);
+          setLogoError(true);
+        }}
         {...(numericSize ? { width: numericSize, height: numericSize } : {})}
       />
     );
