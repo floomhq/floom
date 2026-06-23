@@ -32,8 +32,10 @@ import { contentTagOptions } from "@/lib/workers/derive";
 import { createWorkerHref } from "@/lib/create-worker-nav";
 import {
   formatDuration,
+  formatElapsed,
   formatTrigger,
   triggerKey,
+  runDayGroup,
   runStatusPill,
   runSortTime,
   runsToCsvRows,
@@ -606,6 +608,9 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       }
     },
     view: { default: "list", grid: true },
+    // Fix D: group runs by start time into Today / Yesterday / This week / Earlier.
+    // Uses the same `now` snapshot as tagsOf so grouping is stable during a session.
+    group: (r) => runDayGroup(r.created_at ?? r.started_at, now),
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
       ({
@@ -664,23 +669,32 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       // be cancelled directly from the list. Terminal runs render no menu.
       menuColumn: true,
     },
-    row: (r) => ({
-      // V4 SPEC rule 3: no avatar for runs — non-person entity.
-      primary: r.worker_name ?? r.worker_id,
-      // Keep compact/split-left text distinct from the Status and Started columns.
-      secondary: formatTrigger(r.trigger_source),
-      cols: [
-        formatTrigger(r.trigger_source),
-        formatDuration(r.duration_ms),
-        <StatusPill key="status" spec={runStatusPill(r.status)} />,
-        formatRelative(r.created_at ?? r.started_at ?? ""),
-      ],
-      // gap N2: Cancel row action, only for in-progress runs. Omitting `menu`
-      // entirely for terminal runs hides the ⋯ menu for that row.
-      menu: isCancellableRunStatus(r.status)
-        ? [{ label: "Cancel run", danger: true, onSelect: () => void cancel(r) }]
-        : undefined,
-    }),
+    row: (r) => {
+      const isActive = r.status === "running" || r.status === "queued";
+      // Fix B: for active runs show live elapsed time instead of the "—" placeholder.
+      // duration_ms is only set once a run completes; elapsed is computed from
+      // started_at (or created_at) to the snapshot `now`.
+      const durationCell = isActive
+        ? formatElapsed(r.started_at ?? r.created_at, now)
+        : formatDuration(r.duration_ms);
+      return {
+        // V4 SPEC rule 3: no avatar for runs — non-person entity.
+        primary: r.worker_name ?? r.worker_id,
+        // Keep compact/split-left text distinct from the Status and Started columns.
+        secondary: formatTrigger(r.trigger_source),
+        cols: [
+          formatTrigger(r.trigger_source),
+          durationCell,
+          <StatusPill key="status" spec={runStatusPill(r.status)} />,
+          formatRelative(r.created_at ?? r.started_at ?? ""),
+        ],
+        // gap N2: Cancel row action, only for in-progress runs. Omitting `menu`
+        // entirely for terminal runs hides the ⋯ menu for that row.
+        menu: isCancellableRunStatus(r.status)
+          ? [{ label: "Cancel run", danger: true, onSelect: () => void cancel(r) }]
+          : undefined,
+      };
+    },
     card: (r) => ({
       // V4 SPEC rule 3: no avatar monogram for runs.
       name: r.worker_name ?? r.worker_id,

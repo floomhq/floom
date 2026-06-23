@@ -71,6 +71,36 @@ export function dayLabel(iso: string | undefined, now: number): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/**
+ * Section-group label for the runs list: Today / Yesterday / This week / Earlier.
+ * Used by RunsCollection `group` to bucket runs into 4 coarse sections.
+ */
+export function runDayGroup(iso: string | undefined, now: number): string {
+  if (!iso) return "Earlier";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "Earlier";
+  const d = new Date(t);
+  const today = new Date(now);
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayMs = 86400000;
+  const diff = Math.round((startOf(today) - startOf(d)) / dayMs);
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  if (diff < 7) return "This week";
+  return "Earlier";
+}
+
+/**
+ * Live elapsed duration for a running/queued run.
+ * Returns a human-readable string like "2m 34s" from the run's start time to `now`.
+ */
+export function formatElapsed(iso: string | undefined, now: number): string {
+  if (!iso) return "Running…";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "Running…";
+  return formatDuration(now - t);
+}
+
 export function runSortTime(r: RunSummary): number {
   return Date.parse(r.created_at ?? r.started_at ?? "") || 0;
 }
