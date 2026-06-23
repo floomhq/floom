@@ -606,6 +606,18 @@ def _build_owned_tracked_ids() -> frozenset[str]:
         return frozenset(tracked)  # Fail open: treat all as owned
 
 
+def _owned_tracked_ids_from_rows(workers: List[Dict[str, Any]]) -> frozenset[str]:
+    """Git-tracked workers that are present as owned rows in the scoped repo result."""
+    tracked = _tracked_worker_ids()
+    if not tracked:
+        return frozenset()
+    return frozenset(
+        str(worker.get("id") or "")
+        for worker in workers
+        if str(worker.get("id") or "") in tracked and worker.get("owner_id") is not None
+    )
+
+
 def _worker_source_visible_to_api(worker_id: str) -> bool:
     if _worker_hidden_from_api(worker_id):
         return False
@@ -647,12 +659,14 @@ def _list_visible_workers(
     from worker_registry import discover_workers
 
     role = _visibility_role(role)
-    # Pre-load ownership for all git-tracked workers in one query so
-    # _worker_hidden_from_api() inside the loop doesn't fire N extra SELECTs.
-    _owned = _build_owned_tracked_ids()
+    db_workers = _list_db_workers(user_id=user_id, repos=repos, role=role)
+    # Build ownership from the already-scoped repo rows first. Cloud deployments
+    # may not have SQLite behind get_db(), so the scoped repository result is the
+    # authoritative source for whether a tracked id is a real user worker.
+    _owned = _owned_tracked_ids_from_rows(db_workers) or _build_owned_tracked_ids()
     visible = {
         worker["id"]: worker
-        for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
+        for worker in db_workers
         if not str(worker.get("id") or "").startswith(".")
         and not _worker_hidden_from_api(str(worker.get("id") or ""), _owned)
     }

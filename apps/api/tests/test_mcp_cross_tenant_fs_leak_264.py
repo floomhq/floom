@@ -80,6 +80,40 @@ class _StubRepos:
         self.workers = _EmptyWorkerRepo()
 
 
+class _ScopedStockWorkerRepo:
+    """Workspace-scoped repo that owns a real user worker with a stock id."""
+
+    def list(self, *, user_id, role=None):
+        return [
+            {
+                "id": "csv_enricher",
+                "name": "CSV Enricher",
+                "owner_id": user_id,
+                "workspace_id": "workspace-test",
+                "visibility": "private",
+                "manifest": {"system_worker": False},
+            }
+        ]
+
+    def get(self, *, user_id, worker_id, role=None):
+        if worker_id == "csv_enricher":
+            return self.list(user_id=user_id, role=role)[0]
+        return None
+
+    def get_any(self, *, worker_id):
+        if worker_id == "csv_enricher":
+            return self.list(user_id="owner", role=None)[0]
+        return None
+
+    def get_owner(self, *, worker_id):
+        return "owner" if worker_id == "csv_enricher" else None
+
+
+class _ScopedStockRepos:
+    def __init__(self):
+        self.workers = _ScopedStockWorkerRepo()
+
+
 def _a_stock_id(wa):
     from core.config import PUBLIC_STOCK_WORKER_IDS
 
@@ -120,6 +154,23 @@ def test_list_visible_workers_no_fs_leak_on_cloud(wa, monkeypatch):
         f"cross-tenant FS workers leaked into workers.list on cloud: "
         f"{[w.get('id') for w in visible]}"
     )
+
+
+def test_list_visible_workers_keeps_owned_stock_id_db_row_on_cloud(wa, monkeypatch):
+    """A workspace-owned DB row with a stock id is a real user worker.
+
+    Cloud list filtering must use the scoped repository rows instead of a local
+    SQLite ownership preload. Otherwise a user-created/owned row whose id also
+    exists in PUBLIC_STOCK_WORKER_IDS is mistaken for a pure engine stock worker
+    and hidden from the list.
+    """
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    wa._tracked_worker_ids.cache_clear()
+    monkeypatch.setattr(wa, "_build_owned_tracked_ids", lambda: frozenset())
+
+    visible = wa._list_visible_workers(user_id="owner", repos=_ScopedStockRepos())
+
+    assert [w["id"] for w in visible] == ["csv_enricher"]
 
 
 def test_list_visible_workers_shows_stock_off_cloud(wa, monkeypatch):
