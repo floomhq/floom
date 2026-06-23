@@ -264,6 +264,8 @@ export const api = {
     get: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}`),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
+    duplicate: (id: string) =>
+      fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     archive: async (id: string) => {
       const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" });
       return worker;
@@ -919,6 +921,8 @@ export const api = {
     clearRuns: () => fetchJson<import("@/lib/types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("@/lib/types").WorkspaceAgentInfo>("/system/workspace-agent"),
+    emailChannel: () =>
+      fetchJson<{ connected: boolean; email?: string | null }>("/channels/email"),
     // Members STEP 5: assistant Private <-> Shared with workspace.
     setAssistantVisibility: (visibility: import("@/lib/types").AssetVisibility) =>
       fetchJson<import("@/lib/types").WorkspaceAgentInfo>(

@@ -69,6 +69,25 @@ describe("middleware auth gate", () => {
     }
   });
 
+  it("keeps basePath cli-auth proxy approval reachable before login", async () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/app";
+    try {
+      const { proxy: middleware } = await import("@/proxy");
+      const res = await middleware(new NextRequest("https://workers.floom.dev/app/api/proxy/cli-auth/approve", {
+        method: "POST",
+        headers: {
+          origin: "https://workers.floom.dev",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ user_code: "ABCD-2345" }),
+      }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    } finally {
+      delete process.env.NEXT_PUBLIC_BASE_PATH;
+    }
+  });
+
   it("keeps the OAuth callback page and exact proxy callback reachable without login", async () => {
     const { proxy: middleware } = await import("@/proxy");
 
