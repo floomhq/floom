@@ -133,6 +133,27 @@ function isCsrfSafe(req: NextRequest): boolean {
   return originHost ? allowed.has(originHost) : false;
 }
 
+const SENSITIVE_NEXT_PARAMS = new Set([
+  "token",
+  "download_token",
+  "share_token",
+  "claim_token",
+  "invite",
+  "code",
+]);
+
+function safeLoginNext(pathname: string, search: string): string {
+  if (!search) return withAppBase(pathname);
+  const params = new URLSearchParams(search);
+  for (const key of Array.from(params.keys())) {
+    if (SENSITIVE_NEXT_PARAMS.has(key.toLowerCase())) {
+      params.delete(key);
+    }
+  }
+  const qs = params.toString();
+  return `${withAppBase(pathname)}${qs ? `?${qs}` : ""}`;
+}
+
 // Round-09 P0 #5 — App Router RSC/Flight prefetch + Next data requests must NOT
 // receive a 307 HTML login redirect on failed auth. The client router expects an
 // RSC (text/x-component) payload; a 307->/login HTML response is treated as a
@@ -175,7 +196,10 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // return (the cloud treats /api/proxy/* as public — backend verifies the
   // Bearer token — so CSRF is the relevant control here).
   if (
-    stripAppBase(req.nextUrl.pathname).startsWith("/api/proxy/") &&
+    (
+      stripAppBase(req.nextUrl.pathname).startsWith("/api/proxy/") ||
+      stripAppBase(req.nextUrl.pathname).startsWith("/api/cli-auth/")
+    ) &&
     !isCsrfSafe(req)
   ) {
     const response = NextResponse.json(
@@ -207,7 +231,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
-    loginUrl.searchParams.set("next", `${withAppBase(path)}${req.nextUrl.search}`);
+    loginUrl.searchParams.set("next", safeLoginNext(path, req.nextUrl.search));
     return NextResponse.redirect(loginUrl);
   }
   // #945: authenticated app shells are never shared-cacheable.

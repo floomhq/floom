@@ -68,6 +68,12 @@ export function templateRoute(pathname: string): string {
   return pathname;
 }
 
+export function sanitizedCurrentUrl(pathname: string): string {
+  const route = templateRoute(pathname);
+  if (typeof window === "undefined") return route;
+  return `${window.location.origin}${route}`;
+}
+
 export function initPostHog() {
   if (initialized || typeof window === "undefined") return;
   const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;

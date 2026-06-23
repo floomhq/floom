@@ -91,6 +91,7 @@ if _cloud_floom_secret:
     os.environ["WORKEROS_SLACK_STATE_SECRET"] = _cloud_floom_secret
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from apps.api.cloud_scheduler import start_cloud_scheduler, stop_cloud_scheduler
 from apps.api.cloud_webhooks import verify_webhook_token
@@ -114,6 +115,62 @@ from apps.api.routes.workspaces import router as workspaces_router
 
 engine_main = import_engine_module("main")
 engine_worker_serialize = import_engine_module("services.worker_serialize")
+
+
+_RUN_ARTIFACTS_BUCKET = "workeros-run-artifacts"
+
+
+def _install_cloud_artifact_responder() -> None:
+    """Serve cloud artifacts from Supabase Storage when the local disk is cold.
+
+    Engine routes call services.run_access._artifact_file_response through
+    module-level imports in runs/approvals. Patch those globals in cloud boot so
+    artifact metadata paths like supabase://workeros-run-artifacts/... stream
+    from Storage instead of returning "File not found on disk" on a different
+    Railway node. Local paths still use the engine responder unchanged.
+    """
+    run_access = import_engine_module("services.run_access")
+    runs_router = import_engine_module("routers.runs")
+    approvals_router = import_engine_module("routers.approvals")
+    original = run_access._artifact_file_response
+
+    def _cloud_artifact_file_response(row: Any):
+        from io import BytesIO
+        import mimetypes
+        from core.utils import row_to_dict
+        from apps.api.config import get_supabase_service_client
+
+        art = row_to_dict(row)
+        path = str(art.get("path") or "")
+        prefix = f"supabase://{_RUN_ARTIFACTS_BUCKET}/"
+        if not path.startswith(prefix):
+            return original(row)
+        if run_access._is_sensitive_artifact_row(row):
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+        key = path[len(prefix):]
+        try:
+            data = get_supabase_service_client().storage.from_(_RUN_ARTIFACTS_BUCKET).download(key)
+        except Exception:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        if not data:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+        name = str(art.get("name") or key.rsplit("/", 1)[-1] or "artifact")
+        content_type = art.get("type") or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        filename = run_access._sanitize_download_name(name)
+        return StreamingResponse(
+            BytesIO(data),
+            media_type=content_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    run_access._artifact_file_response = _cloud_artifact_file_response
+    runs_router._artifact_file_response = _cloud_artifact_file_response
+    approvals_router._artifact_file_response = _cloud_artifact_file_response
+
+
+_install_cloud_artifact_responder()
 
 # The engine's main.py auto-loads /root/.config/workeros/api.env via load_dotenv()
 # on import. That file is the OSS single-tenant local-mode prod env and contains
@@ -466,7 +523,11 @@ async def member_write_guard(request: Request, call_next):
                             content={"detail": "You do not have edit access to this worker."},
                         )
                 except Exception:
-                    pass  # never hard-fail the request on guard error
+                    from fastapi.responses import JSONResponse as _JSONResponse
+                    return _JSONResponse(
+                        status_code=403,
+                        content={"detail": "Worker ownership could not be verified."},
+                    )
 
     return await call_next(request)
 

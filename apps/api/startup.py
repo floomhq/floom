@@ -1332,6 +1332,22 @@ def _bootstrap_git_bundles_storage() -> None:
         logging.getLogger(__name__).warning("git bundles bucket bootstrap failed: %s", exc)
 
 
+def _bootstrap_run_artifacts_storage() -> None:
+    """Create the run-artifacts Storage bucket used for multi-node downloads."""
+    from apps.api.config import get_supabase_service_client
+    bucket = "workeros-run-artifacts"
+    try:
+        get_supabase_service_client().storage.create_bucket(
+            bucket,
+            options={"public": False},
+        )
+    except Exception as exc:
+        import logging
+        message = str(exc).lower()
+        if "already" not in message and "exists" not in message:
+            logging.getLogger(__name__).warning("run artifacts bucket bootstrap failed: %s", exc)
+
+
 def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
@@ -1356,6 +1372,7 @@ def register_cloud_components() -> None:
     _suppress_secrets_enc_in_cloud()
     _bootstrap_contexts_storage()
     _bootstrap_git_bundles_storage()
+    _bootstrap_run_artifacts_storage()
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
     _override_run_executor_workspace_context()

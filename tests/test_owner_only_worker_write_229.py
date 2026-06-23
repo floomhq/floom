@@ -18,6 +18,7 @@ import pytest
 
 def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.setenv("WORKEROS_ROLE", "web")
     monkeypatch.setenv("WORKEROS_DEV", "1")
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
@@ -89,3 +90,57 @@ def test_member_permitted_actions_stay_open(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
     for method, suffix in MEMBER_PERMITTED:
         assert main._is_owner_only_worker_write(method, suffix) is False, (method, suffix)
+
+
+def test_member_write_guard_fails_closed_on_ownership_lookup_error(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    from fastapi.testclient import TestClient
+
+    class Auth:
+        user_id = "member-1"
+
+    class AuthProvider:
+        async def verify(self, request):
+            return Auth()
+
+    workspace_context = types.ModuleType("apps.api.auth.workspace_context")
+    workspace_context.get_active_member_role = lambda: "member"
+    workspace_context.get_active_workspace_id = lambda: "ws_123"
+
+    supabase_provider = types.ModuleType("apps.api.auth.supabase_provider")
+    supabase_provider.SupabaseAuthProvider = lambda: AuthProvider()
+
+    class BrokenWorkersTable:
+        def select(self, *_a, **_k):
+            return self
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def limit(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            raise RuntimeError("supabase unavailable")
+
+    class BrokenService:
+        def table(self, name):
+            assert name == "workers"
+            return BrokenWorkersTable()
+
+    config_mod = types.ModuleType("apps.api.config")
+    config_mod.get_supabase_service_client = lambda: BrokenService()
+
+    monkeypatch.setitem(sys.modules, "apps.api.auth.workspace_context", workspace_context)
+    monkeypatch.setitem(sys.modules, "apps.api.auth.supabase_provider", supabase_provider)
+    monkeypatch.setitem(sys.modules, "apps.api.config", config_mod)
+
+    @main.app.patch("/api/workers/w1")
+    async def _guard_target():
+        return {"ok": True}
+
+    with TestClient(main.app) as client:
+        response = client.patch("/api/workers/w1")
+
+    assert response.status_code == 403
+    assert "ownership" in response.json()["detail"].lower()

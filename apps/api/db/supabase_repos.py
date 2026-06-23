@@ -44,6 +44,7 @@ _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 
 _SYSTEM_RUN_WORKER_IDS = frozenset({"worker-author"})
 _ENGINE_WORKER_SERIALIZE: Any | None = None
+_RUN_ARTIFACTS_BUCKET = "workeros-run-artifacts"
 
 
 def _should_ignore_worker_file(rel_path: str) -> bool:
@@ -51,6 +52,50 @@ def _should_ignore_worker_file(rel_path: str) -> bool:
     if _ENGINE_WORKER_SERIALIZE is None:
         _ENGINE_WORKER_SERIALIZE = import_engine_module("services.worker_serialize")
     return bool(_ENGINE_WORKER_SERIALIZE._should_ignore_worker_file(rel_path))
+
+
+def _safe_storage_key_part(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "._=-" else "_" for ch in value) or "item"
+
+
+def _upload_run_artifact_to_storage(
+    client: Any,
+    *,
+    user_id: str,
+    run_id: str,
+    artifact_id: str,
+    name: str,
+    path: str,
+) -> str | None:
+    local_path = Path(path)
+    if not local_path.is_absolute():
+        try:
+            runner_utils = import_engine_module("runner_utils")
+            local_path = Path(runner_utils.ARTIFACTS_DIR) / local_path
+        except Exception:
+            return None
+    if not local_path.is_file():
+        return None
+
+    key = "/".join(
+        [
+            _safe_storage_key_part(user_id),
+            _safe_storage_key_part(run_id),
+            _safe_storage_key_part(artifact_id),
+            _safe_storage_key_part(name or local_path.name),
+        ]
+    )
+    data = local_path.read_bytes()
+    bucket = client.storage.from_(_RUN_ARTIFACTS_BUCKET)
+    try:
+        bucket.upload(key, data)
+    except Exception:
+        try:
+            bucket.update(key, data)
+        except Exception as exc:
+            _repo_logger.warning("run artifact storage upload failed for %s/%s: %s", run_id, artifact_id, exc)
+            return None
+    return f"supabase://{_RUN_ARTIFACTS_BUCKET}/{key}"
 
 # Curated catalog of ship-with-product stock/example workers that EVERY tenant
 # may run. On cloud these rows are seeded under DIFFERENT demo users in DIFFERENT
@@ -3012,6 +3057,17 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
     ) -> None:
         if self.get(user_id=user_id, run_id=run_id) is None:
             raise ValueError(f"run {run_id} not found for {user_id}")
+        stored_path = (
+            _upload_run_artifact_to_storage(
+                self._client,
+                user_id=user_id,
+                run_id=run_id,
+                artifact_id=artifact_id,
+                name=name,
+                path=path,
+            )
+            or path
+        )
         self._client.table("artifacts").insert(
             {
                 "id": artifact_id,
@@ -3019,7 +3075,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 "run_id": run_id,
                 "name": name,
                 "type": artifact_type,
-                "path": path,
+                "path": stored_path,
                 "size_bytes": size_bytes,
                 "created_at": created_at,
             }
