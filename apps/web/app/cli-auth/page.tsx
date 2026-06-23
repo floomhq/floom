@@ -79,6 +79,9 @@ export function CliAuthContent({
         setState("error");
         return;
       }
+      // No auto-redirect: land on a clean terminal state so the user can return
+      // to their terminal (the engine twin of the cloud-overlay post-approve
+      // bounce fix).
       setState(action === "approve" ? "approved" : "denied");
     } catch {
       setErrorText("Could not reach the API.");

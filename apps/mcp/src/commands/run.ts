@@ -124,7 +124,7 @@ export async function runWorkerCommand(
     if (message.includes("Not logged in")) {
       log.err("Not authenticated.");
       log.info(`Run: ${getCommandName()} login`);
-      process.exit(1);
+      return 1;
     }
     throw error;
   }
