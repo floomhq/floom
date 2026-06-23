@@ -315,6 +315,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
           create-worker Link. Same primary token + label everywhere. */}
       <Link
         href={createWorkerHref()}
+        prefetch={false}
         onClick={() => onNavigate?.()}
         className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
