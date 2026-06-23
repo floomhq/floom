@@ -52,6 +52,105 @@ def _run_headers(run_id: str) -> dict[str, str]:
     return {"X-Floom-Run-Token": make_run_token(run_id, secret="test-secret")}
 
 
+def _worker_call_headers(run_id: str) -> dict[str, str]:
+    from run_token import issue_worker_call_token
+
+    return {
+        "X-Floom-Run-Token": issue_worker_call_token(
+            user_id="owner-a",
+            parent_run_id=run_id,
+            callable_workers=["child-worker"],
+            secret="test-secret",
+        )
+    }
+
+
+def test_composio_proxy_accepts_script_worker_call_token_header(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    repos = db.get_repositories()
+    repos.users.create(
+        user_id="owner-a",
+        username="owner-a",
+        display_name=None,
+        password_hash="x",
+        role="admin",
+    )
+    manifest = {
+        "id": "gmail-worker",
+        "name": "Gmail Worker",
+        "trigger": {"type": "manual"},
+        "runtime": {"type": "python", "entrypoint": "run.py", "runner": "e2b"},
+        "calls": ["child-worker"],
+        "connections": [{"app": "gmail", "allowed_tools": ["GMAIL_FETCH_EMAILS"]}],
+    }
+    repos.workers.create(
+        user_id="owner-a",
+        worker_id="gmail-worker",
+        name="Gmail Worker",
+        manifest_json=manifest,
+        bundle_path="workers/gmail-worker",
+    )
+    repos.runs.create(
+        user_id="owner-a",
+        run_id="run-gmail",
+        worker_id="gmail-worker",
+        status="running",
+        trigger_source="manual",
+        runner="e2b",
+    )
+    repos.connections.upsert(
+        user_id="owner-a",
+        id="conn-row",
+        app_name="gmail",
+        composio_connection_id="ca_gmail",
+        status="active",
+    )
+
+    captured = {}
+
+    class _Response:
+        def json(self):
+            return {"successful": True, "data": {"messages": []}}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return _Response()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    client = TestClient(main.app)
+    resp = client.post(
+        "/runs/run-gmail/composio-execute/GMAIL_FETCH_EMAILS",
+        headers=_worker_call_headers("run-gmail"),
+        json={"connected_account_id": "ca_gmail", "arguments": {"query": "is:unread"}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["url"].endswith("/GMAIL_FETCH_EMAILS")
+    assert captured["json"]["connected_account_id"] == "ca_gmail"
+    assert captured["json"]["entity_id"] == "owner-a"
+    assert captured["json"]["arguments"] == {"query": "is:unread"}
+
+    mismatch = client.post(
+        "/runs/run-gmail/composio-execute/GMAIL_FETCH_EMAILS",
+        headers=_worker_call_headers("other-run"),
+        json={"connected_account_id": "ca_gmail", "arguments": {}},
+    )
+    assert mismatch.status_code == 403
+    assert mismatch.json()["detail"] == "Run token does not match request run_id"
+
+    repos.users.update(user_id="owner-a", disabled=1)
+    disabled = client.post(
+        "/runs/run-gmail/composio-execute/GMAIL_FETCH_EMAILS",
+        headers=_worker_call_headers("run-gmail"),
+        json={"connected_account_id": "ca_gmail", "arguments": {}},
+    )
+    assert disabled.status_code == 401
+    assert disabled.json()["detail"] == "account disabled"
+    db.get_repositories.cache_clear()
+
+
 def test_composio_proxy_derives_entity_id_from_run_owner(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     repos = db.get_repositories()
