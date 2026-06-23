@@ -209,13 +209,12 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   // source, which revalidates on focus + after any approve/reject — G5 P2).
   const badgeCounts = useNavBadgeSources();
   // Data prefetch: warm the destination route's TanStack cache on hover/focus
-  // so the tab switch is instant. Link already prefetches the route's JS/RSC;
-  // this adds the DATA. Cache-first + idempotent (see prefetch.ts).
+  // so the tab switch is instant. Keep Next route prefetch disabled here:
+  // these persistent sidebar links otherwise issue basePath RSC segment
+  // prefetches that prod can answer with `_not-found` payloads.
   const queryClient = useQueryClient();
-  const router = useRouter();
   const warm = (href: string) => {
     prefetchRouteData(queryClient, href);
-    router.prefetch(href);
   };
 
   return (
@@ -227,7 +226,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
           <Link
             key={item.href}
             href={item.href}
-            prefetch
+            prefetch={false}
             onMouseEnter={() => warm(item.href)}
             onPointerDown={() => warm(item.href)}
             onFocus={() => warm(item.href)}
@@ -301,6 +300,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
           create-worker Link. Same primary token + label everywhere. */}
       <Link
         href={createWorkerHref()}
+        prefetch={false}
         onClick={() => onNavigate?.()}
         className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
@@ -380,12 +380,11 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   const mcpModal = useMcpModal();
   // Data prefetch (collapsed icon rail uses this `warm`; the expanded nav warms
   // inside NavLinks). After first paint, warm the highest-value routes once on
-  // idle so the first tab switch is already instant.
+  // idle so the first tab switch is already instant. Keep Next route prefetch
+  // off for the same basePath RSC segment reason as NavLinks above.
   const queryClient = useQueryClient();
-  const router = useRouter();
   const warm = (href: string) => {
     prefetchRouteData(queryClient, href);
-    router.prefetch(href);
   };
   useEffect(() => {
     // Warm ALL main routes' data immediately (parallel, cache-first/idempotent)
@@ -403,7 +402,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 lg:hidden">
         {/* #1305: white-label, workspace mark + name, not the Floom brand. */}
-        <Link href="/overview" className="flex items-center gap-2 min-w-0">
+        <Link href="/overview" prefetch={false} className="flex items-center gap-2 min-w-0">
           <WorkspaceMark size={22} />
           <MobileWorkspaceName />
         </Link>
@@ -497,7 +496,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  prefetch
+                  prefetch={false}
                   onMouseEnter={() => warm(item.href)}
                   onPointerDown={() => warm(item.href)}
                   onFocus={() => warm(item.href)}
@@ -540,6 +539,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             </button>
             <Link
               href="/settings"
+              prefetch={false}
               title="Settings"
               className={cn(
                 "inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
