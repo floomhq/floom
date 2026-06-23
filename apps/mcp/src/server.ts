@@ -363,6 +363,15 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
   let buffer = "";
   let sawTerminalStatus = false;
 
+  async function finalRunStatus(): Promise<JsonObject | null> {
+    const run = await request("GET", `/runs/${encodeURIComponent(runId)}`) as JsonObject;
+    const finalStatus = typeof run.status === "string" ? run.status : undefined;
+    if (finalStatus && TERMINAL_RUN_STATUSES.has(finalStatus)) {
+      return { run_id: runId, status: finalStatus, run, events };
+    }
+    return null;
+  }
+
   try {
     const response = await fetch(buildUrl(`/runs/${encodeURIComponent(runId)}/events`), {
       method: "GET",
@@ -425,6 +434,10 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
+      const final = await finalRunStatus();
+      if (final) {
+        return final;
+      }
       throw new FloomApiError(`Timed out watching run ${runId} after ${timeoutMs}ms`);
     }
     throw error;
@@ -432,6 +445,10 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
     clearTimeout(timeout);
   }
 
+  const final = await finalRunStatus();
+  if (final) {
+    return final;
+  }
   return { run_id: runId, status: status || "unknown", events };
 }
 

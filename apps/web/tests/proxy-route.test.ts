@@ -55,4 +55,37 @@ describe("api proxy route", () => {
         "FLOOM_API_BASE is required for /api/proxy. Set it to the API origin for this deployment.",
     });
   });
+
+  it("forwards cloud session cookies to cli-auth approval upstream", async () => {
+    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+    const { POST } = await import("@/app/api/proxy/[...path]/route");
+
+    const res = await POST(
+      new NextRequest("https://workers.floom.dev/app/api/proxy/cli-auth/approve", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "workeros_cloud_session=cloud-session; theme=dark",
+        },
+        body: JSON.stringify({ user_code: "ABCD-2345" }),
+      }),
+      { params: Promise.resolve({ path: ["cli-auth", "approve"] }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://workers-api.floom.dev/cli-auth/approve",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          cookie: "workeros_cloud_session=cloud-session; theme=dark",
+        }),
+      }),
+    );
+  });
 });
