@@ -60,6 +60,7 @@ floom mcp install --target generic    # prints JSON snippet for manual paste
 ```bash
 floom workspace list             # all workspaces your credentials can access, active marked with *
 floom workspace switch <name>    # by name or id; fails (exit 1) if not authenticated for it
+floom workspace rename <name-or-id> <new-name>  # rename a workspace (omit <name-or-id> to rename the active one); 409 on duplicate name
 floom mcp list                   # configured MCP servers (connections of kind "mcp")
 floom mcp switch <name>          # set the active MCP server by label
 floom mcp test [name]            # live probe (initialize + tools/list); defaults to the active server

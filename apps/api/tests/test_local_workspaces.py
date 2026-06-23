@@ -487,6 +487,33 @@ def test_rename_workspace(client_and_db):
     assert client.patch(f"/workspaces/{wid}", json={"name": ""}).status_code == 422
 
 
+def test_rename_workspace_rejects_duplicate_name(client_and_db):
+    # #1738/#1888 — renaming onto a sibling's name must conflict (409), the same
+    # guard create honors.
+    client, _db = client_and_db
+    keep = client.post("/workspaces", json={"name": "secretary"}).json()["id"]
+    other = client.post("/workspaces", json={"name": "fede-secretary"}).json()["id"]
+
+    dup = client.patch(f"/workspaces/{other}", json={"name": "secretary"})
+    assert dup.status_code == 409, dup.text
+    assert "already exists" in dup.json()["detail"]
+
+    # case-insensitive, and renaming a workspace to its own name is a no-op (200).
+    assert client.patch(f"/workspaces/{other}", json={"name": "SECRETARY"}).status_code == 409
+    same = client.patch(f"/workspaces/{keep}", json={"name": "secretary"})
+    assert same.status_code == 200, same.text
+
+
+def test_rename_missing_workspace_is_404_even_on_name_collision(client_and_db):
+    # #1888 — a PATCH against a stale/unknown id must read as 404, never masked by
+    # a sibling's name collision raising 409 before the existence check.
+    client, _db = client_and_db
+    client.post("/workspaces", json={"name": "secretary"})
+
+    resp = client.patch("/workspaces/ws_doesnotexist", json={"name": "secretary"})
+    assert resp.status_code == 404, resp.text
+
+
 def test_create_workspace_rejects_duplicate_name(client_and_db):
     # #1738 — a retried create (e.g. after a transient session death) must not
     # silently make a SECOND identically-named workspace; reject with 409.

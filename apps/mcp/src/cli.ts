@@ -27,6 +27,7 @@ import {
 import {
   workspacesCreateCommand,
   workspacesListCommand,
+  workspacesRenameCommand,
   workspacesShowCommand,
   workspacesSwitchCommand,
 } from "./commands/workspaces.js";
@@ -234,6 +235,13 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .description("Switch the active workspace (matches by name or id; requires authenticated access)")
     .argument("<name-or-id>", "Workspace name or id")
     .action(async (target: string) => runAction(workspacesSwitchCommand(target)));
+  workspaces.command("rename")
+    .description("Rename a workspace (defaults to the active one when only a new name is given)")
+    .argument("<name-or-id-or-new-name>", "Workspace to rename, or the new name when renaming the active workspace")
+    .argument("[new-name]", "New name (when the first argument selects the workspace)")
+    .option("--json", "Print raw JSON")
+    .action(async (first: string, newName: string | undefined, options: { json?: boolean }) =>
+      runAction(workspacesRenameCommand(first, newName, options)));
 
   const runs = program.command("runs").description("Inspect worker runs");
   runs.command("list")

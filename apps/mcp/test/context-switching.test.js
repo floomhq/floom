@@ -15,7 +15,7 @@ import {
   writeCredentials,
 } from "../dist/lib/credentials.js";
 import { FloomApiClient } from "../dist/lib/api.js";
-import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
+import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand, workspacesRenameCommand } from "../dist/commands/workspaces.js";
 import { connectionsAddCommand, connectionsListCommand } from "../dist/commands/connections.js";
 import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
 import { authLogoutCommand, authSwitchCommand } from "../dist/commands/auth.js";
@@ -96,6 +96,27 @@ async function withStubServer(fn, { cloud = false } = {}) {
           created_at: "2026-01-03",
           ...(cloud ? { api_token: "floom_new_workspace_token" } : {}),
         }));
+        return;
+      }
+      const rename = req.url.match(new RegExp(`^${prefix}/workspaces/([^/]+)$`));
+      if (req.method === "PATCH" && rename) {
+        const found = WORKSPACES.find((row) => row.id === rename[1]);
+        if (!found) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ detail: "workspace not found" }));
+          return;
+        }
+        const nextName = parsedBody?.name || found.name;
+        // #1738 — reject a duplicate name (case-insensitive) for another workspace.
+        const clash = WORKSPACES.find(
+          (row) => row.id !== found.id && row.name.toLowerCase() === String(nextName).toLowerCase(),
+        );
+        if (clash) {
+          res.statusCode = 409;
+          res.end(JSON.stringify({ detail: `a workspace named '${nextName}' already exists` }));
+          return;
+        }
+        res.end(JSON.stringify({ ...found, name: nextName }));
         return;
       }
       const select = req.url.match(/^\/workspaces\/([^/]+)\/select$/);
@@ -344,6 +365,79 @@ test("workspace create works against cloud /api/workspaces", async () => {
       assert.equal(creds.workspace_id, "ws_created");
       assert.equal(creds.workspace_name, "Cloud Customer");
       assert.ok(calls.includes("POST /api/workspaces"));
+    }, { cloud: true });
+  });
+});
+
+test("workspace rename targets a named workspace via PATCH", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls, bodies) => {
+      await writeOssCreds(base);
+      const code = await workspacesRenameCommand("Team A", "Team Alpha", { json: true });
+      assert.equal(code, 0);
+      assert.ok(calls.includes("PATCH /workspaces/ws_0123456789abcd"));
+      assert.deepEqual(
+        bodies.find((call) => call.method === "PATCH" && call.url === "/workspaces/ws_0123456789abcd")?.body,
+        { name: "Team Alpha" },
+      );
+    });
+  });
+});
+
+test("workspace rename with one argument renames the active workspace and syncs credentials", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls) => {
+      await writeOssCreds(base, { workspace_id: "ws_0123456789abcd", workspace_name: "Team A" });
+      const code = await workspacesRenameCommand("Team Renamed");
+      assert.equal(code, 0);
+      assert.ok(calls.includes("PATCH /workspaces/ws_0123456789abcd"));
+      const creds = await readCredentials();
+      assert.equal(creds.workspace_name, "Team Renamed");
+      assert.equal(creds.workspace_id, "ws_0123456789abcd");
+    });
+  });
+});
+
+test("workspace rename returns exit 1 on a duplicate-name conflict (#1738)", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeOssCreds(base);
+      // "Local" already exists, so renaming Team A to it must conflict.
+      const code = await workspacesRenameCommand("Team A", "Local");
+      assert.equal(code, 1);
+    });
+  });
+});
+
+test("workspace rename fails with exit 1 on an unknown workspace", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeOssCreds(base);
+      const code = await workspacesRenameCommand("does-not-exist", "Whatever");
+      assert.equal(code, 1);
+    });
+  });
+});
+
+test("workspace rename fails with exit 1 when not logged in", async () => {
+  await withTempHome(async () => {
+    const code = await workspacesRenameCommand("Team A", "Team Alpha");
+    assert.equal(code, 1);
+  });
+});
+
+test("workspace rename works against cloud /api/workspaces", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "pat-token",
+        authed_at: new Date().toISOString(),
+      });
+      const code = await workspacesRenameCommand("Team A", "Team Alpha", { json: true });
+      assert.equal(code, 0);
+      assert.ok(calls.includes("PATCH /api/workspaces/ws_0123456789abcd"));
     }, { cloud: true });
   });
 });
