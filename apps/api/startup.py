@@ -671,6 +671,78 @@ def _bootstrap_contexts_storage() -> None:
     _cloud_context_dir._workeros_cloud_patched = True  # type: ignore[attr-defined]
     engine_contexts.context_dir = _cloud_context_dir
 
+    # --- 3. Patch current_contexts_root so list_contexts sees Storage packs ---
+    # The engine's list_contexts iterates the disk root for the active workspace.
+    # On a fresh container that root is empty — packs that live in Supabase
+    # Storage (including worker memory packs written by previous runs) are
+    # invisible until accessed by name.  This patch:
+    #   a) Downloads the workspace-level .workeros-contexts.json metadata file
+    #      from Storage if it isn't on disk yet.  This gives the engine owner/
+    #      visibility info for every pack without downloading pack files.
+    #   b) Creates stub directories for each Storage-known context that isn't on
+    #      disk yet.  With the metadata file in place the engine can check
+    #      ownership/visibility and include those packs in the listing.  Actual
+    #      pack files are fetched lazily on first access via the hydration hook.
+    if not hasattr(engine_contexts, "current_contexts_root"):
+        return
+    _original_contexts_root = engine_contexts.current_contexts_root
+    if getattr(_original_contexts_root, "_workeros_cloud_patched", False):
+        return
+
+    def _cloud_contexts_root() -> "Path":
+        root = _original_contexts_root()
+        workspace_id = get_active_workspace_id()
+        if not workspace_id:
+            return root
+        # a) Ensure the workspace metadata file is on disk.
+        # The engine stores it at <root>/.workeros-contexts.json.
+        metadata_path = root / ".workeros-contexts.json"
+        if not metadata_path.exists():
+            try:
+                from apps.api.config import get_supabase_service_client
+                _BUCKET = "contexts"
+                svc = get_supabase_service_client()
+                storage_path = f"{workspace_id}/.workeros-contexts.json"
+                raw = svc.storage.from_(_BUCKET).download(storage_path)
+                if raw:
+                    root.mkdir(parents=True, exist_ok=True)
+                    metadata_path.write_bytes(raw)
+            except Exception as exc:
+                import logging as _log
+                _log.getLogger(__name__).debug(
+                    "cloud contexts_root metadata fetch failed for %s: %s", workspace_id, exc
+                )
+        # b) Create stub dirs for Storage-known packs not yet on disk.
+        try:
+            from apps.api.cloud_contexts import list_context_names
+            known = list_context_names(workspace_id)
+        except Exception as exc:
+            import logging as _log
+            _log.getLogger(__name__).debug(
+                "cloud contexts_root Storage list failed for %s: %s", workspace_id, exc
+            )
+            return root
+        for name in known:
+            safe_name = str(name or "").strip()
+            if (
+                not safe_name
+                or safe_name.startswith(".")
+                or "/" in safe_name
+                or "\\" in safe_name
+            ):
+                continue
+            stub = root / safe_name
+            if not stub.exists():
+                try:
+                    stub.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+        return root
+
+    _cloud_contexts_root._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    engine_contexts.current_contexts_root = _cloud_contexts_root
+    logger.info("Patched current_contexts_root to surface Supabase Storage packs in Library listing")
+
 
 def _override_git_cfg_for_cloud() -> None:
     """Replace SQLite-backed git_workspace_config reads/writes with Supabase.

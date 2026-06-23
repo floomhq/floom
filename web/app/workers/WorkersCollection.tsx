@@ -401,7 +401,7 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
         <div>
           <h4 style={h4}>
             <Brain className="inline-block size-[11px] align-[-1px] mr-1" aria-hidden="true" />
-            Company brain it uses
+            Library folders it uses
           </h4>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {contexts.map((spec) => {
@@ -773,7 +773,7 @@ function BrainTab({ w }: { w: WorkerSummary }) {
     setBusy(true);
     try {
       applyDetail(await persistYml(d, patchBrainContexts(workerYml(d), next)));
-      toast.success("Brain updated");
+      toast.success("Library updated");
     } catch {
       toast.error("Could not update brain folders.");
     } finally {
@@ -1753,13 +1753,13 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
   Setup: SetupTab,
   Source: SourceTab,
   Versions: VersionsTab,
-  Brain: BrainTab,
+  Library: BrainTab,
   Tools: ToolsTab,
 };
 
 /**
  * Inline "Developer" disclosure button — sits directly after the operator tabs
- * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Brain, Tools).
+ * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Library, Tools).
  * One click reveals all; clicking again collapses all. No dropdown, no pin, no
  * per-item checkmark. Replaces the pick-one dropdown (kills the #1680 bug class).
  */

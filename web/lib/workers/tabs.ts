@@ -1,6 +1,6 @@
 // The worker detail tab set (round-09 approved structure, worker-detail-v2.md):
 //   PRIMARY:  Overview · Runs · Setup
-//   ADVANCED: Source · Versions · Brain · Tools   (quiet, secondary group)
+//   ADVANCED: Source · Versions · Library · Tools   (quiet, secondary group)
 // Setup is itself a second-row tab host (Inputs / Alerts & webhooks /
 // Triggers / Limits) — see SetupTab. Config was folded into Setup and
 // Triggers moved under Setup. Kept as a typed constant so a test can guard
@@ -11,7 +11,7 @@ export const WORKER_DETAIL_TABS = [
   "Setup",
   "Source",
   "Versions",
-  "Brain",
+  "Library",
   "Tools",
 ] as const;
 

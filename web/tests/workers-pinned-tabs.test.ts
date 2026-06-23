@@ -35,8 +35,8 @@ describe("pinned-tabs tab sets", () => {
     expect([...BASE_DETAIL_TABS]).toEqual(["Overview", "Runs", "Setup"]);
   });
 
-  it("advanced (pinnable) tabs are Source, Versions, Brain, Tools in canonical order", () => {
-    expect(ADVANCED_DETAIL_TABS).toEqual(["Source", "Versions", "Brain", "Tools"]);
+  it("advanced (pinnable) tabs are Source, Versions, Library, Tools in canonical order", () => {
+    expect(ADVANCED_DETAIL_TABS).toEqual(["Source", "Versions", "Library", "Tools"]);
   });
 });
 
@@ -50,8 +50,8 @@ describe("getPinnedTabs / savePinnedTabs", () => {
 
   it("persists in canonical order regardless of insertion order", () => {
     const store = installLocalStorage();
-    savePinnedTabs(new Set<WorkerDetailTab>(["Brain", "Source"]));
-    expect(store[LS_KEY]).toBe(JSON.stringify(["Source", "Brain"]));
+    savePinnedTabs(new Set<WorkerDetailTab>(["Library", "Source"]));
+    expect(store[LS_KEY]).toBe(JSON.stringify(["Source", "Library"]));
   });
 
   it("ignores unknown / base tabs in stored data (no poisoned bar)", () => {
