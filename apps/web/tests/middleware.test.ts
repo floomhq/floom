@@ -100,6 +100,15 @@ describe("middleware auth gate", () => {
     expect(proxy.headers.get("x-middleware-next")).toBe("1");
   });
 
+  it("keeps signed connection authorize proxy links reachable without login", async () => {
+    const { proxy: middleware } = await import("@/proxy");
+
+    const proxy = await middleware(req("/api/proxy/connections/authorize/signed-token"));
+
+    expect(proxy.status).toBe(200);
+    expect(proxy.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("does NOT leak the authed approvals proxy through the public prefix", async () => {
     const { proxy: middleware } = await import("@/proxy");
     // The plain /api/proxy/approvals list is NOT public.

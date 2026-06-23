@@ -24,6 +24,7 @@ function safeProxyLocation(
   location: string,
   requestUrl: string,
   apiBase: string | null,
+  upstreamPath = "",
 ): string | null {
   if (!location) return null;
   let appOrigin: string;
@@ -51,6 +52,14 @@ function safeProxyLocation(
   }
   if (apiOrigin && resolved.origin === apiOrigin) {
     return resolved.pathname + resolved.search + resolved.hash;
+  }
+  const host = resolved.hostname.toLowerCase();
+  if (
+    upstreamPath.startsWith("/connections/authorize/")
+    && resolved.protocol === "https:"
+    && (host === "composio.dev" || host.endsWith(".composio.dev"))
+  ) {
+    return resolved.toString();
   }
   return null;
 }
@@ -166,7 +175,7 @@ async function handler(
   );
   const location = upstream.headers.get("location");
   if (location) {
-    const safeLocation = safeProxyLocation(location, req.url, apiBase);
+    const safeLocation = safeProxyLocation(location, req.url, apiBase, upstreamPath);
     if (safeLocation) responseHeaders.set("location", safeLocation);
   }
   // #927: force Secure on any backend cookie we hand to the browser

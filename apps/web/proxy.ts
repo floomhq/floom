@@ -68,6 +68,7 @@ const PUBLIC_PAGE_EXACT = [
 // reachable without a Floom session (OAuth callbacks and signed approvals).
 const PUBLIC_PROXY_PATHS = ["/api/proxy/connections/callback"];
 const PUBLIC_PROXY_PREFIXES = [
+  "/api/proxy/connections/authorize/",
   "/api/proxy/approvals/public/",
   // ReviewPack Review Pack: the public token-gated read/vote endpoints the
   // /review/[token] page calls from the browser (no Floom session). The path

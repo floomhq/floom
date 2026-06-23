@@ -456,6 +456,47 @@ class TestConnectionCallbackAndComposio503:
         state = parse_qs(urlparse(callback_url).query).get("state", [""])[0]
         assert state
 
+    def test_connect_returns_floom_branded_authorize_url(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://floom.dev/app")
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        with patch("composio_client.initiate_connection") as mock_init:
+            mock_init.return_value = {
+                "composio_connection_id": "composio_branded_test",
+                "redirect_url": "https://connect.composio.dev/link/lk_test",
+            }
+            resp = client.post(
+                "/connections",
+                json={"app_name": "gmail"},
+                headers=AUTH_HEADERS,
+            )
+
+        assert resp.status_code == 200, resp.text
+        redirect_url = resp.json()["redirect_url"]
+        assert redirect_url.startswith("https://floom.dev/app/api/proxy/connections/authorize/")
+        assert "composio.dev" not in redirect_url
+
+        api_path = urlparse(redirect_url).path.removeprefix("/app/api/proxy")
+        auth_resp = client.get(api_path, follow_redirects=False)
+        assert auth_resp.status_code in {302, 307}
+        assert auth_resp.headers["location"] == "https://connect.composio.dev/link/lk_test"
+
+    def test_authorize_link_rejects_non_composio_targets(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        from routers.connections import _issue_authorize_token
+
+        token = _issue_authorize_token(
+            redirect_url="https://evil.example/phish",
+            user_id="local-user",
+        )
+
+        resp = client.get(f"/connections/authorize/{token}", follow_redirects=False)
+
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "Invalid authorization target"
+
     def test_callback_accepts_connected_account_id_alias_and_persists_status(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
         # #1073 dropped the hardcoded example.com default for the callback redirect
