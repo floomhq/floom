@@ -359,6 +359,69 @@ def test_side_workspace_workers_are_isolated_and_editable(client_and_db):
     assert update.json()["permissions"]["can_edit"] is True
 
 
+def test_run_list_and_csv_export_follow_scoped_workspace_owner(client_and_db):
+    client, db = client_and_db
+    created = client.post("/workspaces", json={"name": "Runs workspace"})
+    assert created.status_code == 200, created.text
+    workspace_id = created.json()["id"]
+    scoped_user_id = local_workspace_user_id("local-user", workspace_id)
+
+    _seed_workspace_owner(db, workspace_id, scoped_user_id)
+    _seed_legacy_worker(db, "default-run-worker")
+    repos = db.get_repositories()
+    repos.workers.create(
+        user_id=scoped_user_id,
+        worker_id="side-run-worker",
+        name="side-run-worker",
+        manifest_json=_manifest("side-run-worker", "side-run-worker"),
+        bundle_path="workers/side-run-worker",
+        workspace_id=workspace_id,
+        visibility="private",
+    )
+    repos.runs.create(
+        user_id="local-user",
+        run_id="default-run",
+        worker_id="default-run-worker",
+        status="completed",
+        started_at=db.now_iso(),
+        completed_at=db.now_iso(),
+        duration_ms=100,
+    )
+    repos.runs.create(
+        user_id=scoped_user_id,
+        run_id="side-run",
+        worker_id="side-run-worker",
+        status="completed",
+        started_at=db.now_iso(),
+        completed_at=db.now_iso(),
+        duration_ms=100,
+    )
+
+    default_list = client.get("/runs")
+    assert default_list.status_code == 200, default_list.text
+    assert {row["id"] for row in default_list.json()} == {"default-run"}
+
+    scoped_headers = {"x-floom-workspace": workspace_id}
+    side_list = client.get("/runs", headers=scoped_headers)
+    assert side_list.status_code == 200, side_list.text
+    assert {row["id"] for row in side_list.json()} == {"side-run"}
+
+    side_csv = client.get("/runs/export.csv", headers=scoped_headers)
+    assert side_csv.status_code == 200, side_csv.text
+    assert "side-run" in side_csv.text
+    assert "default-run" not in side_csv.text
+
+    spoof_headers = {"x-floom-workspace": "ws_aaaaaaaaaaaaaa"}
+    spoofed_list = client.get("/runs", headers=spoof_headers)
+    assert spoofed_list.status_code == 200, spoofed_list.text
+    assert {row["id"] for row in spoofed_list.json()} == set()
+
+    spoofed_csv = client.get("/runs/export.csv", headers=spoof_headers)
+    assert spoofed_csv.status_code == 200, spoofed_csv.text
+    assert "side-run" not in spoofed_csv.text
+    assert "default-run" not in spoofed_csv.text
+
+
 def test_connections_are_scoped_to_the_active_workspace(client_and_db):
     client, db = client_and_db
     created = client.post("/workspaces", json={"name": "Connections workspace"})

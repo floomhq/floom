@@ -64,7 +64,7 @@ const TOOL_GROUPS: { group: string; tools: { name: string; description: string }
     ],
   },
   {
-    group: "Integrations",
+    group: "Connections",
     tools: [
       { name: "connections.list", description: "List configured app connections." },
       { name: "connections.add_mcp", description: "Add an MCP server connection." },
@@ -88,7 +88,7 @@ const TOOL_GROUPS: { group: string; tools: { name: string; description: string }
     ],
   },
   {
-    group: "Triggers & Integrations",
+    group: "Triggers & connections",
     tools: [
       { name: "triggers.list", description: "List integration triggers, globally or per worker/app." },
       { name: "integrations.catalog", description: "Browse all available integrations." },

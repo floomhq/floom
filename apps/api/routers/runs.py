@@ -77,6 +77,7 @@ from services.run_access import (
 )
 from services.run_serialize import (
     _extract_primary_output_file,
+    _effective_run_status,
     _extract_total_tokens_from_transcript,
     _make_run_summary,
     _parse_tool_calls_from_transcript,
@@ -230,6 +231,10 @@ def list_runs(
     if (before_created_at and not before_id) or (before_id and not before_created_at):
         raise HTTPException(status_code=400, detail="before_created_at and before_id must be supplied together")
 
+    # Defense-in-depth only: this value comes from a client header/query param.
+    # The authorization gate is auth.user_id, which local workspace middleware
+    # rewrites to the scoped owner id before run repository queries execute.
+    # A forged workspace value must only narrow the already owner-scoped rows.
     workspace_key = requested_local_workspace_id(request)
     cache_key = (
         "runs",
@@ -285,6 +290,7 @@ def list_runs(
         before_id=before_id,
         include_system=include_system,
         exact_total=False,
+        workspace_id=workspace_key,
     )
     result = [_make_run_summary(r) for r in visible_rows]
     hot_cache.set(cache_key, (result, visible_total))
@@ -308,6 +314,7 @@ def list_runs(
 
 @runs_router.get("/runs/export.csv")
 def export_runs_csv(
+    request: Request,
     worker_id: Optional[str] = None,
     status: Optional[str] = None,
     since: Optional[str] = None,
@@ -327,6 +334,9 @@ def export_runs_csv(
     until_dt = _parse_iso8601(until) if until else None
     if until and until_dt is None:
         raise HTTPException(status_code=400, detail="Invalid until value")
+    # Keep CSV export on the same scoped visibility path as GET /runs. The
+    # workspace value is a client-selected filter, not an authorization gate;
+    # auth.user_id owner scoping must remain the primary boundary.
     rows, _total = _list_visible_runs(
         user_id=auth.user_id,
         repos=repos,
@@ -337,6 +347,7 @@ def export_runs_csv(
         limit=limit,
         offset=0,
         include_system=include_system,
+        workspace_id=requested_local_workspace_id(request),
     )
     import csv as _csv
     import io as _io
@@ -1106,8 +1117,10 @@ def get_run(
     ]
     transcript: List[Dict[str, Any]] = []
 
+    effective_status = _effective_run_status(row_to_dict(run))
+
     queue_position: Optional[int] = None
-    if run["status"] == RunStatus.QUEUED.value:
+    if effective_status == RunStatus.QUEUED.value:
         pos = queued_run_position(run_id)
         queue_position = pos if pos > 0 else None
 
@@ -1164,7 +1177,7 @@ def get_run(
 
     # #561: replay is available for terminal statuses.
     _terminal_statuses = {RunStatus.COMPLETED.value, RunStatus.FAILED.value}
-    _can_replay = run.get("status") in _terminal_statuses
+    _can_replay = effective_status in _terminal_statuses
 
     return RunDetail(
         id=run["id"],
@@ -1172,7 +1185,7 @@ def get_run(
         # PR S21: query already SELECTs worker_name (line ~3670) but it was
         # never plumbed through to the response model — UI showed the slug.
         worker_name=run.get("worker_name"),
-        status=RunStatus(run["status"]),
+        status=RunStatus(effective_status),
         trigger_source=run["trigger_source"],
         runner=run["runner"],
         input=run_input,

@@ -31,6 +31,7 @@ function RowMenu({ items }: { items: RowMenuItem[] }) {
         items={items.map((it) => ({
           label: it.label,
           destructive: it.danger,
+          confirm: it.confirm,
           onSelect: it.onSelect,
         }))}
       />

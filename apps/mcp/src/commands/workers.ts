@@ -267,7 +267,7 @@ function validateNativeRuntimeContract(
     );
   }
 
-  const usesProxy = /composio-execute\/[A-Z0-9_]+/.test(runPy);
+  const usesProxy = /composio-execute\//.test(runPy);
   const readsConnections = /connections\.json/.test(runPy);
   if ((usesProxy || readsConnections) && declared.size === 0) {
     errors.push("run.py uses Composio/connections.json but worker.yml has no `connections:` declaration");
@@ -283,6 +283,9 @@ function validateNativeRuntimeContract(
       continue;
     }
     if (secrets.has(candidate)) {
+      continue;
+    }
+    if (!toolApp(candidate, declared)) {
       continue;
     }
     toolSlugs.add(candidate);

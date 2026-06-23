@@ -59,6 +59,7 @@ from services.run_access import (
 from services.sse_streaming import _sse_publish
 from services.uploads import _store_uploaded_blob
 from services.worker_access import _delete_worker_impl
+from services.product_events import emit_approval_decided
 
 logger = logging.getLogger("floom.api")
 
@@ -825,6 +826,14 @@ def approve_run(
     if claimed is None:
         # A concurrent approve/reject already decided this approval.
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=str(approval_row.get("id") or ""),
+        run_id=run_id,
+        worker_id=str(worker_id or "") or None,
+        decision="approved",
+        approval_kind=str(_di.get("kind") or "run"),
+    )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
     # state. Without this the original run is stuck at pending_approval forever
@@ -951,6 +960,15 @@ def reject_run(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    run_data = row_to_dict(run_row)
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=str(approval_row.get("id") or ""),
+        run_id=run_id,
+        worker_id=str(run_data.get("worker_id") or "") or None,
+        decision="rejected",
+        approval_kind=str(_di_r.get("kind") or "run"),
+    )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
     # state so it is not stuck forever (zombie approval). The rejection itself
@@ -1064,6 +1082,14 @@ def approve_destructive_action(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or ""),
+        worker_id=str(approval.get("worker_id") or "") or None,
+        decision="approved",
+        approval_kind="destructive_delete",
+    )
 
     description = _execute_destructive_delete(path, auth.user_id, repos)
 
@@ -1099,6 +1125,14 @@ def reject_destructive_action(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or ""),
+        worker_id=str(approval.get("worker_id") or "") or None,
+        decision="rejected",
+        approval_kind="destructive_delete",
+    )
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",
@@ -1135,6 +1169,14 @@ def approve_agent_tool_approval(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or ""),
+        worker_id=str(approval.get("worker_id") or "") or None,
+        decision="approved",
+        approval_kind="agent_tool",
+    )
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",
@@ -1171,6 +1213,14 @@ def reject_agent_tool_approval(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or ""),
+        worker_id=str(approval.get("worker_id") or "") or None,
+        decision="rejected",
+        approval_kind="agent_tool",
+    )
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",

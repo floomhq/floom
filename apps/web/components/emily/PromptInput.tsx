@@ -185,7 +185,7 @@ export function PromptInput({
           ref={textareaRef}
           // a11y #1711: explicit accessible name (the textarea has no visible
           // <label>; the placeholder is not an accessible name).
-          aria-label="Describe the job for a new worker"
+          aria-label="Message Emily"
           className={cn(
             "w-full resize-none bg-transparent px-2 pt-1.5 outline-none placeholder:text-muted-foreground overflow-auto",
             // Hero (large): bigger type + taller min-height so the home composer

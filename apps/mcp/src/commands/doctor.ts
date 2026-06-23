@@ -164,8 +164,13 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
 
   log.blank();
   const failed = checks.filter((c) => !c.ok).length;
+  const warnings = checks.filter((c) => c.ok && c.hint).length;
   if (failed === 0) {
-    log.ok("All checks passed.");
+    if (warnings === 0) {
+      log.ok("All checks passed.");
+    } else {
+      log.ok(`All required checks passed; ${warnings} optional warning${warnings === 1 ? "" : "s"} above.`);
+    }
   } else {
     log.err(`${failed} check${failed === 1 ? "" : "s"} failed; see hints above.`);
   }

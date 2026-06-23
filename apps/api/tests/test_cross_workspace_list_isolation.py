@@ -73,6 +73,15 @@ def _seed(db_path: Path) -> None:
             "VALUES (?,?,?,?,?,?,?,?)",
             (wid, "sv", wid, owner, ws, vis, 1, _NOW),
         )
+    for rid, wid, status in [
+        ("run-a", "a-shared", "completed"),
+        ("run-b", "b-shared", "completed"),
+    ]:
+        c.execute(
+            "INSERT INTO runs (id,worker_id,status,trigger_source,runner,input_json,output_json,created_at,started_at,completed_at,duration_ms) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (rid, wid, status, "manual", "native", "{}", "{}", _NOW, _NOW, _NOW, 1000),
+        )
     c.commit()
     c.close()
 
@@ -100,6 +109,22 @@ def test_member_list_does_not_leak_workspace_workers_across_workspaces(tmp_path,
     assert "b-shared" in carol
     assert "a-shared" not in carol, "cross-workspace leak: carol (WS-B) saw WS-A's workspace worker"
     assert "a-priv" not in carol
+
+
+def test_run_listing_scopes_by_active_workspace(tmp_path, monkeypatch):
+    db = tmp_path / "xws-runs.db"
+    dbmod = _load_db(monkeypatch, db)
+    _seed(db)
+    repo = dbmod.get_repositories().runs
+
+    a_rows, _a_total = repo.list_operator_visible(user_id="rao", workspace_id="ws-a", limit=50)
+    b_rows, _b_total = repo.list_operator_visible(user_id="rao", workspace_id="ws-b", limit=50)
+
+    assert {r["id"] for r in a_rows} == {"run-a"}
+    assert {r["id"] for r in b_rows} == set()
+
+    carol_rows, _carol_total = repo.list_operator_visible(user_id="carol", workspace_id="ws-b", limit=50)
+    assert {r["id"] for r in carol_rows} == {"run-b"}
 
 
 def test_owner_and_admin_still_see_their_workers(tmp_path, monkeypatch):

@@ -234,10 +234,11 @@ def _list_visible_runs(
     before_id: str | None = None,
     include_system: bool = False,
     exact_total: bool = True,
+    workspace_id: str | None = None,
 ) -> tuple[list[Any], int]:
     list_operator_visible = getattr(repos.runs, "list_operator_visible", None)
     if list_operator_visible is not None and not exact_total:
-        return list_operator_visible(
+        operator_kwargs = dict(
             user_id=user_id,
             worker_id=worker_id,
             statuses=statuses,
@@ -248,7 +249,15 @@ def _list_visible_runs(
             before_id=before_id,
             offset=offset,
             include_system=include_system,
+            workspace_id=workspace_id,
         )
+        try:
+            return list_operator_visible(**operator_kwargs)
+        except TypeError as exc:
+            if "workspace_id" not in str(exc):
+                raise
+            operator_kwargs.pop("workspace_id", None)
+            return list_operator_visible(**operator_kwargs)
 
     batch_size = max(limit, 100)
     raw_offset = 0
@@ -269,6 +278,7 @@ def _list_visible_runs(
             until=until,
             limit=batch_size,
             offset=raw_offset,
+            workspace_id=workspace_id,
         )
         try:
             rows, raw_total_count = repos.runs.list(
@@ -276,9 +286,16 @@ def _list_visible_runs(
                 include_total=exact_total,
             )
         except TypeError as exc:
-            if "include_total" not in str(exc):
+            if "workspace_id" in str(exc):
+                list_kwargs.pop("workspace_id", None)
+                rows, raw_total_count = repos.runs.list(
+                    **list_kwargs,
+                    include_total=exact_total,
+                )
+            elif "include_total" in str(exc):
+                rows, raw_total_count = repos.runs.list(**list_kwargs)
+            else:
                 raise
-            rows, raw_total_count = repos.runs.list(**list_kwargs)
         if not rows:
             break
         raw_offset += len(rows)

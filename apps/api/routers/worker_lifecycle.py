@@ -43,6 +43,7 @@ from services.worker_serialize import (
     _worker_bundle_dir,
     _worker_files_from_manifest,
 )
+from services.product_events import emit_worker_lifecycle_event
 from worker_registry import invalidate_worker_cache
 
 worker_lifecycle_router = APIRouter()
@@ -239,7 +240,14 @@ def pause_worker(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     """#788: pause a worker (enabled=false) so it stops running on schedule."""
-    return _set_worker_enabled(worker_id, enabled=False, auth=auth, repos=repos, request=request)
+    detail = _set_worker_enabled(worker_id, enabled=False, auth=auth, repos=repos, request=request)
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=_canonical_worker_id(worker_id),
+        event="worker_updated",
+        source="pause",
+    )
+    return detail
 
 
 @worker_lifecycle_router.post("/workers/{worker_id}/resume", response_model=WorkerDetail)
@@ -250,7 +258,14 @@ def resume_worker(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     """#788: resume a paused worker (enabled=true) and re-enqueue its schedule."""
-    return _set_worker_enabled(worker_id, enabled=True, auth=auth, repos=repos, request=request)
+    detail = _set_worker_enabled(worker_id, enabled=True, auth=auth, repos=repos, request=request)
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=_canonical_worker_id(worker_id),
+        event="worker_updated",
+        source="resume",
+    )
+    return detail
 
 
 # ---------------------------------------------------------------------------
@@ -301,5 +316,11 @@ def delete_worker(
         if canonical_id in _db_worker_owners():
             raise HTTPException(status_code=404, detail="Worker not found")
     _delete_worker_impl(worker_id, auth.user_id, repos)
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=canonical_id,
+        event="worker_deleted",
+        source="api",
+    )
     # 204 No Content — FastAPI returns empty body automatically for status_code=204
     return None

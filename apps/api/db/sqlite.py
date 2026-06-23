@@ -1878,6 +1878,7 @@ class SqliteRunRepository:
         limit: int = 50,
         offset: int = 0,
         include_total: bool = True,
+        workspace_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         with get_db() as conn:
             has_actor_user_id = self._has_actor_user_id_column(conn)
@@ -1892,6 +1893,9 @@ class SqliteRunRepository:
         if worker_id:
             where.append("r.worker_id = ?")
             params.append(worker_id)
+        if workspace_id:
+            where.append("COALESCE(w.workspace_id, 'local-default') = ?")
+            params.append(workspace_id)
         if statuses:
             where.append(f"r.status IN ({', '.join('?' for _ in statuses)})")
             params.extend(statuses)
@@ -1941,6 +1945,7 @@ class SqliteRunRepository:
         before_id: str | None = None,
         offset: int = 0,
         include_system: bool = False,
+        workspace_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         from core.config import _INTERNAL_WORKER_ID_PREFIXES, _SYSTEM_WORKER_IDS
         from services.run_access import _OPERATOR_TRIGGER_SOURCES
@@ -1958,6 +1963,9 @@ class SqliteRunRepository:
         if worker_id:
             where.append("r.worker_id = ?")
             params.append(worker_id)
+        if workspace_id:
+            where.append("COALESCE(w.workspace_id, 'local-default') = ?")
+            params.append(workspace_id)
         if statuses:
             where.append(f"r.status IN ({', '.join('?' for _ in statuses)})")
             params.extend(statuses)

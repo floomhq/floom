@@ -178,15 +178,7 @@ def _make_run_summary(row: Any) -> "RunSummary":
     from models import RunStatus, RunSummary
 
     d = row_to_dict(row)
-    status_value = str(d.get("status") or "").lower()
-    status_aliases = {
-        "approved": RunStatus.COMPLETED.value,
-        "success": RunStatus.COMPLETED.value,
-        "rejected": RunStatus.FAILED.value,
-        "error": RunStatus.FAILED.value,
-        "cancelled": RunStatus.FAILED.value,
-    }
-    normalized_status = status_aliases.get(status_value, status_value or RunStatus.FAILED.value)
+    normalized_status = _effective_run_status(d)
     # #1022: surface the run's stored input (the mandate/request) so the run list
     # is a queryable log. input_json is already SELECTed by the list queries, so
     # this adds no extra round trips.
@@ -220,6 +212,34 @@ def _make_run_summary(row: Any) -> "RunSummary":
         input=run_input,
         inputs=run_input,
     )
+
+
+def _effective_run_status(row: Dict[str, Any]) -> str:
+    """Normalize stored run status for UI/API display.
+
+    A completed run can occasionally retain ``status='running'`` while terminal
+    fields are already written. Prefer the terminal evidence so list/detail
+    views do not show a finished run as cancellable forever (#1704).
+    """
+    from models import RunStatus
+
+    status_value = str(row.get("status") or "").lower()
+    status_aliases = {
+        "approved": RunStatus.COMPLETED.value,
+        "success": RunStatus.COMPLETED.value,
+        "succeeded": RunStatus.COMPLETED.value,
+        "rejected": RunStatus.FAILED.value,
+        "error": RunStatus.FAILED.value,
+        "timeout": RunStatus.FAILED.value,
+        "cancelled": RunStatus.FAILED.value,
+    }
+    normalized = status_aliases.get(status_value, status_value or RunStatus.FAILED.value)
+    if normalized in {RunStatus.RUNNING.value, RunStatus.QUEUED.value}:
+        if row.get("completed_at") or row.get("duration_ms") is not None:
+            if row.get("error") or row.get("error_code"):
+                return RunStatus.FAILED.value
+            return RunStatus.COMPLETED.value
+    return normalized
 
 
 def _extract_primary_output_file(output_payload: Dict[str, Any]) -> Optional[tuple[str, bytes]]:

@@ -315,6 +315,26 @@ capabilities:
   assert.match(result.stdout, /Validated cli-test-worker/);
 });
 
+test("workers validate does not treat Python constants or plain env vars as Composio tools", async () => {
+  const dir = await makeWorkerDir({
+    run: `import json
+import os
+
+CLEAN_MODE_CONFIGS = {"fast": True}
+CITIES_PATH = os.environ.get("MY_WORKER_CITIES_PATH")
+SHOW_SOURCE = os.environ.get("MY_WORKER_SHOW_SOURCE")
+
+with open("result.json", "w", encoding="utf-8") as f:
+    json.dump({"status": "success", "outputs": {"ok": True}}, f)
+`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Validated cli-test-worker/);
+  assert.doesNotMatch(result.stderr, /connection 'unknown'/);
+});
+
 test("workers validate ignores inactive run.py when entrypoint is SKILL.md", async () => {
   const dir = await makeWorkerDir({
     workerYml: skillWorkerYml,
@@ -566,6 +586,18 @@ test("secrets set accepts --value for non-interactive automation", async (t) => 
   assert.match(result.stdout, /Saved OPENAI_API_KEY/);
   assert.deepEqual(mock.seen, ["POST /secrets/OPENAI_API_KEY"]);
   assert.deepEqual(mock.bodies[0], { value: "sk-test" });
+});
+
+test("secrets delete without --yes cancels with non-zero exit and does not call DELETE", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["secrets", "delete", "OPENAI_API_KEY"], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stdout, /Cancelled/);
+  assert.deepEqual(mock.seen, []);
 });
 
 test("workers push reports unreachable API separately from expired auth", async () => {
