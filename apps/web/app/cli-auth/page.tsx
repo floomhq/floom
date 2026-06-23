@@ -178,7 +178,7 @@ function CliAuthHero() {
   return (
     <section className="relative hidden min-h-[620px] overflow-hidden bg-[#F5F7FB] px-10 py-10 md:block" aria-hidden>
       <div className="absolute inset-x-10 top-10 h-44 rounded-[16px] bg-[#16171A] shadow-[0_20px_60px_hsl(220_22%_10%/.22)]">
-        <div className="flex h-9 items-center gap-2 border-b border-white/10 px-4">
+        <div className="flex h-9 items-center gap-2 px-4 shadow-[inset_0_-1px_0_rgb(255_255_255/.10)]">
           <span className="size-2 rounded-full bg-[#C98A1A]" />
           <span className="size-2 rounded-full bg-white/30" />
           <span className="size-2 rounded-full bg-white/30" />
