@@ -66,6 +66,9 @@ logger = get_logger(__name__)
 ensure_engine_api_path()
 
 from auth.context import AuthContext  # noqa: E402
+from auth.multi_member import _hash_token as _hash_pat  # noqa: E402
+from auth.multi_member import _is_expired  # noqa: E402
+from db import now_iso  # noqa: E402
 
 PAT_HEADER = "x-floom-token"
 
@@ -242,7 +245,7 @@ class SupabaseAuthProvider:
             return await self._verify_worker_call_token(token, request)
         if token.startswith("wst_"):
             return await self._verify_workspace_token(token)
-        if token.startswith("floom_"):
+        if token.startswith(("floom_", "wos_")):
             return await self._verify_pat(token, request)
         claims = _verify_jwt(token, self._settings.supabase_url)
         user_id = claims.get("sub")
@@ -370,7 +373,10 @@ class SupabaseAuthProvider:
         )
 
     async def _verify_pat(self, raw: str, request: Request) -> AuthContext:
-        token_hash = _hash_token(raw)
+        if raw.startswith("wos_"):
+            return await self._verify_account_pat(raw, request)
+
+        token_hash = _hash_pat(raw)
         now = time.time()
 
         # Fast path: PAT already in cache and not expired.
@@ -406,6 +412,47 @@ class SupabaseAuthProvider:
         return await self._build_pat_context(
             user_id=user_id,
             workspace_id=workspace_id,
+            request=request,
+        )
+
+    async def _verify_account_pat(self, raw: str, request: Request) -> AuthContext:
+        token_hash = _hash_pat(raw)
+        now = time.time()
+
+        with _cache_lock:
+            cached = _pat_cache.get(token_hash)
+        if cached and (now - cached[2]) < _PAT_TTL:
+            return await self._build_pat_context(
+                user_id=cached[0],
+                workspace_id=None,
+                request=request,
+            )
+
+        from apps.api.db.supabase_repos import SupabasePersonalAccessTokenRepository
+
+        repo = SupabasePersonalAccessTokenRepository()
+        row = repo.get_by_hash(token_hash=token_hash)
+        if row is None:
+            with _cache_lock:
+                _pat_cache.pop(token_hash, None)
+            raise HTTPException(status_code=401, detail="invalid token")
+        if row.get("disabled"):
+            raise HTTPException(status_code=401, detail="account disabled")
+        if _is_expired(row.get("expires_at")):
+            raise HTTPException(status_code=401, detail="token expired")
+
+        user_id = str(row["user_id"])
+        with _cache_lock:
+            _pat_cache[token_hash] = (user_id, None, now)
+
+        try:
+            repo.touch_last_used(token_id=str(row["id"]), last_used_at=now_iso())
+        except Exception:
+            pass
+
+        return await self._build_pat_context(
+            user_id=user_id,
+            workspace_id=None,
             request=request,
         )
 

@@ -726,6 +726,30 @@ app.include_router(slack_events_router, prefix="/api")
 app.include_router(slack_oauth_router)
 
 
+async def _blocked_engine_account_route() -> None:
+    """Cloud uses Supabase auth/workspace membership, not engine-local user admin."""
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+_BLOCKED_ENGINE_ACCOUNT_ROUTES = (
+    "/auth/setup",
+    "/auth/login",
+    "/auth/magic-link",
+    "/auth/magic/{_path:path}",
+    "/users",
+    "/users/{_path:path}",
+)
+
+for _prefix in ("", "/api", "/v1", "/api/v1"):
+    for _blocked_path in _BLOCKED_ENGINE_ACCOUNT_ROUTES:
+        app.add_api_route(
+            f"{_prefix}{_blocked_path}",
+            _blocked_engine_account_route,
+            methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            include_in_schema=False,
+        )
+
+
 def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any, *, merge_existing: bool = False) -> None:
     """Save worker file contents to Supabase manifest_json._files.
 

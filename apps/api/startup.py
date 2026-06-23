@@ -43,8 +43,11 @@ from apps.api.db.supabase_repos import (
     SupabaseConnectionRepository,
     SupabaseFeedbackRepository,
     SupabaseMcpToolRepository,
+    SupabasePersonalAccessTokenRepository,
     SupabaseRunRepository,
     SupabaseSecretRepository,
+    SupabaseUserRepository,
+    SupabaseUserSessionRepository,
     SupabaseWorkerRepository,
 )
 from apps.api.db.supabase_members_repo import SupabaseWorkspaceMemberRepository
@@ -155,6 +158,9 @@ def _cloud_repositories() -> Repositories:
         alerts=SupabaseAlertRepository(),
         asset_access=SupabaseAssetAccessRepository(),
         mcp_tools=SupabaseMcpToolRepository(),
+        users=SupabaseUserRepository(),
+        tokens=SupabasePersonalAccessTokenRepository(),
+        sessions=SupabaseUserSessionRepository(),
         feedback=SupabaseFeedbackRepository(),
         # FW-02: wire engine-shaped membership so the dashboard's
         # `/workspace/members` surface stops returning HTTP 501. The

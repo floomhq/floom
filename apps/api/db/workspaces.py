@@ -33,13 +33,30 @@ def ensure_user_row(*, user_id: str, email: str | None) -> None:
     every resolution: ``on_conflict="id"`` makes it a no-op when the row exists.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
-    get_supabase_service_client().table("users").upsert(
+    client = get_supabase_service_client()
+    existing = (
+        client.table("users")
+        .select("id")
+        .eq("id", str(user_id))
+        .limit(1)
+        .execute()
+    )
+    if _row(existing):
+        client.table("users").update(
+            {"email": email, "updated_at": now_iso}
+        ).eq("id", str(user_id)).execute()
+        return
+    client.table("users").insert(
         {
             "id": str(user_id),
             "email": email,
+            "username": str(user_id),
+            "password_hash": "",
+            "role": "member",
+            "disabled": False,
+            "created_at": now_iso,
             "updated_at": now_iso,
-        },
-        on_conflict="id",
+        }
     ).execute()
 
 

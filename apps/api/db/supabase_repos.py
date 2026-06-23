@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import json
 import logging
 import os
@@ -634,6 +635,311 @@ def _resolve_workspace_id_for_write(
 class _BaseSupabaseRepository:
     def __init__(self, client: Client | None = None) -> None:
         self._client = client or get_supabase_service_client()
+
+
+def _session_hash(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def _looks_like_session_hash(value: str | None) -> bool:
+    if not value or len(value) != 64:
+        return False
+    return all(ch in "0123456789abcdef" for ch in value)
+
+
+def _normalize_user_row(row: Mapping[str, Any], *, include_password: bool = False) -> dict[str, Any]:
+    item = dict(row)
+    user_id = str(item.get("id") or "")
+    username = item.get("username") or item.get("email") or user_id
+    normalized: dict[str, Any] = {
+        "id": user_id,
+        "username": str(username),
+        "display_name": item.get("display_name"),
+        "role": item.get("role") or "member",
+        "disabled": bool(item.get("disabled")),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+    if include_password:
+        normalized["password_hash"] = item.get("password_hash") or ""
+    return normalized
+
+
+class SupabaseUserRepository(_BaseSupabaseRepository):
+    _PUBLIC_COLUMNS = "id,email,username,display_name,role,disabled,created_at,updated_at"
+    _PRIVATE_COLUMNS = (
+        "id,email,username,display_name,password_hash,role,disabled,created_at,updated_at"
+    )
+
+    def count(self) -> int:
+        response = self._client.table("users").select("id", count="exact").execute()
+        count = getattr(response, "count", None)
+        if count is not None:
+            return int(count or 0)
+        return len(_response_rows(response))
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        username: str,
+        display_name: str | None,
+        password_hash: str,
+        role: str,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        payload = {
+            "id": user_id,
+            "username": username,
+            "display_name": display_name,
+            "password_hash": password_hash,
+            "role": role,
+            "disabled": False,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if "@" in username:
+            payload["email"] = username
+        self._client.table("users").insert(payload).execute()
+        result = self.get(user_id=user_id)
+        if result is None:
+            raise RuntimeError(f"failed to create user {user_id}")
+        return result
+
+    def get(self, *, user_id: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("users")
+            .select(self._PUBLIC_COLUMNS)
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        return _normalize_user_row(row) if row else None
+
+    def get_by_username(self, *, username: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("users")
+            .select(self._PRIVATE_COLUMNS)
+            .eq("username", username)
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        if row is None:
+            response = (
+                self._client.table("users")
+                .select(self._PRIVATE_COLUMNS)
+                .eq("email", username)
+                .limit(1)
+                .execute()
+            )
+            row = _first_row(response)
+        return _normalize_user_row(row, include_password=True) if row else None
+
+    def list(self) -> list[dict[str, Any]]:
+        response = (
+            self._client.table("users")
+            .select(self._PUBLIC_COLUMNS)
+            .order("created_at")
+            .order("id")
+            .execute()
+        )
+        return [_normalize_user_row(row) for row in _response_rows(response)]
+
+    def update(self, *, user_id: str, **fields: Any) -> dict[str, Any] | None:
+        allowed = {"display_name", "password_hash", "role", "disabled"}
+        payload = {key: value for key, value in fields.items() if key in allowed}
+        if payload:
+            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._client.table("users").update(payload).eq("id", user_id).execute()
+        return self.get(user_id=user_id)
+
+    def delete(self, *, user_id: str) -> bool:
+        response = self._client.table("users").delete().eq("id", user_id).execute()
+        return bool(_response_rows(response))
+
+
+class SupabasePersonalAccessTokenRepository(_BaseSupabaseRepository):
+    _PUBLIC_COLUMNS = "id,user_id,name,last_used_at,created_at,expires_at"
+
+    def create(
+        self,
+        *,
+        token_id: str,
+        user_id: str,
+        name: str,
+        token_hash: str,
+        expires_at: str | None,
+    ) -> dict[str, Any]:
+        created_at = datetime.now(timezone.utc).isoformat()
+        self._client.table("personal_access_tokens").insert(
+            {
+                "id": token_id,
+                "user_id": user_id,
+                "name": name,
+                "token_hash": token_hash,
+                "last_used_at": None,
+                "created_at": created_at,
+                "expires_at": expires_at,
+            }
+        ).execute()
+        return self._get(token_id=token_id)
+
+    def _get(self, *, token_id: str) -> dict[str, Any]:
+        response = (
+            self._client.table("personal_access_tokens")
+            .select(self._PUBLIC_COLUMNS)
+            .eq("id", token_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        if row is None:
+            raise RuntimeError(f"PAT {token_id} not found after insert")
+        return row
+
+    def get_by_hash(self, *, token_hash: str) -> dict[str, Any] | None:
+        token_response = (
+            self._client.table("personal_access_tokens")
+            .select(self._PUBLIC_COLUMNS)
+            .eq("token_hash", token_hash)
+            .limit(1)
+            .execute()
+        )
+        token = _first_row(token_response)
+        if token is None:
+            return None
+        user_response = (
+            self._client.table("users")
+            .select("id,email,username,role,disabled")
+            .eq("id", token["user_id"])
+            .limit(1)
+            .execute()
+        )
+        user = _first_row(user_response)
+        if user is None:
+            return None
+        return {
+            **token,
+            "username": user.get("username") or user.get("email") or user.get("id"),
+            "role": user.get("role") or "member",
+            "disabled": bool(user.get("disabled")),
+        }
+
+    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+        response = (
+            self._client.table("personal_access_tokens")
+            .select(self._PUBLIC_COLUMNS)
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return _response_rows(response)
+
+    def delete(self, *, token_id: str, user_id: str) -> bool:
+        response = (
+            self._client.table("personal_access_tokens")
+            .delete()
+            .eq("id", token_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(_response_rows(response))
+
+    def touch_last_used(self, *, token_id: str, last_used_at: str) -> None:
+        self._client.table("personal_access_tokens").update(
+            {"last_used_at": last_used_at}
+        ).eq("id", token_id).execute()
+
+    def rotate(self, *, token_id: str, user_id: str, token_hash: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("personal_access_tokens")
+            .update({"token_hash": token_hash, "last_used_at": None})
+            .eq("id", token_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not _response_rows(response):
+            return None
+        return self._get(token_id=token_id)
+
+
+class SupabaseUserSessionRepository(_BaseSupabaseRepository):
+    def create(self, *, session_id: str, user_id: str, expires_at: str) -> dict[str, Any]:
+        created_at = datetime.now(timezone.utc).isoformat()
+        stored_session_id = _session_hash(session_id)
+        response = self._client.rpc(
+            "create_user_session_if_enabled",
+            {
+                "p_session_id": stored_session_id,
+                "p_user_id": user_id,
+                "p_expires_at": expires_at,
+                "p_created_at": created_at,
+            },
+        ).execute()
+        if not _response_rows(response):
+            raise ValueError("cannot create session: user is disabled or does not exist")
+        return {
+            "id": session_id,
+            "user_id": user_id,
+            "expires_at": expires_at,
+            "created_at": created_at,
+        }
+
+    def get(self, *, session_id: str) -> dict[str, Any] | None:
+        stored_session_id = session_id if _looks_like_session_hash(session_id) else _session_hash(session_id)
+        row = self._get_stored(session_id=stored_session_id)
+        if row is None and stored_session_id != session_id:
+            row = self._get_stored(session_id=session_id)
+            if row is not None:
+                self._client.table("user_sessions").update({"id": stored_session_id}).eq(
+                    "id",
+                    session_id,
+                ).execute()
+        return row
+
+    def _get_stored(self, *, session_id: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("user_sessions")
+            .select("id,user_id,expires_at,created_at")
+            .eq("id", session_id)
+            .limit(1)
+            .execute()
+        )
+        session = _first_row(response)
+        if session is None:
+            return None
+        user_response = (
+            self._client.table("users")
+            .select("id,email,username,role,disabled")
+            .eq("id", session["user_id"])
+            .limit(1)
+            .execute()
+        )
+        user = _first_row(user_response)
+        if user is None:
+            return None
+        return {
+            **session,
+            "username": user.get("username") or user.get("email") or user.get("id"),
+            "role": user.get("role") or "member",
+            "disabled": bool(user.get("disabled")),
+        }
+
+    def delete(self, *, session_id: str) -> bool:
+        stored_session_id = session_id if _looks_like_session_hash(session_id) else _session_hash(session_id)
+        response = (
+            self._client.table("user_sessions")
+            .delete()
+            .in_("id", [stored_session_id, session_id])
+            .execute()
+        )
+        return bool(_response_rows(response))
+
+    def prune_expired(self, *, now_iso: str) -> int:
+        response = self._client.table("user_sessions").delete().lt("expires_at", now_iso).execute()
+        return len(_response_rows(response))
 
 
 class SupabaseWorkerRepository(_BaseSupabaseRepository):

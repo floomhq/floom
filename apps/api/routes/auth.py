@@ -526,13 +526,34 @@ def _provider_flags() -> dict[str, bool | None]:
 
 def _upsert_user_row(user: Any) -> None:
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    new_supabase_service_client().table("users").upsert(
+    user_id = str(user.id)
+    client = new_supabase_service_client()
+    existing = (
+        client.table("users")
+        .select("id")
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if getattr(existing, "data", None):
+        client.table("users").update(
+            {
+                "email": getattr(user, "email", None),
+                "updated_at": now_iso,
+            }
+        ).eq("id", user_id).execute()
+        return
+    client.table("users").insert(
         {
-            "id": str(user.id),
+            "id": user_id,
             "email": getattr(user, "email", None),
+            "username": user_id,
+            "password_hash": "",
+            "role": "member",
+            "disabled": False,
+            "created_at": now_iso,
             "updated_at": now_iso,
-        },
-        on_conflict="id",
+        }
     ).execute()
 
 
