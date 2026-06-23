@@ -133,7 +133,7 @@ describe("page components render with data (no client crash)", () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
     render(<TestQueryProvider><WorkersCollection initialWorkers={[worker as never]} /></TestQueryProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
-    // R9: Setup is a PRIMARY tab (always visible) — no Advanced dropdown needed.
+    // R9: Setup is a PRIMARY tab (always visible) — no Developer dropdown needed.
     fireEvent.click(await screen.findByRole("tab", { name: "Setup" }));
     // Triggers sub-tab label is immediately visible on the Setup second-row tab bar.
     expect(screen.getAllByText("Triggers").length).toBeGreaterThan(0);
@@ -142,7 +142,7 @@ describe("page components render with data (no client crash)", () => {
     expect(await screen.findByText(/E2B sandbox/)).toBeInTheDocument();
     expect(screen.getByText(/Agent skill/)).toBeInTheDocument();
     // The raw model ID must never appear anywhere (model label display removed from
-    // WorkersCollection in R9 — Config dissolved into Setup/Advanced tabs).
+    // WorkersCollection in R9 — Config dissolved into Setup/Developer tabs).
     expect(screen.queryByText("bedrock/us.anthropic.claude-sonnet-4-6")).not.toBeInTheDocument();
   });
 
