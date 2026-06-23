@@ -2,6 +2,7 @@
 // worker IS a conversation with Emily. This route survives only as a redirect
 // so old links keep working; ?prompt= text carries into the composer.
 import { redirect } from "next/navigation";
+import { appPath } from "@/lib/app-path";
 
 export default async function NewWorkerRedirect({
   searchParams,
@@ -10,5 +11,5 @@ export default async function NewWorkerRedirect({
 }) {
   const { prompt } = await searchParams;
   const prime = typeof prompt === "string" && prompt ? `&prime=${encodeURIComponent(prompt)}` : "";
-  redirect(`/chat?mode=create${prime}`);
+  redirect(appPath(`/chat?mode=create${prime}`));
 }

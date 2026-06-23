@@ -88,6 +88,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
           <Link
             key={item.href}
             href={item.href}
+            prefetch={false}
             onClick={onNavigate}
             title={item.hint}
             className={cn(
@@ -122,6 +123,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
           Emily — full-page chat in create mode, not a form. */}
       <Link
         href="/chat?mode=create"
+        prefetch={false}
         onClick={() => onNavigate?.()}
         className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
       >
@@ -207,7 +209,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
     <>
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 md:hidden">
-        <Link href="/overview" className="flex items-center gap-2">
+        <Link href="/overview" prefetch={false} className="flex items-center gap-2">
           <FloomMark size={22} />
           <span className="font-semibold text-base tracking-tight">Floom</span>
         </Link>
@@ -263,6 +265,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                   workspace switcher loads. */}
               <Link
                 href="/overview"
+                prefetch={false}
                 aria-label="Floom home"
                 className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] hover:bg-[var(--active-nav-bg)] transition-colors"
               >
@@ -308,6 +311,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={false}
                   title={item.label}
                   className={cn(
                     "relative inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
@@ -329,6 +333,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             <div className="flex-1" />
             <Link
               href="/settings"
+              prefetch={false}
               title="Settings"
               className={cn(
                 "inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",

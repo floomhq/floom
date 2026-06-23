@@ -102,7 +102,7 @@ describe("#902 New worker → Emily full-screen", () => {
 
   it("/workers/new is a redirect, not a form; all create entry points use the chat flow", () => {
     const newPage = src("app/workers/new/page.tsx");
-    expect(newPage).toContain("redirect(`/chat?mode=create");
+    expect(newPage).toContain("redirect(appPath(`/chat?mode=create");
     expect(newPage).not.toContain("worker-author");
     expect(src("app/workers/WorkersCollection.tsx")).toContain('router.push("/chat?mode=create")');
     expect(src("components/CommandPalette.tsx")).toContain('go("/chat?mode=create")');

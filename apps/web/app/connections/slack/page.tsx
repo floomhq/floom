@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { appPath } from "@/lib/app-path";
 
 // Slack is NOT a worker connection — it is the human interface for Floom
 // Worker OS (DM the assistant, @mention it, handle approvals in Slack).
@@ -18,5 +19,5 @@ export default async function LegacySlackConnectionsRedirect({
     else if (Array.isArray(value) && value[0]) qs.set(key, value[0]);
   }
   const query = qs.toString();
-  redirect(`/settings${query ? `?${query}` : ""}#slack`);
+  redirect(appPath(`/settings${query ? `?${query}` : ""}#slack`));
 }

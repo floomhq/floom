@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { appPath } from "@/lib/app-path";
 
 // P2-9 (audit 2026-05-29): Secrets moved under the /connections namespace so
 // all four Connections tabs (Connected / Browse / MCP / Secrets) share a
@@ -17,5 +18,5 @@ export default async function LegacySecretsRedirect({
     else if (Array.isArray(value) && value[0]) qs.set(key, value[0]);
   }
   const query = qs.toString();
-  redirect(`/connections/secrets${query ? `?${query}` : ""}`);
+  redirect(appPath(`/connections/secrets${query ? `?${query}` : ""}`));
 }

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { appPath } from "@/lib/app-path";
 
 export default async function WorkerDetailRedirectPage({
   params,
@@ -6,5 +7,5 @@ export default async function WorkerDetailRedirectPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  redirect(`/workers?sel=${encodeURIComponent(id)}`);
+  redirect(appPath(`/workers?sel=${encodeURIComponent(id)}`));
 }

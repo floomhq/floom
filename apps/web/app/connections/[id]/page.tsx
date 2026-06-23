@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { appPath } from "@/lib/app-path";
 
 // Full-page connection detail is intentionally gone. The split-pane detail in
 // `ConnectionsCollection` owns activity (`RunSummary`, `RunStatusBadge`) and
@@ -12,5 +13,5 @@ export default async function ConnectionDetailRedirect({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  redirect(`/connections?sel=${encodeURIComponent(id)}`);
+  redirect(appPath(`/connections?sel=${encodeURIComponent(id)}`));
 }

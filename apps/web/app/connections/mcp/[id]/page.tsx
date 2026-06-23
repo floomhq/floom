@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { appPath } from "@/lib/app-path";
 
 // Full-page MCP detail is intentionally gone. The split-pane detail in
 // `ConnectionsCollection` owns `api.connections.list`, `Test connection`,
@@ -10,5 +11,5 @@ export default async function McpConnectionDetailRedirect({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  redirect(`/connections?sel=${encodeURIComponent(id)}`);
+  redirect(appPath(`/connections?sel=${encodeURIComponent(id)}`));
 }
