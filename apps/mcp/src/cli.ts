@@ -372,12 +372,14 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
   mcp.command("add")
     .description("Add workeros/floom to an MCP client config")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
-    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
+    .option("--show-token", "Print live credentials in generic output")
+    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic"; showToken?: boolean }) =>
       runAction(mcpInstallCommand(options)));
   mcp.command("install")
     .description("Install MCP config for a client")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
-    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
+    .option("--show-token", "Print live credentials in generic output")
+    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic"; showToken?: boolean }) =>
       runAction(mcpInstallCommand(options)));
   mcp.command("uninstall")
     .description("Remove MCP config for a client")
