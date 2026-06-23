@@ -24,6 +24,7 @@ Run:
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import sys
@@ -352,6 +353,113 @@ def test_mcp_serve_default_tool_results_redact_secret_shaped_output(monkeypatch,
     assert "sk-live-secret-value" not in text
     assert "api_key" in text
     assert "[redacted]" in text
+
+
+def test_mcp_proxy_empty_success_response_is_not_internal_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_MCP_ENABLE_DESTRUCTIVE", "1")
+    main = _load_api(monkeypatch, tmp_path)
+
+    async def _fake_api_call(method, path, request, **kwargs):
+        assert method == "DELETE"
+        assert path == "/workers/w-1"
+        return {}, 204
+
+    monkeypatch.setattr(main, "_api_call", _fake_api_call)
+    from auth.context import AuthContext
+
+    repos = types.SimpleNamespace(
+        mcp_tools=types.SimpleNamespace(
+            list=lambda *, user_id: [],
+            get_by_name=lambda *, user_id, name: None,
+        )
+    )
+    auth = AuthContext(user_id="admin-1", role="admin", auth_method="secret", scopes=("admin",))
+    result = asyncio.run(
+        main._mcp_dispatch(
+            "workers.delete",
+            {"id": "w-1"},
+            auth,
+            repos,
+            Request({"type": "http", "method": "POST", "path": "/mcp-tools/serve", "query_string": b"", "headers": []}),
+        )
+    )
+    assert result["isError"] is False
+    assert result["structuredContent"] == {}
+    assert "Internal server error" not in result["content"][0]["text"]
+
+
+def test_mcp_proxy_text_success_response_is_structured_content(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+
+    async def _fake_api_call(method, path, request, **kwargs):
+        assert method == "GET"
+        assert path == "/workspace"
+        return {"content": "# Workspace\n\nUse Floom."}, 200
+
+    monkeypatch.setattr(main, "_api_call", _fake_api_call)
+    payload = _rpc("tools/call", params={"name": "workspace.instructions.get", "arguments": {}})
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["result"]
+    assert result["isError"] is False
+    assert result["structuredContent"]["content"].startswith("# Workspace")
+    assert "Internal server error" not in result["content"][0]["text"]
+
+
+def test_mcp_proxy_contexts_read_text_response_is_structured_content(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+
+    async def _fake_api_call(method, path, request, **kwargs):
+        assert method == "GET"
+        assert path == "/contexts/crm/files/facts.md"
+        return {"content": "hello\n"}, 200
+
+    monkeypatch.setattr(main, "_api_call", _fake_api_call)
+    payload = _rpc("tools/call", params={
+        "name": "contexts.read",
+        "arguments": {"name": "crm", "path": "facts.md"},
+    })
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["result"]
+    assert result["isError"] is False
+    assert result["structuredContent"]["content"] == "hello\n"
+    assert "Internal server error" not in result["content"][0]["text"]
+
+
+def test_mcp_internal_proxy_parser_handles_text_empty_and_binary_success(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+
+    class _Response:
+        def __init__(self, *, status_code, content, text="", headers=None):
+            self.status_code = status_code
+            self.content = content
+            self.text = text
+            self.headers = headers or {}
+
+        def json(self):
+            raise ValueError("not json")
+
+    assert main._api_call_response_data(_Response(status_code=204, content=b"")) == {}
+    assert main._api_call_response_data(
+        _Response(
+            status_code=200,
+            content=b"hello",
+            text="hello",
+            headers={"content-type": "text/plain; charset=utf-8"},
+        )
+    ) == {"content": "hello"}
+    assert main._api_call_response_data(
+        _Response(
+            status_code=200,
+            content=b"\x00\x01",
+            headers={"content-type": "application/octet-stream"},
+        )
+    ) == {"content_type": "application/octet-stream", "size_bytes": 2, "binary": True}
 
 
 def test_m08_remote_mcp_validation_error_is_invalid_params(monkeypatch, tmp_path):

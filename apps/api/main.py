@@ -5987,7 +5987,18 @@ def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]
 
 
 def _mcp_api_result(data: Any, status_code: int) -> Dict[str, Any]:
-    return _mcp_content(_mcp_text(data), status_code >= 400)
+    if status_code >= 400:
+        return {
+            "content": [{"type": "text", "text": _mcp_text(data)}],
+            "structuredContent": _mcp_redact(
+                {
+                    "status": status_code,
+                    "detail": jsonable_encoder(data),
+                }
+            ),
+            "isError": True,
+        }
+    return _mcp_call_result(data)
 
 
 def _mcp_max_batch_items() -> int:
@@ -7081,12 +7092,29 @@ def _api_call_response_data(resp: Any) -> Any:
     — leaking server internals to external MCP clients. The raw body is now
     logged server-side and the client gets a generic message.
     """
+    status_code = int(getattr(resp, "status_code", 0) or 0)
+    raw = getattr(resp, "content", b"")
+    if raw in (b"", "", None) or status_code == 204:
+        return {}
     try:
         return resp.json()
     except Exception:
+        content_type = str(getattr(resp, "headers", {}).get("content-type", "")).lower()
+        if status_code < 400 and (
+            content_type.startswith("text/")
+            or "markdown" in content_type
+            or "charset=" in content_type
+        ):
+            return {"content": getattr(resp, "text", "")}
+        if status_code < 400:
+            return {
+                "content_type": content_type or "application/octet-stream",
+                "size_bytes": len(raw) if isinstance(raw, (bytes, bytearray)) else len(str(raw)),
+                "binary": True,
+            }
         logger.warning(
             "MCP proxy: non-JSON internal response (status %s): %.300s",
-            getattr(resp, "status_code", "?"),
+            status_code,
             getattr(resp, "text", ""),
         )
         return {"detail": "Internal server error"}
