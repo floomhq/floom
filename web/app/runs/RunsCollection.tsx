@@ -498,6 +498,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     let all: RunSummary[] = [];
     let before_created_at: string | undefined;
     let before_id: string | undefined;
+    let partial = false;
     try {
       for (;;) {
         const page = await api.runs.list({ limit: PAGE, before_created_at, before_id });
@@ -508,18 +509,28 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         before_id = last.id;
         if (!before_created_at || !before_id) break;
       }
-    } catch {
+    } catch (err) {
+      logError("Could not export the complete run history.", err);
       all = runs;
+      partial = true;
+    }
+    if (all.length === 0) {
+      toast.error(partial ? "Full export failed and no loaded runs were available." : "No runs to export.");
+      return;
     }
     const csv = Papa.unparse(runsToCsvRows(all));
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `workeros-runs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `workeros-runs-${partial ? "loaded-page-" : ""}${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${all.length} runs`);
+    if (partial) {
+      toast.error(`Full export failed. Downloaded ${all.length} loaded runs only.`);
+    } else {
+      toast.success(`Exported ${all.length} runs`);
+    }
   };
 
   // #796: bulk-export the loaded runs as one ZIP (result + artifacts per run).

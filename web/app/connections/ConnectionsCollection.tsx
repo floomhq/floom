@@ -646,22 +646,24 @@ export default function ConnectionsCollection({
   const secrets = secretsQuery.data ?? [];
   const workers = workersQuery.data ?? [];
   const members = membersQuery.data ?? [];
-  const hasCachedData = connections.length > 0 || secrets.length > 0 || workers.length > 0 || members.length > 0;
+  const hasPrimaryData = connections.length > 0;
   const firstLoadPending =
-    (connectionsQuery.isLoading && !connectionsQuery.data) ||
-    (secretsQuery.isLoading && !secretsQuery.data) ||
-    (workersQuery.isLoading && !workersQuery.data) ||
-    (membersQuery.isLoading && !membersQuery.data);
+    connectionsQuery.isLoading && !connectionsQuery.data && initialConnections.length === 0;
   // #1269/#1279: keep the hung-API safety timeout, now applied to the query
   // first-load state. Cached revisits bypass it and render immediately.
   const [timedOut, setTimedOut] = useState(false);
   const loading = firstLoadPending && !timedOut;
   const error =
-    timedOut && !hasCachedData
+    timedOut && !hasPrimaryData
       ? "Could not load connections. Check your connection and try again."
-      : connectionsQuery.isError && !connectionsQuery.data
+      : connectionsQuery.isError
         ? "Could not load connections. Check your connection and try again."
         : null;
+  const secondaryFailures = [
+    secretsQuery.isError ? "secrets" : null,
+    workersQuery.isError ? "workers" : null,
+    membersQuery.isError ? "members" : null,
+  ].filter(Boolean) as string[];
   // Pinned advanced connection tabs (per-session): the "Advanced ▾" group on the
   // tab row pins/opens secondary tabs (Recent emails, Config). Mirrors the
   // worker-detail Advanced group but session-scoped (no cross-worker preference
@@ -764,6 +766,18 @@ export default function ConnectionsCollection({
       headers: ["Connects to", "Type", "Detail", "Status", ""],
       headerTransparent: true,
     },
+    toolbarActions: secondaryFailures.length ? (
+      <span
+        role="alert"
+        className="c-vpill"
+        style={{ color: "var(--warning)", borderColor: "var(--warning)", gap: 8 }}
+      >
+        {`Metadata unavailable: ${secondaryFailures.join(", ")}`}
+        <button type="button" className="c-vpill" style={{ padding: "3px 8px" }} onClick={() => void refresh()}>
+          Retry
+        </button>
+      </span>
+    ) : null,
     row: (i) => ({
       leading: <Logo item={i} />,
       primary: i.name,
@@ -1020,7 +1034,7 @@ export default function ConnectionsCollection({
                     "Used by",
                     usedByCount > 0 ? (
                       <Link
-                        href={`?tab=Used+by`}
+                        href={`?sel=${encodeURIComponent(i.id)}&tab=Used+by`}
                         style={{
                           color: "var(--accent)",
                           textDecoration: "underline",

@@ -106,10 +106,11 @@ export function useApprovalsCountQuery(initialData?: { pending: number }) {
 export function useMembers(initialData?: WorkspaceMember[]) {
   return useQuery({
     queryKey: qk.members,
-    queryFn: () =>
-      (api.members?.list?.() ?? Promise.resolve({ members: [] as WorkspaceMember[] }))
-        .then((r) => r.members)
-        .catch(() => [] as WorkspaceMember[]),
+    queryFn: async () => {
+      if (!api.members?.list) return [] as WorkspaceMember[];
+      const response = await api.members.list();
+      return response.members;
+    },
     initialData,
     placeholderData: keepPreviousData,
   });

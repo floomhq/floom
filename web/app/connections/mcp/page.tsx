@@ -259,6 +259,7 @@ function truncateUrl(url: string, max = 48): string {
 export default function McpConnectionsPage() {
   const [connections, setConnections] = useState<McpConnection[]>([]);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
+  const [secretsError, setSecretsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // Distinguish a FAILED load from an empty one: a 500/network error renders an
   // explicit retry state, never a perpetual skeleton or a misleading empty card.
@@ -310,10 +311,19 @@ export default function McpConnectionsPage() {
     }
   }, []);
 
+  const loadSecrets = useCallback(async () => {
+    setSecretsError(null);
+    try {
+      setSecrets(await api.secrets.list());
+    } catch {
+      setSecretsError("Could not load access keys. Retry before choosing or saving a secret-backed MCP server.");
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-    api.secrets.list().then(setSecrets).catch(() => setSecrets([]));
-  }, [load]);
+    void loadSecrets();
+  }, [load, loadSecrets]);
 
   function resetForm() {
     setLabel(""); setTransport("streamable_http"); setUrl(""); setCommand("");
@@ -337,6 +347,10 @@ export default function McpConnectionsPage() {
     const { payload, error } = serverJsonValidation;
     if (error || !payload) {
       toast.error(error || "MCP config is invalid");
+      return;
+    }
+    if (payload.auth_secret && secretsError) {
+      toast.error("Access keys did not load. Retry access keys before saving this MCP server.");
       return;
     }
     setSaving(true);
@@ -385,6 +399,10 @@ export default function McpConnectionsPage() {
     });
     if (validation.error || !validation.payload) {
       toast.error(validation.error || "MCP config is invalid");
+      return;
+    }
+    if (validation.payload.auth_secret && secretsError) {
+      toast.error("Access keys did not load. Retry access keys before saving this MCP server.");
       return;
     }
     setSaving(true);
@@ -660,7 +678,7 @@ export default function McpConnectionsPage() {
                   type="button"
                   size="sm"
                   onClick={handleCreateFromJson}
-                  disabled={saving || Boolean(serverJsonValidation.error)}
+                  disabled={saving || Boolean(serverJsonValidation.error) || Boolean(serverJsonValidation.payload?.auth_secret && secretsError)}
                 >
                   {saving ? <><Loader2 className="size-3.5 animate-spin" /> Saving...</> : "Save MCP server"}
                 </Button>
@@ -701,6 +719,7 @@ export default function McpConnectionsPage() {
                     id="mcp-auth-secret"
                     value={authSecret}
                     onChange={(e) => setAuthSecret(e.target.value)}
+                    disabled={Boolean(secretsError)}
                     className="flex h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-3 text-sm outline-none"
                   >
                     <option value="">No access key</option>
@@ -708,6 +727,15 @@ export default function McpConnectionsPage() {
                       <option key={s.name} value={s.name}>{s.name}</option>
                     ))}
                   </select>
+                  {secretsError && (
+                    <div role="alert" className="flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] p-2 text-xs text-[var(--warning)]">
+                      <AlertCircle className="size-3.5 shrink-0" />
+                      <span className="min-w-0 flex-1">{secretsError}</span>
+                      <button type="button" className="underline underline-offset-2" onClick={() => void loadSecrets()}>
+                        Retry
+                      </button>
+                    </div>
+                  )}
                 </div>
                 )}
                 {transport !== "stdio" ? (
