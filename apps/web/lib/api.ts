@@ -267,6 +267,8 @@ export const api = {
       return fetchJson<import("./types").WorkerSummary[]>(`/workers?${qs.toString()}`);
     },
     get: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}`),
+    duplicate: (id: string) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: async (id: string) => {
@@ -522,6 +524,26 @@ export const api = {
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
       }),
+    feedback: {
+      list: (id: string) =>
+        fetchJson<import("./types").RunFeedback[]>(`/runs/${encodeURIComponent(id)}/feedback`),
+      create: (id: string, content: string, rating?: string | null) =>
+        fetchJson<import("./types").RunFeedback>(`/runs/${encodeURIComponent(id)}/feedback`, {
+          method: "POST",
+          body: JSON.stringify({ content, rating: rating ?? null }),
+        }),
+    },
+    // #1807: explicitly convert one actionable run feedback item into a
+    // git-backed workspace issue bound to the run. Opt-in only — normal
+    // feedback never hits this path.
+    createFeedbackIssue: (
+      id: string,
+      payload: import("./types").RunFeedbackIssueRequest,
+    ) =>
+      fetchJson<import("./types").RunFeedbackIssueResponse>(
+        `/runs/${encodeURIComponent(id)}/feedback/issue`,
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
     approve: async (
       id: string,
       editedOutput?: Record<string, unknown>,
@@ -817,6 +839,12 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
         { method: "DELETE" }
       ),
+    // #1813: rename a folder/brain pack (auto-named folders -> a chosen name).
+    rename: (name: string, newName: string) =>
+      fetchJson<import("./types").ContextDetail>(
+        `/contexts/${encodeURIComponent(name)}/rename`,
+        { method: "POST", body: JSON.stringify({ new_name: newName }) }
+      ),
     saveTextFile: async (name: string, path: string, content: string, tags?: string[]) => {
       const file = await fetchJson<import("./types").ContextFileItem>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
@@ -942,6 +970,8 @@ export const api = {
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),
+    emailChannel: () =>
+      fetchJson<{ connected: boolean; email?: string | null }>("/channels/email"),
     // Members STEP 5: assistant Private <-> Shared with workspace.
     setAssistantVisibility: (visibility: import("./types").AssetVisibility) =>
       fetchJson<import("./types").WorkspaceAgentInfo>(

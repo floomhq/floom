@@ -133,7 +133,7 @@ describe("page components render with data (no client crash)", () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
     render(<TestQueryProvider><WorkersCollection initialWorkers={[worker as never]} /></TestQueryProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
-    // R9: Setup is a PRIMARY tab (always visible) — no Advanced dropdown needed.
+    // R9: Setup is a PRIMARY tab (always visible) — no Developer dropdown needed.
     fireEvent.click(await screen.findByRole("tab", { name: "Setup" }));
     // Triggers sub-tab label is immediately visible on the Setup second-row tab bar.
     expect(screen.getAllByText("Triggers").length).toBeGreaterThan(0);
@@ -142,7 +142,7 @@ describe("page components render with data (no client crash)", () => {
     expect(await screen.findByText(/E2B sandbox/)).toBeInTheDocument();
     expect(screen.getByText(/Agent skill/)).toBeInTheDocument();
     // The raw model ID must never appear anywhere (model label display removed from
-    // WorkersCollection in R9 — Config dissolved into Setup/Advanced tabs).
+    // WorkersCollection in R9 — Config dissolved into Setup/Developer tabs).
     expect(screen.queryByText("bedrock/us.anthropic.claude-sonnet-4-6")).not.toBeInTheDocument();
   });
 
@@ -177,10 +177,10 @@ describe("page components render with data (no client crash)", () => {
   it("BrainCollection renders the folder", async () => {
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
     render(<TestQueryProvider><BrainCollection initialFolders={[folder as never]} /></TestQueryProvider>);
-    expect(await screen.findByRole("button", { name: /Company facts 3 files/i })).toBeInTheDocument();
-    // #1257: folder name is now wrapped in <span title={c.name}> for truncation
-    // accessibility; getAllByText returns the leaf span only (not both span + parent div).
-    expect(screen.getAllByText("Company facts")).toHaveLength(1);
+    // List view is the default; the folder name appears as the row primary text.
+    expect(await screen.findByText("Company facts")).toBeInTheDocument();
+    // "3 files" appears as a column cell in list view.
+    expect(screen.getByText("3 files")).toBeInTheDocument();
     // BrainVisual (which rendered "Contexts") was removed; collection title is now "Library".
     expect(screen.getByText("Library")).toBeInTheDocument();
   });

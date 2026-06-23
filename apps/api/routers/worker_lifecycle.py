@@ -16,22 +16,64 @@ from pydantic import BaseModel
 
 from auth import AuthContext, get_auth_context
 from db import Repositories, get_repos
-from models import WorkerDetail
+from models import DraftFile, WorkerConfig, WorkerDetail
 from services.worker_access import (
     _canonical_worker_id,
     _db_worker_owners,
     _delete_worker_impl,
     _get_visible_worker,
+    _slugify_worker_id,
     _worker_for_mutation,
 )
 from services.worker_mutation import (
     _mutate_worker_contexts,
     _require_worker_write_workspace_context,
     _set_worker_enabled,
+    _set_worker_yml_is_example,
     _toggle_worker_star,
 )
+from services.worker_registry_ops import (
+    _free_worker_id,
+    _register_worker_from_files,
+    _rewrite_worker_yml_id,
+)
+from services.worker_serialize import (
+    _build_worker_detail,
+    _read_worker_files,
+    _worker_bundle_dir,
+    _worker_files_from_manifest,
+)
+from services.product_events import emit_worker_lifecycle_event
+from worker_registry import invalidate_worker_cache
 
 worker_lifecycle_router = APIRouter()
+
+
+def _source_files_for_clone(worker_id: str, worker: Dict[str, Any]) -> Dict[str, str]:
+    files: Dict[str, str] = {}
+    try:
+        config = WorkerConfig(**(worker.get("config") or {}))
+        bundle_dir = _worker_bundle_dir(worker_id, config)
+        for item in _read_worker_files(bundle_dir):
+            if not item.binary and item.content is not None:
+                files[item.path] = item.content
+    except Exception:
+        files = {}
+
+    if not files:
+        manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+        embedded = manifest.get("_files") if isinstance(manifest, dict) else None
+        if isinstance(embedded, dict):
+            for path, content in embedded.items():
+                if isinstance(path, str) and isinstance(content, str):
+                    files[path] = content
+
+    if not files:
+        for item in _worker_files_from_manifest(worker):
+            if not item.binary and item.content is not None:
+                files[item.path] = item.content
+
+    return files
 
 @worker_lifecycle_router.post("/workers/{worker_id}/star")
 def toggle_worker_star(
@@ -45,6 +87,67 @@ def toggle_worker_star(
     if _worker_for_mutation(worker_id, auth, repos) is None:
         raise HTTPException(status_code=404, detail="Worker not found")
     return {"starred": _toggle_worker_star(auth.user_id, worker_id)}
+
+
+@worker_lifecycle_router.post("/workers/{worker_id}/clone", response_model=WorkerDetail)
+@worker_lifecycle_router.post("/workers/{worker_id}/duplicate", response_model=WorkerDetail)
+@worker_lifecycle_router.post("/workers/{worker_id}/copy", response_model=WorkerDetail)
+def clone_worker(
+    worker_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    files = _source_files_for_clone(worker_id, worker)
+    worker_yml = files.get("worker.yml")
+    if not worker_yml:
+        raise HTTPException(status_code=409, detail="Worker source bundle is not available to clone")
+
+    new_id = _free_worker_id(f"{_slugify_worker_id(worker_id)}-copy", repos=repos)
+    files["worker.yml"] = _set_worker_yml_is_example(
+        _rewrite_worker_yml_id(worker_yml, new_id),
+        False,
+    )
+    created_id = _register_worker_from_files(
+        [DraftFile(path=path, content=content) for path, content in files.items()],
+        user_id=auth.user_id,
+        repos=repos,
+        dedupe_id=True,
+    )
+    return _build_worker_detail(created_id, user_id=auth.user_id, repos=repos)
+
+
+@worker_lifecycle_router.post("/workers/{worker_id}/reload")
+@worker_lifecycle_router.post("/workers/{worker_id}/restart")
+@worker_lifecycle_router.post("/workers/{worker_id}/redeploy")
+@worker_lifecycle_router.post("/workers/{worker_id}/materialize")
+@worker_lifecycle_router.post("/workers/{worker_id}/refresh")
+def reload_worker(
+    worker_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
+    if _worker_for_mutation(worker_id, auth, repos) is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    from services.worker_materialization import rematerialize_worker_from_db
+
+    rematerialized = rematerialize_worker_from_db(worker_id)
+    invalidate_worker_cache()
+    return {
+        "status": "success",
+        "worker_id": worker_id,
+        "rematerialized": bool(rematerialized),
+    }
 
 
 class _WorkerContextAttachRequest(BaseModel):
@@ -137,7 +240,14 @@ def pause_worker(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     """#788: pause a worker (enabled=false) so it stops running on schedule."""
-    return _set_worker_enabled(worker_id, enabled=False, auth=auth, repos=repos, request=request)
+    detail = _set_worker_enabled(worker_id, enabled=False, auth=auth, repos=repos, request=request)
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=_canonical_worker_id(worker_id),
+        event="worker_updated",
+        source="pause",
+    )
+    return detail
 
 
 @worker_lifecycle_router.post("/workers/{worker_id}/resume", response_model=WorkerDetail)
@@ -148,7 +258,14 @@ def resume_worker(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     """#788: resume a paused worker (enabled=true) and re-enqueue its schedule."""
-    return _set_worker_enabled(worker_id, enabled=True, auth=auth, repos=repos, request=request)
+    detail = _set_worker_enabled(worker_id, enabled=True, auth=auth, repos=repos, request=request)
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=_canonical_worker_id(worker_id),
+        event="worker_updated",
+        source="resume",
+    )
+    return detail
 
 
 # ---------------------------------------------------------------------------
@@ -199,5 +316,11 @@ def delete_worker(
         if canonical_id in _db_worker_owners():
             raise HTTPException(status_code=404, detail="Worker not found")
     _delete_worker_impl(worker_id, auth.user_id, repos)
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=canonical_id,
+        event="worker_deleted",
+        source="api",
+    )
     # 204 No Content — FastAPI returns empty body automatically for status_code=204
     return None

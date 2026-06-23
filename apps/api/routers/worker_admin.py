@@ -57,6 +57,7 @@ from services.worker_mutation import (
 )
 from services.worker_registry_ops import _git_commit_worker
 from services.worker_serialize import _build_worker_detail, _iter_worker_dir_files
+from services.product_events import emit_worker_lifecycle_event
 
 logger = logging.getLogger("floom.api")
 
@@ -313,6 +314,12 @@ def set_worker_visibility(
         author_name=author_name,
         author_email=author_email,
     )
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=worker_id,
+        event="worker_updated",
+        source="visibility",
+    )
 
     # Donation model: after share-transfer the caller is no longer the owner,
     # but they can still VIEW the now-workspace-shared worker — fetch the
@@ -377,6 +384,12 @@ def restore_worker(
     mutation_user_id = str(worker.get("owner_id") or auth.user_id) if auth.is_admin else auth.user_id
     _set_db_manifest_archived(worker_id, archived=False, user_id=mutation_user_id, repos=repos)
     invalidate_worker_cache()
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=worker_id,
+        event="worker_updated",
+        source="restore",
+    )
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
@@ -436,6 +449,12 @@ def archive_worker(
     mutation_user_id = str(worker.get("owner_id") or auth.user_id) if auth.is_admin else auth.user_id
     _set_db_manifest_archived(worker_id, archived=True, user_id=mutation_user_id, repos=repos)
     invalidate_worker_cache()
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=worker_id,
+        event="worker_archived",
+        source="api",
+    )
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
@@ -495,6 +514,12 @@ def set_worker_stage(
     mutation_user_id = str(worker.get("owner_id") or auth.user_id) if auth.is_admin else auth.user_id
     _set_db_manifest_stage(worker_id, stage=stage, user_id=mutation_user_id, repos=repos)
     invalidate_worker_cache()
+    emit_worker_lifecycle_event(
+        owner_id=auth.user_id,
+        worker_id=worker_id,
+        event="worker_updated",
+        source="stage",
+    )
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 

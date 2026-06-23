@@ -39,6 +39,8 @@ the generated OpenAPI docs.
 | `/runs/{id}` | GET | Run detail, logs, tool calls, approvals, and outputs |
 | `/runs/{id}/approve` | POST | Approve a pending run |
 | `/runs/{id}/reject` | POST | Reject a pending run |
+| `/runs/{id}/feedback` | GET/POST | List or leave lightweight run feedback. Feedback remains a quality signal until explicitly promoted. |
+| `/runs/{id}/feedback/issue` | POST | Convert actionable run feedback into a workspace issue bound to the run (`asset_type=run`, `source=run_feedback`, label `run-feedback`). Opt-in; a stable `feedback_id` dedups (returns the existing issue with `created=false`, `200`). |
 | `/approvals` | GET | List pending approvals |
 
 ### Connections and secrets
@@ -50,6 +52,26 @@ the generated OpenAPI docs.
 | `/connections/{id}/activity` | GET | Recent runs that used this connection |
 | `/connections/{id}/peek` | GET | Privacy-conscious preview for supported connections |
 | `/connections/secrets` | GET | List secret metadata |
+
+### Workspace issues
+
+Git-backed operating record stored under `.floom/issues/` in the workspace git repo
+(no GitHub Issues, no provider sync, no database table). See
+[git-workspace.md](git-workspace.md).
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/workspace/issues` | GET | List issues; filter by `status`, `label`, `asset_type`, `asset_id` |
+| `/workspace/issues/{id}` | GET | Issue detail with comments |
+| `/workspace/issues` | POST | Create an issue (optionally bound to a worker/context/run) |
+| `/workspace/issues/{id}` | PATCH | Update title/body/status/labels/asset binding |
+| `/workspace/issues/{id}/comments` | POST | Append a comment |
+
+Issues ride the workspace git source of truth, so a git remote clone/push and the
+cloud bundle flow preserve them automatically. The curated `/workspace/export` +
+`/workspace/import` template bundle preserves them explicitly: issue files are
+written under `issues/` in the zip and restored into `.floom/issues/` on import
+(existing ids are never clobbered).
 
 ### Auth and system
 

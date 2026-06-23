@@ -316,6 +316,25 @@ async function startMockApi() {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/runs/run_sse_timeout/events") {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      });
+      response.write(`data: ${JSON.stringify({ type: "status", run_id: "run_sse_timeout", status: "running" })}\n\n`);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/runs/run_sse_timeout") {
+      json(response, 200, {
+        id: "run_sse_timeout",
+        worker_id: "mcp-test-worker",
+        status: "completed",
+        output: { result: "finished while SSE was stale" },
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/runs/missing/events") {
       json(response, 404, { detail: "Run not found" });
       return;
@@ -633,6 +652,37 @@ test("runs.watch returns on terminal status even without a close event", async (
   });
 });
 
+test("runs.watch does a final run status check before timing out", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_sse_timeout", timeout_ms: 1000 } });
+    assert.equal(watched.structuredContent.status, "completed");
+    assert.equal(watched.structuredContent.run.output.result, "finished while SSE was stale");
+    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.status), ["running"]);
+  });
+
+  const seen = mock.seen.filter((entry) => entry.includes("run_sse_timeout"));
+  assert.equal(seen[0], "GET /runs/run_sse_timeout/events");
+  assert.ok(seen.includes("GET /runs/run_sse_timeout"));
+});
+
+test("runs.watch polls run detail while SSE remains open and stale", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_sse_timeout", timeout_ms: 5000 } });
+    assert.equal(watched.structuredContent.status, "completed");
+    assert.equal(watched.structuredContent.run.output.result, "finished while SSE was stale");
+  });
+
+  const seen = mock.seen.filter((entry) => entry.includes("run_sse_timeout"));
+  assert.equal(seen[0], "GET /runs/run_sse_timeout/events");
+  assert.ok(seen.includes("GET /runs/run_sse_timeout"));
+});
+
 test("workeros CLI without a subcommand serves MCP over stdio", async (t) => {
   const mock = await startMockApi();
   t.after(() => mock.server.close());
@@ -783,6 +833,37 @@ test("mcp add patches agent config", async () => {
     assert.equal(config.mcpServers.floom.headers["x-floom-secret"], "test-secret");
     assert.equal(config.mcpServers.floom.command, undefined);
     assert.equal(config.mcpServers.floom.args, undefined);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("mcp install generic redacts credentials by default", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-generic-home-"));
+  try {
+    const result = await runCli(["mcp", "install", "--target", "generic"], {
+      HOME: home,
+      WORKEROS_API_SECRET: "test-secret",
+    });
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /"x-floom-secret": "<x-floom-secret>"/);
+    assert.doesNotMatch(result.stdout, /test-secret/);
+    assert.match(result.stdout, /Credentials are redacted by default/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("mcp install generic requires explicit show-token for live credentials", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-generic-show-home-"));
+  try {
+    const result = await runCli(["mcp", "install", "--target", "generic", "--show-token"], {
+      HOME: home,
+      WORKEROS_API_SECRET: "test-secret",
+    });
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /"x-floom-secret": "test-secret"/);
+    assert.match(result.stderr, /Printing a live credential/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

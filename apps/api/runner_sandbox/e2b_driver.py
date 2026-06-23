@@ -1115,6 +1115,28 @@ def _read_result_json(
             error_code="invalid_result_json",
         )
 
+    if "outputs" not in result_data:
+        legacy_outputs = {
+            key: value
+            for key, value in result_data.items()
+            if key
+            not in {
+                "status",
+                "artifacts",
+                "error",
+                "error_code",
+                "decision_required",
+                "await_external",
+            }
+        }
+        if legacy_outputs:
+            log_fn(
+                "[e2b] result.json has no 'outputs' object; treating top-level "
+                "fields as outputs for compatibility",
+                "warning",
+            )
+            result_data = {**result_data, "outputs": legacy_outputs}
+
     # 5. `outputs` must be a dict. A worker returning a list/string/number was
     #    previously coerced to {} and silently completed green (audit P1).
     outputs = result_data.get("outputs", {})
@@ -2410,6 +2432,9 @@ class E2BSandboxDriver(SandboxDriver):
             decision_required = result_data.get("decision_required")
             if not isinstance(decision_required, dict):
                 decision_required = None
+            await_external = result_data.get("await_external")
+            if not isinstance(await_external, dict):
+                await_external = None
             return WorkerResult(
                 status=result_status,
                 outputs=outputs,
@@ -2417,6 +2442,7 @@ class E2BSandboxDriver(SandboxDriver):
                 error=result_error,
                 error_code=result_error_code,
                 decision_required=decision_required,
+                await_external=await_external,
             )
 
         finally:

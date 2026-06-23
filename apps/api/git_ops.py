@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # is unset. If the server is run from inside a clone of the Floom source repo
 # (the common dev case), that fallback IS the source checkout — so every worker/
 # context/workspace edit would auto-commit into the engine's own repo, and
-# push_background would push it to that repo's origin (e.g. floomhq/workeros).
+# push_background would push it to that repo's origin (e.g. floomhq/floom).
 #
 # Fail safe: if the workspace root is the engine source checkout, skip committing
 # and pushing entirely. To enable versioning, the operator sets

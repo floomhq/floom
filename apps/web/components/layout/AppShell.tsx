@@ -11,7 +11,6 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { DeepLinkRouter } from "@/components/layout/DeepLinkRouter";
 import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
-import { AlertsBell } from "@/components/overview/AlertsBell";
 import { BootSplash } from "@/components/layout/BootSplash";
 import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 
@@ -47,25 +46,6 @@ export type AppShellProps = {
 
 function pathMatchesPrefixes(pathname: string, prefixes: string[]) {
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-}
-
-// #1292: app-wide alerts bell. Anchored to the top-right of the MAIN content
-// pane (the flex child between the sidebar and the Emily dock) so the
-// needs-attention surface (failing workers, missing secrets/connections,
-// expiring connections, pending approvals) is reachable from every page, not
-// just /overview. Anchoring to the pane — not the viewport — keeps it left of
-// the Emily dock regardless of the dock's current width (rail/wide/full).
-// Self-fetches its data (no `items` prop). Desktop only (≥1024, lg) — the
-// mobile/tablet top bar carries its own bell (see sidebar.tsx). z-30 sits above
-// page content; the dropdown opens leftward (right-0) so it stays inside the pane.
-function GlobalAlertsBell() {
-  return (
-    <div className="pointer-events-none absolute right-3 top-2 z-30 hidden lg:block">
-      <div className="pointer-events-auto">
-        <AlertsBell />
-      </div>
-    </div>
-  );
 }
 
 export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
@@ -104,7 +84,6 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         <DeepLinkRouter />
         <Sidebar />
         <main className="relative z-10 flex-1 min-w-0 min-h-screen">
-          <GlobalAlertsBell />
           {children}
         </main>
         <CommandPalette />
@@ -134,8 +113,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
 // Inner body that consumes the Emily fullscreen context. When Emily is in true
 // fullscreen, the page pane (<main>) is hidden so Emily flex-grows to fill the
 // whole main area (everything to the RIGHT of the left sidebar, which stays
-// visible — Federico 2026-06-17 spec). The GlobalAlertsBell also hides with the
-// pane since there is no page content to anchor it to.
+// visible — Federico 2026-06-17 spec).
 function StandardShellBody({
   children,
   fullBleed,
@@ -165,7 +143,6 @@ function StandardShellBody({
             emilyFull ? "hidden" : "flex",
           )}
         >
-          <GlobalAlertsBell />
           {children}
         </main>
       ) : (
@@ -175,14 +152,6 @@ function StandardShellBody({
             emilyFull && "hidden",
           )}
         >
-          {/* Zero-height sticky bar keeps the bell pinned to the pane's
-              top-right while the page content scrolls underneath it.
-              Desktop only (lg) — tablet/mobile use the sidebar header bell. */}
-          <div className="pointer-events-none sticky top-0 z-30 hidden h-0 lg:block">
-            <div className="pointer-events-auto absolute right-3 top-2">
-              <AlertsBell />
-            </div>
-          </div>
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col min-h-full">{children}</div>
         </main>
       )}

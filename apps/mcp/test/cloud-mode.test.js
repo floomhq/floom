@@ -19,7 +19,8 @@ import {
   resolveLoginApiBase,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
-import { cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
+import { runWhoamiCommand } from "../dist/commands/whoami.js";
+import { acquireLoginLock, cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
 
 test("cloud login honors Retry-After headers on cli-exchange 429", () => {
   const error = new FloomApiError(
@@ -44,6 +45,25 @@ test("cloud login treats cli-exchange 429 without retry metadata as slow_down", 
   const error = new FloomApiError("rate limited", 429, {});
 
   assert.equal(cloudRateLimitRetryMs(error, 2), 5_000);
+});
+
+test("login lock blocks concurrent local login flows", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-login-lock-"));
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  const release = await acquireLoginLock();
+  try {
+    await assert.rejects(
+      () => acquireLoginLock(),
+      /Another .* login is already running/,
+    );
+  } finally {
+    await release();
+    process.env.HOME = originalHome;
+    process.env.USERPROFILE = originalUserProfile;
+  }
 });
 
 test("cloud login defaults to hosted Floom API", () => {
@@ -142,6 +162,20 @@ test("updateCredentials persists workspace_id without dropping refresh_token", a
     assert.equal(creds.workspace_id, "ws_test123");
     assert.equal(creds.workspace_name, "Test WS");
     assert.equal(creds.refresh_token, "rt-1");
+  });
+});
+
+test("readCredentials migrates legacy placeholder cloud API base", async () => {
+  await withTempHome(async () => {
+    await writeCredentials({
+      mode: "cloud",
+      api_base: "https://api.workeros.example.com",
+      api_token: "pat-test",
+      authed_at: "2026-01-01T00:00:00.000Z",
+    });
+
+    const creds = await readCredentials();
+    assert.equal(creds.api_base, "https://workeros-api.floom.dev");
   });
 });
 
@@ -409,6 +443,57 @@ test("doctor accepts cloud PAT credentials and uses shared client headers", asyn
     } finally {
       process.stdout.write = originalStdout;
       api.server.close();
+    }
+  });
+});
+
+test("whoami prints hosted account identity from auth/me", async () => {
+  await withTempHome(async () => {
+    const seen = [];
+    const server = createServer((req, res) => {
+      seen.push({ method: req.method, url: req.url, headers: req.headers });
+      if (req.url === "/api/system/info") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+      if (req.url === "/auth/me") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          user_id: "usr_123",
+          username: "vivek",
+          email: "vivek@example.com",
+          role: "admin",
+          auth_method: "pat",
+        }));
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    server.listen(0);
+    await once(server, "listening");
+    const originalStdout = process.stdout.write.bind(process.stdout);
+    let stdout = "";
+    try {
+      await writeCredentials({
+        api_base: `http://127.0.0.1:${server.address().port}`,
+        mode: "cloud",
+        api_token: "pat-test",
+        authed_at: new Date().toISOString(),
+      });
+      process.stdout.write = (chunk) => {
+        stdout += typeof chunk === "string" ? chunk : chunk.toString();
+        return true;
+      };
+
+      const code = await runWhoamiCommand();
+
+      assert.equal(code, 0);
+      assert.match(stdout, /Account\s+vivek@example\.com/);
+      assert.ok(seen.some((r) => r.url === "/auth/me"));
+    } finally {
+      process.stdout.write = originalStdout;
+      server.close();
     }
   });
 });

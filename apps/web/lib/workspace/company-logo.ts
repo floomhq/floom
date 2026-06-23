@@ -15,10 +15,29 @@ export function guessDomain(company: string): string | null {
   return slug ? `${slug}.com` : null;
 }
 
-/** Favicon/logo URL for the company (Google's favicon service, no API key). */
-export function companyLogoUrl(company: string, size = 128): string | null {
-  const domain = guessDomain(company);
-  return domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}` : null;
+/** Favicon/logo URL for a workspace or company.
+ *
+ *  Returns a URL ONLY when the input already contains a dot — i.e. it is a
+ *  real domain (e.g. "acme.com", "https://acme.io/about"). Plain display names
+ *  like "Nova Search" or "content-pipeline" return null so the Avatar component
+ *  renders the clean generated mark instead of attempting a favicon fetch.
+ *
+ *  Rule: NO favicon guessing from workspace names. A workspace logo is shown
+ *  only when the workspace has a real stored domain value passed as input.
+ *  Otherwise the caller must pass null/undefined and let Avatar generate.
+ *
+ *  Uses DuckDuckGo's favicon proxy (`https://icons.duckduckgo.com/ip3/<domain>.ico`).
+ *  The `size` parameter is kept for API compatibility; DuckDuckGo returns a
+ *  fixed-size icon and ignores it.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function companyLogoUrl(company: string, _size = 128): string | null {
+  const v = company.trim();
+  // Only proceed when the input is already a dot-qualified domain or URL.
+  // Plain names (no dot) return null — no slug guessing.
+  if (!v || !v.includes(".")) return null;
+  const domain = v.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  return domain ? `https://icons.duckduckgo.com/ip3/${encodeURIComponent(domain)}.ico` : null;
 }
 
 /** Prefilled, human workspace name from the company input (TLD stripped, title-cased). */

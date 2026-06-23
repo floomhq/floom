@@ -95,6 +95,79 @@ def test_ensure_brain_pack_is_idempotent_and_preserves_visibility(repo_bundle):
     assert again["visibility"] == "workspace"
 
 
+def test_rename_asset_moves_row_within_workspace(repo_bundle):
+    """#1813: rename_asset re-keys the row in place, carrying owner + visibility."""
+    repos, db = repo_bundle[0], repo_bundle[1]
+    _seed_owner(db, "local-default", "local-user")
+    repos.asset_access.ensure_brain_pack(
+        pack_id="facts", workspace_id="local-default", owner_id="local-user"
+    )
+    repos.asset_access.set_visibility(
+        workspace_id="local-default",
+        actor_id="local-user",
+        asset_type="brain_pack",
+        asset_id="facts",
+        visibility="workspace",
+    )
+    moved = repos.asset_access.rename_asset(
+        asset_type="brain_pack",
+        old_asset_id="facts",
+        new_asset_id="company-facts",
+        workspace_id="local-default",
+    )
+    assert moved is not None
+    assert moved["id"] == "company-facts"
+    assert moved["visibility"] == "workspace"
+    assert moved["owner_id"] == "local-user"
+    # Old id no longer carries a row (would re-expose a later folder reusing it).
+    with db.get_db() as conn:
+        stale = conn.execute(
+            "SELECT id FROM brain_packs WHERE id = ?", ("facts",)
+        ).fetchone()
+    assert stale is None
+
+
+def test_rename_asset_is_workspace_scoped(repo_bundle):
+    """#1813 P1: rename_asset must not touch a same-named pack in ANOTHER
+    workspace. Pack ids are workspace-local on disk, so a foreign-workspace
+    rename request must find no source row (returns None) and leave the real
+    workspace's row untouched — never delete/re-key it across workspaces."""
+    repos, db = repo_bundle[0], repo_bundle[1]
+    repos.asset_access.ensure_brain_pack(
+        pack_id="shared", workspace_id="ws_real", owner_id="owner-real"
+    )
+    # A rename driven with the WRONG workspace must be a no-op (no source there).
+    result = repos.asset_access.rename_asset(
+        asset_type="brain_pack",
+        old_asset_id="shared",
+        new_asset_id="renamed",
+        workspace_id="ws_other",
+    )
+    assert result is None
+    # The real workspace's row is intact, still keyed at the original id.
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT id, workspace_id, owner_id FROM brain_packs WHERE id = ?",
+            ("shared",),
+        ).fetchone()
+    assert row is not None
+    assert row["workspace_id"] == "ws_real"
+    assert row["owner_id"] == "owner-real"
+
+
+def test_rename_asset_missing_source_returns_none(repo_bundle):
+    repos = repo_bundle[0]
+    assert (
+        repos.asset_access.rename_asset(
+            asset_type="brain_pack",
+            old_asset_id="ghost",
+            new_asset_id="whatever",
+            workspace_id="local-default",
+        )
+        is None
+    )
+
+
 def test_owner_has_full_brain_pack_permissions(repo_bundle):
     repos, db, _manifest = repo_bundle
     _seed_owner(db, "local-default", "local-user")

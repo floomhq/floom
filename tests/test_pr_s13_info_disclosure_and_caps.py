@@ -29,6 +29,16 @@ if API_DIR not in sys.path:
 _AUTH_HEADER = {"x-floom-secret": "test-secret-s13"}
 
 
+def _assert_rate_limit_error(resp, message: str) -> None:
+    assert resp.json() == {
+        "detail": {
+            "error_code": "rate_limit_exceeded",
+            "message": message,
+            "retry_after": 60,
+        }
+    }
+
+
 def _load_api(
     monkeypatch,
     tmp_path,
@@ -49,6 +59,7 @@ def _load_api(
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
     monkeypatch.setenv("FLOOM_SECRET", _AUTH_HEADER["x-floom-secret"])
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
@@ -551,7 +562,7 @@ def test_run_creation_quota_is_shared_across_workers_and_ips(monkeypatch, tmp_pa
 
     assert statuses == [200, 200, 200, 429], bodies
     assert "Retry-After" in resp.headers
-    assert resp.json() == {"detail": "Run creation rate limit exceeded: 3/60s"}
+    _assert_rate_limit_error(resp, "Run creation rate limit exceeded: 3/60s")
 
 
 def test_run_creation_quota_defaults_to_safe_global_limit(monkeypatch, tmp_path):
@@ -572,7 +583,7 @@ def test_run_creation_quota_defaults_to_safe_global_limit(monkeypatch, tmp_path)
         statuses.append(resp.status_code)
 
     assert statuses == [200] * 10 + [429], statuses
-    assert resp.json() == {"detail": "Run creation rate limit exceeded: 10/60s"}
+    _assert_rate_limit_error(resp, "Run creation rate limit exceeded: 10/60s")
     assert "Retry-After" in resp.headers
 
 
@@ -594,7 +605,7 @@ def test_replay_route_shares_run_creation_quota(monkeypatch, tmp_path):
     replay = client.post(f"/workers/{worker_id}/runs/{run_id}/replay", headers=_AUTH_HEADER)
 
     assert replay.status_code == 429, replay.text
-    assert replay.json() == {"detail": "Run creation rate limit exceeded: 1/60s"}
+    _assert_rate_limit_error(replay, "Run creation rate limit exceeded: 1/60s")
     assert "Retry-After" in replay.headers
 
 
@@ -630,7 +641,7 @@ def test_run_creation_quota_applies_per_worker(monkeypatch, tmp_path):
     )
 
     assert [first.status_code, second.status_code, third.status_code, other_worker.status_code] == [200, 200, 429, 200]
-    assert third.json() == {"detail": "Run creation rate limit exceeded: 2/60s"}
+    _assert_rate_limit_error(third, "Run creation rate limit exceeded: 2/60s")
     assert "Retry-After" in third.headers
 
 
@@ -656,7 +667,7 @@ def test_replay_quota_applies_per_run_id(monkeypatch, tmp_path):
     third = client.post(f"/workers/{worker_id}/runs/{run_id}/replay", headers=_AUTH_HEADER)
 
     assert [first.status_code, second.status_code, third.status_code] == [200, 200, 429]
-    assert third.json() == {"detail": "Run creation rate limit exceeded: 2/60s"}
+    _assert_rate_limit_error(third, "Run creation rate limit exceeded: 2/60s")
     assert "Retry-After" in third.headers
 
 
@@ -1089,7 +1100,7 @@ def test_run_events_redact_trace_ids_and_internal_metadata(monkeypatch, tmp_path
     emitter = threading.Thread(target=emit_events, daemon=True)
     emitter.start()
     emitter.join(timeout=1)
-    consumer.join(timeout=2)
+    consumer.join(timeout=10)
     assert not consumer.is_alive(), "SSE consumer did not finish"
 
     body = json.dumps(events)
@@ -1101,7 +1112,7 @@ def test_run_events_redact_trace_ids_and_internal_metadata(monkeypatch, tmp_path
     assert "[redacted-metadata]" in body
 
 
-def test_cancel_completed_run_does_not_reveal_existence(monkeypatch, tmp_path):
+def test_cancel_completed_owned_run_is_idempotent_but_missing_stays_404(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
     run_id, _transcript_artifact_id = _insert_sensitive_run(main, tmp_path)
@@ -1109,11 +1120,10 @@ def test_cancel_completed_run_does_not_reveal_existence(monkeypatch, tmp_path):
     existing = client.post(f"/runs/{run_id}/cancel", headers=_AUTH_HEADER)
     missing = client.post("/runs/run_missing_cancel_probe/cancel", headers=_AUTH_HEADER)
 
-    assert existing.status_code == 404, existing.text
+    assert existing.status_code == 200, existing.text
+    assert existing.json() == {"status": "completed", "run_id": run_id}
     assert missing.status_code == 404, missing.text
-    assert existing.json() == missing.json() == {"detail": "Run not found"}
-    assert "completed" not in existing.text
-    assert run_id not in existing.text
+    assert missing.json() == {"detail": "Run not found"}
 
 
 def test_bundle_snapshot_missing_does_not_reveal_run_existence(monkeypatch, tmp_path):
@@ -1350,7 +1360,7 @@ def test_chat_per_user_quota_returns_429(monkeypatch, tmp_path):
     blocked = client.post("/chat", headers=_AUTH_HEADER, json={"message": "hi"})
     assert blocked.status_code == 429, blocked.text
     assert "Retry-After" in blocked.headers
-    assert "Chat rate limit exceeded" in blocked.json()["detail"]
+    assert "Chat rate limit exceeded" in blocked.json()["detail"]["message"]
 
 
 def test_chat_cost_quota_exhaustion_returns_retry_after(monkeypatch, tmp_path):

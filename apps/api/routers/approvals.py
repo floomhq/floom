@@ -59,6 +59,7 @@ from services.run_access import (
 from services.sse_streaming import _sse_publish
 from services.uploads import _store_uploaded_blob
 from services.worker_access import _delete_worker_impl
+from services.product_events import emit_approval_decided
 
 logger = logging.getLogger("floom.api")
 
@@ -86,6 +87,14 @@ def _is_row_past_expiry(approval: Dict[str, Any]) -> bool:
         return False
     from db import now_iso
     return str(expires_at) < now_iso()
+
+
+def _is_await_external_approval(approval: Dict[str, Any]) -> bool:
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        decision_input = {}
+    return isinstance(decision_input, dict) and decision_input.get("kind") == "await_external"
 
 
 def _lazy_expire(approval_id: str, repos: Repositories) -> bool:
@@ -244,6 +253,7 @@ def list_approvals(
             for r in stale:
                 _lazy_expire(str(dict(r).get("id") or ""), repos)
             rows = repos.approvals.list_pending(owner_id=auth.user_id, limit=limit)
+        rows = [row for row in rows if not _is_await_external_approval(dict(row))]
     else:
         # For non-pending statuses, query directly
         with get_db() as conn:
@@ -271,7 +281,8 @@ def count_pending_approvals(
     repos: Repositories = Depends(get_repos),
 ):
     """Return count of pending approvals for the authenticated user."""
-    count = repos.approvals.count_pending(owner_id=auth.user_id)
+    rows = repos.approvals.list_pending(owner_id=auth.user_id, limit=200)
+    count = sum(1 for row in rows if not _is_await_external_approval(dict(row)))
     return {"pending": count}
 
 
@@ -772,6 +783,11 @@ def approve_run(
             status_code=400,
             detail="This approval was created by request_approval(). Use POST /approvals/{approval_id}/approve instead.",
         )
+    if _di.get("kind") == "await_external":
+        raise HTTPException(
+            status_code=400,
+            detail="This run is awaiting an external result. Use POST /webhooks/{worker_id}/resume.",
+        )
 
     # Load original inputs
     original_inputs: Dict[str, Any] = {}
@@ -825,6 +841,14 @@ def approve_run(
     if claimed is None:
         # A concurrent approve/reject already decided this approval.
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=str(approval_row.get("id") or ""),
+        run_id=run_id,
+        worker_id=str(worker_id or "") or None,
+        decision="approved",
+        approval_kind=str(_di.get("kind") or "run"),
+    )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
     # state. Without this the original run is stuck at pending_approval forever
@@ -935,6 +959,11 @@ def reject_run(
             status_code=400,
             detail="This approval was created by request_approval(). Use POST /approvals/{approval_id}/reject instead.",
         )
+    if _di_r.get("kind") == "await_external":
+        raise HTTPException(
+            status_code=400,
+            detail="This run is awaiting an external result. Use POST /webhooks/{worker_id}/resume.",
+        )
 
     # #280: claim the decision atomically — reject() flips pending->rejected and
     # returns None if a concurrent approve/reject already won, so we never race
@@ -951,6 +980,15 @@ def reject_run(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    run_data = row_to_dict(run_row)
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=str(approval_row.get("id") or ""),
+        run_id=run_id,
+        worker_id=str(run_data.get("worker_id") or "") or None,
+        decision="rejected",
+        approval_kind=str(_di_r.get("kind") or "run"),
+    )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
     # state so it is not stuck forever (zombie approval). The rejection itself
@@ -1064,6 +1102,14 @@ def approve_destructive_action(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or ""),
+        worker_id=str(approval.get("worker_id") or "") or None,
+        decision="approved",
+        approval_kind="destructive_delete",
+    )
 
     description = _execute_destructive_delete(path, auth.user_id, repos)
 
@@ -1099,6 +1145,14 @@ def reject_destructive_action(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or ""),
+        worker_id=str(approval.get("worker_id") or "") or None,
+        decision="rejected",
+        approval_kind="destructive_delete",
+    )
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",
@@ -1135,6 +1189,14 @@ def approve_agent_tool_approval(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or ""),
+        worker_id=str(approval.get("worker_id") or "") or None,
+        decision="approved",
+        approval_kind="agent_tool",
+    )
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",
@@ -1171,6 +1233,14 @@ def reject_agent_tool_approval(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    emit_approval_decided(
+        owner_id=auth.user_id,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or ""),
+        worker_id=str(approval.get("worker_id") or "") or None,
+        decision="rejected",
+        approval_kind="agent_tool",
+    )
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",

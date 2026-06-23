@@ -3,7 +3,9 @@ import { join, resolve } from "node:path";
 import { inspect } from "node:util";
 import { parse as parseYaml } from "yaml";
 import { createAuthenticatedClient, FloomApiError, FloomConnectionError } from "../lib/api.js";
+import { getCommandName } from "../lib/command-name.js";
 import { log, printJson, renderTable } from "../lib/output.js";
+import { promptYesNo } from "../lib/prompt.js";
 
 type WorkerSummary = {
   id: string;
@@ -257,8 +259,15 @@ function validateNativeRuntimeContract(
       "run.py shells out to `composio execute`; E2B workers must call the Floom proxy at /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}",
     );
   }
+  const definesSdkStyleRun = /^\s*def\s+run\s*\(\s*inputs\s*,\s*context\s*\)\s*:/m.test(runPy);
+  const returnsFromRun = /^\s*return\b/m.test(runPy);
+  if (definesSdkStyleRun && returnsFromRun && !/result\.json/.test(runPy)) {
+    errors.push(
+      "script run.py defines `run(inputs, context)` and returns a value, but production script workers must read inputs.json and write result.json",
+    );
+  }
 
-  const usesProxy = /composio-execute\/[A-Z0-9_]+/.test(runPy);
+  const usesProxy = /composio-execute\//.test(runPy);
   const readsConnections = /connections\.json/.test(runPy);
   if ((usesProxy || readsConnections) && declared.size === 0) {
     errors.push("run.py uses Composio/connections.json but worker.yml has no `connections:` declaration");
@@ -274,6 +283,9 @@ function validateNativeRuntimeContract(
       continue;
     }
     if (secrets.has(candidate)) {
+      continue;
+    }
+    if (!toolApp(candidate, declared)) {
       continue;
     }
     toolSlugs.add(candidate);
@@ -575,7 +587,7 @@ function isExpiredAuthError(error: FloomApiError): boolean {
 function emitApiError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("Not logged in")) {
-    return emitError("Not authenticated.", "Run: floom login");
+    return emitError("Not authenticated.", `Run: ${getCommandName()} login`);
   }
   if (error instanceof FloomConnectionError) {
     return emitError(
@@ -584,7 +596,7 @@ function emitApiError(error: unknown): number {
     );
   }
   if (error instanceof FloomApiError && isExpiredAuthError(error)) {
-    return emitError("Your session expired.", "Re-run: floom login");
+    return emitError("Your session expired.", `Re-run: ${getCommandName()} login`);
   }
   if (error instanceof FloomApiError && error.status === 403) {
     return emitError(
@@ -596,7 +608,7 @@ function emitApiError(error: unknown): number {
     return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues");
   }
   if (error instanceof FloomApiError && error.status && error.status >= 400) {
-    return emitError(`API rejected worker source: ${apiErrorDetail(error)}`, "Fix the worker files and retry: floom workers validate <dir>");
+    return emitError(`API rejected worker source: ${apiErrorDetail(error)}`, `Fix the worker files and retry: ${getCommandName()} workers validate <dir>`);
   }
   throw error;
 }
@@ -644,7 +656,7 @@ export async function workersPushCommand(dir: string): Promise<number> {
         if (error instanceof FloomApiError && error.status === 409 && /already exists/i.test(apiErrorDetail(error))) {
           return emitError(
             `Worker id '${source.workerId}' already exists outside the active workspace.`,
-            "Choose a unique worker id in worker.yml, then run: floom workers validate <dir> && floom workers push <dir>",
+            `Choose a unique worker id in worker.yml, then run: ${getCommandName()} workers validate <dir> && ${getCommandName()} workers push <dir>`,
           );
         }
         throw error;
@@ -709,10 +721,10 @@ export async function workersListCommand(options: { json?: boolean }): Promise<n
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
-      return emitError("Not authenticated.", "Run: floom login", options.json);
+      return emitError("Not authenticated.", `Run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
-      return emitError("Your session expired.", "Re-run: floom login", options.json);
+      return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status && error.status >= 500) {
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
@@ -758,13 +770,13 @@ export async function workersShowCommand(workerId: string, options: { json?: boo
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
-      return emitError("Not authenticated.", "Run: floom login", options.json);
+      return emitError("Not authenticated.", `Run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status === 404) {
-      return emitError(`Worker '${workerId}' not found.`, "List available workers: floom workers list", options.json);
+      return emitError(`Worker '${workerId}' not found.`, `List available workers: ${getCommandName()} workers list`, options.json);
     }
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
-      return emitError("Your session expired.", "Re-run: floom login", options.json);
+      return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status && error.status >= 500) {
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
@@ -840,22 +852,112 @@ export async function workersInfoCommand(workerId: string, options: { json?: boo
     }
 
     log.blank();
-    log.info(`Try: floom run ${workerId}`);
+    log.info(`Try: ${getCommandName()} run ${workerId}`);
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
-      return emitError("Not authenticated.", "Run: floom login", options.json);
+      return emitError("Not authenticated.", `Run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status === 404) {
-      return emitError(`Worker '${workerId}' not found.`, "List available workers: floom workers list", options.json);
+      return emitError(`Worker '${workerId}' not found.`, `List available workers: ${getCommandName()} workers list`, options.json);
     }
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
-      return emitError("Your session expired.", "Re-run: floom login", options.json);
+      return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, options.json);
     }
     if (error instanceof FloomApiError && error.status && error.status >= 500) {
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
     }
     throw error;
+  }
+}
+
+function emitLifecycleError(error: unknown, workerId: string, json?: boolean): number {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("Not logged in")) {
+    return emitError("Not authenticated.", `Run: ${getCommandName()} login`, json);
+  }
+  if (error instanceof FloomConnectionError) {
+    return emitError(
+      "Floom API is unreachable.",
+      `Tried ${error.apiBase}. Check WORKEROS_API_BASE/FLOOM_API_BASE and network connectivity.`,
+      json,
+    );
+  }
+  if (error instanceof FloomApiError && error.status === 404) {
+    return emitError(`Worker '${workerId}' not found.`, `List available workers: ${getCommandName()} workers list`, json);
+  }
+  if (error instanceof FloomApiError && isExpiredAuthError(error)) {
+    return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, json);
+  }
+  if (error instanceof FloomApiError && error.status === 403) {
+    return emitError(
+      "Request was forbidden.",
+      `API said: ${apiErrorDetail(error)}. Check that this token can manage the target worker/workspace.`,
+      json,
+    );
+  }
+  if (error instanceof FloomApiError && error.status && error.status >= 500) {
+    return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", json);
+  }
+  if (error instanceof FloomApiError && error.status && error.status >= 400) {
+    return emitError(`API rejected request: ${apiErrorDetail(error)}`, `Check the worker id and try again: ${getCommandName()} workers list`, json);
+  }
+  throw error;
+}
+
+export async function workersDeleteCommand(workerId: string, options: { yes?: boolean; json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const confirmed = options.yes
+      || await promptYesNo(`Delete worker ${workerId}? This removes its runs and artifacts and cannot be undone. [y/N] `, false);
+    if (!confirmed) {
+      if (options.json) {
+        printJson({ id: workerId, deleted: false, cancelled: true });
+      } else {
+        log.info("Cancelled.");
+      }
+      return 0;
+    }
+    await client.requestJson("DELETE", `/workers/${encodeURIComponent(workerId)}`);
+    if (options.json) {
+      printJson({ id: workerId, deleted: true });
+    } else {
+      log.ok(`Deleted ${workerId}`);
+    }
+    return 0;
+  } catch (error) {
+    return emitLifecycleError(error, workerId, options.json);
+  }
+}
+
+export async function workersDisableCommand(workerId: string, options: { json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const worker = (await client.requestJson("POST", `/workers/${encodeURIComponent(workerId)}/pause`)) as WorkerDetail;
+    if (options.json) {
+      printJson(worker);
+    } else {
+      log.ok(`Disabled ${workerId}`);
+      log.info(`It stays in the workspace but will not run on triggers. Re-enable: ${getCommandName()} workers enable ${workerId}`);
+    }
+    return 0;
+  } catch (error) {
+    return emitLifecycleError(error, workerId, options.json);
+  }
+}
+
+export async function workersEnableCommand(workerId: string, options: { json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const worker = (await client.requestJson("POST", `/workers/${encodeURIComponent(workerId)}/resume`)) as WorkerDetail;
+    if (options.json) {
+      printJson(worker);
+    } else {
+      log.ok(`Enabled ${workerId}`);
+    }
+    return 0;
+  } catch (error) {
+    return emitLifecycleError(error, workerId, options.json);
   }
 }

@@ -25,6 +25,15 @@ import { getActiveWorkspaceId } from "@/lib/api";
 import { getPublicApiHost } from "@/lib/api-base";
 import { generateOssToken, readStoredSecret } from "@/lib/oss-token";
 
+const MCP_CLIENTS = [
+  { label: "Claude", mark: "C" },
+  { label: "Cursor", mark: ">" },
+  { label: "Codex", mark: "CX" },
+  { label: "VS Code", mark: "{}" },
+  { label: "Windsurf", mark: "W" },
+  { label: "Cline", mark: "CL" },
+];
+
 export function McpInstallPanel() {
   const [secret, setSecret] = useState("");
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -78,9 +87,23 @@ export function McpInstallPanel() {
         <p className="text-xs text-muted-foreground">
           Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any
           MCP client. {hasToken
-            ? "Your token is already baked in."
-            : "Generate a token below to bake it in."}
+            ? "Your key is already included."
+            : "Create a key below to include it."}
         </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Supported MCP clients">
+        {MCP_CLIENTS.map((client) => (
+          <div
+            key={client.label}
+            className="flex h-10 items-center gap-2 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-2.5 text-[12px] text-[var(--ink-soft)]"
+          >
+            <span className="grid size-6 shrink-0 place-items-center rounded-[var(--radius-ui)] bg-[var(--bg-card)] font-mono text-[10px] font-semibold text-[var(--ink)] shadow-[0_0_0_1px_var(--border-soft)]">
+              {client.mark}
+            </span>
+            <span className="truncate font-medium">{client.label}</span>
+          </div>
+        ))}
       </div>
 
       {/* code block + copy */}
@@ -103,7 +126,7 @@ export function McpInstallPanel() {
       {!hasToken && (
         <div className="flex items-center gap-2.5 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2.5">
           <p className="flex-1 text-[12px] leading-snug text-[var(--ink-mute)]">
-            No token in this browser yet, generate one to bake it into the config above.
+            No key in this browser yet. Create one to include it in the config above.
           </p>
           <button
             type="button"
@@ -112,7 +135,7 @@ export function McpInstallPanel() {
             className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-[12px] font-medium text-[var(--primary-text)] transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             <RefreshCw className={"size-3 " + (generating ? "animate-spin" : "")} />
-            {generating ? "Generating" : "Generate token"}
+            {generating ? "Generating" : "Create key"}
           </button>
         </div>
       )}
@@ -121,7 +144,7 @@ export function McpInstallPanel() {
 
       <p className="text-[12px] leading-relaxed text-[var(--ink-mute)]">
         Drop it into your client&apos;s MCP config and your workers show up as tools.
-        The token scopes to{" "}
+        The key scopes to{" "}
         <code className="font-mono text-[11.5px]">{getPublicApiHost()}</code>;
         rotate it anytime in Settings → Connect &amp; automate.
       </p>

@@ -28,8 +28,10 @@ exec:
   entry: SKILL.md
 `;
 
-const runPy = `def run(inputs, context):
-    return {"ok": True}
+const runPy = `import json
+
+with open("result.json", "w", encoding="utf-8") as f:
+    json.dump({"status": "success", "outputs": {"ok": True}, "artifacts": []}, f)
 `;
 
 const skillMd = `# CLI Test Worker
@@ -105,7 +107,17 @@ function json(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-async function startMockApi({ existing = false, postStatus = 200, postDetail = "Unsupported", putStatus = 200, putDetail = "Unsupported" } = {}) {
+async function startMockApi({
+  existing = false,
+  postStatus = 200,
+  postDetail = "Unsupported",
+  putStatus = 200,
+  putDetail = "Unsupported",
+  deleteStatus = 204,
+  runPostStatus = 200,
+  runPostDetail = "Unsupported",
+  runDetail = { id: "run_1", status: "completed", output: { ok: true }, artifacts: [] },
+} = {}) {
   const seen = [];
   const bodies = [];
   const server = createServer(async (request, response) => {
@@ -153,6 +165,48 @@ async function startMockApi({ existing = false, postStatus = 200, postDetail = "
       const body = await readBody(request);
       bodies.push(body);
       json(response, 200, { status: "set" });
+      return;
+    }
+
+    if (request.method === "DELETE" && url.pathname === "/workers/cli-test-worker") {
+      if (!existing) {
+        json(response, 404, { detail: "Worker not found" });
+        return;
+      }
+      if (deleteStatus !== 204) {
+        json(response, deleteStatus, { detail: "Forbidden" });
+        return;
+      }
+      // Mirror FastAPI: a 204 still carries content-type: application/json with
+      // an empty body. The client must not try to JSON-parse the empty payload.
+      response.writeHead(204, { "content-type": "application/json" });
+      response.end();
+      return;
+    }
+
+    if (request.method === "POST" && (url.pathname === "/workers/cli-test-worker/pause" || url.pathname === "/workers/cli-test-worker/resume")) {
+      if (!existing) {
+        json(response, 404, { detail: "Worker not found" });
+        return;
+      }
+      const enabled = url.pathname.endsWith("/resume");
+      json(response, 200, { id: "cli-test-worker", name: "CLI Test Worker", enabled });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/workers/cli-test-worker/runs") {
+      const body = await readBody(request);
+      bodies.push(body);
+      if (runPostStatus !== 200) {
+        json(response, runPostStatus, { detail: runPostDetail });
+        return;
+      }
+      json(response, 200, { run_id: "run_1", status: "queued" });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/runs/run_1") {
+      json(response, 200, runDetail);
       return;
     }
 
@@ -214,6 +268,18 @@ test("workers validate rejects Composio CLI subprocess in E2B worker", async () 
   assert.match(result.stderr, /shells out to `composio execute`/);
 });
 
+test("workers validate rejects SDK-style return shape for script workers", async () => {
+  const dir = await makeWorkerDir({
+    run: `def run(inputs, context):
+    return {"ok": True}
+`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /must read inputs\.json and write result\.json/);
+});
+
 test("workers validate rejects invalid trigger timezones before push", async () => {
   const dir = await makeWorkerDir({
     workerYml: `${scriptWorkerYml}trigger:\n  type: schedule\n  cron: "*/5 * * * *"\n  timezone: Foo/Bar-Not-A-Zone\n`,
@@ -247,6 +313,26 @@ capabilities:
 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Validated cli-test-worker/);
+});
+
+test("workers validate does not treat Python constants or plain env vars as Composio tools", async () => {
+  const dir = await makeWorkerDir({
+    run: `import json
+import os
+
+CLEAN_MODE_CONFIGS = {"fast": True}
+CITIES_PATH = os.environ.get("MY_WORKER_CITIES_PATH")
+SHOW_SOURCE = os.environ.get("MY_WORKER_SHOW_SOURCE")
+
+with open("result.json", "w", encoding="utf-8") as f:
+    json.dump({"status": "success", "outputs": {"ok": True}}, f)
+`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Validated cli-test-worker/);
+  assert.doesNotMatch(result.stderr, /connection 'unknown'/);
 });
 
 test("workers validate ignores inactive run.py when entrypoint is SKILL.md", async () => {
@@ -353,7 +439,7 @@ test("workers push creates a new worker with POST /workers", async (t) => {
     "POST /workers",
   ]);
   assert.match(mock.bodies[0].worker_yml, /name: cli-test-worker/);
-  assert.match(mock.bodies[0].run_py, /def run/);
+  assert.match(mock.bodies[0].run_py, /result\.json/);
   assert.equal(mock.bodies[0].skill_md, undefined);
 });
 
@@ -416,7 +502,7 @@ test("workers push strips UTF-8 BOMs before sending source to the API", async (t
 
   assert.equal(result.code, 0);
   assert.equal(mock.bodies[0].worker_yml.charCodeAt(0), "s".charCodeAt(0));
-  assert.equal(mock.bodies[0].run_py.charCodeAt(0), "d".charCodeAt(0));
+  assert.equal(mock.bodies[0].run_py.charCodeAt(0), "i".charCodeAt(0));
 });
 
 test("workers push updates an existing worker with PUT /workers/:id/files", async (t) => {
@@ -502,6 +588,18 @@ test("secrets set accepts --value for non-interactive automation", async (t) => 
   assert.deepEqual(mock.bodies[0], { value: "sk-test" });
 });
 
+test("secrets delete without --yes cancels with non-zero exit and does not call DELETE", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["secrets", "delete", "OPENAI_API_KEY"], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stdout, /Cancelled/);
+  assert.deepEqual(mock.seen, []);
+});
+
 test("workers push reports unreachable API separately from expired auth", async () => {
   const home = await makeTempHome("http://127.0.0.1:9");
   const dir = await makeWorkerDir();
@@ -543,6 +641,123 @@ test("workers push does not call non-auth 403 an expired session", async (t) => 
   assert.match(result.stderr, /Request was forbidden/);
   assert.match(result.stdout, /Stock workers cannot be modified/);
   assert.doesNotMatch(result.stderr, /session expired/i);
+});
+
+test("workers delete --yes removes a worker via DELETE", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "delete", "cli-test-worker", "--yes"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Deleted cli-test-worker/);
+  assert.deepEqual(mock.seen, ["DELETE /workers/cli-test-worker"]);
+});
+
+test("workers delete without --yes or a TTY cancels and does not call DELETE", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "delete", "cli-test-worker"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Cancelled/);
+  assert.deepEqual(mock.seen, []);
+});
+
+test("workers delete --json cancellation keeps stdout machine-readable", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "delete", "cli-test-worker", "--json"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    id: "cli-test-worker",
+    deleted: false,
+    cancelled: true,
+  });
+  assert.deepEqual(mock.seen, []);
+});
+
+test("workers delete reports a missing worker as not found", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "delete", "cli-test-worker", "--yes"], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Worker 'cli-test-worker' not found/);
+  assert.deepEqual(mock.seen, ["DELETE /workers/cli-test-worker"]);
+});
+
+test("workers disable pauses a worker via POST /workers/:id/pause", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "disable", "cli-test-worker"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Disabled cli-test-worker/);
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/pause"]);
+});
+
+test("workers enable resumes a worker via POST /workers/:id/resume", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "enable", "cli-test-worker"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Enabled cli-test-worker/);
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/resume"]);
+});
+
+test("workers run reports paused-worker 409 without top-level crash", async (t) => {
+  const mock = await startMockApi({
+    existing: true,
+    runPostStatus: 409,
+    runPostDetail: "Worker is paused. Re-enable it before running.",
+  });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "run", "cli-test-worker"], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /API rejected run request: Worker is paused/);
+  assert.doesNotMatch(result.stderr, /floom failed/);
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs"]);
+});
+
+test("workers run --json surfaces output_schema values when output is empty", async (t) => {
+  const mock = await startMockApi({
+    existing: true,
+    runDetail: {
+      id: "run_1",
+      status: "completed",
+      output: {},
+      outputs: {},
+      output_schema: [{ name: "result", type: "text", label: "Result", value: "hello" }],
+      artifacts: [],
+    },
+  });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "run", "cli-test-worker", "--json"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  const body = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
+  assert.deepEqual(body.output, { result: "hello" });
+  assert.deepEqual(body.outputs, { result: "hello" });
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs", "GET /runs/run_1"]);
 });
 
 test("workers push renders structured backend validation details and exits cleanly", async (t) => {

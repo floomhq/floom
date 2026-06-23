@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from auth import AuthContext, get_auth_context
 from core.config import PROTECTED_STOCK_WORKER_IDS
 from db import Repositories, get_repos
-from models import WorkerCreateRequest, WorkerDetail
+from models import DraftFile, WorkerCreateRequest, WorkerDetail
 from services.worker_access import _canonical_worker_id, _slugify_worker_id
 from services.worker_create import (
     _create_worker_from_parsed_payload,
@@ -29,10 +29,13 @@ from services.worker_mutation import (
     _set_worker_yml_is_example,
 )
 from services.worker_registry_ops import (
+    MAX_WORKER_BUNDLE_ENTRIES,
+    MAX_WORKER_BUNDLE_UNCOMPRESSED_BYTES,
     _embed_files_in_skill_version,
     _free_worker_id,
     _parse_worker_payload,
     _persist_discovered_workers,
+    _register_worker_from_files,
     _rewrite_worker_yml_id,
 )
 from services.worker_serialize import _DEFAULT_RUN_PY_STUB, _build_worker_detail, _is_secret_bearing_export_path
@@ -89,7 +92,23 @@ def create_worker(
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
     _reject_raw_local_runner_on_create(worker_yml)
     worker_yml = _apply_workspace_approval_default(worker_yml)  # #794
-    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id, repos=repos)
+    if payload.files:
+        file_map = {item.path: item.content for item in payload.files}
+        file_map["worker.yml"] = worker_yml
+        if payload.run_py is not None:
+            file_map["run.py"] = payload.run_py
+        if payload.skill_md is not None:
+            file_map["SKILL.md"] = payload.skill_md
+        created_id = _register_worker_from_files(
+            [DraftFile(path=path, content=content) for path, content in file_map.items()],
+            user_id=auth.user_id,
+            repos=repos,
+        )
+        return _build_worker_detail(created_id, user_id=auth.user_id, repos=repos)
+
+    if payload.run_py is None:
+        raise HTTPException(status_code=422, detail="run_py is required when files are not supplied")
     return _create_worker_from_parsed_payload(
         worker_id=worker_id,
         worker_yml=worker_yml,
@@ -130,14 +149,11 @@ async def create_worker_from_bundle(
     # extracting so a tiny zip cannot exhaust memory/disk. ZipInfo.file_size
     # is the declared uncompressed size; we pre-check the sum, then re-guard
     # the running total during extraction in case a header lies.
-    _MAX_BUNDLE_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50 MB
-    _MAX_BUNDLE_ENTRIES = 2000
-
     infolist = zf.infolist()
-    if len(infolist) > _MAX_BUNDLE_ENTRIES:
+    if len(infolist) > MAX_WORKER_BUNDLE_ENTRIES:
         raise HTTPException(
             status_code=413,
-            detail=f"Bundle has too many entries ({len(infolist)} > {_MAX_BUNDLE_ENTRIES})",
+            detail=f"Bundle has too many entries ({len(infolist)} > {MAX_WORKER_BUNDLE_ENTRIES})",
         )
     declared_total = 0
     for info in infolist:
@@ -145,12 +161,12 @@ async def create_worker_from_bundle(
         if file_type == 0o120000:
             raise HTTPException(status_code=400, detail=f"Bundle contains unsupported symlink: {info.filename!r}")
         declared_total += info.file_size
-        if declared_total > _MAX_BUNDLE_UNCOMPRESSED_BYTES:
+        if declared_total > MAX_WORKER_BUNDLE_UNCOMPRESSED_BYTES:
             raise HTTPException(
                 status_code=413,
                 detail=(
                     f"Bundle too large: uncompressed size exceeds "
-                    f"{_MAX_BUNDLE_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                    f"{MAX_WORKER_BUNDLE_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
                 ),
             )
 
@@ -175,7 +191,7 @@ async def create_worker_from_bundle(
     worker_yml_path_in_zip = f"{prefix}worker.yml"
     worker_yml = zf.read(worker_yml_path_in_zip).decode("utf-8")
 
-    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id, repos=repos)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
@@ -209,12 +225,12 @@ async def create_worker_from_bundle(
             # Re-guard the running total in case a ZipInfo header under-reported
             # the real uncompressed size (defends against a lying header).
             extracted_total += len(data)
-            if extracted_total > _MAX_BUNDLE_UNCOMPRESSED_BYTES:
+            if extracted_total > MAX_WORKER_BUNDLE_UNCOMPRESSED_BYTES:
                 raise HTTPException(
                     status_code=413,
                     detail=(
                         f"Bundle too large: uncompressed size exceeds "
-                        f"{_MAX_BUNDLE_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                        f"{MAX_WORKER_BUNDLE_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
                     ),
                 )
             dest = target_dir

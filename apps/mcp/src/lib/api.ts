@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
+import { getCommandName } from "./command-name.js";
 import { readCredentials, updateCredentials, type StoredCredentials } from "./credentials.js";
 
 const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
@@ -63,11 +64,11 @@ async function fetchFloom(apiBase: string, input: string, init: RequestInit): Pr
 
 async function parseResponse(response: Response): Promise<unknown> {
   const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return response.json();
-  }
   const text = await response.text();
   if (!text) return {};
+  if (contentType.includes("application/json")) {
+    return JSON.parse(text);
+  }
   try {
     return JSON.parse(text);
   } catch {
@@ -133,7 +134,7 @@ async function refreshSupabaseJwt(
 async function getCloudJwt(creds: StoredCredentials): Promise<string> {
   if (!creds.refresh_token || !creds.supabase_url || !creds.supabase_anon_key) {
     throw new Error(
-      "Hosted credentials incomplete (missing refresh_token / supabase_url / supabase_anon_key). Run floom login --cloud again.",
+      `Hosted credentials incomplete (missing refresh_token / supabase_url / supabase_anon_key). Run ${getCommandName()} login --cloud again.`,
     );
   }
   const cacheKey = `${creds.supabase_url}|${creds.refresh_token.slice(-12)}`;
@@ -184,7 +185,7 @@ export class FloomApiClient {
 
   async authHeaders(): Promise<Record<string, string>> {
     if (!this.credentials) {
-      throw new Error("Not logged in. Run floom login first.");
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
     }
     if (this.credentials.mode === "cloud") {
       if (this.credentials.api_token) {
@@ -206,7 +207,7 @@ export class FloomApiClient {
       return headers;
     }
     if (!this.credentials.api_secret) {
-      throw new Error("Not logged in. Run floom login first.");
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
     }
     const headers: Record<string, string> = { "x-floom-secret": this.credentials.api_secret };
     if (this.credentials.workspace_id) {
@@ -280,7 +281,7 @@ export class FloomApiClient {
 
   async uploadFile(inputName: string, filePath: string): Promise<string> {
     if (!this.credentials) {
-      throw new Error("Not logged in. Run floom login first.");
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
     }
     const bytes = await readFile(filePath);
     const form = new FormData();
@@ -309,6 +310,41 @@ export class FloomApiClient {
     }
     return uploadId;
   }
+
+  async uploadContextFile(contextName: string, filePath: string, targetPath?: string): Promise<unknown> {
+    if (!this.credentials) {
+      throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
+    }
+    const relPath = (targetPath || basename(filePath)).replace(/\\/g, "/").replace(/^\/+/, "");
+    const prefix = dirname(relPath);
+    const filename = basename(relPath);
+    const bytes = await readFile(filePath);
+    const form = new FormData();
+    form.append("files", new File([bytes], filename));
+    if (prefix && prefix !== ".") {
+      form.append("path_prefix", prefix);
+    }
+    const path = `/contexts/${encodeURIComponent(contextName)}/upload`;
+    const response = await fetchFloom(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path)), {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        ...(await this.authHeaders()),
+      },
+      body: form,
+    });
+    const parsed = await parseResponse(response);
+    if (!response.ok) {
+      const detail = responseDetail(parsed);
+      throw new FloomApiError(
+        `API POST ${path} failed with HTTP ${response.status}: ${detail}`,
+        response.status,
+        parsed,
+        response.headers,
+      );
+    }
+    return parsed;
+  }
 }
 
 export async function createAuthenticatedClient(): Promise<{
@@ -317,7 +353,7 @@ export async function createAuthenticatedClient(): Promise<{
 }> {
   const credentials = await readCredentials();
   if (!credentials) {
-    throw new Error("Not logged in. Run floom login first.");
+    throw new Error(`Not logged in. Run ${getCommandName()} login first.`);
   }
   return {
     client: new FloomApiClient(credentials.api_base, credentials),

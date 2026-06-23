@@ -6,21 +6,23 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
+import { useNavBadgeCounts } from "@/lib/useSelfOverviewItems";
 import { useQueryClient } from "@tanstack/react-query";
-import { prefetchRouteData, prefetchIdleRoutes } from "@/lib/query/prefetch";
+import { prefetchRouteData, prefetchIdleRoutes, prefetchMainRoutesEager } from "@/lib/query/prefetch";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
-import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
-import { GenerativeAvatar } from "@/components/GenerativeAvatar";
+import { Avatar } from "@/components/ui/Avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,25 +56,42 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 
 // #1305: the app is WHITE-LABELED — the workspace IS the brand. The mark must
 // be the WORKSPACE logo/avatar, never the Floom play-triangle.
-// Generative avatar deterministically seeded by workspace name — squircle shape.
+// Generated identity mark deterministically seeded by workspace name —
+// squircle shape (workspace = non-human). Logo override handled where a
+// company logo is available; the sidebar header mark uses the generated mark.
 function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
   const seed = resolveWorkspaceName(name) || name || "workspace";
-  return <GenerativeAvatar seed={seed} shape="squircle" size={size} />;
+  return <Avatar role="workspace" name={seed} size={size} />;
 }
 
 
+// Module-level cache for the active workspace name so WorkspaceMark and
+// MobileWorkspaceName return the resolved name on every remount (e.g. sidebar
+// collapse/expand) without a blank-seed flash. Populated on first successful
+// fetch; invalidated to "" on catch so error states still propagate correctly.
+let _cachedWorkspaceName: string | null = null;
+
 /** Active workspace name, resolved once from the workspace list (shared shape
- *  with UserProfileFooter so the mark + footer stay in sync). */
+ *  with UserProfileFooter so the mark + footer stay in sync).
+ *  Module-level cache ensures the name is available instantly on remount — the
+ *  key fix for the collapse/expand avatar flicker: without it every remount
+ *  starts with seed="" → wrong motif → API resolves → correct motif (two
+ *  distinct SVG renders = visible flash). */
 function useActiveWorkspaceName(): string {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(() => _cachedWorkspaceName ?? "");
   useEffect(() => {
+    // Already have a name: skip the fetch (returns cached value immediately).
+    if (_cachedWorkspaceName) return;
     let active = true;
     api.workspace
       .list()
       .then((data) => {
         const current =
           data.workspaces.find((workspace) => workspace.id === data.active_id) ?? data.workspaces[0];
-        if (active && current) setName(current.name);
+        if (active && current) {
+          _cachedWorkspaceName = current.name;
+          setName(current.name);
+        }
       })
       .catch(() => {
         if (active) setName("");
@@ -136,51 +155,95 @@ function MobileWorkspaceName() {
 // nav has no room for a permanent subtitle without a redesign, so the
 // employee-model microcopy ("Workers run on triggers") lives in the tooltip
 // instead (the operator 2026-06-02).
+// Each badge is sourced from one shared, polled fetch (see below):
+//  - approvals  → pending-approvals count   (neutral tone)
+//  - connections → connections needing re-auth / expired (amber attention)
+//  - runs       → recent failed runs        (amber attention)
+type NavBadgeKey = "approvals" | "connections" | "runs";
+
 type NavItem = {
   href: string;
   label: string;
   icon: React.ElementType;
   hint?: string;
-  badge?: boolean;
+  badge?: NavBadgeKey;
 };
 
 // Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is gone,
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
-// Connections. (MCP is a pinned item above the profile footer, see below.)
+// Connections. (Agent setup is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
-  { href: "/runs", label: "Runs", icon: Clock },
-  { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
-  { href: "/connections", label: "Connections", icon: Plug },
+  { href: "/runs", label: "Runs", icon: Clock, badge: "runs" },
+  { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: "approvals" },
+  { href: "/connections", label: "Connections", icon: Plug, badge: "connections" },
 ];
 
+// Subtle amber attention treatment (Floom DS: red is NOT a Floom color — amber
+// #C98A1A == var(--warning)). Mirrors the .c-pill.err token in globals.css.
+const AMBER_BADGE_CLASS =
+  "bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] text-[color-mix(in_srgb,var(--warning)_82%,var(--ink))]";
+
+/** Resolve a nav item's badge count + tone from the shared badge sources.
+ *  Pure helper (no hooks) so it is safe to call inside the nav .map(). */
+function resolveNavBadge(key: NavBadgeKey | undefined, counts: NavBadgeCounts) {
+  if (!key) return null;
+  if (key === "approvals") {
+    return counts.pendingApprovals > 0
+      ? { count: counts.pendingApprovals, tone: "neutral" as const }
+      : null;
+  }
+  if (key === "connections") {
+    return counts.connectionsExpired > 0
+      ? { count: counts.connectionsExpired, tone: "amber" as const }
+      : null;
+  }
+  return counts.failedRuns > 0
+    ? { count: counts.failedRuns, tone: "amber" as const }
+    : null;
+}
+
+type NavBadgeCounts = {
+  pendingApprovals: number;
+  connectionsExpired: number;
+  failedRuns: number;
+};
+
+/** Pull all three badge counts from one shared overview fetch + the shared
+ *  approvals source. Used by both the expanded nav and the collapsed rail. */
+function useNavBadgeSources(): NavBadgeCounts {
+  const pendingApprovals = useApprovalsCount();
+  const { connectionsExpired, failedRuns } = useNavBadgeCounts();
+  return { pendingApprovals, connectionsExpired, failedRuns };
+}
+
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
-  // Shared source with /approvals: revalidates on focus + after any
-  // approve/reject so the badge never drifts from the list (G5 P2).
-  const pendingCount = useApprovalsCount();
+  // Badge counts from one shared, polled overview fetch (+ the shared approvals
+  // source, which revalidates on focus + after any approve/reject — G5 P2).
+  const badgeCounts = useNavBadgeSources();
   // Data prefetch: warm the destination route's TanStack cache on hover/focus
-  // so the tab switch is instant. Link already prefetches the route's JS/RSC;
-  // this adds the DATA. Cache-first + idempotent (see prefetch.ts).
+  // so the tab switch is instant. Keep Next route prefetch disabled here:
+  // these persistent sidebar links otherwise issue basePath RSC segment
+  // prefetches that prod can answer with `_not-found` payloads.
   const queryClient = useQueryClient();
-  const router = useRouter();
   const warm = (href: string) => {
     prefetchRouteData(queryClient, href);
-    router.prefetch(href);
   };
 
   return (
     <nav className="flex-1 px-3 space-y-0.5">
       {nav.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
-        const showBadge = item.badge && pendingCount > 0;
+        const badge = resolveNavBadge(item.badge, badgeCounts);
         return (
           <Link
             key={item.href}
             href={item.href}
-            prefetch
+            prefetch={false}
             onMouseEnter={() => warm(item.href)}
+            onPointerDown={() => warm(item.href)}
             onFocus={() => warm(item.href)}
             onClick={onNavigate}
             title={item.hint}
@@ -193,10 +256,17 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
           >
             <item.icon className="w-4 h-4" />
             {item.label}
-            {showBadge && (
-              <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
-                {pendingCount}
-              </span>
+            {badge && (
+              <Badge
+                variant={badge.tone === "amber" ? "default" : "secondary"}
+                aria-hidden="true"
+                className={cn(
+                  "ml-auto h-4 min-w-4 px-1 text-[10px] font-semibold leading-none tabular-nums",
+                  badge.tone === "amber" && AMBER_BADGE_CLASS,
+                )}
+              >
+                {badge.count > 99 ? "99+" : badge.count}
+              </Badge>
             )}
           </Link>
         );
@@ -205,7 +275,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   );
 }
 
-// MCP item, pinned LOW, just above the profile footer (Emily-home redesign).
+// Agent setup item, pinned LOW, just above the profile footer (Emily-home redesign).
 // Opens the MCP-install POPUP modal (not a page). The badge mirrors the v6
 // "12" affordance but is informational chrome only; the count is omitted here
 // since the OSS engine has no live "installed clients" count to show honestly.
@@ -220,10 +290,11 @@ function SidebarMcpItem({ onNavigate }: { onNavigate?: () => void }) {
           mcpModal.open();
         }}
         title="Add Floom to your AI client"
+        aria-label="Add Floom to your AI client"
         className="flex h-9 w-full items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
       >
         <Terminal className="w-4 h-4" />
-        MCP
+        Agent setup
       </button>
     </div>
   );
@@ -238,12 +309,13 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
     <div className="px-3 pt-3 pb-3 space-y-1.5">
       {/* #902 (wireframe newbtn): creating a worker = a conversation with
           Emily. Federico 2026-06-19: it is the SAME fullscreen Emily as the home
-          (the dock-fullscreen surface), primed for create via `/?create=1`, not a
+          (the dock-fullscreen surface), primed for create via `create=1`, not a
           separate full-page chat with its own header. */}
       {/* Global primary CTA: canonical Button (size lg = h-9) rendered as the
           create-worker Link. Same primary token + label everywhere. */}
       <Link
-        href="/?create=1"
+        href={createWorkerHref()}
+        prefetch={false}
         onClick={() => onNavigate?.()}
         className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
@@ -319,21 +391,24 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
     setOpen(false);
   }, [pathname]);
 
-  const pendingCount = useApprovalsCount();
+  const badgeCounts = useNavBadgeSources();
   const mcpModal = useMcpModal();
   // Data prefetch (collapsed icon rail uses this `warm`; the expanded nav warms
   // inside NavLinks). After first paint, warm the highest-value routes once on
-  // idle so the first tab switch is already instant.
+  // idle so the first tab switch is already instant. Keep Next route prefetch
+  // off for the same basePath RSC segment reason as NavLinks above.
   const queryClient = useQueryClient();
-  const router = useRouter();
   const warm = (href: string) => {
     prefetchRouteData(queryClient, href);
-    router.prefetch(href);
   };
   useEffect(() => {
+    // Warm ALL main routes' data immediately (parallel, cache-first/idempotent)
+    // so the first tab switch hits the cache = instant; then warm the remaining
+    // secondary routes on idle. Run once after mount; pathname/queryClient are
+    // stable enough for a one-shot warm (re-running on every nav would be a
+    // refetch storm).
+    prefetchMainRoutesEager(queryClient, pathname);
     prefetchIdleRoutes(queryClient, pathname);
-    // Run once after mount; pathname/queryClient are stable enough for a
-    // one-shot idle warm (re-running on every nav would be a refetch storm).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -342,7 +417,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 lg:hidden">
         {/* #1305: white-label, workspace mark + name, not the Floom brand. */}
-        <Link href="/overview" className="flex items-center gap-2 min-w-0">
+        <Link href="/overview" prefetch={false} className="flex items-center gap-2 min-w-0">
           <WorkspaceMark size={22} />
           <MobileWorkspaceName />
         </Link>
@@ -355,10 +430,6 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           >
             <Search className="w-5 h-5" />
           </button>
-          {/* #1292: global alerts bell on mobile (AppShell's pane-anchored bell
-              is desktop-only). Self-fetches needs-attention; dropdown opens
-              below-right of the trigger. */}
-          <AlertsBell />
           <ThemeModeButton className="theme-mode-button-compact" />
           <button
             type="button"
@@ -435,13 +506,14 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
             {nav.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
-              const showBadge = item.badge && pendingCount > 0;
+              const badge = resolveNavBadge(item.badge, badgeCounts);
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  prefetch
+                  prefetch={false}
                   onMouseEnter={() => warm(item.href)}
+                  onPointerDown={() => warm(item.href)}
                   onFocus={() => warm(item.href)}
                   title={item.label}
                   className={cn(
@@ -452,9 +524,17 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                   )}
                 >
                   <item.icon className="w-4 h-4" />
-                  {showBadge && (
-                    <span className="absolute -top-0.5 -right-0.5 size-3.5 rounded-[var(--radius-pill)] bg-[var(--primary)] flex items-center justify-center text-[8px] font-bold text-[var(--primary-text)]">
-                      {pendingCount > 9 ? "9+" : pendingCount}
+                  {badge && (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute -top-0.5 -right-0.5 size-3.5 rounded-[var(--radius-pill)] flex items-center justify-center text-[8px] font-bold",
+                        badge.tone === "amber"
+                          ? AMBER_BADGE_CLASS
+                          : "bg-[var(--bg-2)] text-[var(--ink-soft)]",
+                      )}
+                    >
+                      {badge.count > 9 ? "9+" : badge.count}
                     </span>
                   )}
                 </Link>
@@ -462,18 +542,19 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             })}
             {/* Settings icon at bottom */}
             <div className="flex-1" />
-            {/* MCP, opens the install popup modal (above Settings). */}
+            {/* Agent setup, opens the install popup modal (above Settings). */}
             <button
               type="button"
               onClick={() => mcpModal.open()}
-              title="MCP, add Floom to your AI client"
-              aria-label="MCP, add Floom to your AI client"
+              title="Add Floom to your AI client"
+              aria-label="Add Floom to your AI client"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 hover:bg-[var(--active-nav-bg)] hover:text-ink"
             >
               <Terminal className="w-4 h-4" />
             </button>
             <Link
               href="/settings"
+              prefetch={false}
               title="Settings"
               className={cn(
                 "inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
@@ -636,16 +717,11 @@ export function UserProfileFooter({
           )}
           aria-label="Profile menu"
         >
-          {/* #1306 / M36: profile photo (Google/GitHub) beats generated default.
-              GenerativeAvatar handles the override ladder: avatarUrl present
-              → real photo cropped to circle; absent → generative default. */}
-          <GenerativeAvatar
-            seed={primary}
-            shape="circle"
-            size={28}
-            avatarUrl={photoUrl}
-            alt="Profile avatar"
-          />
+          {/* #1306 / M36: profile photo (Google/GitHub) beats generated mark.
+              Avatar handles the override ladder: src present → real photo
+              cropped to the circle (user = human); absent → generated mark. */}
+          {/* Pass user_id as stable seed so the mark survives display-name changes. */}
+          <Avatar role="user" id={user?.user_id} name={primary} src={photoUrl} size={28} />
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
             <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>

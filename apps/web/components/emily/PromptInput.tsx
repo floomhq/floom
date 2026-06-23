@@ -31,6 +31,7 @@ export function PromptInput({
   disabled,
   sendDisabled,
   variant = "default",
+  large = false,
   autoFocus = false,
 }: {
   value: string;
@@ -60,6 +61,13 @@ export function PromptInput({
    */
   variant?: "default" | "landing";
   /**
+   * Hero sizing (Federico 2026-06-21): the home empty-state composer is the
+   * primary call-to-action, so it gets a taller min-height, larger text, and
+   * more generous padding than the in-conversation composer. Borderless flat
+   * fill is preserved (it pairs with variant="landing").
+   */
+  large?: boolean;
+  /**
    * #1698: when the composer is the PRIMARY first action (the home/create
    * empty state reached via "New worker" / `?create=1`), focus it on mount so
    * clicking "New worker" gives immediate, visible feedback (a caret lands in
@@ -68,6 +76,7 @@ export function PromptInput({
   autoFocus?: boolean;
 }) {
   const isLanding = variant === "landing";
+  const textareaLabel = placeholder ?? "Describe the job you want done";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,9 +112,9 @@ export function PromptInput({
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, large ? 200 : 120)}px`;
     }
-  }, [value]);
+  }, [value, large]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files ?? []).filter((f) => f.size <= MAX_FILE_SIZE);
@@ -157,31 +166,42 @@ export function PromptInput({
           default: a single subtle divider outline keeps it discoverable.
           landing (#1557/P1-10): fully FLAT, no box border at all, to match the
           marketing landing prompt box; compact padding (py-2) keeps it short. */}
+      {/* Two-row composer: textarea on top, action toolbar below (attach left,
+          send right): the prompt-kit/ChatGPT/Cursor layout (Federico 2026-06-21).
+          Flat Floom system: bg fill, NO border, NO shadow. The a11y focus ring
+          (#1711) stays as the visible focus affordance. The bg-2 fill (non-landing)
+          gives the box resting discoverability without a border, replacing the
+          E10 divider outline, per Federico's approval. No "Tools" affordance. */}
       <div
         className={cn(
-          // a11y #1711: the inner <textarea> is outline-none, so the composer
-          // had no visible focus indicator. Move the focus affordance to the
-          // wrapper: a token-based ring (--ring = --accent-line) appears whenever
-          // the composer is focused, satisfying the visible-focus requirement
-          // without changing the resting flat look.
-          "flex items-center gap-2 rounded-xl bg-[var(--bg-app)] px-3 py-2",
+          "rounded-xl p-1.5 transition-colors",
           "focus-within:ring-2 focus-within:ring-[var(--ring)] focus-within:ring-offset-0",
-          isLanding
-            ? "[border:none]"
-            : "[border:var(--bd-div)]"
+          large && "p-2",
+          // landing keeps the fully-flat marketing look (#1557); the Emily
+          // composer uses a bg-2 fill so it's discoverable without a border.
+          isLanding ? "bg-[var(--bg-app)]" : "bg-[var(--bg-2)]",
         )}
       >
-        {/* Attach button */}
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
+        <textarea
+          ref={textareaRef}
+          // a11y #1711: explicit accessible name (the textarea has no visible
+          // <label>; the placeholder is not an accessible name).
+          aria-label={textareaLabel}
+          className={cn(
+            "w-full resize-none bg-transparent px-2 pt-1.5 outline-none placeholder:text-muted-foreground overflow-auto",
+            // Hero (large): bigger type + taller min-height so the home composer
+            // reads as the primary input. Standard: compact body text.
+            large
+              ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px]"
+              : "text-sm min-h-[24px] max-h-[120px]",
+          )}
+          placeholder={placeholder ?? "Message Emily..."}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKey}
+          rows={1}
           disabled={disabled}
-          className="shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-          title="Attach file"
-          aria-label="Attach file"
-        >
-          <Paperclip className="size-4" />
-        </button>
+        />
 
         <input
           ref={fileInputRef}
@@ -194,49 +214,52 @@ export function PromptInput({
           tabIndex={-1}
         />
 
-        <textarea
-          ref={textareaRef}
-          // a11y #1711: explicit accessible name (the textarea has no visible
-          // <label>; the placeholder is not an accessible name).
-          aria-label="Describe the job for a new worker"
-          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[120px] overflow-auto"
-          placeholder={placeholder ?? "Message Emily..."}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKey}
-          rows={1}
-          disabled={disabled}
-        />
+        {/* Action toolbar — attach left, send right */}
+        <div className="flex items-center gap-1 px-0.5">
+          {/* Attach button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+            title="Attach file"
+            aria-label="Attach file"
+          >
+            <Paperclip className="size-4" />
+          </button>
 
-        {isLanding ? (
-          // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
-          // landing's prompt CTA, not a bare arrow. Keeps the accessible name
-          // "Send message" so the send action stays discoverable to AT + tests.
-          <Button
-            size="sm"
-            className="h-7 shrink-0 gap-1.5 px-3 text-xs font-medium"
-            onClick={onSubmit}
-            disabled={!canSend}
-            style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
-            type="button"
-            aria-label="Hire worker"
-          >
-            Hire
-            <ArrowUp className="size-3.5" />
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="h-7 w-7 p-0 shrink-0"
-            onClick={onSubmit}
-            disabled={!canSend}
-            style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
-            type="button"
-            aria-label="Send message"
-          >
-            <SendHorizonal className="size-3.5" />
-          </Button>
-        )}
+          <div className="flex-1" />
+
+          {isLanding ? (
+            // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
+            // landing's prompt CTA, not a bare arrow. Keeps an accessible name so
+            // the send action stays discoverable to AT + tests.
+            <Button
+              size="sm"
+              className="h-8 shrink-0 gap-1.5 px-3 text-xs font-medium"
+              onClick={onSubmit}
+              disabled={!canSend}
+              style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
+              type="button"
+              aria-label="Hire worker"
+            >
+              Hire
+              <ArrowUp className="size-3.5" />
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="size-8 p-0 shrink-0"
+              onClick={onSubmit}
+              disabled={!canSend}
+              style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
+              type="button"
+              aria-label="Send message"
+            >
+              <SendHorizonal className="size-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

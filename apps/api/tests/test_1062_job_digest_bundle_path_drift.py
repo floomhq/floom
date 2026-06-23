@@ -93,6 +93,30 @@ def test_e2b_worker_dir_uses_shared_bare_relative_resolution(tmp_path, monkeypat
     assert resolved != (workers_dir.parent / "job-digest").resolve()
 
 
+def test_worker_serialize_bundle_dir_uses_shared_bare_relative_resolution(tmp_path, monkeypatch):
+    """The edit/show path must resolve like the run path.
+
+    Regression for #1859: PUT /workers/:id/files used services.worker_serialize
+    to choose a target dir. That helper still resolved bare bundle_path values
+    under WORKERS_DIR.parent, so an existing stale sibling dir could be updated
+    while E2B kept running the real bundle under WORKERS_DIR/<id>.
+    """
+    import worker_registry
+    from services.worker_serialize import _worker_bundle_dir
+
+    workers_dir = _engine_workers(tmp_path)
+    real_bundle = workers_dir / "job-digest"
+    stale_sibling = workers_dir.parent / "job-digest"
+    real_bundle.mkdir()
+    stale_sibling.mkdir()
+    monkeypatch.setattr(worker_registry, "WORKERS_DIR", workers_dir)
+
+    cfg = _Config("job-digest")
+    resolved = _worker_bundle_dir("job-digest", cfg)
+    assert resolved == real_bundle.resolve()
+    assert resolved != stale_sibling.resolve()
+
+
 def test_absolute_bundle_path_inside_root_is_honoured(tmp_path):
     """A correct absolute bundle_path under the current root is returned as-is."""
     workers_dir = _engine_workers(tmp_path)

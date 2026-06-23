@@ -288,9 +288,40 @@ def _worker_for_mutation(
         return worker
     if auth.is_admin:
         any_row = repos.workers.get_any(worker_id=worker_id)
-        if any_row and str(any_row.get("visibility") or "private") == "workspace":
+        if (
+            any_row
+            and str(any_row.get("visibility") or "private") == "workspace"
+            and _workspace_member_for_worker_row(any_row, auth=auth, repos=repos)
+        ):
             return any_row
     return None
+
+
+def _workspace_member_for_worker_row(
+    worker: Dict[str, Any],
+    *,
+    auth: "AuthContext",
+    repos: Repositories,
+) -> bool:
+    """Return whether auth.user_id belongs to the worker's workspace.
+
+    The admin mutation fallback must not use get_any alone: worker ids are
+    global and get_any is intentionally unscoped. Mirror the normal view path by
+    requiring active workspace membership before a global admin can mutate a
+    workspace-visible worker.
+    """
+    workspace_id = str(worker.get("workspace_id") or "").strip()
+    if not workspace_id:
+        return False
+    members = getattr(repos, "members", None)
+    if members is None:
+        return False
+    try:
+        row = members.get(workspace_id=workspace_id, user_id=auth.user_id)
+    except Exception:
+        logger.debug("worker mutation workspace-membership check failed for %s", worker.get("id"), exc_info=True)
+        return False
+    return bool(row) and str(row.get("status") or "") == "active"
 
 
 def _get_worker_for_workspace_share_source(
@@ -575,6 +606,18 @@ def _build_owned_tracked_ids() -> frozenset[str]:
         return frozenset(tracked)  # Fail open: treat all as owned
 
 
+def _owned_tracked_ids_from_rows(workers: List[Dict[str, Any]]) -> frozenset[str]:
+    """Git-tracked workers that are present as owned rows in the scoped repo result."""
+    tracked = _tracked_worker_ids()
+    if not tracked:
+        return frozenset()
+    return frozenset(
+        str(worker.get("id") or "")
+        for worker in workers
+        if str(worker.get("id") or "") in tracked and worker.get("owner_id") is not None
+    )
+
+
 def _worker_source_visible_to_api(worker_id: str) -> bool:
     if _worker_hidden_from_api(worker_id):
         return False
@@ -616,12 +659,14 @@ def _list_visible_workers(
     from worker_registry import discover_workers
 
     role = _visibility_role(role)
-    # Pre-load ownership for all git-tracked workers in one query so
-    # _worker_hidden_from_api() inside the loop doesn't fire N extra SELECTs.
-    _owned = _build_owned_tracked_ids()
+    db_workers = _list_db_workers(user_id=user_id, repos=repos, role=role)
+    # Build ownership from the already-scoped repo rows first. Cloud deployments
+    # may not have SQLite behind get_db(), so the scoped repository result is the
+    # authoritative source for whether a tracked id is a real user worker.
+    _owned = _owned_tracked_ids_from_rows(db_workers) or _build_owned_tracked_ids()
     visible = {
         worker["id"]: worker
-        for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
+        for worker in db_workers
         if not str(worker.get("id") or "").startswith(".")
         and not _worker_hidden_from_api(str(worker.get("id") or ""), _owned)
     }
@@ -717,14 +762,23 @@ def _normalize_run_status(status_value: str) -> str:
 
 def _available_connection_slugs_for_user(user_id: str, repos: "Repositories") -> set[str]:
     """Return lower-cased app_name slugs for all active connections owned by user_id."""
+    return _available_connection_slugs_for_users([user_id], repos)
+
+def _available_connection_slugs_for_users(user_ids: List[str], repos: "Repositories") -> set[str]:
+    """Return active connection slugs for one or more owner principals."""
     _live = {"active", "valid", "connected"}
+    slugs: set[str] = set()
     try:
-        rows = repos.connections.list(user_id=user_id)
-        return {
-            row_to_dict(r).get("app_name", "").lower()
-            for r in rows
-            if str((row_to_dict(r).get("status") or "")).lower() in _live
-        }
+        for user_id in dict.fromkeys(str(uid or "").strip() for uid in user_ids):
+            if not user_id:
+                continue
+            rows = repos.connections.list(user_id=user_id)
+            slugs.update(
+                row_to_dict(r).get("app_name", "").lower()
+                for r in rows
+                if str((row_to_dict(r).get("status") or "")).lower() in _live
+            )
+        return slugs
     except Exception:
         return set()
 

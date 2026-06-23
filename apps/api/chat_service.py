@@ -304,8 +304,13 @@ supplying the full run.py code yourself.
 
 **Runner** — always `exec.runner: "e2b"`. The local runner was removed.
 
-After creating a worker I re-read what was actually saved (connections, approvals,
-trigger) and confirm it matches what the user asked for before I say it's done.
+After creating a worker with `workers__create_from_prompt`, I stop. That tool
+starts the worker-author run and streams progress back to the UI; I do not call
+it again, list workers, or poll for completion in the same turn.
+
+After creating a worker with `workers__create`, I re-read what was actually
+saved (connections, approvals, trigger) and confirm it matches what the user
+asked for before I say it's done.
 
 **Links over walls of text.** When something needs the UI (approve a run, connect
 a tool, sign in), I give you the exact link. I don't describe where to go.
@@ -1412,6 +1417,81 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
             },
             _tool_slack_read_channel,
         ),
+        _make_tool(
+            "issues__list",
+            (
+                "List git-backed workspace issues (the workspace operating record). "
+                "Optionally filter by status ('open'|'closed'), label, asset_type "
+                "('worker'|'context'|'run'|'connection'|'approval'|'mcp'), and asset_id. "
+                "Use this to answer 'what issues are open for this workspace?'."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["open", "closed"]},
+                    "label": {"type": "string"},
+                    "asset_type": {"type": "string"},
+                    "asset_id": {"type": "string"},
+                },
+                "required": [],
+            },
+            _tool_issues_list,
+        ),
+        _make_tool(
+            "issues__create",
+            (
+                "Create a git-backed workspace issue. For a workspace-wide issue omit "
+                "asset_type/asset_id. To attach it to a worker/context/run, set "
+                "asset_type and asset_id together (e.g. asset_type='worker', "
+                "asset_id='gmail-inbox-manager'; asset_type='run', asset_id='run_123'). "
+                "labels are plain strings."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "asset_type": {"type": "string"},
+                    "asset_id": {"type": "string"},
+                    "source": {"type": "string"},
+                    "labels": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["title"],
+            },
+            _tool_issues_create,
+        ),
+        _make_tool(
+            "issues__comment",
+            "Add a comment to a workspace issue by id (e.g. 'ISSUE-0001').",
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "body": {"type": "string"},
+                },
+                "required": ["id", "body"],
+            },
+            _tool_issues_comment,
+        ),
+        _make_tool(
+            "issues__set_status",
+            (
+                "Close a workspace issue, or reopen it when reopen=true. "
+                "Pass the issue id (e.g. 'ISSUE-0001')."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "reopen": {
+                        "type": "boolean",
+                        "description": "Reopen instead of close (default false).",
+                    },
+                },
+                "required": ["id"],
+            },
+            _tool_issues_close,
+        ),
     ]
     blocked: set[str] = set()
     if not settings.get("connections_read"):
@@ -1448,6 +1528,10 @@ from services.chat_tool_impls import (  # noqa: E402,F401
     _tool_contexts_list,
     _tool_contexts_read,
     _tool_contexts_write,
+    _tool_issues_list,
+    _tool_issues_create,
+    _tool_issues_comment,
+    _tool_issues_close,
 )
 
 
@@ -2012,6 +2096,15 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
 def _fallback_reply_from_successful_tools(tool_results: List[tuple[str, Any]]) -> Optional[str]:
     """Build a deterministic assistant reply when the LLM fails after a tool succeeds."""
     for tool_name, result in reversed(tool_results):
+        if (
+            tool_name == "workers__create_from_prompt"
+            and isinstance(result, dict)
+            and result.get("ok") is True
+        ):
+            run_id = str(result.get("run_id") or "").strip()
+            if run_id:
+                return f"I started drafting that worker. Track progress in the run card for `{run_id}`."
+            return "I started drafting that worker. Track progress in the run card."
         if tool_name != "workers__list_all" or not isinstance(result, dict) or result.get("ok") is not True:
             continue
         workers = [
@@ -2321,7 +2414,7 @@ async def stream_chat(
                 include_usage=True,
                 extra_args=_llm.cache_control_extra_args(_emily_model),
             ),
-            tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
+            tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs", "workers__create_from_prompt"]},
         )
 
         result = Runner.run_streamed(
@@ -2523,6 +2616,16 @@ async def stream_chat(
         full_reply = "".join(assistant_text_parts).strip()
         if not full_reply and "reply" in final_reply_box:
             full_reply = final_reply_box["reply"]
+        if not full_reply:
+            full_reply = _fallback_reply_from_successful_tools(successful_tool_results) or ""
+            if full_reply:
+                await part_queue.put({
+                    "type": "text",
+                    "version": CHAT_EVENT_VERSION,
+                    "conversation_id": conversation_id,
+                    "message_id": assistant_message_id,
+                    "text": full_reply,
+                })
         full_reply = _sanitize_preview_text(full_reply)
         full_reply = _ensure_bare_greeting_identity(message, full_reply)
         if full_reply:

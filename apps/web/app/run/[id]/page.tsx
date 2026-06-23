@@ -22,8 +22,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Avatar } from "@/components/ui/Avatar";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/WorkerInputForm";
 import { RunPanel } from "@/components/run-page/RunPanel";
@@ -64,11 +64,9 @@ function WorkerIdentityPanel({ worker }: { worker: WorkerDetail }) {
   const slugs = connectionSlugs(worker);
   return (
     <div className="space-y-3">
-      {/* Avatar + name */}
+      {/* Identity mark + name — a worker is a non-human entity (squircle). */}
       <div className="flex items-center gap-3">
-        <span className="c-logo shrink-0">
-          <Layers className="size-4 text-[var(--ink-soft)]" />
-        </span>
+        <Avatar role="worker" id={worker.id} name={worker.name} size={36} />
         <div className="min-w-0">
           <p className="font-semibold text-[var(--ink)] truncate">{worker.name}</p>
           {worker.config.trigger?.type && (

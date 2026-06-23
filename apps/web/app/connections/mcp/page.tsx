@@ -940,10 +940,9 @@ export default function McpConnectionsPage() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        MCP servers declared in a worker&apos;s{" "}
-        <code className="rounded bg-muted px-1 py-0.5 font-mono">worker.yml</code>{" "}
+        MCP servers declared in a worker file&apos;s{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono">connections</code> list are
-        connected at run time. Auth secrets are resolved by name, their values are never
+        connected at run time. Secrets are resolved by name, their values are never
         stored here. Prefer the terminal? Run{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono">{IMPORT_CONFIG_COMMAND}</code>.
       </p>

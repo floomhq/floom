@@ -45,15 +45,23 @@ and CycloneDX JSON.
 Recommended commands:
 
 ```bash
-# Whole repository SPDX SBOM from GitHub's dependency graph
+# Repository SPDX SBOM from checked-in dependency manifests
+npm run sbom
+
+# Optional GitHub dependency-graph export when the repository is public/enabled
 gh api \
   -H "Accept: application/vnd.github+json" \
   /repos/floomhq/floom/dependency-graph/sbom \
-  > floom-sbom.spdx.json
+  > docs/sbom/floom-sbom.github.spdx.json
 
 # Optional local cross-check when syft is installed
 syft . -o cyclonedx-json > floom-sbom.cdx.json
 ```
+
+The current generated SPDX file is checked in at
+[`docs/sbom/floom-sbom.spdx.json`](sbom/floom-sbom.spdx.json). Attach that file
+to the GitHub release, along with any GitHub or Syft cross-check output used for
+the release.
 
 Release reviewers should check that:
 

@@ -122,6 +122,7 @@ describe("Sidebar IA — nav label is 'Connections'", () => {
     const connections = screen.getByRole("link", { name: /connections/i });
     expect(connections).toHaveAttribute("href", "/connections");
     expect(screen.queryByRole("link", { name: /integrations/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^mcp/i })).toBeNull();
     // Secrets is not a sidebar sub-item (it is a type filter on /connections).
     expect(screen.queryByRole("link", { name: /^secrets$/i })).toBeNull();
   });

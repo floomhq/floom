@@ -2,6 +2,7 @@ import { basename, resolve as resolvePath, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createAuthenticatedClient, FloomApiError } from "../lib/api.js";
+import { getCommandName } from "../lib/command-name.js";
 import { log, printJson } from "../lib/output.js";
 
 type ParsedInputs = {
@@ -13,9 +14,20 @@ type RunDetail = {
   id: string;
   status: string;
   output?: Record<string, unknown>;
+  outputs?: Record<string, unknown>;
+  output_schema?: Array<{ name?: string; value?: unknown }>;
   error?: string | null;
   artifacts?: Array<{ id: string; name?: string }>;
 };
+
+function apiErrorDetail(error: FloomApiError): string {
+  const body = error.body;
+  if (body && typeof body === "object" && "detail" in body) {
+    const detail = (body as { detail: unknown }).detail;
+    return typeof detail === "string" ? detail : JSON.stringify(detail);
+  }
+  return error.message;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -61,15 +73,16 @@ export function parseInputAssignments(inputs: string[] = [], inputsFile?: string
 }
 
 function printPrettyRun(run: RunDetail, savedPaths: string[]): void {
+  const output = effectiveRunOutput(run);
   log.heading(`Run ${run.id}`);
   log.kv("Status", run.status);
   if (run.error) {
     log.err(run.error);
   }
-  if (run.output && Object.keys(run.output).length) {
+  if (Object.keys(output).length) {
     log.blank();
     log.info("Output:");
-    for (const [key, value] of Object.entries(run.output)) {
+    for (const [key, value] of Object.entries(output)) {
       log.step(`${key}:`);
       if (typeof value === "string") {
         process.stdout.write(value + "\n");
@@ -87,19 +100,34 @@ function printPrettyRun(run: RunDetail, savedPaths: string[]): void {
   }
 }
 
+function effectiveRunOutput(run: RunDetail): Record<string, unknown> {
+  if (run.output && Object.keys(run.output).length) return run.output;
+  if (run.outputs && Object.keys(run.outputs).length) return run.outputs;
+  const fromSchema: Record<string, unknown> = {};
+  for (const field of run.output_schema || []) {
+    if (typeof field.name === "string" && field.name && field.value !== undefined && field.value !== null) {
+      fromSchema[field.name] = field.value;
+    }
+  }
+  return fromSchema;
+}
+
 export async function runWorkerCommand(
   workerId: string,
   options: { input?: string[]; inputsFile?: string; outputDir?: string; json?: boolean },
 ): Promise<number> {
-  const { client } = await createAuthenticatedClient().catch((error) => {
+  let client;
+  try {
+    ({ client } = await createAuthenticatedClient());
+  } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
       log.err("Not authenticated.");
-      log.info("Run: floom login");
-      process.exit(1);
+      log.info(`Run: ${getCommandName()} login`);
+      return 1;
     }
     throw error;
-  });
+  }
   const parsedInputs = parseInputAssignments(options.input || [], options.inputsFile);
 
   const resolvedInputs: Record<string, unknown> = { ...parsedInputs.values };
@@ -119,17 +147,21 @@ export async function runWorkerCommand(
   } catch (error) {
     if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Worker '${workerId}' not found.`);
-      log.info("List available workers: floom workers list");
+      log.info(`List available workers: ${getCommandName()} workers list`);
       return 1;
     }
     if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
       log.err("Your session expired.");
-      log.info("Re-run: floom login");
+      log.info(`Re-run: ${getCommandName()} login`);
       return 1;
     }
     if (error instanceof FloomApiError && error.status && error.status >= 500) {
       log.err(`API error starting run.`);
       log.info("Check API status, then retry. Report: https://github.com/floomhq/floom/issues");
+      return 1;
+    }
+    if (error instanceof FloomApiError && error.status && error.status >= 400) {
+      log.err(`API rejected run request: ${apiErrorDetail(error)}`);
       return 1;
     }
     throw error;
@@ -172,6 +204,11 @@ export async function runWorkerCommand(
 
   if (!latest) {
     throw new Error("Run polling ended without a run payload");
+  }
+
+  const output = effectiveRunOutput(latest);
+  if (Object.keys(output).length) {
+    latest = { ...latest, output, outputs: output };
   }
 
   if (options.json) {

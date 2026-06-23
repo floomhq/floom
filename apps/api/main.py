@@ -554,6 +554,7 @@ from services.worker_access import (
     _worker_access_user_id,
     _normalize_run_status,
     _available_connection_slugs_for_user,
+    _available_connection_slugs_for_users,
     _normalize_trigger_type,
     _trigger_label,
     _list_operator_workers,
@@ -898,6 +899,7 @@ async def lifespan(app: FastAPI):
     register_part_publisher(_run_part_publish)
     # Startup
     _validate_startup_configuration()
+    _warn_if_upload_signing_unconfigured()
     _warn_if_composio_webhook_unconfigured()
     # #603: migrate any DB rows that still store exec.mode="hybrid" to "pure-script".
     # The "hybrid" mode was a deprecated alias; removing it from the Literal without
@@ -1218,6 +1220,22 @@ def _validate_startup_configuration() -> None:
             )
     if deploy != "local":
         get_auth_provider()
+
+
+def _warn_if_upload_signing_unconfigured() -> None:
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local":
+        return
+    if (os.environ.get("WORKEROS_UPLOAD_URL_SIGNING_SECRET") or "").strip():
+        return
+    if (os.environ.get("FLOOM_SECRET") or "").strip():
+        return
+    logger.error(
+        "WORKEROS_UPLOAD_URL_SIGNING_SECRET is not configured and FLOOM_SECRET "
+        "is absent; /uploads download token minting will return 503. Set "
+        "WORKEROS_UPLOAD_URL_SIGNING_SECRET in the API environment before "
+        "using file-input workers (#1892)."
+    )
 
 
 def _warn_if_composio_webhook_unconfigured() -> None:
@@ -2217,11 +2235,12 @@ def _resolve_file_input_references(
     with get_db() as conn:
         for inp in file_inputs:
             value = resolved_inputs.get(inp.name)
-            if value in (None, ""):
+            if value in (None, "", []):
                 # Optional file omitted for this run — leave it absent in the
                 # per-run dir so stale files from earlier runs are never visible.
                 continue
-            if not is_sha256(value):
+            raw_values = value if isinstance(value, list) else [value]
+            if any(not is_sha256(item) for item in raw_values):
                 raise HTTPException(
                     status_code=400,
                     detail=(
@@ -2231,6 +2250,72 @@ def _resolve_file_input_references(
                 )
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
                 raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
+
+            if isinstance(value, list):
+                mounted_values: List[str] = []
+                group_dir = run_inputs_dir / inp.name
+                group_dir.mkdir(parents=True, exist_ok=True)
+                for idx, file_id in enumerate(raw_values):
+                    row = conn.execute(
+                        "SELECT id, filename, media_type, size_bytes, uploaded_by FROM files WHERE id = ?",
+                        (file_id,),
+                    ).fetchone()
+                    if not row:
+                        raise HTTPException(status_code=404, detail=f"Uploaded file not found: {inp.name}")
+                    source = blob_path(row["id"])
+                    if not source.is_file():
+                        raise HTTPException(status_code=400, detail=f"Uploaded file blob missing: {inp.name}")
+                    if inp.accepts:
+                        accepted = set(inp.accepts)
+                        if row["media_type"] not in accepted:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=(
+                                    f"File input '{inp.name}': stored media_type {row['media_type']!r} "
+                                    f"is not in accepts {sorted(accepted)}"
+                                ),
+                            )
+                    if inp.max_size_mb is not None:
+                        max_bytes = int(inp.max_size_mb * 1024 * 1024)
+                        if row["size_bytes"] > max_bytes:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=(
+                                    f"File input '{inp.name}': stored size {row['size_bytes']} bytes "
+                                    f"exceeds max_size_mb={inp.max_size_mb}"
+                                ),
+                            )
+                    file_owner = row["uploaded_by"] or "anonymous"
+                    if not _user_owns_uploaded_file(conn, row["id"], bound_by):
+                        logger.info(
+                            "file_binding_audit: run=%s worker=%s input=%s sha=%s "
+                            "uploaded_by=%r bound_by=%r",
+                            run_id,
+                            worker_id,
+                            inp.name,
+                            row["id"],
+                            file_owner,
+                            bound_by,
+                        )
+                        try:
+                            conn.execute(
+                                """
+                                INSERT INTO file_binding_audit
+                                    (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
+                            )
+                        except sqlite3.OperationalError as exc:
+                            logger.debug("file_binding_audit write skipped: %s", exc)
+                        raise HTTPException(status_code=403, detail=f"Uploaded file not found: {inp.name}")
+                    ext = extension_for_file(row["filename"], row["media_type"])
+                    mounted = group_dir / f"{idx + 1:03d}{ext}"
+                    shutil.copyfile(source, mounted)
+                    mounted_values.append(str(mounted))
+                    bound_file_ids.append(row["id"])
+                resolved_inputs[inp.name] = mounted_values
+                continue
 
             row = conn.execute(
                 "SELECT id, filename, media_type, size_bytes, uploaded_by FROM files WHERE id = ?",
@@ -2314,9 +2399,10 @@ def _validate_file_input_references(
         if getattr(inp, "type", None) != "file":
             continue
         value = inputs.get(inp.name)
-        if value in (None, ""):
+        if value in (None, "", []):
             continue
-        if not is_sha256(value):
+        raw_values = value if isinstance(value, list) else [value]
+        if any(not is_sha256(item) for item in raw_values):
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -3513,7 +3599,7 @@ async def draft_and_create_worker(
             draft_files_from_llm.append(DraftFile(path="SKILL.md", content=skill_md_str))
 
     # Parse worker_id from validated YAML
-    worker_id, _config2 = _parse_worker_payload(worker_yml_str, user_id=auth.user_id)
+    worker_id, _config2 = _parse_worker_payload(worker_yml_str, user_id=auth.user_id, repos=repos)
 
     # #186: the LLM author often returns the same suggested id regardless of
     # prompt. Rather than 409 on collision, allocate a free id and rewrite the
@@ -3682,6 +3768,9 @@ def update_worker(
     """Update an existing worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
+    if payload.run_py is None:
+        raise HTTPException(status_code=422, detail="run_py is required")
+
     worker_id = _canonical_worker_id(worker_id)
     raw_worker_id = _raw_worker_id_from_worker_yml(payload.worker_yml)
     if raw_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
@@ -3691,7 +3780,7 @@ def update_worker(
         )
     _raise_if_protected_worker_mutation(worker_id)
 
-    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
+    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id, repos=repos)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
@@ -3923,7 +4012,7 @@ def update_worker_files(
 
     # Validate worker.yml is parseable
     yml_item = next(f for f in payload.files if f.path == "worker.yml")
-    parsed_worker_id, _config = _parse_worker_payload(yml_item.content, user_id=auth.user_id)
+    parsed_worker_id, _config = _parse_worker_payload(yml_item.content, user_id=auth.user_id, repos=repos)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
@@ -4061,6 +4150,178 @@ def reload_workers(
     return _reload_workers_for_user(auth.user_id)
 
 
+def _parse_inbox_metadata(raw: Optional[str]) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="metadata must be a JSON object") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="metadata must be a JSON object")
+    return parsed
+
+
+def _inbox_file_input_name(config: Optional[WorkerConfig], explicit: Optional[str]) -> Optional[str]:
+    if not config:
+        return explicit
+    file_inputs = [inp for inp in getattr(config, "inputs", []) or [] if getattr(inp, "type", None) == "file"]
+    if explicit:
+        if explicit not in {inp.name for inp in file_inputs}:
+            raise HTTPException(status_code=400, detail=f"Unknown file input: {explicit}")
+        return explicit
+    if len(file_inputs) == 1:
+        return file_inputs[0].name
+    if len(file_inputs) > 1:
+        required = [inp.name for inp in file_inputs if getattr(inp, "required", False)]
+        if len(required) == 1:
+            return required[0]
+        raise HTTPException(
+            status_code=400,
+            detail="input_name is required when a worker declares multiple file inputs",
+        )
+    return None
+
+
+def _build_inbox_run_inputs(
+    *,
+    config: Optional[WorkerConfig],
+    uploaded_files: List[Dict[str, Any]],
+    input_name: Optional[str],
+    group_id: Optional[str],
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not uploaded_files:
+        raise HTTPException(status_code=400, detail="at least one file is required")
+    selected_input = _inbox_file_input_name(config, input_name)
+    inputs: Dict[str, Any] = {}
+    file_ids = [str(item["id"]) for item in uploaded_files]
+    if selected_input:
+        inputs[selected_input] = file_ids[0] if len(file_ids) == 1 else file_ids
+    else:
+        inputs["files"] = [
+            {
+                "id": str(item["id"]),
+                "sha256": str(item.get("sha256") or item["id"]),
+                "name": str(item.get("filename") or item.get("name") or item["id"]),
+                "media_type": str(item.get("media_type") or "application/octet-stream"),
+                "size": int(item.get("size") or 0),
+                "url": str(item.get("url") or ""),
+            }
+            for item in uploaded_files
+        ]
+    inputs["inbox"] = {
+        "group_id": group_id,
+        "file_count": len(uploaded_files),
+        "metadata": metadata,
+    }
+    return inputs
+
+
+_inbox_rate_lock = threading.Lock()
+_inbox_rate_store: Dict[str, collections.deque] = {}
+
+
+def _inbox_file_limit() -> int:
+    try:
+        return max(1, int(os.environ.get("FLOOM_INBOX_MAX_FILES", "25")))
+    except ValueError:
+        return 25
+
+
+def _inbox_rate_config() -> tuple[int, float]:
+    try:
+        limit = int(os.environ.get("FLOOM_INBOX_RATE_LIMIT", "10"))
+    except ValueError:
+        limit = 10
+    try:
+        window = float(os.environ.get("FLOOM_INBOX_RATE_WINDOW_SECONDS", "60"))
+    except ValueError:
+        window = 60.0
+    return max(0, limit), max(1.0, window)
+
+
+def _check_inbox_rate_limit(key: str) -> bool:
+    limit, window = _inbox_rate_config()
+    if limit <= 0:
+        return True
+    now = time.monotonic()
+    cutoff = now - window
+    with _inbox_rate_lock:
+        dq = _inbox_rate_store.setdefault(key, collections.deque())
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= limit:
+            return False
+        dq.append(now)
+    return True
+
+
+@app.post("/workers/{worker_id}/inbox", response_model=ActionResponse)
+async def upload_worker_inbox(
+    worker_id: str,
+    request: Request,
+    files: List[UploadFile] = File(...),
+    input_name: Optional[str] = Form(None),
+    group_id: Optional[str] = Form(None),
+    metadata: Optional[str] = Form(None),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Upload one grouped batch of files and enqueue one worker run."""
+    from services.uploads import _store_uploaded_blob
+
+    worker_id = _canonical_worker_id(worker_id)
+    if not files:
+        raise HTTPException(status_code=400, detail="at least one file is required")
+    max_files = _inbox_file_limit()
+    if len(files) > max_files:
+        raise HTTPException(status_code=400, detail=f"inbox uploads support at most {max_files} files")
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    rate_key = f"user:{auth.user_id or 'anonymous'}:worker:{worker_id}:inbox"
+    if not _check_inbox_rate_limit(rate_key):
+        raise HTTPException(status_code=429, detail="Inbox upload rate limit exceeded")
+    parsed_metadata = _parse_inbox_metadata(metadata)
+    config = get_worker_config_for_run(worker_id)
+    selected_input = _inbox_file_input_name(config, input_name)
+    accepted = None
+    max_size_mb = None
+    if config and selected_input:
+        for inp in getattr(config, "inputs", []) or []:
+            if inp.name == selected_input:
+                accepted = json.dumps(inp.accepts) if inp.accepts else None
+                max_size_mb = inp.max_size_mb
+                break
+    uploaded = []
+    uploader = auth.user_id or "anonymous"
+    for file in files:
+        stored = await _store_uploaded_blob(
+            request,
+            file,
+            uploader,
+            accepts=accepted,
+            max_size_mb=max_size_mb,
+        )
+        stored["filename"] = file.filename or stored["id"]
+        uploaded.append(stored)
+    inputs = _build_inbox_run_inputs(
+        config=config,
+        uploaded_files=uploaded,
+        input_name=selected_input,
+        group_id=group_id,
+        metadata=parsed_metadata,
+    )
+    return create_worker_run(
+        worker_id,
+        RunCreate(inputs=inputs, trigger_source="inbox"),
+        request,
+        auth=auth,
+        repos=repos,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Runs
 # ---------------------------------------------------------------------------
@@ -4148,7 +4409,7 @@ def create_worker_run(
             detail=f"Cannot run: missing required secret(s): {', '.join(_run_missing_secrets)}. "
                    f"Add them at /connections/secrets before running.",
         )
-    _run_available_conn_slugs = _available_connection_slugs_for_user(auth.user_id, repos)
+    _run_available_conn_slugs = _available_connection_slugs_for_users([auth.user_id, true_owner_id], repos)
     _run_required_conn_slugs = _worker_connection_slugs(worker)
     _run_missing_conns = [c for c in _run_required_conn_slugs if c.lower() not in _run_available_conn_slugs]
     if _run_missing_conns:
@@ -4253,6 +4514,7 @@ def create_worker_run(
         )
         raise
     except Exception as exc:
+        logger.exception("File input resolution failed for run %s worker %s", run_id, worker_id)
         update_run_status(
             run_id,
             RunStatus.FAILED.value,
@@ -4261,7 +4523,7 @@ def create_worker_run(
             user_id=true_owner_id,
             repos=repos,
         )
-        raise
+        raise HTTPException(status_code=500, detail="File input resolution failed") from exc
     # Persist resolved inputs (absolute file paths replace SHA values) so that
     # GET /runs/:id returns the staged paths, not raw SHA strings.
     repos.runs.set_input_json(user_id=true_owner_id, run_id=run_id, input_json=resolved_inputs)
@@ -5333,6 +5595,10 @@ app.include_router(review_pack_router)
 from routers.workspace import workspace_router
 app.include_router(workspace_router)
 
+# Git-backed workspace issues (#1781): .floom/issues/ in the workspace git repo.
+from routers.workspace_issues import workspace_issues_router
+app.include_router(workspace_issues_router)
+
 # Auth + users route group (setup/login/logout/magic/me, user CRUD, PAT tokens).
 from routers.auth import auth_router
 app.include_router(auth_router)
@@ -5590,19 +5856,27 @@ def _workspace_agent_mcp_conversation_id(raw: Any) -> str:
     return f"langdock:{safe or 'default'}"
 
 
-def _workspace_agent_mcp_discovery() -> Dict[str, Any]:
+def _workspace_agent_mcp_visible_tool_names(auth: AuthContext) -> List[str]:
+    return [
+        tool["name"]
+        for tool in _workeros_remote_mcp_tool_definitions()
+        if _mcp_access_error(str(tool["name"]), auth) is None
+    ]
+
+
+def _workspace_agent_mcp_discovery(auth: AuthContext) -> Dict[str, Any]:
     return {
         "name": _WORKEROS_REMOTE_MCP_NAME,
         "version": _WORKEROS_REMOTE_MCP_VERSION,
         "protocol": _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION,
         "transport": "streamable-http",
         "endpoint": "POST /api/mcp",
-        "tools": [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()],
+        "tools": _workspace_agent_mcp_visible_tool_names(auth),
     }
 
 
-def _workspace_agent_mcp_setup_card() -> Dict[str, Any]:
-    tools = [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()]
+def _workspace_agent_mcp_setup_card(auth: AuthContext) -> Dict[str, Any]:
+    tools = _workspace_agent_mcp_visible_tool_names(auth)
     recommended_prompt = (
         "You are the Floom Agent. Use Floom MCP actions to inspect workers, "
         "runs, brain packs, connections, and secrets. Use ask_workspace_agent for "
@@ -5731,7 +6005,18 @@ def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]
 
 
 def _mcp_api_result(data: Any, status_code: int) -> Dict[str, Any]:
-    return _mcp_content(_mcp_text(data), status_code >= 400)
+    if status_code >= 400:
+        return {
+            "content": [{"type": "text", "text": _mcp_text(data)}],
+            "structuredContent": _mcp_redact(
+                {
+                    "status": status_code,
+                    "detail": jsonable_encoder(data),
+                }
+            ),
+            "isError": True,
+        }
+    return _mcp_call_result(data)
 
 
 def _mcp_max_batch_items() -> int:
@@ -6080,8 +6365,26 @@ def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: R
     return _mcp_call_result(data, "Worker run started.")
 
 
+def _mcp_request_for_runs_list(arguments: Dict[str, Any]) -> Request:
+    from urllib.parse import urlencode
+
+    query: Dict[str, Any] = {}
+    for key in ("worker_id", "status", "limit", "offset"):
+        value = arguments.get(key)
+        if value is not None:
+            query[key] = value
+    return Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/runs",
+        "headers": [],
+        "query_string": urlencode(query).encode("utf-8"),
+    })
+
+
 def _mcp_call_runs_list(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     data = list_runs(
+        _mcp_request_for_runs_list(arguments),
         Response(),
         worker_id=arguments.get("worker_id") or None,
         status=arguments.get("status") or None,
@@ -6436,50 +6739,42 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
 
 @app.get("/api/mcp")
 async def workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/mcp")
 async def workspace_agent_mcp_mount_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/api/mcp/setup/langdock")
 async def workspace_agent_mcp_langdock_setup(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_setup_card())
+    return JSONResponse(_workspace_agent_mcp_setup_card(auth))
 
 
 @app.get("/mcp/setup/langdock")
 async def workspace_agent_mcp_mount_langdock_setup(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_setup_card())
+    return JSONResponse(_workspace_agent_mcp_setup_card(auth))
 
 
 @app.get("/langdock/mcp")
 async def langdock_workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/workspace-agent/mcp")
 async def workspace_agent_named_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/api/langdock/mcp")
 async def api_langdock_workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.get("/api/workspace-agent/mcp")
 async def api_workspace_agent_named_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    del auth
-    return JSONResponse(_workspace_agent_mcp_discovery())
+    return JSONResponse(_workspace_agent_mcp_discovery(auth))
 
 
 @app.post("/api/mcp")
@@ -6617,6 +6912,202 @@ class WebhookSecretResponse(BaseModel):
     # The CURRENT webhook URL after rotation. Rotating changes the URL token
     # (it derives from the rotatable secret), so the user must re-register this.
     webhook_url: Optional[str] = None
+
+
+async def _verified_worker_webhook_body(
+    *,
+    worker_id: str,
+    request: Request,
+    token: Optional[str],
+    repos: Repositories,
+) -> bytes:
+    """Verify per-worker webhook token/signature and return the raw body."""
+    from webhook_service import get_webhook_secret_hash, verify_signature, verify_webhook_token
+
+    body = await request.body()
+    if token is not None:
+        if not verify_webhook_token(worker_id, token, repos=repos):
+            raise HTTPException(status_code=401, detail="Invalid webhook token")
+        return body
+
+    secret_hash = get_webhook_secret_hash(worker_id, repos=repos)
+    if not secret_hash:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Webhook secret not configured — call POST "
+                f"/workers/{worker_id}/webhook-secret/rotate first"
+            ),
+        )
+    sig_header = (
+        request.headers.get("X-Floom-Signature", "")
+        or request.headers.get("X-Workeros-Signature", "")
+    )
+    if not verify_signature(body, sig_header, secret_hash):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    return body
+
+
+def _parse_webhook_json_body(body: bytes) -> Dict[str, Any]:
+    if not body:
+        return {}
+    try:
+        parsed = json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Resume body must be valid JSON")
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="Resume body must be a JSON object")
+    return parsed
+
+
+def _external_result_from_resume_payload(payload: Dict[str, Any]) -> Any:
+    if "result" in payload:
+        return payload["result"]
+    return {k: v for k, v in payload.items() if k not in {"key", "run_id"}}
+
+
+def _find_pending_await_external(
+    *,
+    worker_id: str,
+    key: str,
+    run_id: Optional[str],
+) -> Dict[str, Any]:
+    with get_db() as conn:
+        params: list[Any] = [worker_id, RunStatus.PENDING_APPROVAL.value]
+        run_clause = ""
+        if run_id:
+            run_clause = "AND a.run_id = ?"
+            params.append(run_id)
+        rows = conn.execute(
+            f"""
+            SELECT a.*, r.status AS run_status
+            FROM approvals a
+            JOIN runs r ON r.id = a.run_id
+            WHERE a.worker_id = ?
+              AND a.status = 'pending'
+              AND r.status = ?
+              {run_clause}
+            ORDER BY a.created_at ASC
+            """,
+            tuple(params),
+        ).fetchall()
+
+    matches: list[Dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        try:
+            decision_input = json.loads(item.get("decision_input_json") or "{}")
+        except Exception:
+            decision_input = {}
+        if not isinstance(decision_input, dict):
+            continue
+        if decision_input.get("kind") != "await_external":
+            continue
+        if str(decision_input.get("key") or "") != key:
+            continue
+        item["_decision_input"] = decision_input
+        matches.append(item)
+
+    if not matches:
+        raise HTTPException(status_code=404, detail="No pending await_external run found")
+    if len(matches) > 1:
+        raise HTTPException(status_code=409, detail="Multiple pending await_external runs match; include run_id")
+    return matches[0]
+
+
+@app.post("/webhooks/{worker_id}/resume", response_model=ActionResponse)
+async def webhook_resume(
+    worker_id: str,
+    request: Request,
+    token: Optional[str] = Query(None),
+) -> ActionResponse:
+    """Resume a run parked by await_external using per-worker webhook auth."""
+    repos = get_repositories()
+
+    client_ip = (request.client.host if request.client else "unknown")
+    rl_key = f"{worker_id}:resume:{client_ip}"
+    if not _check_webhook_rate_limit(rl_key):
+        raise HTTPException(status_code=429, detail="Too many webhook requests")
+
+    worker = repos.workers.get_any(worker_id=worker_id) or get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    owner_id = worker.get("owner_id")
+    if not owner_id:
+        raise HTTPException(status_code=404, detail="Worker owner not found")
+
+    body = await _verified_worker_webhook_body(
+        worker_id=worker_id,
+        request=request,
+        token=token,
+        repos=repos,
+    )
+    payload = _parse_webhook_json_body(body)
+    key = str(payload.get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Resume body must include key")
+    requested_run_id = str(payload.get("run_id") or "").strip() or None
+    wait_row = _find_pending_await_external(
+        worker_id=worker_id,
+        key=key,
+        run_id=requested_run_id,
+    )
+
+    parked_run_id = str(wait_row.get("run_id") or "")
+    decision_input = wait_row.get("_decision_input") or {}
+    original_inputs = decision_input.get("original_inputs")
+    if not isinstance(original_inputs, dict):
+        original_inputs = {}
+    external_result = _external_result_from_resume_payload(payload)
+    follow_up_inputs = {
+        **original_inputs,
+        "external_result": external_result,
+        "_workeros_await_external": {
+            "key": key,
+            "run_id": parked_run_id,
+        },
+    }
+
+    claimed = repos.approvals.approve(
+        owner_id=str(owner_id),
+        run_id=parked_run_id,
+        decided_at=now_iso(),
+        reason="External result received",
+    )
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="Await external run already resumed")
+
+    repos.runs.update_status(
+        user_id=str(owner_id),
+        run_id=parked_run_id,
+        status=RunStatus.COMPLETED.value,
+    )
+    try:
+        follow_up_run_id = create_run(
+            worker_id,
+            follow_up_inputs,
+            trigger_source="webhook_resume",
+            status=RunStatus.RUNNING.value,
+            user_id=str(owner_id),
+            repos=repos,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to spawn resumed run: {exc}") from exc
+
+    attach = getattr(repos.approvals, "attach_follow_up", None)
+    if callable(attach):
+        attach(
+            owner_id=str(owner_id),
+            run_id=parked_run_id,
+            follow_up_run_id=follow_up_run_id,
+        )
+    repos.runs.update_status(
+        user_id=str(owner_id),
+        run_id=follow_up_run_id,
+        status=RunStatus.QUEUED.value,
+    )
+    start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=str(owner_id), repos=repos)
+    return ActionResponse(status="resumed", run_id=follow_up_run_id)
 
 
 
@@ -6833,12 +7324,29 @@ def _api_call_response_data(resp: Any) -> Any:
     — leaking server internals to external MCP clients. The raw body is now
     logged server-side and the client gets a generic message.
     """
+    status_code = int(getattr(resp, "status_code", 0) or 0)
+    raw = getattr(resp, "content", b"")
+    if raw in (b"", "", None) or status_code == 204:
+        return {}
     try:
         return resp.json()
     except Exception:
+        content_type = str(getattr(resp, "headers", {}).get("content-type", "")).lower()
+        if status_code < 400 and (
+            content_type.startswith("text/")
+            or "markdown" in content_type
+            or "charset=" in content_type
+        ):
+            return {"content": getattr(resp, "text", "")}
+        if status_code < 400:
+            return {
+                "content_type": content_type or "application/octet-stream",
+                "size_bytes": len(raw) if isinstance(raw, (bytes, bytearray)) else len(str(raw)),
+                "binary": True,
+            }
         logger.warning(
             "MCP proxy: non-JSON internal response (status %s): %.300s",
-            getattr(resp, "status_code", "?"),
+            status_code,
             getattr(resp, "text", ""),
         )
         return {"detail": "Internal server error"}
@@ -7385,8 +7893,25 @@ async def _mcp_dispatch(
     custom = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=name)
     if custom:
         worker_id = custom["worker_id"]
-        run_id = create_run(worker_id, a, "mcp", user_id=auth.user_id, repos=repos)
-        start_run(run_id, worker_id, a, user_id=auth.user_id, repos=repos)
+        # Hosted/cloud workers created via MCP may be backed by persisted DB
+        # files instead of a static WORKERS_DIR entry. Use the same internal
+        # API path as workers.run so cloud overrides materialize/queue them.
+        created, status_code = await _api_call(
+            "POST",
+            f"/workers/{_enc(worker_id)}/runs",
+            request,
+            body={"inputs": a, "trigger_source": "mcp"},
+        )
+        if status_code >= 400:
+            return _mcp_api_result(created, status_code)
+        run_id = str(created.get("run_id") or created.get("id") or "")
+        if not run_id:
+            result = _mcp_call_result(
+                {"status": "error", "detail": "Worker run response did not include run_id."},
+                "Worker run failed.",
+            )
+            result["isError"] = True
+            return result
         # #835 RCA: this loop blocked the HTTP connection for up to 120s per
         # call — concurrent custom-tool calls exhausted the connection pool.
         # Fix: wait at most the shared 30s MCP cap so fast tools still return
@@ -7396,25 +7921,34 @@ async def _mcp_dispatch(
         run = None
         while _time.monotonic() < deadline:
             await asyncio.sleep(1.0)
-            run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
-            if run and run["status"] in ("completed", "failed"):
+            run_data, run_status_code = await _api_call("GET", f"/runs/{_enc(run_id)}", request)
+            if run_status_code >= 400:
+                return _mcp_api_result(run_data, run_status_code)
+            run = run_data if isinstance(run_data, dict) else {}
+            if run and run.get("status") in ("completed", "failed", "cancelled"):
                 break
-        if not run or run["status"] not in ("completed", "failed"):
-            return _mcp_content(
-                json.dumps(
-                    {
-                        "status": "running",
-                        "run_id": run_id,
-                        "detail": "Run still in progress. Poll runs.get or runs.watch with this run_id for the result.",
-                    },
-                    indent=2,
-                ),
-                is_error=False,
+        if not run or run.get("status") not in ("completed", "failed", "cancelled"):
+            return _mcp_call_result(
+                {
+                    "status": "running",
+                    "run_id": run_id,
+                    "detail": "Run still in progress. Poll runs.get or runs.watch with this run_id for the result.",
+                }
             )
-        if run["status"] == "failed":
-            return _mcp_content(_mcp_text(run.get("error") or "Worker run failed"), is_error=True)
+        if run.get("status") in ("failed", "cancelled"):
+            result = _mcp_call_result(
+                {
+                    "status": run.get("status"),
+                    "run_id": run_id,
+                    "error": run.get("error") or "Worker run failed",
+                }
+            )
+            result["isError"] = True
+            return result
         output = run.get("output_json") or run.get("output") or {}
-        return _mcp_content(_mcp_text(output))
+        if not isinstance(output, dict):
+            output = {"data": output}
+        return _mcp_call_result({"status": "completed", "run_id": run_id, "output": output})
 
     return _mcp_content(f"Unknown tool: {name!r}", is_error=True)
 

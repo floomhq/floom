@@ -1,16 +1,24 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { readCredentials, writeCredentials } from "../dist/lib/credentials.js";
+import {
+  activeAccountPath,
+  credentialsAccountsDir,
+  credentialsPath,
+  listCredentialAccounts,
+  readCredentials,
+  writeCredentials,
+} from "../dist/lib/credentials.js";
 import { FloomApiClient } from "../dist/lib/api.js";
 import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
 import { connectionsAddCommand, connectionsListCommand } from "../dist/commands/connections.js";
 import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
+import { authLogoutCommand, authSwitchCommand } from "../dist/commands/auth.js";
 
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-ctx-"));
@@ -86,6 +94,7 @@ async function withStubServer(fn, { cloud = false } = {}) {
           id: "ws_created",
           name: parsedBody?.name || "Created",
           created_at: "2026-01-03",
+          ...(cloud ? { api_token: "floom_new_workspace_token" } : {}),
         }));
         return;
       }
@@ -165,6 +174,53 @@ test("workspace switch persists and validates via /select in OSS mode", async ()
   });
 });
 
+test("auth switch selects between stored accounts without deleting siblings", async () => {
+  await withTempHome(async () => {
+    await writeCredentials({
+      api_base: "https://workeros-api.floom.dev",
+      mode: "cloud",
+      api_token: "pat-personal",
+      account_id: "personal@example.com",
+      account_label: "personal@example.com",
+      workspace_id: "ws_personal",
+      workspace_name: "Personal",
+      authed_at: "2026-01-01T00:00:00.000Z",
+    });
+    await writeCredentials({
+      api_base: "https://workeros-api.floom.dev",
+      mode: "cloud",
+      api_token: "pat-work",
+      account_id: "work@example.com",
+      account_label: "work@example.com",
+      workspace_id: "ws_work",
+      workspace_name: "Work",
+      authed_at: "2026-01-02T00:00:00.000Z",
+    });
+
+    let accounts = await listCredentialAccounts();
+    assert.deepEqual(accounts.map((account) => account.id).sort(), ["personal@example.com", "work@example.com"]);
+    assert.equal(accounts.find((account) => account.id === "work@example.com")?.active, true);
+
+    assert.equal(await authSwitchCommand("personal@example.com"), 0);
+    let creds = await readCredentials();
+    assert.equal(creds?.api_token, "pat-personal");
+    assert.equal(creds?.workspace_id, "ws_personal");
+
+    assert.equal(await authLogoutCommand("work@example.com"), 0);
+    accounts = await listCredentialAccounts();
+    assert.deepEqual(accounts.map((account) => account.id), ["personal@example.com"]);
+    creds = await readCredentials();
+    assert.equal(creds?.api_token, "pat-personal");
+
+    if (process.platform !== "win32") {
+      assert.equal((await stat(credentialsPath())).mode & 0o077, 0);
+      assert.equal((await stat(activeAccountPath())).mode & 0o077, 0);
+      assert.equal((await stat(credentialsAccountsDir())).mode & 0o077, 0);
+      assert.equal((await stat(join(credentialsAccountsDir(), "personal@example.com.json"))).mode & 0o077, 0);
+    }
+  });
+});
+
 test("workspace switch fails with exit 1 on unknown workspace and keeps credentials", async () => {
   await withTempHome(async () => {
     await withStubServer(async (base) => {
@@ -220,6 +276,27 @@ test("workspace create posts to API and persists new active workspace", async ()
         { name: "Customer A" },
       );
     });
+  });
+});
+
+test("cloud workspace create preserves the existing token", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "floom_old_workspace_token",
+        workspace_id: "ws_old",
+        workspace_name: "Old",
+        authed_at: new Date().toISOString(),
+      });
+      const code = await workspacesCreateCommand("Customer A", { json: true });
+      assert.equal(code, 0);
+      const creds = await readCredentials();
+      assert.equal(creds.workspace_id, "ws_created");
+      assert.equal(creds.workspace_name, "Customer A");
+      assert.equal(creds.api_token, "floom_old_workspace_token");
+    }, { cloud: true });
   });
 });
 

@@ -61,6 +61,33 @@ def _worker_yml(worker_id: str) -> str:
 RUN_PY = "import json\nwith open('result.json','w') as f: json.dump({'status':'success','outputs':{}}, f)\n"
 
 
+def _connection_worker_yml(worker_id: str) -> str:
+    return textwrap.dedent(
+        f"""
+        schema_version: "0.3"
+        id: "{worker_id}"
+        name: "{worker_id}"
+        title: "Connection test worker"
+        description: "donation model connection test"
+        version: "0.1.0"
+        exec:
+          entry: "run.py"
+          runtime: "python311"
+          runner: "e2b"
+          command: "python run.py"
+          inputs: []
+          outputs: []
+        trigger:
+          type: manual
+        connections:
+          - app: gmail
+            allowed_tools:
+              - GMAIL_FETCH_EMAILS
+        secrets: []
+        """
+    ).strip() + "\n"
+
+
 @pytest.fixture
 def client_and_main(monkeypatch, tmp_path):
     workers_dir = tmp_path / "workers"
@@ -311,6 +338,35 @@ class TestWorkspaceToken:
         resp = client.post("/workers/runnable-shared/runs", headers=tok, json={"inputs": {}})
         assert resp.status_code == 200, resp.text
         assert resp.json().get("run_id")
+
+    def test_workspace_owned_connection_satisfies_shared_worker_run_preflight(self, client_and_main):
+        client, _ = client_and_main
+        resp = client.post(
+            "/workers",
+            headers=MEMBER_BEARER,
+            json={"worker_yml": _connection_worker_yml("gmail-shared"), "run_py": RUN_PY},
+        )
+        assert resp.status_code == 200, resp.text
+        _share(client, "gmail-shared", MEMBER_BEARER)
+
+        from db import get_repositories, now_iso
+        from db.sqlite import workspace_actor_id
+
+        repos = get_repositories()
+        repos.connections.upsert(
+            user_id=workspace_actor_id("local-default"),
+            id="workspace-gmail",
+            app_name="gmail",
+            composio_connection_id="ca_workspace_gmail",
+            status="active",
+            account_label="shared@example.com",
+            created_at=now_iso(),
+            updated_at=now_iso(),
+        )
+
+        run = client.post("/workers/gmail-shared/runs", headers=ADMIN, json={"inputs": {}})
+        assert run.status_code == 200, run.text
+        assert run.json().get("run_id")
 
     def test_token_is_read_and_run_only(self, client_and_main):
         client, _ = client_and_main

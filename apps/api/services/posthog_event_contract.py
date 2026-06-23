@@ -30,10 +30,8 @@ CONTRACT SHAPE
   ``ai_schema_version`` for AI) are asserted by the test from these tags, not
   re-listed per event.
 
-This contract reflects what the code emits TODAY. Events named in the spec but
-NOT yet emitted by the code (e.g. ``approval_approved``/``approval_rejected``,
-``worker_updated``) are intentionally ABSENT here so the contract never claims
-coverage the code does not have. Add them when the emit path lands.
+This contract reflects what the code emits TODAY. Add new events only when the
+real emit path lands.
 """
 from __future__ import annotations
 
@@ -130,6 +128,44 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
         },
         "optional_props": set(),
     },
+    "worker_updated": {
+        "emitter": EMITTER_SERVER,
+        "surface": "routers.worker_admin/worker_lifecycle",
+        "required_props": {
+            "worker_id",
+            "source",
+        },
+        "optional_props": set(),
+    },
+    "worker_archived": {
+        "emitter": EMITTER_SERVER,
+        "surface": "routers.worker_admin.archive_worker",
+        "required_props": {
+            "worker_id",
+            "source",
+        },
+        "optional_props": set(),
+    },
+    "worker_deleted": {
+        "emitter": EMITTER_SERVER,
+        "surface": "routers.worker_lifecycle.delete_worker",
+        "required_props": {
+            "worker_id",
+            "source",
+        },
+        "optional_props": set(),
+    },
+    "trigger_fired": {
+        "emitter": EMITTER_SERVER,
+        "surface": "scheduler._emit_trigger_fired",
+        "required_props": {
+            "worker_id",
+            "run_id",
+            "trigger_type",
+            "trigger_id",
+        },
+        "optional_props": set(),
+    },
     # --- connections (server, routers.connections._emit_connection_resolved) -
     # OAuth activation outcome, emitted once per callback resolution.
     "connection_added": {
@@ -161,6 +197,30 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
             "worker_id",
             "tool_name",
             "risk_level",
+        },
+        "optional_props": set(),
+    },
+    "approval_approved": {
+        "emitter": EMITTER_SERVER,
+        "surface": "routers.approvals",
+        "required_props": {
+            "approval_id",
+            "run_id",
+            "worker_id",
+            "decision",
+            "approval_kind",
+        },
+        "optional_props": set(),
+    },
+    "approval_rejected": {
+        "emitter": EMITTER_SERVER,
+        "surface": "routers.approvals",
+        "required_props": {
+            "approval_id",
+            "run_id",
+            "worker_id",
+            "decision",
+            "approval_kind",
         },
         "optional_props": set(),
     },

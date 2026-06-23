@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/command";
 import { api } from "@/lib/api";
 import { rankWorkersForCommandPalette } from "@/lib/command-palette";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 import { useWorkers } from "@/lib/query/hooks";
 import type { WorkerSummary } from "@/lib/types";
 
@@ -148,7 +149,7 @@ export function CommandPalette() {
         <CommandGroup heading="Actions">
           <CommandItem
             value="action new worker create add"
-            onSelect={() => go("/?create=1")}
+            onSelect={() => go(createWorkerHref())}
           >
             <Plus />
             New worker

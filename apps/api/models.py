@@ -38,6 +38,29 @@ def default_worker_agent_model() -> str:
 # default_worker_agent_model() instead (see agent_driver / contract builders).
 DEFAULT_WORKER_AGENT_MODEL = default_worker_agent_model()
 
+_SELF_HOSTED_RUNNER_RE = re.compile(r"^self-hosted(?::[A-Za-z0-9][A-Za-z0-9_-]*)?$")
+
+
+def normalize_worker_runner(value: str) -> str:
+    """Normalize accepted worker runner selectors.
+
+    ``self-hosted`` and ``self-hosted:<name>`` are valid manifest intent, but
+    dispatch still fails fast until a connected self-hosted runner exists.
+    """
+    runner = (value or "").strip()
+    if runner == "local":
+        return "e2b"
+    if runner == "e2b" or _SELF_HOSTED_RUNNER_RE.fullmatch(runner):
+        return runner
+    raise ValueError(
+        "runner must be 'e2b', 'self-hosted', or 'self-hosted:<name>' "
+        f"(got {value!r})"
+    )
+
+
+def is_self_hosted_runner(value: object) -> bool:
+    return isinstance(value, str) and _SELF_HOSTED_RUNNER_RE.fullmatch(value.strip()) is not None
+
 
 def _model_data(value: Any) -> Any:
     if hasattr(value, "model_dump"):
@@ -1191,14 +1214,7 @@ class WorkerRuntime(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, v: str) -> str:
-        # In-process execution was removed in PR #28; only E2B is supported.
-        # Coerce legacy `local` declarations to `e2b` for backward-compat
-        # with old worker.yml files, but reject anything else.
-        if v == "local":
-            return "e2b"
-        if v != "e2b":
-            raise ValueError(f"runner must be 'e2b' (got {v!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
-        return v
+        return normalize_worker_runner(v)
 
 
 class WorkerConfig(BaseModel):
@@ -1477,14 +1493,7 @@ class WorkerContractExec(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, value: str) -> str:
-        # Coerce legacy `local` to `e2b` (PR #28 removed the in-process
-        # executor; this guard prevents misleading manifests). Reject any
-        # other value with a clear message.
-        if value == "local":
-            return "e2b"
-        if value != "e2b":
-            raise ValueError(f"runner must be 'e2b' (got {value!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
-        return value
+        return normalize_worker_runner(value)
 
     @field_validator("template_profile")
     @classmethod
@@ -2650,6 +2659,9 @@ class WorkerResult(BaseModel):
     # S47 HITL: present when a worker requests human approval before executing.
     # Contains {label: str, preview: str} as emitted by the worker in result.json.
     decision_required: Optional[Dict[str, Any]] = None
+    # Machine-async await: present when a worker parks until an authenticated
+    # external callback resumes it with a JSON result.
+    await_external: Optional[Dict[str, Any]] = None
     # Track A LLM-obs: trace-derived run rollup (generation_count, span_count,
     # total_tokens, total_cost_usd, p95_step_latency_ms, ai_trace_id). Present
     # only for agent-mode runs; the runner uses it to persist real cost/tokens
@@ -2822,12 +2834,18 @@ class _ImportFromShareRequest(BaseModel):
     token: str
 
 
+class WorkerCreateFile(BaseModel):
+    path: str
+    content: str
+
+
 class WorkerCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     worker_yml: str
-    run_py: str
+    run_py: Optional[str] = None
     skill_md: Optional[str] = None
+    files: Optional[List[WorkerCreateFile]] = None
 
 
 class SecretWarning(BaseModel):
@@ -2914,6 +2932,10 @@ class ContextDeleteResponse(BaseModel):
 
 class ContextFileMoveRequest(BaseModel):
     new_path: str  # #770: destination path within the same context
+
+
+class ContextRenameRequest(BaseModel):
+    new_name: str  # #1813: new folder/context name (validated server-side)
 
 
 class ContextSecretScanFile(BaseModel):
@@ -3025,6 +3047,7 @@ class WorkspaceShareLinkResponse(BaseModel):
 class WorkspaceImportResponse(BaseModel):
     workers_imported: List[str] = []
     contexts_imported: List[str] = []
+    issues_imported: List[str] = []
     skipped: List[Dict[str, str]] = []
     id_remaps: Dict[str, str] = {}
     required_secrets: List[str] = []
@@ -3033,7 +3056,7 @@ class WorkspaceImportResponse(BaseModel):
 
 
 class ChangelogEntry(BaseModel):
-    asset_type: str  # "worker" | "context" | "workspace_instructions"
+    asset_type: str  # "worker" | "context" | workspace-level asset types
     asset_id: str
     asset_name: str
     sha: str
@@ -3181,3 +3204,110 @@ class DraftAndCreateResponse(BaseModel):
 class WorkerListSummary(WorkerSummary):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Workspace issues (git-backed, stored under .floom/issues/) — #1781
+# asset_type is left as a plain string (not a Literal) so the schema stays open
+# for connection/approval/mcp bindings beyond the worker/context/run MVP set.
+# ---------------------------------------------------------------------------
+
+class WorkspaceIssueComment(BaseModel):
+    id: str
+    body: str
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class WorkspaceIssueOut(BaseModel):
+    id: str
+    status: str = "open"
+    title: str
+    body: str = ""
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    source: Optional[str] = None
+    labels: List[str] = []
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    comment_count: int = 0
+
+
+class WorkspaceIssueDetail(WorkspaceIssueOut):
+    comments: List[WorkspaceIssueComment] = []
+
+
+class WorkspaceIssuesResponse(BaseModel):
+    issues: List[WorkspaceIssueOut]
+
+
+class WorkspaceIssueCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    body: str = ""
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    source: Optional[str] = None
+    labels: List[str] = []
+
+
+class WorkspaceIssueUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    status: Optional[Literal["open", "closed"]] = None
+    labels: Optional[List[str]] = None
+    asset_type: Optional[str] = None
+    asset_id: Optional[str] = None
+    clear_asset: bool = False
+
+
+class WorkspaceIssueCommentRequest(BaseModel):
+    body: str = Field(..., min_length=1, max_length=20000)
+
+
+# ---------------------------------------------------------------------------
+# Run feedback -> workspace issue (#1807)
+# ---------------------------------------------------------------------------
+# Run feedback stays a lightweight quality signal. This is the explicit, opt-in
+# bridge that turns one actionable feedback item into a git-backed workspace
+# issue (#1781) bound to the run (asset_type=run, asset_id=<run_id>).
+
+class RunFeedback(BaseModel):
+    """A lightweight feedback note left on a specific run."""
+
+    id: str
+    run_id: str
+    worker_id: str
+    author_id: str
+    author_name: Optional[str] = None
+    content: str
+    rating: Optional[str] = None
+    issue_id: Optional[str] = None
+    created_at: str
+
+
+class RunFeedbackCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+    rating: Optional[str] = Field(None, max_length=120)
+
+
+class RunFeedbackIssueRequest(BaseModel):
+    """Convert an actionable run feedback item into a tracked workspace issue."""
+
+    # Required for legacy direct-create callers; optional when feedback_id points
+    # at a stored run-feedback row.
+    feedback_text: Optional[str] = Field(None, min_length=1, max_length=10000)
+    # Free-form thumb/rating value as the UI captured it (e.g. "down", "up", "2").
+    rating: Optional[str] = Field(None, max_length=120)
+    # Optional operator-supplied title; defaulted from worker/run when omitted.
+    title: Optional[str] = Field(None, max_length=300)
+    # Stable client feedback id; when present a second submit for the same id
+    # returns the existing issue instead of creating a duplicate.
+    feedback_id: Optional[str] = Field(None, max_length=200)
+
+
+class RunFeedbackIssueResponse(BaseModel):
+    issue_id: str
+    created: bool
+    issue: WorkspaceIssueOut
+    feedback: Optional[RunFeedback] = None

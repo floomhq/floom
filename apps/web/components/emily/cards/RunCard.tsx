@@ -17,7 +17,7 @@ export function RunCard({ card }: { card: RunCardType }) {
   const providerSlug = resolveProviderSlug(toolName) ?? resolveProviderSlug(workerName);
 
   return (
-    <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card/60 overflow-hidden text-sm">
+    <div className="rounded-[var(--radius-card)] bg-card overflow-hidden text-sm">
       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
         {providerSlug ? (
           <BrandLogo icon={providerSlug} className="size-3.5 shrink-0" />
@@ -70,7 +70,7 @@ export function RunCard({ card }: { card: RunCardType }) {
             <a
               key={action.id}
               href={action.href}
-              className="inline-flex h-7 items-center rounded-md [border:var(--bd-card)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
+              className="inline-flex h-7 items-center rounded-md bg-muted/60 px-2.5 text-xs font-normal text-foreground hover:bg-muted transition-colors"
             >
               {action.label ?? action.id}
             </a>

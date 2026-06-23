@@ -27,7 +27,9 @@ from routers import connections as connections_router  # noqa: E402
 from services import analytics_posthog  # noqa: E402
 from services import ai_observability as ai  # noqa: E402
 from services import posthog_event_contract as contract  # noqa: E402
+from services import product_events  # noqa: E402
 from services import worker_create  # noqa: E402
+import scheduler  # noqa: E402
 
 
 class _StubClient:
@@ -128,6 +130,65 @@ def _drive_approval_requested():
     )
 
 
+def _drive_approval_approved():
+    product_events.emit_approval_decided(
+        owner_id="owner-1",
+        approval_id="appr-1",
+        run_id="run-1",
+        worker_id="wkr-1",
+        decision="approved",
+        approval_kind="run",
+    )
+
+
+def _drive_approval_rejected():
+    product_events.emit_approval_decided(
+        owner_id="owner-1",
+        approval_id="appr-1",
+        run_id="run-1",
+        worker_id="wkr-1",
+        decision="rejected",
+        approval_kind="run",
+    )
+
+
+def _drive_worker_updated():
+    product_events.emit_worker_lifecycle_event(
+        owner_id="owner-1",
+        worker_id="wkr-1",
+        event="worker_updated",
+        source="pause",
+    )
+
+
+def _drive_worker_archived():
+    product_events.emit_worker_lifecycle_event(
+        owner_id="owner-1",
+        worker_id="wkr-1",
+        event="worker_archived",
+        source="api",
+    )
+
+
+def _drive_worker_deleted():
+    product_events.emit_worker_lifecycle_event(
+        owner_id="owner-1",
+        worker_id="wkr-1",
+        event="worker_deleted",
+        source="api",
+    )
+
+
+def _drive_trigger_fired():
+    scheduler._emit_trigger_fired(
+        owner_id="owner-1",
+        worker_id="wkr-1",
+        run_id="run-1",
+        trigger_type="schedule",
+        trigger_id="trg-1",
+    )
+
+
 def _drive_connection_added():
     connections_router._emit_connection_resolved(
         event="connection_added",
@@ -190,9 +251,15 @@ _DRIVERS = {
     "run_failed": lambda: _drive_run_lifecycle("failed", error_code="timeout", error="timed out"),
     "run_cancelled": lambda: _drive_run_lifecycle("cancelled", error_code="cancelled"),
     "worker_created": _drive_worker_created,
+    "worker_updated": _drive_worker_updated,
+    "worker_archived": _drive_worker_archived,
+    "worker_deleted": _drive_worker_deleted,
+    "trigger_fired": _drive_trigger_fired,
     "connection_added": _drive_connection_added,
     "connection_failed": _drive_connection_failed,
     "approval_requested": _drive_approval_requested,
+    "approval_approved": _drive_approval_approved,
+    "approval_rejected": _drive_approval_rejected,
     "$ai_generation": _drive_ai_generation,
     "$ai_span": _drive_ai_span,
     "$ai_trace": _drive_ai_trace,

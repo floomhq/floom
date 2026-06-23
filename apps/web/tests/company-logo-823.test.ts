@@ -18,9 +18,26 @@ describe("guessDomain", () => {
 });
 
 describe("companyLogoUrl", () => {
-  it("builds a favicon URL for the derived domain", () => {
-    expect(companyLogoUrl("Acme")).toContain("domain=acme.com");
+  it("returns a DuckDuckGo favicon URL only for dot-qualified domain inputs", () => {
+    // Dot-qualified input (real domain) → DuckDuckGo favicon URL.
+    expect(companyLogoUrl("acme.com")).toContain("icons.duckduckgo.com");
+    expect(companyLogoUrl("acme.com")).toContain("acme.com.ico");
+    expect(companyLogoUrl("https://acme.io/about")).toContain("acme.io.ico");
+    // Empty → null.
     expect(companyLogoUrl("")).toBeNull();
+  });
+  it("returns null for plain workspace names — no slug guessing", () => {
+    // Plain names (no dot) must return null. The workspace mark renders the
+    // clean generated mark. Slug guessing ("Nova Search" → novasearch.com) is
+    // forbidden because favicon services return generic placeholder icons for
+    // unknown domains, which look like a broken logo (gray globe/DDG icon).
+    expect(companyLogoUrl("Nova Search")).toBeNull();
+    expect(companyLogoUrl("content-pipeline")).toBeNull();
+    expect(companyLogoUrl("Floom Admin")).toBeNull();
+    expect(companyLogoUrl("Acme")).toBeNull();
+    expect(companyLogoUrl("reltix")).toBeNull();
+    expect(companyLogoUrl("Heidi Health")).toBeNull();
+    expect(companyLogoUrl("   ")).toBeNull();
   });
 });
 

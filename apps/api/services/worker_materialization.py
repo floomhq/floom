@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -11,6 +12,17 @@ from pathlib import Path
 from worker_registry import WORKERS_DIR, invalidate_worker_cache
 
 logger = logging.getLogger("floom.worker_materialization")
+
+
+def _is_unsafe_embedded_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    parts = normalized.split("/")
+    return (
+        not normalized
+        or normalized.startswith("/")
+        or re.match(r"^[A-Za-z]:/", normalized) is not None
+        or any(part in ("", "..") for part in parts)
+    )
 
 
 def _validated_materialization_target(worker_id: str, target_dir: Path | None) -> Path:
@@ -63,6 +75,9 @@ def rematerialize_worker_from_db(worker_id: str, *, target_dir: Path | None = No
         resolved_tmp = tmp_dir.resolve()
         for rel_path, content in files.items():
             if not isinstance(rel_path, str) or not isinstance(content, str):
+                continue
+            if _is_unsafe_embedded_path(rel_path):
+                logger.warning("Skipping path traversal in _files for worker %s: %s", worker_id, rel_path)
                 continue
             dest = (tmp_dir / rel_path).resolve()
             try:

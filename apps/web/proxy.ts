@@ -47,6 +47,10 @@ const PUBLIC_PAGE_PREFIXES = [
   //       Trailing slash keeps this from matching e.g. /startup-foo (OW-02).
   "/auth/magic/", // #1447: magic-link token consumption. A logged-out visitor follows
   //       the email link here to establish a session, so it must stay public.
+  "/cli-auth", // #1789: device-login approval page; the user clicking the terminal
+  //       link is NOT yet logged into the web dashboard. The page renders publicly
+  //       and handles auth inline (approve/deny buttons call the proxy; a 401 from
+  //       the proxy causes an in-page login redirect, not a middleware gate).
 ];
 
 // Pages reachable WITHOUT a session cookie, matched EXACTLY (not by prefix).
@@ -74,6 +78,10 @@ const PUBLIC_PROXY_PREFIXES = [
   // public. The token in the path is the secret. Issuance (POST
   // /auth/magic-link) stays gated - it has no logged-out caller.
   "/api/proxy/auth/magic/",
+  // #1789: cli-auth approve/deny calls. The page is public (see PUBLIC_PAGE_PREFIXES
+  //       above); its API calls must also be public so the browser can reach them
+  //       before a session exists. The backend validates the user_code as the secret.
+  "/api/proxy/cli-auth/",
 ];
 
 function isPublicPage(pathname: string): boolean {
@@ -91,6 +99,16 @@ function isPublicPage(pathname: string): boolean {
 function isPublicProxy(pathname: string): boolean {
   if (PUBLIC_PROXY_PATHS.includes(pathname)) return true;
   return PUBLIC_PROXY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+function stripConfiguredBasePath(pathname: string): string {
+  const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+  if (!basePath || basePath === "/") return pathname;
+  if (pathname === basePath) return "/";
+  if (pathname.startsWith(`${basePath}/`)) {
+    return pathname.slice(basePath.length) || "/";
+  }
+  return pathname;
 }
 
 // #947 — CSRF defence-in-depth. The /api/proxy/* surface injects the server
@@ -188,7 +206,8 @@ export function buildCsp(nonce: string): string {
 }
 
 export async function proxy(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+  const rawPathname = req.nextUrl.pathname;
+  const pathname = stripConfiguredBasePath(rawPathname);
 
   // Per-request CSP nonce, threaded to Next via the request headers so SSR
   // stamps it onto inline/framework scripts (#926).
@@ -274,7 +293,7 @@ export async function proxy(req: NextRequest) {
   const loginUrl = req.nextUrl.clone();
   loginUrl.pathname = "/login";
   loginUrl.search = "";
-  const next = pathname + (req.nextUrl.search || "");
+  const next = rawPathname + (req.nextUrl.search || "");
   if (next && next !== "/") {
     loginUrl.searchParams.set("next", next);
   }

@@ -31,7 +31,7 @@ export function Terminal({
           : lines.map((line, index) => (
               <div
                 key={`${line.timestamp || "line"}-${index}`}
-                className={line.level === "error" ? "text-red-700 dark:text-[#ffb4a8]" : ""}
+                className={line.level === "error" ? "text-error" : ""}
               >
                 <span className="text-muted-foreground dark:text-white/35">
                   {line.timestamp ? `[${new Date(line.timestamp).toLocaleTimeString()}]` : "$"}

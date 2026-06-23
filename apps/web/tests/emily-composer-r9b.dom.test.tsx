@@ -1,8 +1,7 @@
 // Round-09b (Federico 2026-06-17) — Emily composer fixes:
 //   B15: typing must stay possible WHILE Emily streams a reply. Only the SEND
 //        action is disabled during the stream; the textarea stays editable.
-//   E10: the composer is a flat #FBFBFC (bg-app) box, NOT the grey --bg-2 panel
-//        that read as an unwanted "white box" on type/focus.
+//   E10: the composer is a flat, borderless box with a discoverable bg-2 fill.
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -97,8 +96,8 @@ describe("Emily composer — B15 type while streaming", () => {
   });
 });
 
-describe("Emily composer — E10 flat box, no white panel", () => {
-  it("composer box uses the flat bg-app fill, not the grey --bg-2 panel", () => {
+describe("Emily composer - E10 flat box, no outline", () => {
+  it("default composer uses the borderless bg-2 fill", () => {
     streamState.isStreaming = false;
     render(<EmilyChatPage />);
     const composer = screen.getByPlaceholderText(/Message/i);
@@ -106,8 +105,18 @@ describe("Emily composer — E10 flat box, no white panel", () => {
     const box = composer.parentElement as HTMLElement;
     expect(box).toBeTruthy();
     const cls = box.className;
-    // Flat #FBFBFC composer (bg-app); the old grey --bg-2 panel is gone.
-    expect(cls).toContain("bg-[var(--bg-app)]");
-    expect(cls).not.toContain("bg-[var(--bg-2)]");
+    // Default composer is discoverable with a bg-2 fill, not an outline.
+    expect(cls).toContain("bg-[var(--bg-2)]");
+    expect(cls).not.toContain("[border:var(--bd-div)]");
+  });
+
+  it("textarea has an accessible label and visible focus ring on the composer", () => {
+    streamState.isStreaming = false;
+    render(<EmilyChatPage />);
+    const composer = screen.getByRole("textbox", { name: /message emily/i });
+    const box = composer.parentElement as HTMLElement;
+    expect(composer).toBeInTheDocument();
+    expect(box.className).toContain("focus-within:ring-2");
+    expect(box.className).toContain("focus-within:ring-[var(--ring)]");
   });
 });

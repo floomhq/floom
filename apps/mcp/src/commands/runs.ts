@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import { createAuthenticatedClient, FloomApiError } from "../lib/api.js";
+import { getCommandName } from "../lib/command-name.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
 type RunSummary = {
@@ -35,12 +36,12 @@ function handleAuthError(error: unknown): number | null {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("Not logged in")) {
     log.err("Not authenticated.");
-    process.stderr.write("Run: floom login\n");
+    process.stderr.write(`Run: ${getCommandName()} login\n`);
     return 1;
   }
   if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
     log.err("Your session expired.");
-    process.stderr.write("Re-run: floom login\n");
+    process.stderr.write(`Re-run: ${getCommandName()} login\n`);
     return 1;
   }
   if (error instanceof FloomApiError && error.status && error.status >= 500) {
@@ -141,7 +142,7 @@ export async function runsShowCommand(runId: string, options: { json?: boolean }
   } catch (error) {
     if (error instanceof FloomApiError && error.status === 404) {
       log.err(`Run '${runId}' not found.`);
-      log.info("List recent runs: floom runs list");
+      log.info(`List recent runs: ${getCommandName()} runs list`);
       return 1;
     }
     const handled = handleAuthError(error);
@@ -182,12 +183,12 @@ export async function runsLogsCommand(runId: string, options: { follow?: boolean
     });
     if (!response.ok) {
       log.err(`Failed to follow logs: HTTP ${response.status}`);
-      log.info("Check run status: floom runs show " + runId);
+      log.info(`Check run status: ${getCommandName()} runs show ${runId}`);
       return 1;
     }
     if (!response.body) {
       log.err("Events response body is missing");
-      log.info("Check run status: floom runs show " + runId);
+      log.info(`Check run status: ${getCommandName()} runs show ${runId}`);
       return 1;
     }
 
@@ -238,7 +239,7 @@ export async function runsDownloadCommand(runId: string): Promise<number> {
     } catch (error) {
       if (error instanceof FloomApiError && error.status === 404) {
         log.warn("Run download is not yet available for this run.");
-        log.info("View run details: floom runs show " + runId);
+        log.info(`View run details: ${getCommandName()} runs show ${runId}`);
         return 0;
       }
       throw error;
