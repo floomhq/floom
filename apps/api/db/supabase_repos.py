@@ -45,6 +45,8 @@ _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 _SYSTEM_RUN_WORKER_IDS = frozenset({"worker-author"})
 _ENGINE_WORKER_SERIALIZE: Any | None = None
 _RUN_ARTIFACTS_BUCKET = "workeros-run-artifacts"
+_COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success"}
+_COMPOSIO_PENDING_STATUSES = {"", "initiated", "pending", "unknown"}
 
 
 def _should_ignore_worker_file(rel_path: str) -> bool:
@@ -690,6 +692,13 @@ def _looks_like_session_hash(value: str | None) -> bool:
     if not value or len(value) != 64:
         return False
     return all(ch in "0123456789abcdef" for ch in value)
+
+
+def _normalize_composio_status(status: Any) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in _COMPOSIO_ACTIVE_STATUSES:
+        return "active"
+    return normalized
 
 
 def _normalize_user_row(row: Mapping[str, Any], *, include_password: bool = False) -> dict[str, Any]:
@@ -3473,11 +3482,102 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         item["mcp_transport"] = item.get("mcp_transport") or "streamable_http"
         return item
 
+    def _reconcile_pending_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        """Refresh pending Composio OAuth rows from Composio before callers decide.
+
+        The engine callback can see a still-pending status even after provider
+        OAuth redirects back. Cloud list/run paths need a fresh app-level view,
+        so initiated/pending rows are reconciled lazily here.
+        """
+        item = self._normalize_row(row)
+        if (item.get("kind") or "composio") != "composio":
+            return item
+        status = _normalize_composio_status(item.get("status"))
+        if status not in _COMPOSIO_PENDING_STATUSES:
+            return item
+        composio_id = str(item.get("composio_connection_id") or "").strip()
+        if not composio_id:
+            return item
+        checked_at = datetime.now(timezone.utc).isoformat()
+        try:
+            from composio_client import check_status  # type: ignore
+
+            remote_status = _normalize_composio_status(check_status(composio_id))
+        except Exception as exc:
+            try:
+                updated = self.update(
+                    user_id=str(item["user_id"]),
+                    composio_id=str(item["id"]),
+                    last_checked_at=checked_at,
+                    last_check_status="failed",
+                    last_check_error=str(exc),
+                    updated_at=checked_at,
+                )
+                return updated or item
+            except Exception:
+                return item
+        updates: dict[str, Any] = {
+            "last_checked_at": checked_at,
+            "last_check_status": "valid" if remote_status == "active" else (remote_status or "unknown"),
+            "last_check_error": None,
+            "updated_at": checked_at,
+        }
+        if remote_status and remote_status != "not_found":
+            updates["status"] = remote_status
+        try:
+            updated = self.update(
+                user_id=str(item["user_id"]),
+                composio_id=str(item["id"]),
+                **updates,
+            )
+            return updated or item
+        except Exception:
+            return item
+
+    def _delete_other_pending_app_rows(
+        self,
+        *,
+        user_id: str,
+        app_name: str,
+        keep_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Keep at most one pending OAuth row per app/workspace.
+
+        Active rows are preserved for multi-account support; only unfinished
+        OAuth attempts are collapsed.
+        """
+        try:
+            rows = (
+                self._client.table("connections")
+                .select("id,status,kind,app_name,user_id,workspace_id")
+                .eq("workspace_id", workspace_id)
+                .eq("user_id", user_id)
+                .eq("app_name", app_name)
+                .execute()
+            )
+            for row in _response_rows(rows):
+                row_id = str(row.get("id") or "")
+                if row_id == keep_id:
+                    continue
+                if (row.get("kind") or "composio") != "composio":
+                    continue
+                if _normalize_composio_status(row.get("status")) not in _COMPOSIO_PENDING_STATUSES:
+                    continue
+                self._client.table("connections").delete().eq("id", row_id).execute()
+        except Exception:
+            _repo_logger.debug(
+                "pending Composio connection dedupe failed for %s/%s",
+                workspace_id,
+                app_name,
+                exc_info=True,
+            )
+
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
         builder = self._client.table("connections").select(self._CONNECTION_COLUMNS)
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.order("app_name").execute()
-        return [self._normalize_row(row) for row in _response_rows(response)]
+        return [self._reconcile_pending_row(row) for row in _response_rows(response)]
 
     def get(self, *, user_id: str, composio_id: str) -> dict[str, Any] | None:
         builder = self._client.table("connections").select(self._CONNECTION_COLUMNS)
@@ -3584,6 +3684,16 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
                 fields["mcp_allowed_tools_json"], []
             )
         self._client.table("connections").upsert(payload, on_conflict="id").execute()
+        if (
+            payload.get("kind", "composio") == "composio"
+            and _normalize_composio_status(payload.get("status")) in _COMPOSIO_PENDING_STATUSES
+        ):
+            self._delete_other_pending_app_rows(
+                user_id=user_id,
+                app_name=str(payload["app_name"]),
+                keep_id=str(connection_id),
+                workspace_id=str(workspace_id),
+            )
         item = self.get(user_id=user_id, composio_id=connection_id)
         if item is None:
             raise RuntimeError(f"failed to upsert connection {connection_id}")
@@ -3620,6 +3730,16 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
             payload["mcp_allowed_tools_json"] = _json_storage_value(
                 fields["mcp_allowed_tools_json"], []
             )
+        if (
+            _normalize_composio_status(fields.get("status")) == "active"
+            and "last_checked_at" not in fields
+        ):
+            checked_at = fields.get("updated_at") or datetime.now(timezone.utc).isoformat()
+            payload["last_checked_at"] = checked_at
+            if "last_check_status" not in fields:
+                payload["last_check_status"] = "valid"
+            if "last_check_error" not in fields:
+                payload["last_check_error"] = None
         if payload:
             builder = self._client.table("connections").update(payload).eq("id", composio_id)
             builder = _scope_by_workspace(builder, user_id=user_id)
