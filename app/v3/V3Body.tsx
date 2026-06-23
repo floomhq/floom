@@ -280,7 +280,7 @@ function Story() {
 
 /* ───────────────── templates: shared card, real data ───────────────── */
 
-const TPL_SLUGS = ["client-follow-up-worker", "monday-report-worker", "lead-research-worker"];
+const TPL_SLUGS = ["client-follow-up-worker", "seo-opportunity-scout", "inbox-manager"];
 
 function Templates() {
   const templates = TPL_SLUGS.map((sl) => getTemplate(sl)!).filter(Boolean);

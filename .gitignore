@@ -70,3 +70,4 @@ web/.vercel/
 
 # checked-in CI virtualenv removed from tracking (was 10,902 files / ~275MB)
 .ci-venv/
+.crit/
