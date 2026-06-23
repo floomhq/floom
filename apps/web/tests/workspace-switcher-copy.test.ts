@@ -25,13 +25,13 @@ describe("getWorkspaceActionCopy (#1005)", () => {
     expect(copy.shareFailed).toBe("Failed to create invite link");
   });
 
-  it("hides engine-local duplicate/share-template actions in cloud mode", () => {
+  it("keeps cloud duplicate visible while hiding engine-local share-template links", () => {
     expect(getWorkspaceActionAvailability(false)).toEqual({
       duplicate: true,
       shareTemplateLink: true,
     });
     expect(getWorkspaceActionAvailability(true)).toEqual({
-      duplicate: false,
+      duplicate: true,
       shareTemplateLink: false,
     });
   });

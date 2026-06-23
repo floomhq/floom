@@ -72,7 +72,7 @@ export function getWorkspaceActionCopy(isCloudMode: boolean): WorkspaceActionCop
 
 export function getWorkspaceActionAvailability(isCloudMode: boolean): WorkspaceActionAvailability {
   return isCloudMode
-    ? { duplicate: false, shareTemplateLink: false }
+    ? { duplicate: true, shareTemplateLink: false }
     : { duplicate: true, shareTemplateLink: true };
 }
 
