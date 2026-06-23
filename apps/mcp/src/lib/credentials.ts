@@ -1,6 +1,6 @@
 import { chmodSync, existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { getCommandName } from "./command-name.js";
 
 // AuthMode determines how the CLI hits the API:
@@ -30,6 +30,9 @@ export type StoredCredentials = {
   workspace_name?: string;
   // Label of the active MCP server connection (`floom mcp switch`).
   active_mcp_label?: string;
+  // Stable account identity for multi-account auth switching.
+  account_id?: string;
+  account_label?: string;
   authed_at: string;
 };
 
@@ -74,6 +77,14 @@ export function credentialsPath(): string {
   return join(home, ".config", "floom", "credentials.json");
 }
 
+export function credentialsAccountsDir(): string {
+  return join(dirname(credentialsPath()), "credentials");
+}
+
+export function activeAccountPath(): string {
+  return join(dirname(credentialsPath()), "active");
+}
+
 function legacyCredentialsPath(): string {
   const home = resolveHomeDir();
   if (!home) {
@@ -108,7 +119,14 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     };
   }
 
-  const path = existsSync(credentialsPath()) ? credentialsPath() : legacyCredentialsPath();
+  const active = await readActiveAccountCredentials();
+  const path = active ? "" : (existsSync(credentialsPath()) ? credentialsPath() : legacyCredentialsPath());
+  if (active) {
+    if (envCloudRequested() && active.mode !== "cloud") {
+      return null;
+    }
+    return active;
+  }
   if (!existsSync(path)) {
     return null;
   }
@@ -144,6 +162,8 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     workspace_id: parsed.workspace_id,
     workspace_name: parsed.workspace_name,
     active_mcp_label: parsed.active_mcp_label,
+    account_id: parsed.account_id,
+    account_label: parsed.account_label,
     authed_at: parsed.authed_at || new Date().toISOString(),
   };
 }
@@ -151,9 +171,15 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
 export async function writeCredentials(credentials: StoredCredentials): Promise<void> {
   const path = credentialsPath();
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const payload = JSON.stringify(credentials, null, 2);
+  const accountId = credentials.account_id || inferAccountId(credentials);
+  const accountLabel = credentials.account_label || inferAccountLabel(credentials);
+  const normalized: StoredCredentials = { ...credentials, account_id: accountId, account_label: accountLabel };
+  const payload = JSON.stringify(normalized, null, 2);
   await writeFile(path, `${payload}\n`, "utf8");
   chmodSync(path, 0o600);
+  await writeAccountCredentials(normalized);
+  await writeFile(activeAccountPath(), `${accountId}\n`, "utf8");
+  chmodSync(activeAccountPath(), 0o600);
 }
 
 export async function updateCredentials(
@@ -169,10 +195,176 @@ export async function updateCredentials(
 }
 
 export async function clearCredentials(): Promise<boolean> {
-  const paths = [credentialsPath(), legacyCredentialsPath()];
+  const paths = [credentialsPath(), legacyCredentialsPath(), activeAccountPath()];
   const existing = paths.filter((path) => existsSync(path));
-  await Promise.all(existing.map((path) => rm(path, { force: true })));
-  return existing.length > 0;
+  const accountDirExists = existsSync(credentialsAccountsDir());
+  await Promise.all([
+    ...existing.map((path) => rm(path, { force: true })),
+    rm(credentialsAccountsDir(), { recursive: true, force: true }),
+  ]);
+  return existing.length > 0 || accountDirExists;
+}
+
+export type CredentialAccount = {
+  id: string;
+  label: string;
+  mode: AuthMode;
+  api_base: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  active: boolean;
+  authed_at: string;
+};
+
+function sanitizeAccountId(value: string): string {
+  const cleaned = value.trim().toLowerCase().replace(/[^a-z0-9._@-]+/g, "-").replace(/^-+|-+$/g, "");
+  return cleaned.slice(0, 120) || "default";
+}
+
+function inferAccountLabel(credentials: StoredCredentials): string {
+  return (
+    credentials.account_label ||
+    credentials.user ||
+    credentials.account_id ||
+    credentials.workspace_name ||
+    credentials.workspace_id ||
+    credentials.api_base
+  );
+}
+
+function inferAccountId(credentials: StoredCredentials): string {
+  return sanitizeAccountId(
+    credentials.account_id ||
+    credentials.user ||
+    credentials.account_label ||
+    [credentials.mode, credentials.workspace_id || credentials.workspace_name || credentials.api_base].join("-"),
+  );
+}
+
+function accountPath(accountId: string): string {
+  return join(credentialsAccountsDir(), `${sanitizeAccountId(accountId)}.json`);
+}
+
+function isValidCredentials(parsed: Partial<StoredCredentials>): boolean {
+  const mode: AuthMode = parsed.mode === "cloud" ? "cloud" : "oss";
+  if (mode === "oss") return Boolean(parsed.api_secret);
+  return Boolean(parsed.api_token || (parsed.refresh_token && parsed.supabase_url));
+}
+
+async function readCredentialFile(path: string): Promise<StoredCredentials | null> {
+  if (!existsSync(path)) return null;
+  const raw = (await readFile(path, "utf8")).trim();
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as Partial<StoredCredentials>;
+  if (!isValidCredentials(parsed)) return null;
+  const mode: AuthMode = parsed.mode === "cloud" ? "cloud" : "oss";
+  return {
+    api_base: normalizeStoredApiBase(mode, parsed.api_base),
+    mode,
+    api_secret: parsed.api_secret,
+    api_token: parsed.api_token,
+    refresh_token: parsed.refresh_token,
+    supabase_url: parsed.supabase_url ? parsed.supabase_url.replace(/\/+$/, "") : undefined,
+    supabase_anon_key: parsed.supabase_anon_key,
+    user: envUser() || parsed.user,
+    workspace_id: parsed.workspace_id,
+    workspace_name: parsed.workspace_name,
+    active_mcp_label: parsed.active_mcp_label,
+    account_id: parsed.account_id,
+    account_label: parsed.account_label,
+    authed_at: parsed.authed_at || new Date().toISOString(),
+  };
+}
+
+async function readActiveAccountCredentials(): Promise<StoredCredentials | null> {
+  if (!existsSync(activeAccountPath())) return null;
+  const accountId = (await readFile(activeAccountPath(), "utf8")).trim();
+  if (!accountId) return null;
+  return readCredentialFile(accountPath(accountId));
+}
+
+async function writeAccountCredentials(credentials: StoredCredentials): Promise<void> {
+  const accountId = credentials.account_id || inferAccountId(credentials);
+  await mkdir(credentialsAccountsDir(), { recursive: true, mode: 0o700 });
+  const path = accountPath(accountId);
+  await writeFile(path, `${JSON.stringify({ ...credentials, account_id: accountId }, null, 2)}\n`, "utf8");
+  chmodSync(path, 0o600);
+}
+
+export async function listCredentialAccounts(): Promise<CredentialAccount[]> {
+  const activeId = existsSync(activeAccountPath()) ? (await readFile(activeAccountPath(), "utf8")).trim() : "";
+  const ids = new Set<string>();
+  if (existsSync(credentialsAccountsDir())) {
+    for (const entry of await readdir(credentialsAccountsDir())) {
+      if (entry.endsWith(".json")) ids.add(basename(entry, ".json"));
+    }
+  }
+  const active = await readCredentialFile(credentialsPath());
+  if (active) ids.add(active.account_id || inferAccountId(active));
+  const rows: CredentialAccount[] = [];
+  for (const id of [...ids].sort()) {
+    const creds = await readCredentialFile(accountPath(id));
+    const account = creds || (active && (active.account_id || inferAccountId(active)) === id ? active : null);
+    if (!account) continue;
+    const accountId = account.account_id || inferAccountId(account);
+    rows.push({
+      id: accountId,
+      label: account.account_label || inferAccountLabel(account),
+      mode: account.mode,
+      api_base: account.api_base,
+      workspace_id: account.workspace_id,
+      workspace_name: account.workspace_name,
+      active: activeId ? accountId === activeId : Boolean(active && (active.account_id || inferAccountId(active)) === accountId),
+      authed_at: account.authed_at,
+    });
+  }
+  return rows;
+}
+
+function accountMatches(account: StoredCredentials, target: string): boolean {
+  const needle = target.trim().toLowerCase();
+  return [
+    account.account_id,
+    account.account_label,
+    account.user,
+    account.workspace_id,
+    account.workspace_name,
+  ].some((value) => typeof value === "string" && value.trim().toLowerCase() === needle);
+}
+
+export async function switchCredentialAccount(target: string): Promise<StoredCredentials> {
+  for (const entry of existsSync(credentialsAccountsDir()) ? await readdir(credentialsAccountsDir()) : []) {
+    if (!entry.endsWith(".json")) continue;
+    const creds = await readCredentialFile(join(credentialsAccountsDir(), entry));
+    if (!creds || !accountMatches(creds, target)) continue;
+    await writeCredentials(creds);
+    return creds;
+  }
+  const current = await readCredentialFile(credentialsPath());
+  if (current && accountMatches(current, target)) {
+    await writeCredentials(current);
+    return current;
+  }
+  throw new Error(`No saved account matches ${JSON.stringify(target)}.`);
+}
+
+export async function removeCredentialAccount(target?: string): Promise<boolean> {
+  if (!target) return clearCredentials();
+  let removed = false;
+  for (const entry of existsSync(credentialsAccountsDir()) ? await readdir(credentialsAccountsDir()) : []) {
+    if (!entry.endsWith(".json")) continue;
+    const path = join(credentialsAccountsDir(), entry);
+    const creds = await readCredentialFile(path);
+    if (!creds || !accountMatches(creds, target)) continue;
+    await rm(path, { force: true });
+    removed = true;
+  }
+  const current = await readCredentialFile(credentialsPath());
+  if (current && accountMatches(current, target)) {
+    await rm(credentialsPath(), { force: true });
+    await rm(activeAccountPath(), { force: true });
+  }
+  return removed;
 }
 
 export function maskSecret(secret: string): string {

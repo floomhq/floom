@@ -554,6 +554,7 @@ from services.worker_access import (
     _worker_access_user_id,
     _normalize_run_status,
     _available_connection_slugs_for_user,
+    _available_connection_slugs_for_users,
     _normalize_trigger_type,
     _trigger_label,
     _list_operator_workers,
@@ -4408,7 +4409,7 @@ def create_worker_run(
             detail=f"Cannot run: missing required secret(s): {', '.join(_run_missing_secrets)}. "
                    f"Add them at /connections/secrets before running.",
         )
-    _run_available_conn_slugs = _available_connection_slugs_for_user(auth.user_id, repos)
+    _run_available_conn_slugs = _available_connection_slugs_for_users([auth.user_id, true_owner_id], repos)
     _run_required_conn_slugs = _worker_connection_slugs(worker)
     _run_missing_conns = [c for c in _run_required_conn_slugs if c.lower() not in _run_available_conn_slugs]
     if _run_missing_conns:

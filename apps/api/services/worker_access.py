@@ -748,14 +748,23 @@ def _normalize_run_status(status_value: str) -> str:
 
 def _available_connection_slugs_for_user(user_id: str, repos: "Repositories") -> set[str]:
     """Return lower-cased app_name slugs for all active connections owned by user_id."""
+    return _available_connection_slugs_for_users([user_id], repos)
+
+def _available_connection_slugs_for_users(user_ids: List[str], repos: "Repositories") -> set[str]:
+    """Return active connection slugs for one or more owner principals."""
     _live = {"active", "valid", "connected"}
+    slugs: set[str] = set()
     try:
-        rows = repos.connections.list(user_id=user_id)
-        return {
-            row_to_dict(r).get("app_name", "").lower()
-            for r in rows
-            if str((row_to_dict(r).get("status") or "")).lower() in _live
-        }
+        for user_id in dict.fromkeys(str(uid or "").strip() for uid in user_ids):
+            if not user_id:
+                continue
+            rows = repos.connections.list(user_id=user_id)
+            slugs.update(
+                row_to_dict(r).get("app_name", "").lower()
+                for r in rows
+                if str((row_to_dict(r).get("status") or "")).lower() in _live
+            )
+        return slugs
     except Exception:
         return set()
 
