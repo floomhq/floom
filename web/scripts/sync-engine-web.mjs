@@ -140,6 +140,7 @@ export const OVERLAY_FILES = [
   "tests/me-cache-941.test.ts",
   "tests/csrf-origin-947.test.ts",
   "tests/proxy-route.test.ts",
+  "tests/cli-auth-seams.dom.test.tsx",
   "tests/files-editor-markdown-sanitize-190.dom.test.tsx",
 ];
 
