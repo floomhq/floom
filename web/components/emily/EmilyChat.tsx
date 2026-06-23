@@ -795,11 +795,9 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 onPickMcp={() => mcpModal.open()}
               />
               <div className="mt-6 w-full max-w-2xl px-6">
-                {/* Create mode uses the landing-style composer with a "Hire"
-                    send affordance. The home route (non-create) uses "home"
-                    variant: grey bg-2 fill that makes the input discoverable
-                    against the flat bg-app surface. Conversation/default keeps
-                    its standard composer styling. */}
+                {/* The home route always uses the grey home composer fill,
+                    including create mode. createMode only switches the send
+                    affordance to "Hire" and wraps the first message. */}
                 <PromptInput
                   value={input}
                   onChange={setInput}
@@ -808,7 +806,8 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   attachedFiles={attachedFiles}
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
-                  variant={createMode ? "landing" : "home"}
+                  variant={homeMode ? "home" : createMode ? "landing" : "default"}
+                  sendMode={createMode ? "hire" : "send"}
                   large
                   // #1698: "New worker" / ?create=1 must give visible feedback
                   // from ANY route. Focus the composer when entering create mode
@@ -1297,7 +1296,7 @@ export function EmilyDock({ className }: { className?: string }) {
           // (wraps the first send via buildCreateWorkerMessage + ephemeral thread).
           createMode={createMode}
           primeInput={createMode ? primeText : undefined}
-          homeMode={isHomeRoute && !createMode}
+          homeMode={isHomeRoute}
         />
       </div>
     </div>

@@ -32,6 +32,7 @@ export function PromptInput({
   sendDisabled,
   variant = "default",
   large = false,
+  sendMode = "send",
   autoFocus = false,
 }: {
   value: string;
@@ -62,9 +63,8 @@ export function PromptInput({
    * "home": the Emily home-route fullscreen empty-state composer. Uses the grey
    * bg-2 fill (focus-within → bg-3) so the input area is visually discoverable
    * against the flat bg-app background — richer than the flat default, but
-   * distinct from the landing's fully-borderless look. Keeps the send-icon
-   * affordance (not the labeled "Hire" CTA). No chip row. Only used on the
-   * home/overview route when NOT in createMode.
+   * distinct from the landing's fully-borderless look. No chip row. Used on the
+   * home/overview route in all empty-home states, including create mode.
    */
   variant?: "default" | "landing" | "home";
   /**
@@ -75,6 +75,11 @@ export function PromptInput({
    */
   large?: boolean;
   /**
+   * Visual send affordance. Kept separate from the box variant so the home route
+   * can use the grey home fill while create mode still presents the "Hire" CTA.
+   */
+  sendMode?: "send" | "hire";
+  /**
    * #1698: when the composer is the PRIMARY first action (the home/create
    * empty state reached via "New worker" / `?create=1`), focus it on mount so
    * clicking "New worker" gives immediate, visible feedback (a caret lands in
@@ -84,6 +89,7 @@ export function PromptInput({
 }) {
   const isLanding = variant === "landing";
   const isHome = variant === "home";
+  const usesHireCta = isLanding || sendMode === "hire";
   const textareaLabel = placeholder ?? "Describe the job you want done";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -244,7 +250,7 @@ export function PromptInput({
 
           <div className="flex-1" />
 
-          {isLanding ? (
+          {usesHireCta ? (
             // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
             // landing's prompt CTA, not a bare arrow. Keeps an accessible name so
             // the send action stays discoverable to AT + tests.
