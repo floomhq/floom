@@ -719,7 +719,8 @@ export function UserProfileFooter({
           {/* #1306 / M36: profile photo (Google/GitHub) beats generated mark.
               Avatar handles the override ladder: src present → real photo
               cropped to the circle (user = human); absent → generated mark. */}
-          <Avatar role="user" name={primary} src={photoUrl} size={28} />
+          {/* Pass user_id as stable seed so the mark survives display-name changes. */}
+          <Avatar role="user" id={user?.user_id} name={primary} src={photoUrl} size={28} />
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
             <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>

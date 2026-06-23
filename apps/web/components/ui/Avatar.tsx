@@ -14,7 +14,7 @@
 //
 // No gradients, no faces, no stock glyphs (radar/orbit/star), no letters.
 // Tokens only: --accent (Emily blue), --radius-squircle (squircle radius).
-import { generateMark, MARK_GROUND, type MarkMotif } from "@/lib/avatar/generate";
+import { generateMarkForRole, MARK_GROUND, type MarkMotif } from "@/lib/avatar/generate";
 
 export type AvatarRole = "user" | "workspace" | "worker" | "emily";
 
@@ -187,7 +187,11 @@ export function Avatar({
   }
 
   // Generated fallback (user circle / workspace+worker squircle).
-  const { motif, c1, c2 } = generateMark(id || name || "?");
+  // generateMarkForRole applies role-based index offsets so a user and a
+  // workspace with the same name/id are mathematically guaranteed to produce
+  // different motifIndex values (the offset is coprime to MARK_MOTIF_COUNT).
+  // Pass a stable database id via the `id` prop so the mark survives renames.
+  const { motif, c1, c2 } = generateMarkForRole(role, id || name || "?");
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
