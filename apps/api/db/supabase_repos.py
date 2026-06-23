@@ -624,6 +624,10 @@ def _scope_by_workspace(
     return builder
 
 
+def _has_read_scope(*, user_id: str | None) -> bool:
+    return bool(get_active_workspace_id() or user_id)
+
+
 def _log_admin_access(
     *,
     workspace_id: str,
@@ -1081,6 +1085,8 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         worker_id: str | None = None,
         worker_ids: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
+        if not _has_read_scope(user_id=user_id):
+            return []
         builder = self._client.table("workers").select("*")
         # Workspace scope: filter by workspace_id when set (per-request
         # contextvar). Falls back to user_id when out of request context.
@@ -2225,6 +2231,8 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         order_created_desc: bool = False,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
+        if not _has_read_scope(user_id=user_id):
+            return []
         status_values = [str(status) for status in statuses or () if str(status)]
         worker_values = [str(worker_id) for worker_id in worker_ids or () if str(worker_id)]
         if statuses is not None and not status_values:
@@ -2252,7 +2260,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             if worker_values:
                 builder = builder.in_("worker_id", worker_values)
             if order_created_desc:
-                builder = builder.order("created_at", desc=True)
+                builder = builder.order("created_at", desc=True).order("id", desc=True)
 
             page = _response_rows(builder.range(offset, offset + page_size - 1).execute())
             rows.extend(page)
@@ -2568,6 +2576,8 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
+        if not _has_read_scope(user_id=user_id):
+            return []
         builder = self._client.table("runs").select(
             "id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error"
         )
@@ -2576,6 +2586,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             builder
             .eq("worker_id", worker_id)
             .order("created_at", desc=True)
+            .order("id", desc=True)
             .range(offset, offset + limit - 1)
             .execute()
         )
@@ -2593,6 +2604,8 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         offset: int = 0,
         include_total: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
+        if not _has_read_scope(user_id=user_id):
+            return [], 0
         builder = self._client.table("runs").select(
             "id,worker_id,status,trigger_source,input_json,error,started_at,completed_at,duration_ms,created_at,trigger_member_id",
             count="exact" if include_total else None,
@@ -2606,7 +2619,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             builder = builder.gte("created_at", since)
         if until:
             builder = builder.lte("created_at", until)
-        response = builder.order("created_at", desc=True).range(
+        response = builder.order("created_at", desc=True).order("id", desc=True).range(
             offset,
             offset + limit - 1,
         ).execute()
