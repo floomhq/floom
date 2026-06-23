@@ -66,7 +66,7 @@ import {
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
-import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
+import { WorkerFlow } from "@/components/WorkerFlow";
 import {
   FilesEditor,
   TriggersEditor,
@@ -348,10 +348,7 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
         <p style={{ margin: 0, color: "var(--ink-soft)", fontSize: 13 }}>{description}</p>
       </DetailGroup>
       <DetailGroup label="Flow">
-        <p className="c-dctx">
-          {(w.connections ?? []).length > 0 ? w.connections.join(" -> ") : friendlyToken(w.trigger_type)}
-        </p>
-        <WorkerAsciiDiagram
+        <WorkerFlow
           workerName={w.name}
           worker={{ id: w.id, name: w.name, connections: w.connections, tags: w.tags }}
           connections={w.connections}
