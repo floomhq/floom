@@ -811,6 +811,186 @@ for _prefix in ("", "/api", "/v1", "/api/v1"):
         )
 
 
+async def _cloud_engine_auth_and_repos(request: Request) -> tuple[Any, Any]:
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from auth.context import AuthContext as _AuthContext
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    engine_auth = _AuthContext(
+        user_id=auth.user_id,
+        email=getattr(auth, "email", None),
+        scopes=getattr(auth, "scopes", ()),
+        role=getattr(auth, "role", None) or "member",
+        auth_method=getattr(auth, "auth_method", "secret"),
+    )
+    return engine_auth, engine_main.get_repositories()
+
+
+def _cloud_mark_context_materialized(root: _Path) -> None:
+    """Keep a newly-created empty pack from being lazily rehydrated as missing."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ".workeros-empty").mkdir(exist_ok=True)
+
+
+def _cloud_backup_context_metadata() -> None:
+    try:
+        from apps.api.auth.workspace_context import get_active_workspace_id
+        from apps.api.cloud_contexts import upload_context_metadata
+        import contexts as _contexts
+
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            upload_context_metadata(workspace_id, _contexts.current_contexts_root())
+    except Exception:
+        import logging as _logging
+
+        _logging.getLogger("workeros.cloud").warning(
+            "context metadata Storage backup failed",
+            exc_info=True,
+        )
+
+
+def _cloud_ensure_context_for_write(
+    name: str,
+    *,
+    payload: dict[str, Any] | None,
+    user_id: str,
+    repos: Any,
+    allow_existing: bool,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    import contexts as _contexts
+    from services import context_access as _context_access
+
+    safe_name = _context_access._context_name_or_400(name)
+    root = _contexts.context_dir(safe_name, hydrate=False)
+    metadata = _contexts.load_context_metadata()
+    owner_id = _contexts.context_owner_id(safe_name, metadata)
+
+    if root.exists() and owner_id:
+        if not _context_access._context_visible_to_user(
+            safe_name,
+            user_id=user_id,
+            metadata=metadata,
+            repos=repos,
+        ):
+            if allow_existing:
+                raise HTTPException(status_code=409, detail="Context already exists")
+            raise HTTPException(status_code=404, detail="Context not found")
+        return safe_name, metadata
+
+    _cloud_mark_context_materialized(root)
+    _contexts.set_context_metadata(
+        safe_name,
+        writeable=bool((payload or {}).get("writeable", False)),
+        sensitive=bool((payload or {}).get("sensitive", True)),
+        owner_id=user_id,
+        category=(payload or {}).get("category"),
+    )
+    _contexts.refresh_context_summary_metadata(safe_name)
+    _context_access._ensure_brain_pack_row(safe_name, owner_id=user_id, repos=repos)
+    _cloud_backup_context_metadata()
+    return safe_name, _contexts.load_context_metadata()
+
+
+@app.post("/contexts/{name}")
+@app.post("/api/contexts/{name}")
+@app.post("/v1/contexts/{name}")
+@app.post("/api/v1/contexts/{name}")
+async def cloud_create_context(
+    name: str,
+    request: Request,
+    payload: dict[str, Any] | None = None,
+) -> Any:
+    """Cloud override for context creation.
+
+    The engine's `context_dir()` hydrates missing or empty packs from remote
+    Storage. That is correct for reads, but create must check the target path
+    without hydration; otherwise a Storage stub or stale pack can make a create
+    look like an invisible existing pack and return 404.
+    """
+    from services import context_access as _context_access
+
+    auth, repos = await _cloud_engine_auth_and_repos(request)
+    context_user_id = _context_access._context_actor_user_id(auth.user_id)
+    safe_name, metadata = _cloud_ensure_context_for_write(
+        name,
+        payload=payload,
+        user_id=context_user_id,
+        repos=repos,
+        allow_existing=True,
+    )
+    return _context_access._context_detail(
+        safe_name,
+        metadata,
+        repos=repos,
+        user_id=context_user_id,
+    )
+
+
+@app.put("/contexts/{name}/files/{file_path:path}")
+@app.put("/api/contexts/{name}/files/{file_path:path}")
+@app.put("/v1/contexts/{name}/files/{file_path:path}")
+@app.put("/api/v1/contexts/{name}/files/{file_path:path}")
+async def cloud_put_context_file(
+    name: str,
+    file_path: str,
+    request: Request,
+) -> Any:
+    from services import context_access as _context_access
+    from services.git_service import _git_author
+    from models import ContextTextWriteRequest
+
+    auth, repos = await _cloud_engine_auth_and_repos(request)
+    context_user_id = _context_access._context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _cloud_ensure_context_for_write(
+        name,
+        payload=None,
+        user_id=context_user_id,
+        repos=repos,
+        allow_existing=False,
+    )
+    rel = _context_access._context_file_path_or_400(file_path)
+    content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if content_type == "application/json":
+        try:
+            text_payload = ContextTextWriteRequest(**(await request.json()))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}") from exc
+        data = text_payload.content.encode("utf-8")
+        tags = text_payload.tags
+        file_metadata = text_payload.metadata
+    else:
+        data = await request.body()
+        tags = None
+        file_metadata = None
+
+    result = _context_access._write_context_file(
+        safe_name,
+        rel,
+        data,
+        user_id=context_user_id,
+        tags=tags,
+        file_metadata=file_metadata,
+    )
+    author_name, author_email = _git_author(auth)
+    _context_access._git_commit_context(
+        safe_name,
+        rel,
+        message=f"context {safe_name}: update {rel}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+    _cloud_backup_context_metadata()
+    return result
+
+
 def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any, *, merge_existing: bool = False) -> None:
     """Save worker file contents to Supabase manifest_json._files.
 

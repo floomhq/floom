@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -654,9 +655,9 @@ def _bootstrap_contexts_storage() -> None:
     if getattr(_original_context_dir, "_workeros_cloud_patched", False):
         return
 
-    def _cloud_context_dir(name: str) -> "Path":
-        d = _original_context_dir(name)
-        if not d.exists() or not any(d.iterdir() if d.exists() else []):
+    def _cloud_context_dir(name: str, *, hydrate: bool = True) -> "Path":
+        d = _original_context_dir(name, hydrate=hydrate)
+        if hydrate and (not d.exists() or not any(d.iterdir() if d.exists() else [])):
             workspace_id = get_active_workspace_id()
             if workspace_id:
                 try:
@@ -712,16 +713,25 @@ def _bootstrap_contexts_storage() -> None:
                 _log.getLogger(__name__).debug(
                     "cloud contexts_root metadata fetch failed for %s: %s", workspace_id, exc
                 )
-        # b) Create stub dirs for Storage-known packs not yet on disk.
+        # b) Create stub dirs for Storage-known packs not yet on disk. Also
+        # include metadata-only packs so a newly-created empty pack survives a
+        # fresh container before its first file write.
+        known: set[str] = set()
         try:
             from apps.api.cloud_contexts import list_context_names
-            known = list_context_names(workspace_id)
+            known.update(list_context_names(workspace_id))
         except Exception as exc:
             import logging as _log
             _log.getLogger(__name__).debug(
                 "cloud contexts_root Storage list failed for %s: %s", workspace_id, exc
             )
-            return root
+        try:
+            raw_metadata = metadata_path.read_text(encoding="utf-8") if metadata_path.is_file() else "{}"
+            parsed_metadata = json.loads(raw_metadata)
+            if isinstance(parsed_metadata, dict):
+                known.update(str(name) for name in parsed_metadata)
+        except Exception:
+            pass
         for name in known:
             safe_name = str(name or "").strip()
             if (
