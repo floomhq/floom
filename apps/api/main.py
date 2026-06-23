@@ -1674,12 +1674,25 @@ async def auth_middleware(request: Request, call_next):
     # authenticated operator/server paths, never this sandbox token.
     run_token_header = _run_token_header(request)
     if run_token_header:
-        run_id_from_token = verify_run_token(run_token_header, secret=secret)
-        if run_id_from_token is None:
-            return _JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid or expired run token"},
-            )
+        if run_token_header.startswith("wrt_"):
+            try:
+                worker_call_payload = validate_worker_call_token(run_token_header)
+            except ValueError as exc:
+                return _JSONResponse(status_code=401, content={"detail": str(exc)})
+            try:
+                from auth.multi_member import _require_active_token_user  # noqa: PLC0415
+
+                _require_active_token_user(str(worker_call_payload.get("user_id") or ""))
+            except HTTPException as exc:
+                return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            run_id_from_token = str(worker_call_payload.get("parent_run_id") or "")
+        else:
+            run_id_from_token = verify_run_token(run_token_header, secret=secret)
+            if run_id_from_token is None:
+                return _JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid or expired run token"},
+                )
         if not (
             _RE_RUN_COMPOSIO_PROXY.match(path)
             or _RE_RUN_LLM_PROXY.match(path)
@@ -4675,6 +4688,14 @@ def _authorize_run_platform_proxy(request: Request, run_id: str) -> None:
 
     simple_token = _run_token_header(request)
     if simple_token:
+        if simple_token.startswith("wrt_"):
+            try:
+                payload = _validate_worker_call_token(simple_token)
+            except ValueError as exc:
+                raise HTTPException(status_code=401, detail=str(exc)) from exc
+            if str(payload.get("parent_run_id") or "") != run_id:
+                raise HTTPException(status_code=403, detail="Worker-call token does not match request run_id")
+            return
         token_run_id = _verify_run_token(simple_token)
         if token_run_id is None:
             raise HTTPException(status_code=401, detail="Missing or invalid run token")
@@ -4784,13 +4805,8 @@ def composio_execute_proxy(
       4. Returns Composio's JSON response verbatim.
     """
     import requests as _req_lib
-    from run_token import verify_run_token as _verify_run_token
 
-    token_run_id = _verify_run_token(_run_token_header(request))
-    if token_run_id is None:
-        raise HTTPException(status_code=401, detail="Missing or invalid run token")
-    if token_run_id != run_id:
-        raise HTTPException(status_code=403, detail="Run token does not match request run_id")
+    _authorize_run_platform_proxy(request, run_id)
 
     # 1. Validate run_id — must exist in DB and be RUNNING.
     #    NOTE: get_any() is the UNSCOPED run lookup. That is correct *here* and
