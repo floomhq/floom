@@ -44,6 +44,7 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 # 30 days, matching the brief.
 _COOKIE_MAX_AGE_SECONDS = 30 * 24 * 3600
 _WORKSPACE_LIST_CACHE_TTL_SECONDS = 15.0
+_MAX_OWNED_WORKSPACES = 50
 _workspace_list_cache_lock = threading.Lock()
 _workspace_list_cache: dict[str, tuple[float, list["WorkspaceOut"]]] = {}
 
@@ -210,6 +211,14 @@ def _duplicate_workspace_name(name: str, existing_names: set[str] | None = None)
         if candidate not in existing:
             return candidate
     raise ValueError("could not allocate duplicate workspace name")
+
+
+def _enforce_workspace_count_cap(owned_rows: list[dict]) -> None:
+    if len(owned_rows) >= _MAX_OWNED_WORKSPACES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"workspace limit reached ({_MAX_OWNED_WORKSPACES})",
+        )
 
 
 def _workspace_cache_get(user_id: str) -> list[WorkspaceOut] | None:
@@ -432,10 +441,9 @@ async def duplicate_workspace(
     if source is None or str(source["owner_user_id"]) != auth.user_id:
         raise HTTPException(status_code=404, detail="workspace not found")
 
-    existing_names = {
-        str(row.get("name") or "")
-        for row in workspace_repo.list_for_owner(owner_user_id=auth.user_id)
-    }
+    owned = workspace_repo.list_for_owner(owner_user_id=auth.user_id)
+    _enforce_workspace_count_cap(owned)
+    existing_names = {str(row.get("name") or "") for row in owned}
     duplicate_name = _duplicate_workspace_name(str(source.get("name") or ""), existing_names)
     try:
         created = workspace_repo.create(owner_user_id=auth.user_id, name=duplicate_name)
