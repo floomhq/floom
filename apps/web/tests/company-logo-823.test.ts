@@ -18,21 +18,25 @@ describe("guessDomain", () => {
 });
 
 describe("companyLogoUrl", () => {
-  it("builds a favicon URL only for dot-qualified domain inputs", () => {
-    // Explicit domain → favicon URL (real company logo likely exists).
-    expect(companyLogoUrl("acme.com")).toContain("domain=acme.com");
-    expect(companyLogoUrl("https://acme.io/about")).toContain("domain=acme.io");
+  it("builds a DuckDuckGo favicon URL for explicit domain inputs", () => {
+    // Explicit domain → DuckDuckGo favicon URL.
+    expect(companyLogoUrl("acme.com")).toContain("icons.duckduckgo.com");
+    expect(companyLogoUrl("acme.com")).toContain("acme.com.ico");
+    expect(companyLogoUrl("https://acme.io/about")).toContain("acme.io.ico");
     // Empty → null.
     expect(companyLogoUrl("")).toBeNull();
   });
-  it("returns null for plain slugs without a dot (personal/non-company names)", () => {
-    // These workspace names would only produce a generic globe favicon from the
-    // favicon service — return null so the caller falls back to the gradient squircle.
-    expect(companyLogoUrl("depontefede")).toBeNull();
-    expect(companyLogoUrl("fede-production")).toBeNull();
-    expect(companyLogoUrl("content-pipeline")).toBeNull();
-    expect(companyLogoUrl("Acme")).toBeNull();
-    expect(companyLogoUrl("My Workspace")).toBeNull();
+  it("also returns a favicon URL for plain company-named slugs (DuckDuckGo 404s on miss)", () => {
+    // DuckDuckGo returns a real HTTP 404 for unknown domains, so onError fires
+    // in the browser and the Avatar component falls back to the generated mark.
+    // This means we can safely return a URL for all non-empty slugs — the
+    // 404-on-miss path handles non-company names cleanly without any globe placeholder.
+    expect(companyLogoUrl("reltix")).toContain("reltix.com.ico");
+    expect(companyLogoUrl("Heidi Health")).toContain("heidihealth.com.ico");
+    expect(companyLogoUrl("Nova Search")).toContain("novasearch.com.ico");
+    // Non-company names also get a URL; they'll 404 → onError → generated mark.
+    expect(companyLogoUrl("content-pipeline")).toContain("contentpipeline.com.ico");
+    expect(companyLogoUrl("Acme")).toContain("acme.com.ico");
   });
 });
 
