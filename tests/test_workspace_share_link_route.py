@@ -21,6 +21,9 @@ def _route_methods() -> set[tuple[str, str]]:
 
 def test_workspace_share_link_routes_registered():
     pairs = _route_methods()
+    # Cloud workspace duplication must be handled by the cloud workspace router
+    # before the engine /api mount; otherwise ws_* ids fall through to 404.
+    assert ("/workspaces/{workspace_id}/duplicate", "POST") in pairs
     # The route whose absence caused the 404 in #205.
     assert ("/workspaces/{workspace_id}/share-links", "POST") in pairs
     # Its revoke counterpart, so a created link can be invalidated.

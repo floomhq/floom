@@ -120,6 +120,16 @@ class WorkspaceShareImportResponse(BaseModel):
     workspace_md_present: bool = False
 
 
+class WorkspaceDuplicateResponse(WorkspaceOut):
+    workers_imported: list[str] = Field(default_factory=list)
+    contexts_imported: list[str] = Field(default_factory=list)
+    skipped: list[dict] = Field(default_factory=list)
+    id_remaps: dict[str, str] = Field(default_factory=dict)
+    required_secrets: list[str] = Field(default_factory=list)
+    required_connections: list[str] = Field(default_factory=list)
+    workspace_md_present: bool = False
+
+
 class WorkspaceTransferResponse(BaseModel):
     workspace: WorkspaceOut
     previous_owner_user_id: str
@@ -183,6 +193,23 @@ def _to_out(row: dict, role: str = "admin") -> WorkspaceOut:
         created_at=str(row["created_at"]),
         role=role,
     )
+
+
+def _duplicate_workspace_name(name: str, existing_names: set[str] | None = None) -> str:
+    base = (name or "").strip() or "Untitled"
+    existing = existing_names or set()
+
+    def candidate_for(index: int) -> str:
+        suffix = " (copy)" if index == 1 else f" (copy {index})"
+        if len(base) + len(suffix) <= 80:
+            return f"{base}{suffix}"
+        return f"{base[: 80 - len(suffix)].rstrip()}{suffix}"
+
+    for index in range(1, 100):
+        candidate = candidate_for(index)
+        if candidate not in existing:
+            return candidate
+    raise ValueError("could not allocate duplicate workspace name")
 
 
 def _workspace_cache_get(user_id: str) -> list[WorkspaceOut] | None:
@@ -394,6 +421,57 @@ async def update_workspace(
     updated = workspace_repo.rename(workspace_id=workspace_id, name=payload.name.strip())
     _workspace_cache_clear(auth.user_id)
     return _to_out(updated)
+
+
+@router.post("/{workspace_id}/duplicate", response_model=WorkspaceDuplicateResponse)
+async def duplicate_workspace(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceDuplicateResponse:
+    source = workspace_repo.get(workspace_id=workspace_id)
+    if source is None or str(source["owner_user_id"]) != auth.user_id:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    existing_names = {
+        str(row.get("name") or "")
+        for row in workspace_repo.list_for_owner(owner_user_id=auth.user_id)
+    }
+    duplicate_name = _duplicate_workspace_name(str(source.get("name") or ""), existing_names)
+    try:
+        created = workspace_repo.create(owner_user_id=auth.user_id, name=duplicate_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    import_engine = __import__("main")
+    with active_workspace(workspace_id):
+        export_response = import_engine.export_workspace(
+            auth=AuthContext(user_id=auth.user_id, email=auth.email, scopes=()),
+            repos=import_engine.get_repositories(),
+        )
+    payload = bytes(getattr(export_response, "body", b""))
+    if not payload:
+        raise HTTPException(status_code=500, detail="workspace export failed")
+
+    with active_workspace(str(created["id"])):
+        upload = UploadFile(filename="workspace-template.zip", file=io.BytesIO(payload))
+        result = await import_engine.import_workspace(
+            bundle=upload,
+            request=None,
+            auth=auth,
+            repos=import_engine.get_repositories(),
+        )
+
+    _workspace_cache_clear(auth.user_id)
+    return WorkspaceDuplicateResponse(
+        **_to_out(created).model_dump(),
+        workers_imported=list(result.workers_imported),
+        contexts_imported=list(result.contexts_imported),
+        skipped=list(result.skipped),
+        id_remaps=dict(result.id_remaps),
+        required_secrets=list(result.required_secrets),
+        required_connections=list(result.required_connections),
+        workspace_md_present=bool(result.workspace_md_present),
+    )
 
 
 @router.post("/{workspace_id}/transfer", response_model=WorkspaceTransferResponse)
