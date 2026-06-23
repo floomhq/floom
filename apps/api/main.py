@@ -1675,7 +1675,7 @@ async def auth_middleware(request: Request, call_next):
     run_token_header = _run_token_header(request)
     if run_token_header:
         try:
-            run_id_from_token = _run_scoped_token_run_id(run_token_header, secret=secret)
+            run_id_from_token = _run_scoped_token_run_id(run_token_header)
         except HTTPException as exc:
             return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         if run_id_from_token is None:
@@ -1797,7 +1797,7 @@ _RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
 _RE_RUN_DETAIL = _re.compile(r"^/runs/([a-zA-Z0-9_-]+)$")
 
 
-def _run_scoped_token_run_id(raw_token: str | None, *, secret: str | None = None) -> str | None:
+def _run_scoped_token_run_id(raw_token: str | None) -> str | None:
     """Return the run id authorized by a sandbox callback token.
 
     Script workers historically received a simple ``run:`` token for platform
@@ -1822,7 +1822,7 @@ def _run_scoped_token_run_id(raw_token: str | None, *, secret: str | None = None
 
         _require_active_token_user(str(payload.get("user_id") or ""))
         return str(payload.get("parent_run_id") or "") or None
-    return _verify_run_token(token, secret=secret)
+    return _verify_run_token(token)
 
 
 def _worker_call_run_metadata(auth: AuthContext) -> tuple[str | None, str | None]:

@@ -16,7 +16,7 @@ Token format (URL-safe, plain text):
 
 where hex_expires is seconds-since-epoch as a zero-padded 10-char hex string
 and hex_hmac_sha256 is the HMAC-SHA256 of "run:<run_id>:<hex_expires>" keyed
-on FLOOM_SECRET (the operator API secret).
+on the configured run-token signing secret.
 
 Design notes:
   - No database lookup on every sandbox API call — the HMAC is the proof.
@@ -41,22 +41,38 @@ from typing import Any, Callable
 MAX_TTL_SECONDS = 14_400  # 4 hours
 
 
+def _run_token_signing_key(secret: str | None = None) -> str:
+    """Resolve the simple run-token signing secret.
+
+    Returns an empty string when no signing key is configured.
+    """
+    for candidate in (
+        secret,
+        os.environ.get("WORKEROS_RUN_TOKEN_SECRET"),
+        os.environ.get("WORKEROS_WORKER_CALL_SECRET"),
+        os.environ.get("FLOOM_SECRET"),
+    ):
+        key = (candidate or "").strip()
+        if key:
+            return key
+    return ""
+
+
 def make_run_token(run_id: str, *, secret: str | None = None) -> str:
     """Create a signed run capability token for a sandbox worker.
 
     Args:
         run_id: The run's unique identifier.
-        secret: FLOOM_SECRET value.  Defaults to os.environ["FLOOM_SECRET"].
+        secret: Optional explicit signing secret.
 
     Returns:
         An opaque token string to be set as WORKEROS_RUN_TOKEN in the sandbox.
     """
-    if secret is None:
-        secret = os.environ.get("FLOOM_SECRET", "")
+    key = _run_token_signing_key(secret)
     expires = int(time.time()) + MAX_TTL_SECONDS
     hex_expires = format(expires, "010x")
     data = f"run:{run_id}:{hex_expires}"
-    sig = hmac.new(secret.encode(), data.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(key.encode(), data.encode(), hashlib.sha256).hexdigest()
     return f"{data}.{sig}"
 
 
@@ -65,16 +81,15 @@ def verify_run_token(token: str, *, secret: str | None = None) -> str | None:
 
     Args:
         token: Token string (from X-Floom-Run-Token header).
-        secret: FLOOM_SECRET value.  Defaults to os.environ["FLOOM_SECRET"].
+        secret: Optional explicit signing secret.
 
     Returns:
         The run_id embedded in the token if valid and not expired, else None.
     """
     if not token:
         return None
-    if secret is None:
-        secret = os.environ.get("FLOOM_SECRET", "")
-    if not secret:
+    key = _run_token_signing_key(secret)
+    if not key:
         return None
     try:
         data, sig = token.rsplit(".", 1)
@@ -82,7 +97,7 @@ def verify_run_token(token: str, *, secret: str | None = None) -> str | None:
         expires = int(hex_expires, 16)
         if expires < time.time():
             return None  # expired
-        expected = hmac.new(secret.encode(), data.encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(key.encode(), data.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return None  # tampered
         return run_id
