@@ -123,6 +123,15 @@ function ScopeBanner({ scope, name, detail }: { scope: SettingsScope; name?: str
 
 // Cross-link callout that disambiguates the two token scopes in-place
 // (mockup .note). "This is not your personal token → see …" and vice-versa.
+function navigateSettingsSelection(targetSel: string) {
+  const params = new URLSearchParams(window.location.search);
+  params.set("sel", targetSel);
+  params.delete("tab");
+  const nextUrl = `${window.location.pathname}?${params.toString()}`;
+  window.history.pushState(null, "", nextUrl);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 function ScopeCrossLink({
   title,
   body,
@@ -143,10 +152,7 @@ function ScopeCrossLink({
           type="button"
           className="font-medium text-[var(--accent)] hover:underline"
           onClick={() => {
-            const params = new URLSearchParams(window.location.search);
-            params.set("sel", targetSel);
-            params.delete("tab");
-            window.location.href = `/settings?${params.toString()}`;
+            navigateSettingsSelection(targetSel);
           }}
         >
           {linkLabel}
@@ -1305,10 +1311,7 @@ function ConnectSection() {
             type="button"
             className="font-medium text-[var(--accent)] hover:underline"
             onClick={() => {
-              const params = new URLSearchParams(window.location.search);
-              params.set("sel", "personal_tokens");
-              params.delete("tab");
-              window.location.href = `/settings?${params.toString()}`;
+              navigateSettingsSelection("personal_tokens");
             }}
           >
             Account · Personal access tokens
@@ -2261,8 +2264,10 @@ function memberInitial(m: WorkspaceMember, currentUser?: CurrentUser | null, isM
   return base.slice(0, 2).toUpperCase();
 }
 
+let membersSettingsCache: WorkspaceMembersResponse | null = null;
+
 function MembersSettingsPanel() {
-  const [data, setData] = useState<WorkspaceMembersResponse | null>(null);
+  const [data, setData] = useState<WorkspaceMembersResponse | null>(() => membersSettingsCache);
   const [error, setError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
@@ -2278,6 +2283,7 @@ function MembersSettingsPanel() {
   const load = useCallback(async () => {
     try {
       const res = await api.members.list();
+      membersSettingsCache = res;
       setData(res);
       setError(null);
     } catch (err) {
@@ -2286,9 +2292,23 @@ function MembersSettingsPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
-    api.me().then(setCurrentUser).catch(() => setCurrentUser(null));
-  }, [load]);
+    let alive = true;
+    api.members.list()
+      .then((res) => {
+        membersSettingsCache = res;
+        if (alive) {
+          setData(res);
+          setError(null);
+        }
+      })
+      .catch((err: Error) => {
+        if (alive) setError(err.message || "Failed to load members");
+      });
+    api.me()
+      .then((user) => { if (alive) setCurrentUser(user); })
+      .catch(() => { if (alive) setCurrentUser(null); });
+    return () => { alive = false; };
+  }, []);
 
   const myRole = data?.my_role ?? null;
   const myMember = data?.members.find((m) => m.user_id === data.my_user_id) ?? null;
