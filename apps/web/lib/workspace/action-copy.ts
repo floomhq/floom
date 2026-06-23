@@ -7,8 +7,8 @@
  * by link" / "Make a local copy"). Gating the copy here lets downstream hosts
  * consume the engine WorkspaceSwitcher directly instead of forking it.
  *
- * The underlying actions are identical in both modes; only the user-facing
- * wording changes.
+ * Some engine-local template actions are intentionally unavailable in cloud
+ * mode; availability is exposed below so hosts do not render broken calls.
  */
 export interface WorkspaceActionCopy {
   exportLabel: string;
@@ -24,6 +24,11 @@ export interface WorkspaceActionCopy {
   shareCopied: string;
   shareReady: string;
   shareFailed: string;
+}
+
+export interface WorkspaceActionAvailability {
+  duplicate: boolean;
+  shareTemplateLink: boolean;
 }
 
 const OSS_COPY: WorkspaceActionCopy = {
@@ -63,6 +68,12 @@ const CLOUD_COPY: WorkspaceActionCopy = {
 /** Resolve the action copy for the current deploy mode. */
 export function getWorkspaceActionCopy(isCloudMode: boolean): WorkspaceActionCopy {
   return isCloudMode ? CLOUD_COPY : OSS_COPY;
+}
+
+export function getWorkspaceActionAvailability(isCloudMode: boolean): WorkspaceActionAvailability {
+  return isCloudMode
+    ? { duplicate: false, shareTemplateLink: false }
+    : { duplicate: true, shareTemplateLink: true };
 }
 
 /** True when the bundle is built for a managed multi-tenant deployment. */

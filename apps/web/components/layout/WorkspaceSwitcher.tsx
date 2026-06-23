@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { Avatar } from "@/components/ui/Avatar";
-import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
+import { getWorkspaceActionAvailability, getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
 import { computeIsAdmin } from "@/lib/use-is-admin";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -80,7 +80,9 @@ export function WorkspaceSwitcher() {
   const [canExportWorkspace, setCanExportWorkspace] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   // #1005: cloud speaks invite copy, OSS speaks template-zip copy.
-  const copy = getWorkspaceActionCopy(isCloudMode());
+  const cloudMode = isCloudMode();
+  const copy = getWorkspaceActionCopy(cloudMode);
+  const actionAvailability = getWorkspaceActionAvailability(cloudMode);
 
   useEffect(() => {
     let cancelled = false;
@@ -407,34 +409,38 @@ export function WorkspaceSwitcher() {
                 </DropdownMenuItem>
                 {/* W9b: Duplicate mints a "<name> (copy)" sibling; Share copies a
                     signed login-free download link (no secret values). */}
-                <DropdownMenuItem
-                  closeOnClick={false}
-                  disabled={duplicating}
-                  onClick={() => void handleDuplicate()}
-                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-                >
-                  <div className="flex items-center gap-2">
-                    <Copy className="size-4 shrink-0" />
-                    <span>{duplicating ? copy.duplicating : copy.duplicateLabel}</span>
-                  </div>
-                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
-                    {copy.duplicateHelp}
-                  </span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  closeOnClick={false}
-                  disabled={sharingLink}
-                  onClick={() => void handleShareLink()}
-                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-                >
-                  <div className="flex items-center gap-2">
-                    <Link2 className="size-4 shrink-0" />
-                    <span>{sharingLink ? copy.sharing : copy.shareLabel}</span>
-                  </div>
-                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
-                    {copy.shareHelp}
-                  </span>
-                </DropdownMenuItem>
+                {actionAvailability.duplicate && (
+                  <DropdownMenuItem
+                    closeOnClick={false}
+                    disabled={duplicating}
+                    onClick={() => void handleDuplicate()}
+                    className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Copy className="size-4 shrink-0" />
+                      <span>{duplicating ? copy.duplicating : copy.duplicateLabel}</span>
+                    </div>
+                    <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                      {copy.duplicateHelp}
+                    </span>
+                  </DropdownMenuItem>
+                )}
+                {actionAvailability.shareTemplateLink && (
+                  <DropdownMenuItem
+                    closeOnClick={false}
+                    disabled={sharingLink}
+                    onClick={() => void handleShareLink()}
+                    className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Link2 className="size-4 shrink-0" />
+                      <span>{sharingLink ? copy.sharing : copy.shareLabel}</span>
+                    </div>
+                    <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                      {copy.shareHelp}
+                    </span>
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           </DropdownMenuGroup>
