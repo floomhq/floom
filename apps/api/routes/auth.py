@@ -105,6 +105,10 @@ class FragmentSessionRequest(BaseModel):
     user_code: str | None = None
 
 
+class ProfileUpdateRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=120)
+
+
 def _gotrue_detail(exc: Exception) -> str:
     """Return a log-safe summary of a GoTrue/Supabase auth exception.
 
@@ -1145,6 +1149,72 @@ def _session_user(request: Request) -> tuple[str, str]:
     if not user_id:
         raise HTTPException(status_code=401, detail="Not signed in")
     return user_id, refresh_token
+
+
+def _auth_user_from_admin_response(response: Any) -> Any:
+    return getattr(response, "user", None) or response
+
+
+def _auth_user_metadata(user: Any) -> dict[str, Any]:
+    metadata = getattr(user, "user_metadata", None) or {}
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+@router.patch("/profile")
+def update_profile(payload: ProfileUpdateRequest, request: Request):
+    """Update the signed-in user's display profile.
+
+    Cloud intentionally blocks the engine's broad /users endpoints; profile
+    editing needs a self-service route that derives identity from the verified
+    session cookie and can only update the caller's display metadata.
+    """
+    user_id, _refresh_token = _session_user(request)
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(status_code=400, detail="display_name is required")
+    if len(display_name) > 120:
+        raise HTTPException(status_code=400, detail="display_name is too long")
+
+    svc = new_supabase_service_client()
+    try:
+        user = _auth_user_from_admin_response(svc.auth.admin.get_user_by_id(user_id))
+    except Exception as exc:
+        logger.warning("auth/profile get_user_by_id failed for %s: %s", user_id, _gotrue_detail(exc))
+        raise HTTPException(status_code=502, detail="Could not load profile") from exc
+    if user is None or not getattr(user, "id", None):
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    metadata = _auth_user_metadata(user)
+    metadata.update(
+        {
+            "display_name": display_name,
+            "full_name": display_name,
+            "name": display_name,
+        }
+    )
+    try:
+        svc.auth.admin.update_user_by_id(user_id, {"user_metadata": metadata})
+    except Exception as exc:
+        logger.warning("auth/profile update_user_by_id failed for %s: %s", user_id, _gotrue_detail(exc))
+        raise HTTPException(status_code=502, detail="Could not update profile") from exc
+
+    row: dict[str, Any] | None = None
+    try:
+        row = get_repositories().users.update(user_id=user_id, display_name=display_name)
+    except Exception as exc:
+        logger.warning("auth/profile public users update failed for %s: %s", user_id, type(exc).__name__)
+
+    role = str((row or {}).get("role") or "")
+    email = getattr(user, "email", None) or (row or {}).get("email")
+    username = (row or {}).get("username")
+    return {
+        "user_id": user_id,
+        "email": email,
+        "display_name": display_name,
+        "role": role or None,
+        "is_admin": role in {"admin", "owner"},
+        "username": username,
+    }
 
 
 _OSS_PLACEHOLDER_USER_ID = "federico"

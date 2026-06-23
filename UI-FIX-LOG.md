@@ -21,6 +21,26 @@ Remaining flaws:
 - Repo-wide `npm exec tsc -- --noEmit --pretty false` still fails on unrelated existing baseline issues (`EmilyRadarMark`, `@/proxy` test imports, and older test fixture type drift).
 - MCP and secrets still use bespoke list shells; this PR only fixes the secret dependency fail-open path requested for PR 1.
 
+## PR 2 - settings profile save and fail-closed settings states
+
+Score: 8/10
+
+Closed audit items:
+- Profile save now uses the Cloud self-service `/auth/profile` backend path through `api.updateMe`, and success is only shown after that call resolves.
+- Profile save failures render inline error text and an error toast; non-OK/catch paths no longer optimistically update local state or show success.
+- Settings admin state starts locked and only enables privileged controls after `/me` verifies owner/admin/admin status.
+- `/me` failure renders a retryable permissions error and keeps privileged controls locked.
+- Personal access token load failures render a retryable inline error instead of removing the panel.
+- System information load failures render a retryable inline error instead of leaving skeletons mounted forever.
+
+Verification:
+- `python -m pytest tests/test_auth_email_flows.py -k profile_update -q` - passed.
+- `npx vitest run tests/profile-update-api.test.ts tests/settings-fail-closed.dom.test.tsx` from `web/` - 2 files / 6 tests passed.
+
+Remaining flaws:
+- Browser rendering is hook-blocked, so layout and focus behavior for the new alerts is verified by DOM tests only.
+- Repo-wide `npm exec tsc -- --noEmit --pretty false` has unrelated existing baseline failures outside this PR.
+
 ## PR 3 - list defaults and semantic collection heading
 
 Score: 9/10
