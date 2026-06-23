@@ -266,8 +266,6 @@ export const api = {
       fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
-    duplicate: (id: string) =>
-      fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     archive: async (id: string) => {
       const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" });
       return worker;
