@@ -65,18 +65,33 @@ function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number })
 }
 
 
+// Module-level cache for the active workspace name so WorkspaceMark and
+// MobileWorkspaceName return the resolved name on every remount (e.g. sidebar
+// collapse/expand) without a blank-seed flash. Populated on first successful
+// fetch; invalidated to "" on catch so error states still propagate correctly.
+let _cachedWorkspaceName: string | null = null;
+
 /** Active workspace name, resolved once from the workspace list (shared shape
- *  with UserProfileFooter so the mark + footer stay in sync). */
+ *  with UserProfileFooter so the mark + footer stay in sync).
+ *  Module-level cache ensures the name is available instantly on remount — the
+ *  key fix for the collapse/expand avatar flicker: without it every remount
+ *  starts with seed="" → wrong motif → API resolves → correct motif (two
+ *  distinct SVG renders = visible flash). */
 function useActiveWorkspaceName(): string {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(() => _cachedWorkspaceName ?? "");
   useEffect(() => {
+    // Already have a name: skip the fetch (returns cached value immediately).
+    if (_cachedWorkspaceName) return;
     let active = true;
     api.workspace
       .list()
       .then((data) => {
         const current =
           data.workspaces.find((workspace) => workspace.id === data.active_id) ?? data.workspaces[0];
-        if (active && current) setName(current.name);
+        if (active && current) {
+          _cachedWorkspaceName = current.name;
+          setName(current.name);
+        }
       })
       .catch(() => {
         if (active) setName("");
