@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import json
 import sys
 import time
 from pathlib import Path
@@ -56,14 +55,33 @@ def _fake_repos(run_status: str, output: dict | None = None, error: str | None =
     return SimpleNamespace(
         mcp_tools=SimpleNamespace(get_by_name=lambda *, user_id, name: {"id": "t1", "worker_id": "w1", "name": name}),
         runs=SimpleNamespace(get=lambda *, user_id, run_id: dict(run_row)),
+        run_row=run_row,
     )
 
 
 def _dispatch(main, monkeypatch, repos):
     from auth.context import AuthContext
 
-    monkeypatch.setattr(main, "create_run", lambda *args, **kwargs: "run-1")
-    monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        main,
+        "create_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("custom MCP tools must use the REST run path")),
+    )
+    monkeypatch.setattr(
+        main,
+        "start_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("custom MCP tools must use the REST run path")),
+    )
+
+    async def _fake_api_call(method, path, request, **kwargs):
+        if method == "POST" and path == "/workers/w1/runs":
+            assert kwargs["body"] == {"inputs": {}, "trigger_source": "mcp"}
+            return {"status": "running", "run_id": "run-1"}, 200
+        if method == "GET" and path == "/runs/run-1":
+            return dict(repos.run_row), 200
+        raise AssertionError(f"unexpected internal call: {method} {path}")
+
+    monkeypatch.setattr(main, "_api_call", _fake_api_call)
     # shrink the wait cap so the slow-run test doesn't take 30s of wall clock
     monkeypatch.setattr(main, "_mcp_watch_timeout_seconds", lambda raw: 1.5)
 
@@ -80,9 +98,8 @@ def test_slow_run_returns_run_id_instead_of_blocking(monkeypatch, tmp_path):
 
     assert elapsed < 10, f"dispatch blocked for {elapsed:.1f}s"
     assert result["isError"] is False
-    body = json.loads(result["content"][0]["text"])
-    assert body["status"] == "running"
-    assert body["run_id"] == "run-1"
+    assert result["structuredContent"]["status"] == "running"
+    assert result["structuredContent"]["run_id"] == "run-1"
 
 
 def test_fast_run_still_returns_output_inline(monkeypatch, tmp_path):
@@ -91,7 +108,11 @@ def test_fast_run_still_returns_output_inline(monkeypatch, tmp_path):
     result = _dispatch(main, monkeypatch, _fake_repos("completed", output={"answer": 42}))
 
     assert result["isError"] is False
-    assert json.loads(result["content"][0]["text"]) == {"answer": 42}
+    assert result["structuredContent"] == {
+        "status": "completed",
+        "run_id": "run-1",
+        "output": {"answer": 42},
+    }
 
 
 def test_completed_run_redacts_secret_shaped_output(monkeypatch, tmp_path):
@@ -127,6 +148,8 @@ def test_failed_run_is_error(monkeypatch, tmp_path):
     result = _dispatch(main, monkeypatch, _fake_repos("failed", error="boom"))
 
     assert result["isError"] is True
+    assert result["structuredContent"]["status"] == "failed"
+    assert result["structuredContent"]["run_id"] == "run-1"
     assert "boom" in result["content"][0]["text"]
 
 
