@@ -2,7 +2,7 @@
 
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { qk } from "@/lib/query/hooks";
+import { qk, RUNS_FIRST_PAGE_QUERY_PARAMS, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
 
 // Data prefetch for the primary sidebar routes. Each entry warms the SAME
 // TanStack cache entry (key + fn) that the destination route's hook reads, so
@@ -27,14 +27,14 @@ const ROUTE_PREFETCH: Record<string, PrefetchFn> = {
     }),
   "/workers": (qc) =>
     qc.prefetchQuery({
-      queryKey: qk.workers(),
-      queryFn: () => api.workers.list(),
+      queryKey: qk.workers(WORKERS_LIST_QUERY_OPTS),
+      queryFn: () => api.workers.list(WORKERS_LIST_QUERY_OPTS),
       staleTime: PREFETCH_STALE,
     }),
   "/runs": (qc) =>
     qc.prefetchQuery({
-      queryKey: qk.runs(),
-      queryFn: () => api.runs.list(),
+      queryKey: qk.runs(RUNS_FIRST_PAGE_QUERY_PARAMS),
+      queryFn: () => api.runs.list(RUNS_FIRST_PAGE_QUERY_PARAMS),
       staleTime: PREFETCH_STALE,
     }),
   "/connections": (qc) =>

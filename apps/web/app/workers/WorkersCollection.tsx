@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
-import { useWorkers } from "@/lib/query/hooks";
+import { useWorkers, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
 import type {
   WorkerSummary,
   WorkerDetail,
@@ -2092,7 +2092,7 @@ export default function WorkersCollection({
   // state is kept in sync so the existing optimistic mutation handlers (delete,
   // update, archive) still work.
   const workersQuery = useWorkers(
-    { include_archived: true },
+    WORKERS_LIST_QUERY_OPTS,
     initialWorkers.length > 0 ? initialWorkers : undefined,
   );
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);

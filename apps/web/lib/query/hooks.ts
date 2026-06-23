@@ -15,6 +15,9 @@ import type {
 
 // Stable query keys — one namespace per resource so the cache survives navigation
 // and revalidation patches the same entry in place (no skeleton on return).
+export const WORKERS_LIST_QUERY_OPTS = { include_archived: true } as const;
+export const RUNS_FIRST_PAGE_QUERY_PARAMS = { limit: 50, offset: 0 } as const;
+
 export const qk = {
   overview: ["system", "overview"] as const,
   workers: (opts?: { include_archived?: boolean }) => ["workers", opts ?? {}] as const,
