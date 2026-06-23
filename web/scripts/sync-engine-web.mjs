@@ -77,6 +77,7 @@ export const OVERLAY_FILES = [
   "app/invite/[token]/page.tsx",
   "app/api/me/route.ts",
   "app/api/cli-auth/[action]/route.ts",
+  "app/cli-auth/page.engine.tsx",
   "app/cli-auth/page.tsx",
   "app/lib/me.ts",
   "app/connections/connected-accounts/[id]/route.ts",
@@ -119,6 +120,7 @@ export const OVERLAY_FILES = [
   // fullscreen page-pane-hide needs its own guard (Federico 2026-06-17).
   "tests/cloud-emily-fullscreen-r9.dom.test.tsx",
   "tests/cloud-cli-auth-endpoint.test.ts",
+  "tests/cloud-cli-auth-signin-redirect.dom.test.tsx",
   "tests/cloud-overlay-parity.test.ts",
   "lib/api.ts",
   "lib/server-api.ts",

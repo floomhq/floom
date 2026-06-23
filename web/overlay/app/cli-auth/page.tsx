@@ -11,6 +11,7 @@ export default function CloudCliAuthPage() {
     <CliAuthContent
       endpointBase="/app/api/cli-auth"
       loginPath="/app/login"
+      sessionCheckPath="/app/api/me"
       clientName="workeros-cli"
     />
   );
