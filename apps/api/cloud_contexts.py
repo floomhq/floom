@@ -101,6 +101,37 @@ def upload_context(workspace_id: str, context_name: str, context_dir: Path) -> N
             )
 
 
+def upload_context_metadata(workspace_id: str, contexts_root: Path) -> None:
+    """Upload the workspace context metadata file to Supabase Storage."""
+    metadata_path = contexts_root / ".workeros-contexts.json"
+    if not metadata_path.is_file():
+        return
+    from apps.api.config import get_supabase_service_client
+    svc = get_supabase_service_client()
+    storage_path = f"{workspace_id}/.workeros-contexts.json"
+    content = metadata_path.read_bytes()
+    try:
+        svc.storage.from_(_BUCKET).upload(
+            path=storage_path,
+            file=content,
+            file_options={"upsert": "true", "content-type": "application/json"},
+        )
+    except Exception:
+        try:
+            svc.storage.from_(_BUCKET).update(
+                storage_path,
+                content,
+                file_options={"content-type": "application/json"},
+            )
+        except Exception:
+            log_failure(
+                logger,
+                "upload_context_metadata: failed to upload metadata for "
+                "workspace %s (empty/new context metadata not backed to Storage)",
+                workspace_id,
+            )
+
+
 def upload_context_background(
     workspace_id: str,
     context_name: str,
