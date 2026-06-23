@@ -72,12 +72,70 @@ export interface GeneratedMark {
 }
 
 /**
+ * Per-role index offsets applied on top of the hash-derived motif/tone indices.
+ *
+ * Design contract:
+ * - `user` is the baseline (offset 0, 0).
+ * - Every other role has a motif offset that is coprime to MARK_MOTIF_COUNT (6),
+ *   guaranteeing that `(h % 6 + motifOffset) % 6` is NEVER equal to `h % 6`
+ *   for any h. This makes it IMPOSSIBLE for a user and any other role to share
+ *   the same motifIndex when their seeds are identical — without needing the
+ *   hash to differ.
+ * - Do not reorder or modify these offsets without re-baselining all marks.
+ */
+const ROLE_OFFSETS: Record<string, { readonly motif: number; readonly tone: number }> = {
+  user:      { motif: 0, tone: 0 },
+  workspace: { motif: 3, tone: 2 }, // 3 is coprime to 6; user≠workspace guaranteed
+  worker:    { motif: 1, tone: 3 }, // 1 is coprime to 6
+  // emily is fixed (no generated fallback); no offset needed
+};
+
+/**
+ * Derive the motif + tone pair for a (role, seed) pair. Pure — SSR-safe.
+ *
+ * The role offset ensures that marks for different roles can never share both
+ * motifIndex AND toneIndex when their seeds are identical, preventing the
+ * "same blue cross" collision between a user and a workspace with unrelated
+ * names that happened to hash to the same raw indices.
+ *
+ * @param role    - "user", "workspace", "worker", or any future role string.
+ *                  Emily is handled separately (fixed mark, call `generateMark`
+ *                  directly or bypass via the `src` override in `Avatar`).
+ * @param rawSeed - Stable database id preferred over display name so the mark
+ *                  survives renames. Falls back gracefully to any non-empty string.
+ */
+export function generateMarkForRole(role: string, rawSeed: string): GeneratedMark {
+  const h = markHash(rawSeed);
+  const off = ROLE_OFFSETS[role] ?? { motif: 0, tone: 0 };
+  const motifIndex = (h % MARK_MOTIF_COUNT + off.motif) % MARK_MOTIF_COUNT;
+  const toneIndex = ((h >> 5) % MARK_PAIRS.length + off.tone) % MARK_PAIRS.length;
+  const [c1, c2] = MARK_PAIRS[toneIndex]!;
+  return { motif: MOTIF_NAMES[motifIndex]!, motifIndex, c1, c2 };
+}
+
+/**
+ * @deprecated Prefer `generateMarkForRole(role, seed)` for Avatar rendering
+ * so that user and workspace marks never collide for the same seed.
+ * This bare-seed variant is kept for backward compat (existing tests, non-avatar
+ * usages). It has no role-namespace protection.
+ *
  * Deterministically derive the motif + tone pair for a seed. Pure — safe to
  * call during SSR and in tests.
  */
 export function generateMark(seed: string): GeneratedMark {
   const h = markHash(seed);
   const motifIndex = h % MARK_MOTIF_COUNT;
-  const [c1, c2] = MARK_PAIRS[(h >> 5) % MARK_PAIRS.length];
-  return { motif: MOTIF_NAMES[motifIndex], motifIndex, c1, c2 };
+  const [c1, c2] = MARK_PAIRS[(h >> 5) % MARK_PAIRS.length]!;
+  return { motif: MOTIF_NAMES[motifIndex]!, motifIndex, c1, c2 };
+}
+
+/**
+ * Convenience: namespace a raw seed by role for use with `generateMark`.
+ * Exported for unit tests. `Avatar` uses `generateMarkForRole` directly.
+ *
+ * @deprecated Use `generateMarkForRole(role, seed)` instead. This helper is
+ * kept only for test legibility.
+ */
+export function namespacedSeed(role: string, rawSeed: string): string {
+  return `${role}:${rawSeed}`;
 }
