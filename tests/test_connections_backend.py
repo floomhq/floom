@@ -341,7 +341,7 @@ class TestConnectionsListProjection:
         assert item is not None
         assert set(item["scopes"]) == {"channels:read", "chat:write"}
 
-    def test_list_does_not_refresh_stale_initiated_status(self, monkeypatch, tmp_path):
+    def test_list_refreshes_stale_initiated_status(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
         conn = _seed_connection(client, app_name="github")
@@ -358,16 +358,16 @@ class TestConnectionsListProjection:
                 (stale_time, local_id),
             )
 
-        with patch("composio_client.check_status", side_effect=AssertionError("list called Composio")) as mock_check:
+        with patch("composio_client.check_status", return_value="valid") as mock_check:
             resp = client.get("/connections", headers=AUTH_HEADERS)
 
         assert resp.status_code == 200
-        mock_check.assert_not_called()
+        mock_check.assert_called_once_with(conn["composio_connection_id"])
         item = next((c for c in resp.json() if c["id"] == local_id), None)
         assert item is not None
-        assert item["status"] == "initiated"
-        assert item["last_checked_at"] is None
-        assert item["last_check_status"] is None
+        assert item["status"] == "active"
+        assert item["last_checked_at"] is not None
+        assert item["last_check_status"] == "active"
 
     def test_status_endpoint_normalizes_valid_to_active(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)

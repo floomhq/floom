@@ -30,6 +30,7 @@ import threading
 import time
 import urllib.parse
 import uuid as _uuid_mod
+from datetime import datetime, timezone
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
@@ -320,6 +321,7 @@ def _parse_json_string_list(value: Optional[str]) -> List[str]:
 
 _COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success"}
 _COMPOSIO_LIST_REFRESH_STATUSES = {"", "initiated", "pending", "unknown", "created"}
+_COMPOSIO_LIST_REFRESH_MIN_AGE_SECONDS = 60.0
 
 
 def _normalize_composio_connection_status(status: Optional[str]) -> str:
@@ -338,6 +340,31 @@ def _connection_list_item_needs_status_refresh(item: Any) -> bool:
     if (kind or "composio") != "composio":
         return False
     return _normalize_composio_connection_status(status) in _COMPOSIO_LIST_REFRESH_STATUSES
+
+
+def _parse_iso_timestamp(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _connection_list_status_refresh_is_due(row: Dict[str, Any], now_dt: datetime) -> bool:
+    last_checked_at = _parse_iso_timestamp(row.get("last_checked_at"))
+    if last_checked_at is not None:
+        return (now_dt - last_checked_at).total_seconds() >= _COMPOSIO_LIST_REFRESH_MIN_AGE_SECONDS
+    updated_at = _parse_iso_timestamp(row.get("updated_at") or row.get("created_at"))
+    if updated_at is not None:
+        return (now_dt - updated_at).total_seconds() >= _COMPOSIO_LIST_REFRESH_MIN_AGE_SECONDS
+    return True
 
 
 def _callback_persisted_status(existing_status: str, remote_status: str) -> str:
@@ -420,6 +447,9 @@ def _refresh_connection_status_for_list(
         return row
 
     checked_at = now if isinstance(now, str) else now_iso()
+    now_dt = _parse_iso_timestamp(checked_at) or datetime.now(timezone.utc)
+    if not _connection_list_status_refresh_is_due(row, now_dt):
+        return row
     try:
         from composio_client import check_status
 
