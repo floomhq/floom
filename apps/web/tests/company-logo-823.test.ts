@@ -18,25 +18,26 @@ describe("guessDomain", () => {
 });
 
 describe("companyLogoUrl", () => {
-  it("builds a DuckDuckGo favicon URL for explicit domain inputs", () => {
-    // Explicit domain → DuckDuckGo favicon URL.
+  it("returns a DuckDuckGo favicon URL only for dot-qualified domain inputs", () => {
+    // Dot-qualified input (real domain) → DuckDuckGo favicon URL.
     expect(companyLogoUrl("acme.com")).toContain("icons.duckduckgo.com");
     expect(companyLogoUrl("acme.com")).toContain("acme.com.ico");
     expect(companyLogoUrl("https://acme.io/about")).toContain("acme.io.ico");
     // Empty → null.
     expect(companyLogoUrl("")).toBeNull();
   });
-  it("also returns a favicon URL for plain company-named slugs (DuckDuckGo 404s on miss)", () => {
-    // DuckDuckGo returns a real HTTP 404 for unknown domains, so onError fires
-    // in the browser and the Avatar component falls back to the generated mark.
-    // This means we can safely return a URL for all non-empty slugs — the
-    // 404-on-miss path handles non-company names cleanly without any globe placeholder.
-    expect(companyLogoUrl("reltix")).toContain("reltix.com.ico");
-    expect(companyLogoUrl("Heidi Health")).toContain("heidihealth.com.ico");
-    expect(companyLogoUrl("Nova Search")).toContain("novasearch.com.ico");
-    // Non-company names also get a URL; they'll 404 → onError → generated mark.
-    expect(companyLogoUrl("content-pipeline")).toContain("contentpipeline.com.ico");
-    expect(companyLogoUrl("Acme")).toContain("acme.com.ico");
+  it("returns null for plain workspace names — no slug guessing", () => {
+    // Plain names (no dot) must return null. The workspace mark renders the
+    // clean generated mark. Slug guessing ("Nova Search" → novasearch.com) is
+    // forbidden because favicon services return generic placeholder icons for
+    // unknown domains, which look like a broken logo (gray globe/DDG icon).
+    expect(companyLogoUrl("Nova Search")).toBeNull();
+    expect(companyLogoUrl("content-pipeline")).toBeNull();
+    expect(companyLogoUrl("Floom Admin")).toBeNull();
+    expect(companyLogoUrl("Acme")).toBeNull();
+    expect(companyLogoUrl("reltix")).toBeNull();
+    expect(companyLogoUrl("Heidi Health")).toBeNull();
+    expect(companyLogoUrl("   ")).toBeNull();
   });
 });
 
