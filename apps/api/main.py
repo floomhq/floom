@@ -839,6 +839,47 @@ def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any, *, merg
     svc.table("skill_versions").update({"manifest_json": manifest_json}).eq("id", sv_id).execute()
 
 
+def _install_cloud_mcp_worker_create_persistence() -> None:
+    """Make hosted HTTP MCP worker creation durable on cloud.
+
+    The normal REST create route is overridden below and persists worker source
+    into Supabase skill_versions.manifest_json._files. Hosted HTTP MCP dispatches
+    in-process through engine_main._mcp_call_workers_create, bypassing that REST
+    override, so workers created through /mcp/{workspace_id} could exist in DB
+    but be unrunnable on the runner's cold/ephemeral disk.
+    """
+    original = getattr(engine_main, "_mcp_call_workers_create", None)
+    if not callable(original) or getattr(original, "_workeros_cloud_persist_wrapper", False):
+        return
+
+    def _cloud_mcp_call_workers_create(arguments: dict, auth: Any, repos: Any) -> dict:
+        result = original(arguments, auth, repos)
+        if not isinstance(result, dict) or result.get("isError"):
+            return result
+
+        structured = result.get("structuredContent")
+        worker_id = ""
+        if isinstance(structured, dict):
+            worker_id = str(structured.get("id") or structured.get("worker_id") or "").strip()
+        if not worker_id:
+            return result
+
+        files = _read_worker_files_from_disk(worker_id)
+        if not files:
+            files = {
+                "worker.yml": str(arguments.get("worker_yml") or ""),
+                "run.py": str(arguments.get("run_py") or ""),
+            }
+            skill_md = arguments.get("skill_md")
+            if skill_md:
+                files["SKILL.md"] = str(skill_md)
+        _cloud_persist_worker_files(worker_id, files, repos)
+        return result
+
+    setattr(_cloud_mcp_call_workers_create, "_workeros_cloud_persist_wrapper", True)
+    engine_main._mcp_call_workers_create = _cloud_mcp_call_workers_create
+
+
 def _validate_cloud_worker_file_path(path: str) -> str:
     path = path.strip()
     if not path:
@@ -891,6 +932,9 @@ def _read_worker_files_from_disk(worker_id: str) -> dict:
             except Exception:
                 pass
     return files
+
+
+_install_cloud_mcp_worker_create_persistence()
 
 
 @app.post("/workers")
