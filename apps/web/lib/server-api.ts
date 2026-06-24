@@ -54,11 +54,13 @@ export async function serverFetch<T>(
 }
 
 /** Fetch worker list (trimmed list-shape, 30s cache). */
-export async function fetchWorkerList() {
+export async function fetchWorkerList(opts?: { include_archived?: boolean }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
+  const qs = new URLSearchParams({ shape: "list" });
+  if (opts?.include_archived) qs.set("include_archived", "true");
   try {
-    return await serverFetch<import("./types").WorkerSummary[]>("/workers?shape=list", {
+    return await serverFetch<import("./types").WorkerSummary[]>(`/workers?${qs.toString()}`, {
       next: { revalidate: 30 },
       signal: controller.signal,
     });
