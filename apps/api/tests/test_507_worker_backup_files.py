@@ -129,3 +129,27 @@ def test_embed_strict_raises_on_empty_bundle(tmp_path):
         _embed_files_in_skill_version(
             "empty-worker", worker_dir, repos=_Repos(), strict=True
         )
+
+
+def test_embed_strict_raises_when_canonical_repo_lacks_update_manifest_files(tmp_path):
+    """#717 (Codex review P1-A): if a canonical repo is present but predates
+    update_manifest_files, strict mode must RAISE — never fall back to the raw
+    SQLite write. On a Postgres-backed (cloud) repo that fallback would land
+    _files only in the engine's local SQLite sidecar, recreating the original
+    silent split-brain bug."""
+    worker_dir = tmp_path / "workers" / "legacy-repo-worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "worker.yml").write_text("name: legacy-repo-worker\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text("print('hi')\n", encoding="utf-8")
+
+    class _LegacyWorkersRepo:
+        # No update_manifest_files attribute at all (predates the method).
+        pass
+
+    class _Repos:
+        workers = _LegacyWorkersRepo()
+
+    with pytest.raises(RuntimeError, match="update_manifest_files"):
+        _embed_files_in_skill_version(
+            "legacy-repo-worker", worker_dir, repos=_Repos(), strict=True
+        )
