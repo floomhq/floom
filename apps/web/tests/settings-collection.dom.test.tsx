@@ -131,8 +131,11 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
-    // SETTINGS-01: Settings now defaults to LIST view (not gallery grid).
+    // SETTINGS-01: Settings now defaults to LIST view (not gallery grid); grid
+    // stays available as a toggle.
     expect(await screen.findByRole("button", { name: "List view", pressed: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Grid view" }));
+    expect(await screen.findByRole("button", { name: "Grid view", pressed: true })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "List view" }));
     await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
