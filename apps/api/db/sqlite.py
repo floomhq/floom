@@ -1471,6 +1471,13 @@ class SqliteWorkerRepository:
         _invalidate_run_worker_cache()
 
     def update_manifest_files(self, *, worker_id: str, files: dict[str, str]) -> bool:
+        # NOTE (workeros-cloud#717, P2): whole-manifest read-modify-write
+        # (SELECT manifest_json -> set `_files` -> UPDATE). Intentional and safe
+        # for the single-shot create/register/save paths that are its only callers
+        # today (no concurrent writer to the same skill_version mid-create). Before
+        # reusing in any concurrent/bulk path, switch to a `_files`-scoped update
+        # (SQLite json_set / Postgres jsonb_set) so a concurrent manifest edit
+        # between SELECT and UPDATE cannot be lost.
         with get_db() as conn:
             row = conn.execute(
                 "SELECT sv.id AS id, sv.manifest_json AS manifest_json "

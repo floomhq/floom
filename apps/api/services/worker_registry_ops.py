@@ -464,8 +464,20 @@ def _embed_files_in_skill_version(
             )
         return
 
-    # Last-resort fallback: a backend whose repo predates update_manifest_files.
-    # SQLite-only; a no-op against a non-SQLite primary store.
+    # A canonical repo is present but predates update_manifest_files. In strict
+    # mode we MUST NOT fall back to the raw-SQLite write below: if that repo is a
+    # non-SQLite (e.g. Postgres/cloud) store, the SQLite write lands in the wrong
+    # place, Postgres ``_files`` stays empty, and the bundle silently ships dead
+    # (workeros-cloud#717). Fail loud instead of recreating the original bug.
+    if strict and workers_repo is not None:
+        raise RuntimeError(
+            f"canonical worker repository {type(workers_repo).__name__} does not "
+            f"implement update_manifest_files; refusing to embed bundle for "
+            f"worker {worker_id!r} into a non-canonical store"
+        )
+
+    # Last-resort fallback: NO canonical repo handle at all (rare). SQLite-only;
+    # a no-op against a non-SQLite primary store, so best-effort by definition.
     from db import get_db
 
     with get_db() as conn:
@@ -582,8 +594,13 @@ def _register_worker_from_files(
     try:
         _embed_files_in_skill_version(worker_id, target_dir, repos=repos, strict=True)
     except Exception as exc:
+        # Embed failed under strict mode: the worker row was already created by
+        # _persist_discovered_workers above. Remove BOTH the directory AND the DB
+        # row so a strict failure leaves no ghost worker (a visible row with no
+        # bundle), mirroring the create path's _cleanup_worker_create_state.
         import shutil
         shutil.rmtree(target_dir, ignore_errors=True)
+        _purge_partial_worker(worker_id, user_id=user_id, repos=repos)
         invalidate_worker_cache()
         raise HTTPException(
             status_code=502,
@@ -591,6 +608,45 @@ def _register_worker_from_files(
         ) from exc
 
     return worker_id
+
+
+def _purge_partial_worker(
+    worker_id: str,
+    *,
+    user_id: str | None,
+    repos: "Repositories | None" = None,
+) -> None:
+    """Best-effort delete of a partially-registered worker's DB state.
+
+    Used when a strict embed fails after the worker row was persisted, so the
+    create/register paths never leave a row pointing at a missing bundle. Routes
+    through the canonical repo first (cloud-aware), then cleans the SQLite
+    sidecar; both are best-effort because this runs inside a failure handler.
+    """
+    workers_repo = getattr(repos, "workers", None) if repos is not None else None
+    if workers_repo is not None:
+        try:
+            workers_repo.delete(user_id=user_id, worker_id=worker_id)
+        except Exception:
+            logger.debug("partial-worker repo delete failed for %s", worker_id, exc_info=True)
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT skill_version_id FROM workers WHERE id = ?", (worker_id,)
+            ).fetchone()
+            skill_version_id = row["skill_version_id"] if row else None
+            conn.execute("DELETE FROM worker_triggers WHERE worker_id = ?", (worker_id,))
+            conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
+            if skill_version_id:
+                conn.execute(
+                    "DELETE FROM skill_versions WHERE id = ? "
+                    "AND NOT EXISTS (SELECT 1 FROM workers WHERE skill_version_id = ?)",
+                    (skill_version_id, skill_version_id),
+                )
+    except Exception:
+        logger.debug("partial-worker sqlite delete failed for %s", worker_id, exc_info=True)
 
 
 def _persist_discovered_workers(
