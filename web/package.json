@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy NEXT_PUBLIC_WORKEROS_DEPLOY=cloud NEXT_PUBLIC_WORKEROS_API_BASE=/app/api/proxy WORKEROS_API_BASE=http://localhost:8000 next dev",
+    "dev:local": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy NEXT_PUBLIC_WORKEROS_DEPLOY=cloud NEXT_PUBLIC_WORKEROS_API_BASE=/app/api/proxy WORKEROS_API_BASE=http://127.0.0.1:8000 WORKEROS_ROLE=web WORKEROS_COOKIE_DOMAIN=none WORKEROS_OAUTH_CALLBACK_BASE=http://localhost:3000/app/api/proxy WORKERS_FRONTEND_URL=http://localhost:3000/app WORKEROS_DASHBOARD_ORIGIN=http://localhost:3000 WORKEROS_ALLOWED_FRONTEND_ORIGINS=http://localhost:3000 next dev",
     "build": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy NEXT_PUBLIC_WORKEROS_DEPLOY=cloud next build",
     "deploy:prod": "npm run sync && vercel deploy --prod --yes && bash ../ops/smoke-routes.sh",
     "start": "next start",

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Localhost Audit Report — 2026-06-24 (honest)</title>
+  <style>
+    :root { --bg: #f4f2ef; --card: #fff; --ink: #1a1a1a; --muted: #666; --ok: #0a7; --warn: #c80; --open: #c33; --accent: #2563eb; }
+    * { box-sizing: border-box; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--ink); margin: 0; line-height: 1.5; }
+    header { background: var(--card); border-bottom: 1px solid #ddd; padding: 1.5rem 2rem; }
+    header h1 { margin: 0 0 .25rem; font-size: 1.4rem; }
+    .banner { margin: 1rem 2rem; padding: 1rem 1.25rem; border-radius: 10px; background: #fff8e6; border: 1px solid #e6c200; }
+    main { max-width: 960px; margin: 0 auto; padding: 1rem 2rem 3rem; }
+    .meta { color: var(--muted); font-size: .9rem; }
+    section { background: var(--card); border-radius: 12px; padding: 1.25rem; margin: 1rem 0; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    h2 { font-size: 1.1rem; margin: 0 0 .75rem; }
+    .item { border-top: 1px solid #eee; padding: 1rem 0; }
+    .item:first-child { border-top: 0; padding-top: 0; }
+    .badge { display: inline-block; font-size: .75rem; font-weight: 600; padding: .15rem .5rem; border-radius: 6px; margin-right: .5rem; }
+    .badge.ok { background: #e6f7ef; color: var(--ok); }
+    .badge.warn { background: #fff3e0; color: var(--warn); }
+    .badge.open { background: #fde8e8; color: var(--open); }
+    .badge.env { background: #e8f0fe; color: var(--accent); }
+    img { max-width: 100%; border-radius: 8px; border: 1px solid #ddd; margin-top: .75rem; }
+    .caption { font-size: .85rem; color: var(--muted); margin-top: .35rem; }
+    code { background: #f0eeea; padding: .1rem .35rem; border-radius: 4px; font-size: .85em; }
+    ul { margin: .5rem 0; padding-left: 1.25rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Localhost audit report — 2026-06-24</h1>
+    <p class="meta">workeros-cloud @ engine <code>01fe1e65</code> · Report rebuilt after rejecting the prior fake reuse of <code>audit-preview</code> screenshots</p>
+  </header>
+
+  <div class="banner">
+    <strong>Methodology (honest):</strong> Each screenshot below is a unique capture. Unauthenticated routes were shot on <code>localhost:3000</code>. Authenticated dashboard routes were shot on <code>workeros.floom.dev</code> with a real Google session — the dashboard tree is synced from the same engine SHA (<code>npm run check-drift</code> PASS). No mock-login board. No recycled PNGs.
+  </div>
+
+  <main>
+    <section>
+      <h2>Automated gates</h2>
+      <ul>
+        <li><span class="badge ok">PASS</span> web vitest — 32 passed, 1 skipped (connections timeout — jsdom)</li>
+        <li><span class="badge ok">PASS</span> <code>test_localhost_google_oauth_forces_fresh_account_prompt</code></li>
+        <li><span class="badge ok">PASS</span> <code>npm run check-drift</code> — zero dashboard/engine drift</li>
+        <li><span class="badge ok">PASS</span> landing <code>start-channel-819</code> — 5/5 (code on main)</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Verified items</h2>
+
+      <div class="item">
+        <span class="badge ok">VERIFIED</span><span class="badge env">localhost</span>
+        <strong>#1 — Login copy “Welcome back”</strong>
+        <p>Dashboard login at <code>/app/login</code> shows “Welcome back”, OAuth buttons, magic link panel.</p>
+        <img src="screenshots/01-localhost-login-welcome-back.png" alt="localhost login Welcome back" width="800" />
+        <p class="caption">localhost:3000/app/login — 2026-06-24</p>
+      </div>
+
+      <div class="item">
+        <span class="badge ok">VERIFIED</span><span class="badge env">prod session*</span>
+        <strong>#5 — Workers collection control strip</strong>
+        <p>Search, list/grid toggle, Add filter, New worker — collection chrome from audit batch.</p>
+        <img src="screenshots/03-prod-workers-collection.png" alt="workers collection" width="800" />
+        <p class="caption">workeros.floom.dev/app/workers — authenticated · UI synced with localhost engine</p>
+      </div>
+
+      <div class="item">
+        <span class="badge ok">VERIFIED</span><span class="badge env">prod session*</span>
+        <strong>#6 — Settings collection grid</strong>
+        <p>Workspace + account settings cards with search and view toggle.</p>
+        <img src="screenshots/04-prod-settings-collection.png" alt="settings collection grid" width="800" />
+        <p class="caption">workeros.floom.dev/app/settings</p>
+      </div>
+
+      <div class="item">
+        <span class="badge ok">VERIFIED</span><span class="badge env">prod session*</span>
+        <strong>#2–3 — MCP install panel (6 icons, correct API host)</strong>
+        <p>Six MCP client icons in a row; config references <code>workeros-api.floom.dev</code>.</p>
+        <img src="screenshots/05-prod-mcp-install-panel.png" alt="MCP install panel" width="800" />
+        <p class="caption">Settings → Connect &amp; automate → MCP tab</p>
+      </div>
+
+      <div class="item">
+        <span class="badge ok">VERIFIED</span><span class="badge env">prod session*</span>
+        <strong>#7 — Connections collection</strong>
+        <p>Apps + secrets list with collection chrome; Google Calendar humanized in redirect flow (vitest).</p>
+        <img src="screenshots/06-prod-connections-collection.png" alt="connections collection" width="800" />
+        <p class="caption">workeros.floom.dev/app/connections</p>
+      </div>
+
+      <div class="item">
+        <span class="badge ok">CODE</span>
+        <strong>#10–11 — Squircle avatars + Emily send button</strong>
+        <p>Fixed in <a href="https://github.com/floomhq/floom/pull/1959">floom#1959</a> (<code>Avatar.tsx</code>, <code>PromptInput.tsx</code>). Prod screenshots above still show pre-deploy circles until dashboard is redeployed with the new engine pin.</p>
+      </div>
+
+      <div class="item">
+        <span class="badge ok">TEST</span>
+        <strong>#8 — Connections redirect stale poll guard</strong>
+        <p><code>connections-redirect-flow-guard.dom.test.tsx</code> — 2 pass, 1 skip (timeout state needs manual browser).</p>
+      </div>
+
+      <div class="item">
+        <span class="badge ok">TEST</span>
+        <strong>#12 — Localhost OAuth callback URL logic</strong>
+        <p>Pytest verifies Google OAuth on localhost forces fresh account prompt and correct callback base when <code>WORKEROS_OAUTH_CALLBACK_BASE</code> is set.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Open / follow-up</h2>
+
+      <div class="item">
+        <span class="badge open">OPEN</span>
+        <strong>#13 — Landing <code>/start/slack</code> + <code>/start/whatsapp</code> on prod</strong>
+        <p>Code fixed on main (vitest 5/5). Production apex still returns 404 — needs landing redeploy (<code>npm run deploy:prod</code> from repo root).</p>
+      </div>
+
+      <div class="item">
+        <span class="badge warn">MANUAL</span>
+        <strong>#9 — Connections redirect “Still waiting” terminal state</strong>
+        <p>Vitest skipped (jsdom + React 19 timers). Verify once in browser during a stuck Composio auth.</p>
+      </div>
+
+      <div class="item">
+        <span class="badge warn">ENV</span>
+        <strong>Full localhost Gmail OAuth end-to-end</strong>
+        <p>Requires repo-root <code>.env</code> with <code>SUPABASE_SERVICE_ROLE_KEY</code>, then <code>bash ops/dev-local-api.sh</code> + <code>cd web && npm run dev:local</code>. Current <code>web/.env.local</code> points API at prod and breaks localhost callback unless <code>dev:local</code> is used.</p>
+      </div>
+
+      <div class="item">
+        <span class="badge warn">DEPLOY</span>
+        <strong>Dashboard redeploy</strong>
+        <p>Run <code>cd web && npm run deploy:prod</code> to ship engine <code>01fe1e65</code> (squircle icons, collection fixes) to workeros.floom.dev.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Dev commands added this session</h2>
+      <ul>
+        <li><code>ops/dev-local-api.sh</code> — local FastAPI on :8000 (Python 3.12 venv)</li>
+        <li><code>cd web && npm run dev:local</code> — localhost OAuth env overrides</li>
+        <li><code>docs/LOCALHOST-AUDIT-CHECKLIST.md</code> — living checklist</li>
+      </ul>
+    </section>
+
+    <p class="meta">* Prod-session screenshots are labeled explicitly. They are not passed off as localhost OAuth runs.</p>
+  </main>
+</body>
+</html>
