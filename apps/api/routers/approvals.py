@@ -22,9 +22,12 @@ RejectRequest that chat_service imports.
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import logging
 import re
+import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import (
@@ -60,10 +63,35 @@ from services.sse_streaming import _sse_publish
 from services.uploads import _store_uploaded_blob
 from services.worker_access import _delete_worker_impl
 from services.product_events import emit_approval_decided
+from services.share_links import (
+    _create_or_get_standalone_share_link,
+    _load_standalone_share_row,
+)
 
 logger = logging.getLogger("floom.api")
 
 approvals_router = APIRouter()
+
+_WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_PUBLIC_BATCH_RATE_LOCK = threading.Lock()
+_PUBLIC_BATCH_RATE_BUCKETS: dict[str, list[float]] = {}
+_PUBLIC_BATCH_RATE_WINDOW_SECONDS = 60.0
+_PUBLIC_BATCH_READ_LIMIT = 120
+_PUBLIC_BATCH_ACTION_LIMIT = 30
+_BATCH_SENSITIVE_KEYS = {
+    "authorization",
+    "bearer",
+    "claim_token",
+    "connected_account_id",
+    "connection_id",
+    "download_token",
+    "mcp_auth_secret",
+    "password",
+    "refresh_token",
+    "secret",
+    "signature",
+    "token",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +244,160 @@ class ApproveRequest(BaseModel):
 class RejectRequest(BaseModel):
     reason: Optional[str] = None
     annotations: Optional[Dict[str, Any]] = None
+
+
+def _safe_workspace_id(value: str | None) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    if not _WORKSPACE_ID_RE.fullmatch(text):
+        return None
+    return text
+
+
+def _derive_workspace_id_for_owner(owner_id: str | None) -> str:
+    try:
+        from db import derive_workspace_id
+
+        return str(derive_workspace_id(owner_id))
+    except Exception:
+        text = (owner_id or "").strip()
+        match = re.search(r"__(ws_[A-Za-z0-9_.:-]{3,64})$", text)
+        return match.group(1) if match else "local-default"
+
+
+def _active_workspace_id_for_batch(request: Request, auth: AuthContext) -> str:
+    header_value = (
+        request.headers.get("x-floom-workspace")
+        or request.headers.get("x-workeros-workspace")
+    )
+    header_workspace_id = _safe_workspace_id(header_value)
+    active_workspace_id: str | None = None
+    try:
+        from apps.api.auth.workspace_context import get_active_workspace_id
+
+        active_workspace_id = _safe_workspace_id(get_active_workspace_id())
+    except Exception:
+        active_workspace_id = None
+    if active_workspace_id:
+        if header_workspace_id and header_workspace_id != active_workspace_id:
+            raise HTTPException(status_code=403, detail="Workspace mismatch")
+        return active_workspace_id
+    import os
+
+    if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "cloud":
+        raise HTTPException(status_code=400, detail="Workspace context is required")
+    if header_workspace_id:
+        return header_workspace_id
+    return _derive_workspace_id_for_owner(auth.user_id)
+
+
+def _enforce_public_batch_rate_limit(request: Request, token: str, *, action: bool) -> None:
+    client_host = request.client.host if request.client else "unknown"
+    token_fingerprint = hashlib.sha256((token or "").encode("utf-8")).hexdigest()[:16]
+    key = f"{client_host}:{token_fingerprint}:{'action' if action else 'read'}"
+    now = time.monotonic()
+    limit = _PUBLIC_BATCH_ACTION_LIMIT if action else _PUBLIC_BATCH_READ_LIMIT
+    with _PUBLIC_BATCH_RATE_LOCK:
+        bucket = [
+            ts for ts in _PUBLIC_BATCH_RATE_BUCKETS.get(key, [])
+            if now - ts < _PUBLIC_BATCH_RATE_WINDOW_SECONDS
+        ]
+        if len(bucket) >= limit:
+            _PUBLIC_BATCH_RATE_BUCKETS[key] = bucket
+            raise HTTPException(status_code=429, detail="Too many approval batch requests")
+        bucket.append(now)
+        _PUBLIC_BATCH_RATE_BUCKETS[key] = bucket
+
+
+def _approval_workspace_id(approval: Dict[str, Any], repos: Repositories) -> str:
+    workspace_id = _safe_workspace_id(str(approval.get("workspace_id") or ""))
+    if workspace_id:
+        return workspace_id
+    worker_id = str(approval.get("worker_id") or "")
+    if worker_id:
+        try:
+            worker = repos.workers.get_any(worker_id=worker_id)
+            if worker:
+                workspace_id = _safe_workspace_id(str(worker.get("workspace_id") or ""))
+                if workspace_id:
+                    return workspace_id
+        except Exception:
+            logger.warning("Failed to resolve approval workspace for worker %s", worker_id, exc_info=True)
+    return _derive_workspace_id_for_owner(str(approval.get("owner_id") or ""))
+
+
+def _scrub_public_batch_value(value: Any, *, depth: int = 0) -> Any:
+    if depth > 8:
+        return None
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            key_l = key_text.lower()
+            if any(sensitive in key_l for sensitive in _BATCH_SENSITIVE_KEYS):
+                continue
+            scrubbed = _scrub_public_batch_value(item, depth=depth + 1)
+            if scrubbed is not None:
+                out[key_text] = scrubbed
+        return out
+    if isinstance(value, list):
+        return [_scrub_public_batch_value(item, depth=depth + 1) for item in value[:200]]
+    if isinstance(value, str):
+        return value[:20000]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)[:20000]
+
+
+def _approval_kind(approval: Dict[str, Any]) -> str:
+    try:
+        parsed = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        parsed = {}
+    kind = str(parsed.get("kind") or "run")
+    return kind if kind in {"run", "agent_tool", "destructive_delete"} else "run"
+
+
+def _public_batch_approval_item(approval: Dict[str, Any], repos: Repositories) -> Dict[str, Any]:
+    public = _public_approval_response(approval, repos)
+    public.pop("decision_input_json", None)
+    public.pop("edited_output_json", None)
+    public.pop("follow_up_run_id", None)
+    public.pop("workspace_id", None)
+    public["preview_payload"] = _scrub_public_batch_value(public.get("preview_payload"))
+    public["kind"] = _approval_kind(approval)
+    public["action_token"] = try_approval_public_token(dict(approval))
+    return public
+
+
+def _load_approvals_batch_share(token: str) -> Dict[str, Any]:
+    row = _load_standalone_share_row(token)
+    if not row or str(row.get("entity_type") or "") != "approvals_batch":
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    workspace_id = _safe_workspace_id(str(row.get("entity_id") or ""))
+    if not workspace_id:
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    return dict(row)
+
+
+def _list_pending_approvals_for_workspace(
+    repos: Repositories,
+    *,
+    workspace_id: str,
+    owner_id: str,
+    limit: int = 200,
+) -> list[Dict[str, Any]]:
+    bounded_limit = max(1, min(int(limit or 200), 200))
+    list_for_workspace = getattr(repos.approvals, "list_pending_for_workspace", None)
+    if callable(list_for_workspace):
+        rows = list_for_workspace(workspace_id=workspace_id, limit=bounded_limit)
+    else:
+        rows = repos.approvals.list_pending(owner_id=owner_id, limit=bounded_limit)
+    return [
+        dict(row) for row in rows
+        if _approval_workspace_id(dict(row), repos) == workspace_id
+    ]
 
 
 @approvals_router.get("/approvals")
@@ -525,6 +707,168 @@ class PublicApprovalDecisionRequest(BaseModel):
     annotations: Dict[str, Any] | None = None
 
 
+class PublicBatchApprovalDecisionRequest(PublicApprovalDecisionRequest):
+    decision: str
+
+
+def _dispatch_public_approval_decision(
+    approval_id: str,
+    approval: Dict[str, Any],
+    *,
+    decision: str,
+    body: PublicApprovalDecisionRequest,
+    repos: Repositories,
+) -> ActionResponse:
+    auth = AuthContext(user_id=str(approval["owner_id"]), email=None, scopes=("approval",))
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision == "approved":
+        if decision_input.get("kind") == "destructive_delete":
+            result = approve_destructive_action(
+                approval_id=approval_id,
+                auth=auth,
+                repos=repos,
+                annotations=body.annotations,
+                reason=body.reason,
+            )
+            return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
+        if decision_input.get("kind") == "agent_tool":
+            return approve_agent_tool_approval(
+                approval_id,
+                ApproveRequest(edited_output=body.edited_output, annotations=body.annotations, reason=body.reason),
+                auth,
+                repos,
+            )
+        return approve_run(
+            str(approval["run_id"]),
+            ApproveRequest(edited_output=body.edited_output, annotations=body.annotations, reason=body.reason),
+            auth,
+            repos,
+        )
+    if decision == "rejected":
+        if decision_input.get("kind") == "destructive_delete":
+            result = reject_destructive_action(
+                approval_id=approval_id,
+                body=RejectRequest(reason=body.reason, annotations=body.annotations),
+                auth=auth,
+                repos=repos,
+            )
+            return ActionResponse(status=str(result.get("status") or "rejected"), run_id=str(approval["run_id"]))
+        if decision_input.get("kind") == "agent_tool":
+            return reject_agent_tool_approval(
+                approval_id,
+                RejectRequest(reason=body.reason, annotations=body.annotations),
+                auth,
+                repos,
+            )
+        return reject_run(
+            str(approval["run_id"]),
+            RejectRequest(reason=body.reason, annotations=body.annotations),
+            auth,
+            repos,
+        )
+    raise HTTPException(status_code=422, detail="decision must be approved or rejected")
+
+
+@approvals_router.post("/approvals/batch-share-link")
+def create_approvals_batch_share_link(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    """Mint or rotate one public actionable link for pending approvals in a workspace."""
+    workspace_id = _active_workspace_id_for_batch(request, auth)
+    return _create_or_get_standalone_share_link(
+        entity_type="approvals_batch",
+        entity_id=workspace_id,
+        owner_id=auth.user_id,
+    )
+
+
+def _public_approvals_batch_payload(
+    token: str,
+    repos: Repositories,
+    *,
+    request: Request | None = None,
+) -> Dict[str, Any]:
+    if request is not None:
+        _enforce_public_batch_rate_limit(request, token, action=False)
+    share = _load_approvals_batch_share(token)
+    workspace_id = str(share["entity_id"])
+    owner_id = str(share["owner_id"])
+    rows = _list_pending_approvals_for_workspace(
+        repos,
+        workspace_id=workspace_id,
+        owner_id=owner_id,
+        limit=200,
+    )
+    stale = [row for row in rows if _is_row_past_expiry(row)]
+    if stale:
+        for row in stale:
+            _lazy_expire(str(row.get("id") or ""), repos)
+        rows = _list_pending_approvals_for_workspace(
+            repos,
+            workspace_id=workspace_id,
+            owner_id=owner_id,
+            limit=200,
+        )
+    return {
+        "entity_type": "approvals_batch",
+        "title": "Pending approvals",
+        "description": "Actionable public link for this workspace's pending approvals.",
+        "approvals": [_public_batch_approval_item(row, repos) for row in rows],
+    }
+
+
+@approvals_router.get("/approvals/public-batch/{token}")
+def get_public_approvals_batch(
+    request: Request,
+    token: str = Path(..., min_length=10),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return pending approval display data for a workspace batch share token."""
+    return _public_approvals_batch_payload(token, repos, request=request)
+
+
+@approvals_router.post("/approvals/public-batch/{token}/items/{approval_id}/decision", response_model=ActionResponse)
+def decide_public_approvals_batch_item(
+    request: Request,
+    token: str = Path(..., min_length=10),
+    approval_id: str = Path(..., min_length=1, max_length=128),
+    body: PublicBatchApprovalDecisionRequest = Body(...),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Approve or reject one item authorized by a workspace batch share token."""
+    if body.decision not in {"approved", "rejected"}:
+        raise HTTPException(status_code=422, detail="decision must be approved or rejected")
+    _enforce_public_batch_rate_limit(request, token, action=True)
+    share = _load_approvals_batch_share(token)
+    workspace_id = str(share["entity_id"])
+    approval = repos.approvals.get_public(approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    approval = dict(approval)
+    if _approval_workspace_id(approval, repos) != workspace_id:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if _is_row_past_expiry(approval):
+        _lazy_expire(approval_id, repos)
+        approval = repos.approvals.get_public(approval_id=approval_id) or approval
+    if str(approval.get("status") or "") == "expired":
+        raise HTTPException(status_code=409, detail="Approval expired")
+    if str(approval.get("status") or "") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+    return _dispatch_public_approval_decision(
+        approval_id,
+        approval,
+        decision=body.decision,
+        body=body,
+        repos=repos,
+    )
+
+
 @approvals_router.get("/approvals/public/{approval_id}")
 def get_public_approval(
     approval_id: str,
@@ -569,34 +913,12 @@ def approve_public_approval(
 ) -> ActionResponse:
     """Approve from a signed standalone link without requiring app navigation."""
     approval = _load_public_approval(approval_id, token, repos)
-    auth = AuthContext(user_id=str(approval["owner_id"]), email=None, scopes=("approval",))
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") == "destructive_delete":
-        result = approve_destructive_action(
-            approval_id,
-            auth,
-            repos,
-            annotations=body.annotations,
-            reason=body.reason,  # #769: was dropped on the public destructive-delete path
-        )
-        return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
-    if decision_input.get("kind") == "agent_tool":
-        return approve_agent_tool_approval(
-            approval_id,
-            # #769: forward the public approver's plain-text reason (was dropped)
-            ApproveRequest(edited_output=body.edited_output, annotations=body.annotations, reason=body.reason),
-            auth,
-            repos,
-        )
-    return approve_run(
-        str(approval["run_id"]),
-        ApproveRequest(edited_output=body.edited_output, annotations=body.annotations, reason=body.reason),
-        auth,
-        repos,
+    return _dispatch_public_approval_decision(
+        approval_id,
+        approval,
+        decision="approved",
+        body=body,
+        repos=repos,
     )
 
 
@@ -609,32 +931,12 @@ def reject_public_approval(
 ) -> ActionResponse:
     """Reject from a signed standalone link without requiring app navigation."""
     approval = _load_public_approval(approval_id, token, repos)
-    auth = AuthContext(user_id=str(approval["owner_id"]), email=None, scopes=("approval",))
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") == "destructive_delete":
-        result = reject_destructive_action(
-            approval_id,
-            RejectRequest(reason=body.reason, annotations=body.annotations),
-            auth,
-            repos,
-        )
-        return ActionResponse(status=str(result.get("status") or "rejected"), run_id=str(approval["run_id"]))
-    if decision_input.get("kind") == "agent_tool":
-        return reject_agent_tool_approval(
-            approval_id,
-            RejectRequest(reason=body.reason, annotations=body.annotations),
-            auth,
-            repos,
-        )
-    return reject_run(
-        str(approval["run_id"]),
-        RejectRequest(reason=body.reason, annotations=body.annotations),
-        auth,
-        repos,
+    return _dispatch_public_approval_decision(
+        approval_id,
+        approval,
+        decision="rejected",
+        body=body,
+        repos=repos,
     )
 
 

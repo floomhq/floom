@@ -286,6 +286,10 @@ def _standalone_share_payload(token: str, repos: "Repositories") -> Dict[str, An
             return _public_brain_pack_share(row)
         if entity_type == "run":
             return _public_run_share(row, repos)
+        if entity_type == "approvals_batch":
+            from routers.approvals import _public_approvals_batch_payload
+
+            return _public_approvals_batch_payload(token, repos)
         raise HTTPException(status_code=404, detail="Share link not found")
 
     # Backward compatibility for worker short links created before the unified

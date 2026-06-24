@@ -3773,7 +3773,7 @@ class SqliteApprovalRepository:
         with get_db() as conn:
             row = conn.execute(
                 """
-                SELECT a.*, w.name AS worker_name
+                SELECT a.*, w.name AS worker_name, w.workspace_id AS workspace_id
                 FROM approvals a
                 LEFT JOIN workers w ON w.id = a.worker_id
                 WHERE a.id = ?
@@ -3864,6 +3864,24 @@ class SqliteApprovalRepository:
                 LIMIT ?
                 """,
                 (owner_id, bounded_limit),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def list_pending_for_workspace(self, *, workspace_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        bounded_limit = _bounded_positive_int(limit, default=100, maximum=200)
+        safe_workspace_id = (workspace_id or "local-default").strip() or "local-default"
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.*, w.name AS worker_name, w.workspace_id AS workspace_id
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE a.status = 'pending'
+                  AND COALESCE(w.workspace_id, 'local-default') = ?
+                ORDER BY a.created_at ASC
+                LIMIT ?
+                """,
+                (safe_workspace_id, bounded_limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 

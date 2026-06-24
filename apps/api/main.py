@@ -1700,6 +1700,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/api/workspace-agent/mcp"
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
+            or path.startswith("/approvals/public-batch/")
             or path.startswith("/drop/public/")
             or path.startswith("/review/public/")
             or path.startswith("/workers/public/")
