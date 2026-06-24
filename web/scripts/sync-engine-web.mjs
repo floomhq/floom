@@ -66,6 +66,8 @@ export const OVERLAY_FILES = [
   "app/api/auth/email/route.ts",
   "app/api/auth/password/route.ts",
   "app/api/proxy/[...path]/route.ts",
+  "app/s/[token]/page.tsx",
+  "app/s/[token]/StandaloneShareCard.tsx",
   "app/s/[token]/download/route.ts",
   // app/contexts/page.tsx + app/assistant/page.tsx de-forked 2026-06-13: both were
   // stale forks that lagged the engine (no cloud seam; the engine pages are strict
@@ -125,6 +127,7 @@ export const OVERLAY_FILES = [
   "tests/cloud-overlay-parity.test.ts",
   "lib/api.ts",
   "lib/server-api.ts",
+  "lib/types.ts",
   "lib/posthog.ts",
   "lib/safe-next.ts",
   "lib/safe-storage.ts",
@@ -132,7 +135,8 @@ export const OVERLAY_FILES = [
   // seams (NEXT_PUBLIC_API_PROXY_BASE / NEXT_PUBLIC_BASE_PATH) directly; the
   // overlay copy had silently fallen behind (missing workspace.getSettings,
   // bulk export, chat attachments) and broke those features on cloud.
-  // lib/types.ts entry was stale — the overlay file never existed.
+  // lib/types.ts is overlaid for cloud-only public batch approval share shapes
+  // until the engine submodule carries the same StandaloneShare union.
   "lib/telemetry.ts",
   // lib/useRunStream.ts de-forked 2026-06-13: the engine hook is identical-shaped and a
   // strict superset; the workspace-query seam lives in lib/api's apiProxyPath, not here.
