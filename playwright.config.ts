@@ -6,7 +6,7 @@ export default defineConfig({
   retries: 1,
   reporter: [["list"], ["html", { open: "never", outputFolder: "tests/e2e/report" }]],
   use: {
-    baseURL: "https://workeros.floom.dev",
+    baseURL: "https://floom.dev",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "on-first-retry",

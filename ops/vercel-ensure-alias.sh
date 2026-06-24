@@ -14,7 +14,7 @@ TEAM=""
 PROJECT=""
 DEPLOY=""
 DOMAINS=()
-REQUIRED="${REQUIRED_DOMAINS:-workeros.floom.dev}"
+REQUIRED="${REQUIRED_DOMAINS:-floom.dev}"
 TOKEN="${VERCEL_TOKEN:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

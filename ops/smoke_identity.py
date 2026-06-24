@@ -4,7 +4,7 @@
 Environment:
   WORKEROS_IDENTITY_EXPECTED_SHA       Required expected git/build SHA.
   WORKEROS_IDENTITY_API_BASE           Optional API base, e.g. https://workeros-api.floom.dev.
-  WORKEROS_IDENTITY_WEB_BASE           Optional apex/landing base, e.g. https://workeros.floom.dev.
+  WORKEROS_IDENTITY_WEB_BASE           Optional apex/landing base, e.g. https://floom.dev.
   WORKEROS_IDENTITY_DASHBOARD_BASE     Optional direct dashboard base.
   WORKEROS_IDENTITY_API_VERSION_URL    Optional explicit API version URL.
   WORKEROS_IDENTITY_LANDING_VERSION_URL Optional explicit landing version URL.

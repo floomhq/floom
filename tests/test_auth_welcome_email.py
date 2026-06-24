@@ -62,7 +62,7 @@ def test_welcome_email_records_dedupe_and_updates_sent(monkeypatch):
     monkeypatch.setattr(
         auth,
         "get_cloud_settings",
-        lambda: SimpleNamespace(dashboard_origin="https://workeros.floom.dev"),
+        lambda: SimpleNamespace(dashboard_origin="https://floom.dev"),
     )
     monkeypatch.setattr(
         auth.email_service,

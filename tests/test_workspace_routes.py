@@ -395,7 +395,7 @@ def test_create_share_link_returns_token_once(monkeypatch):
     monkeypatch.setattr(
         workspace_routes,
         "get_cloud_settings",
-        lambda: SimpleNamespace(frontend_url="https://workeros.floom.dev/app"),
+        lambda: SimpleNamespace(frontend_url="https://floom.dev/app"),
     )
 
     result = asyncio.run(
@@ -409,7 +409,7 @@ def test_create_share_link_returns_token_once(monkeypatch):
     assert captured["owner_user_id"] == "user-1"
     assert captured["workspace_id"] == "ws_a"
     assert result.token == "wst_raw"
-    assert result.url == "https://workeros.floom.dev/app/workspace/share/wst_raw"
+    assert result.url == "https://floom.dev/app/workspace/share/wst_raw"
 
 
 def test_create_share_link_hides_non_owner_workspace(monkeypatch):

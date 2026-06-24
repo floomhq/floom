@@ -17,27 +17,27 @@ env:
 
 jobs:
   deploy-landing:
-    name: Deploy workeros.floom.dev
+    name: Deploy floom.dev
     # Self-hosted AX41 runner (org GitHub-hosted Actions are billing-disabled).
     runs-on: [self-hosted, linux, x64, workeros-ci]
     timeout-minutes: 15
 
     env:
-      # The apex workeros.floom.dev is owned by the floomhq-team
+      # The apex floom.dev is owned by the floomhq-team
       # workeros-cloud-landing Vercel project. The repo secrets below MUST resolve
       # to that floomhq project (org id + landing project id). They previously
       # resolved to a personal-team project of the same name, so deploys landed
       # there and only aliased workeros-cloud-landing.vercel.app, never the apex,
-      # which froze workeros.floom.dev at a pre-merge build. The pin step below
+      # which froze floom.dev at a pre-merge build. The pin step below
       # writes .vercel/project.json from these values BEFORE pull so the deploy
       # can never silently auto-link to a same-named project on another team.
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_WORKEROS_CLOUD_LANDING_PROJECT_ID }}
       VERCEL_LANDING_PROJECT_ID: ${{ secrets.VERCEL_WORKEROS_CLOUD_LANDING_PROJECT_ID }}
       VERCEL_LANDING_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      APEX_DOMAIN: workeros.floom.dev
-      LANDING_ALIASES: workeros.floom.dev,floom.dev
-      REQUIRED_LANDING_DOMAINS: workeros.floom.dev
+      APEX_DOMAIN: floom.dev
+      LANDING_ALIASES: floom.dev
+      REQUIRED_LANDING_DOMAINS: floom.dev
 
     steps:
       - uses: actions/checkout@v4
@@ -348,7 +348,7 @@ jobs:
             proj_id="$(python3 ops/http-client.py vercel-json-get \
               --url "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_ID}?teamId=${DASHBOARD_SCOPE}" \
               --field targets.production.id)"
-            code="$(python3 ops/http-client.py status --url "https://workeros.floom.dev/app/login" --timeout 20 || true)"
+            code="$(python3 ops/http-client.py status --url "https://floom.dev/app/login" --timeout 20 || true)"
             deploy_chunk="$(chunkset_hash "${DEPLOY_URL}/app/login" || true)"
             alias_chunk="$(chunkset_hash "https://${DASHBOARD_PROD_ALIAS}/app/login" || true)"
             echo "attempt $i: dashboard prod id=$proj_id (expected ${DEPLOY_ID}); /app/login=$code; deploy chunkset=$deploy_chunk; ${DASHBOARD_PROD_ALIAS} chunkset=$alias_chunk"

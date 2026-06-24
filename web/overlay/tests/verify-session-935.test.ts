@@ -182,7 +182,7 @@ describe("#935 middleware integration", () => {
     const { middleware } = await import("@/middleware");
 
     const forgedCookie = cookieFor("a.b.c"); // structurally fine, unverifiable
-    const forgedReq = new NextRequest("https://workeros.floom.dev/app/workers", {
+    const forgedReq = new NextRequest("https://floom.dev/app/workers", {
       headers: { cookie: `workeros_cloud_session=${forgedCookie}` },
     });
     const forgedRes = await middleware(forgedReq);
@@ -190,7 +190,7 @@ describe("#935 middleware integration", () => {
     expect(forgedRes.headers.get("location")).toContain("/login");
 
     const validCookie = cookieFor(await signToken());
-    const validReq = new NextRequest("https://workeros.floom.dev/app/workers", {
+    const validReq = new NextRequest("https://floom.dev/app/workers", {
       headers: { cookie: `workeros_cloud_session=${validCookie}` },
     });
     const validRes = await middleware(validReq);
@@ -206,7 +206,7 @@ describe("#935 middleware integration", () => {
   it("allows a valid encrypted v2 session cookie", async () => {
     const { middleware } = await import("@/middleware");
     backendSessionToken = await signToken();
-    const validReq = new NextRequest("https://workeros.floom.dev/app/workers", {
+    const validReq = new NextRequest("https://floom.dev/app/workers", {
       headers: { cookie: "workeros_cloud_session=v2.gAAAAencrypted" },
     });
 
@@ -228,22 +228,22 @@ describe("Round-09 #5 — RSC/Flight requests are not redirected to /login", () 
   const rscVariants: Array<{ name: string; url: string; headers: Record<string, string> }> = [
     {
       name: "?_rsc= query param (cache-busting marker)",
-      url: "https://workeros.floom.dev/app/workers?_rsc=abc123",
+      url: "https://floom.dev/app/workers?_rsc=abc123",
       headers: {},
     },
     {
       name: "RSC: 1 request header (Flight marker)",
-      url: "https://workeros.floom.dev/app/runs",
+      url: "https://floom.dev/app/runs",
       headers: { rsc: "1" },
     },
     {
       name: "Next-Router-Prefetch header (link prefetch)",
-      url: "https://workeros.floom.dev/app/connections",
+      url: "https://floom.dev/app/connections",
       headers: { "next-router-prefetch": "1" },
     },
     {
       name: "Next-Router-State-Tree header (soft nav)",
-      url: "https://workeros.floom.dev/app/approvals",
+      url: "https://floom.dev/app/approvals",
       headers: { "next-router-state-tree": "%5B%22%22%5D" },
     },
   ];
@@ -264,7 +264,7 @@ describe("Round-09 #5 — RSC/Flight requests are not redirected to /login", () 
     const { middleware } = await import("@/middleware");
     const forgedCookie = cookieFor("a.b.c"); // structurally fine, unverifiable
     const res = await middleware(
-      new NextRequest("https://workeros.floom.dev/app/workers?_rsc=xyz", {
+      new NextRequest("https://floom.dev/app/workers?_rsc=xyz", {
         headers: { cookie: `workeros_cloud_session=${forgedCookie}`, rsc: "1" },
       }),
     );
@@ -275,7 +275,7 @@ describe("Round-09 #5 — RSC/Flight requests are not redirected to /login", () 
   it("still 307-redirects a real document navigation (no RSC markers) to /login", async () => {
     const { middleware } = await import("@/middleware");
     const res = await middleware(
-      new NextRequest("https://workeros.floom.dev/app/workers", { headers: {} }),
+      new NextRequest("https://floom.dev/app/workers", { headers: {} }),
     );
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toContain("/login");
@@ -284,7 +284,7 @@ describe("Round-09 #5 — RSC/Flight requests are not redirected to /login", () 
   it("allows build identity checks without a session", async () => {
     const { middleware } = await import("@/middleware");
     for (const path of ["/version", "/app/version"]) {
-      const res = await middleware(new NextRequest(`https://workeros.floom.dev${path}`));
+      const res = await middleware(new NextRequest(`https://floom.dev${path}`));
       expect(res.headers.get("x-middleware-next"), path).toBe("1");
       expect(res.status, path).not.toBe(307);
       expect(res.headers.get("location"), path).toBeNull();
@@ -295,7 +295,7 @@ describe("Round-09 #5 — RSC/Flight requests are not redirected to /login", () 
     const { middleware } = await import("@/middleware");
     const validCookie = cookieFor(await signToken());
     const res = await middleware(
-      new NextRequest("https://workeros.floom.dev/app/workers?_rsc=ok", {
+      new NextRequest("https://floom.dev/app/workers?_rsc=ok", {
         headers: { cookie: `workeros_cloud_session=${validCookie}`, rsc: "1" },
       }),
     );

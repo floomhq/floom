@@ -72,7 +72,7 @@ def _load_supabase_templates() -> dict[str, str]:
 
     # Substitute Mustache/Go template placeholders with sample values so the
     # HTML renders with real-looking (but synthetic) links.
-    sample_redirect = "https://workeros.floom.dev/auth/callback"
+    sample_redirect = "https://floom.dev/auth/callback"
     # Synthetic placeholder — not a real token; gitleaks false-positive suppressed below
     sample_token = "preview-otp-placeholder-xxxx"  # noqa: S105 gitleaks:allow
 
@@ -106,7 +106,7 @@ def main() -> None:
     # --- welcome email ---
     welcome = build_welcome_email(
         to="preview@example.com",
-        dashboard_url="https://workeros.floom.dev",
+        dashboard_url="https://floom.dev",
     )
     path = out_dir / "welcome.html"
     path.write_text(welcome.html, encoding="utf-8")
@@ -116,7 +116,7 @@ def main() -> None:
     invite_result = build_workspace_invite_email(
         inviter_name="Alice Smith",
         workspace_name="Acme Corp",
-        invite_url="https://workeros.floom.dev/invite/preview-token",
+        invite_url="https://floom.dev/invite/preview-token",
     )
     path = out_dir / "workspace_invite.html"
     path.write_text(invite_result["html"], encoding="utf-8")

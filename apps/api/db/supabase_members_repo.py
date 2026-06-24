@@ -180,7 +180,7 @@ class SupabaseWorkspaceMemberRepository:
             role=role,
         )
         # Best-effort invite email; never block invite creation on send failure.
-        invite_url = f"https://workeros.floom.dev/app/join?invite={raw_token}"
+        invite_url = f"https://floom.dev/app/join?invite={raw_token}"
         try:
             from apps.api.email_service import (
                 build_workspace_invite_email,

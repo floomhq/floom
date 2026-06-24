@@ -44,7 +44,7 @@ def test_smoke_routes_fails_on_4xx(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 1
-    assert "FAIL  cloud  https://workeros.floom.dev/app/runs  -> 404" in result.stdout
+    assert "FAIL  cloud  https://floom.dev/app/runs  -> 404" in result.stdout
     assert "SMOKE FAILED - do not promote this deploy." in result.stdout
 
 
@@ -63,5 +63,5 @@ def test_smoke_routes_fails_on_5xx(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 1
-    assert "FAIL  cloud  https://workeros.floom.dev/app/runs  -> 503" in result.stdout
+    assert "FAIL  cloud  https://floom.dev/app/runs  -> 503" in result.stdout
     assert "SMOKE FAILED - do not promote this deploy." in result.stdout

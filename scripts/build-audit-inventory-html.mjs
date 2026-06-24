@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const PERMANENT_URL = "https://workeros.floom.dev/audit";
+const PERMANENT_URL = "https://floom.dev/audit";
 const OUT_DIRS = [
   join(ROOT, "public/audit"),
   join(ROOT, "test-results/workeros-issue-inventory-2026-06-24"),
@@ -278,7 +278,7 @@ const ISSUES = [
     sev: "P1",
     area: "Deploy",
     issue: "Vercel CI + /audit permanent URL",
-    detail: "Dashboard build fixes landed; landing apex /v3/integrations 404 blocks alias; workeros.floom.dev/audit still pending.",
+    detail: "Dashboard build fixes landed; landing apex /v3/integrations 404 blocks alias; floom.dev/audit still pending.",
     status: "open",
     owner: "cloud",
     shot: "22-prod-audit-page.png",

@@ -46,7 +46,7 @@ def test_email_readiness_requires_enabled_key_from_and_not_dry_run(monkeypatch):
 def test_welcome_email_uses_dashboard_link():
     message = email.build_welcome_email(
         to="user@example.com",
-        dashboard_url="https://workeros.floom.dev",
+        dashboard_url="https://floom.dev",
     )
 
     assert message.to == "user@example.com"
@@ -55,8 +55,8 @@ def test_welcome_email_uses_dashboard_link():
     assert email.FLOOM_EMAIL_LOGO_URL in message.html
     assert 'alt="Floom"' in message.html
     assert "workeros-card" in message.html
-    assert "https://workeros.floom.dev/app" in message.html
-    assert "https://workeros.floom.dev/app" in (message.text or "")
+    assert "https://floom.dev/app" in message.html
+    assert "https://floom.dev/app" in (message.text or "")
     assert message.tags == {"kind": "welcome"}
 
 

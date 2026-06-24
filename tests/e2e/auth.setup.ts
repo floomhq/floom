@@ -15,7 +15,7 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: path.join(__dirname, "../../.env.test") });
 
-const BASE = "https://workeros.floom.dev";
+const BASE = "https://floom.dev";
 const WORKSPACE_ID = "ws_8bdb2e8127db4f";
 const ADMIN_STATE  = path.join(__dirname, ".auth/admin.json");
 const MEMBER_STATE = path.join(__dirname, ".auth/member.json");
@@ -31,7 +31,7 @@ async function loginAndSave(page: Page, email: string, password: string, stateFi
 
   // Wait until redirected into the app
   await page.waitForFunction(
-    () => window.location.href.includes("workeros.floom.dev/app") && !window.location.href.includes("/login"),
+    () => window.location.href.includes("floom.dev/app") && !window.location.href.includes("/login"),
     { timeout: 30_000, polling: 500 }
   );
 
@@ -43,7 +43,7 @@ async function loginAndSave(page: Page, email: string, password: string, stateFi
   await page.context().addCookies([{
     name: "workeros_active_workspace",
     value: WORKSPACE_ID,
-    domain: "workeros.floom.dev",
+    domain: "floom.dev",
     path: "/",
     secure: true,
     sameSite: "Lax",

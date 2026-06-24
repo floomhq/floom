@@ -51,8 +51,8 @@ def _no_side_effects(monkeypatch):
         "get_cloud_settings",
         lambda: SimpleNamespace(
             api_base="https://workeros-api.floom.dev",
-            dashboard_origin="https://workeros.floom.dev",
-            frontend_url="https://workeros.floom.dev/app",
+            dashboard_origin="https://floom.dev",
+            frontend_url="https://floom.dev/app",
         ),
     )
     return calls

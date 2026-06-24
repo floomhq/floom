@@ -5,7 +5,7 @@ describe("Cloud login next routing", () => {
   it("preserves Cloud /app destinations after apex login", () => {
     expect(normalizeNextPath("/app")).toBe("/app");
     expect(normalizeNextPath("/app/workers/new?prompt=hire")).toBe("/app/workers/new?prompt=hire");
-    expect(normalizeNextPath("https://workeros.floom.dev/app/workers/new")).toBe("/app/workers/new");
+    expect(normalizeNextPath("https://floom.dev/app/workers/new")).toBe("/app/workers/new");
   });
 
   it("unwraps nested login URLs without falling back to the landing page", () => {

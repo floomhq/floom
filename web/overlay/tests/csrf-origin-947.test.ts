@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const HOST = "workeros.floom.dev";
+const HOST = "floom.dev";
 
 function req(
   path: string,

@@ -34,7 +34,7 @@ sha256_of() {
 
 OS_HOST="https://workers.floom.dev"
 OS_API="https://workers-api.floom.dev"
-CLOUD_HOST="https://workeros.floom.dev"
+CLOUD_HOST="https://floom.dev"
 CLOUD_LANDING_HOST="https://floom.dev"
 CLOUD_API="https://workeros-api.floom.dev"
 CLOUD_DASHBOARD_HOST="${CLOUD_DASHBOARD_HOST:-https://r9-detail.floom.dev}"

@@ -46,7 +46,7 @@ def _client(monkeypatch) -> tuple[TestClient, _FakeCliAuth]:
     monkeypatch.setattr(
         cli_devices,
         "get_cloud_settings",
-        lambda: SimpleNamespace(frontend_url="https://workeros.floom.dev/app"),
+        lambda: SimpleNamespace(frontend_url="https://floom.dev/app"),
     )
     return TestClient(app), fake
 
@@ -62,7 +62,7 @@ def test_create_device_persists_null_user_id(monkeypatch):
     assert payload["device_code"]
     assert payload["user_code"]
     # Verification URL points at the cloud dashboard cli-auth page.
-    assert payload["verification_url"].startswith("https://workeros.floom.dev/app/cli-auth?code=")
+    assert payload["verification_url"].startswith("https://floom.dev/app/cli-auth?code=")
     # Repo was called with user_id=None.
     assert len(fake.created) == 1
     assert fake.created[0]["user_id"] is None

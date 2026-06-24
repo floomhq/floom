@@ -26,13 +26,13 @@ from apps.api.routes import auth as auth_module
 _FAKE_USER_ID = "user-uuid-abc123"
 _FAKE_EMAIL = "alice@example.com"
 _FAKE_ACTION_LINK = "https://project.supabase.co/auth/v1/verify?token=xyz&type=magiclink"
-_FAKE_FRONTEND_URL = "https://workeros.floom.dev/app"
+_FAKE_FRONTEND_URL = "https://floom.dev/app"
 
 
 def _settings():
     return SimpleNamespace(
         frontend_url=_FAKE_FRONTEND_URL,
-        dashboard_origin="https://workeros.floom.dev",
+        dashboard_origin="https://floom.dev",
         api_base="https://workeros-api.floom.dev",
     )
 
@@ -155,13 +155,13 @@ def test_generate_link_empty_action_link_returns_502(monkeypatch):
 
 def test_redirect_uses_supabase_url_not_frontend_url(monkeypatch):
     """Redirect destination is the Supabase action_link, not the frontend URL."""
-    custom_link = "https://abc.supabase.co/auth/v1/verify?token=tok&type=magiclink&redirect_to=https%3A%2F%2Fworkeros.floom.dev%2Fapp"
+    custom_link = "https://abc.supabase.co/auth/v1/verify?token=tok&type=magiclink&redirect_to=https%3A%2F%2Ffloom.dev%2Fapp"
     svc = _make_svc_client(action_link=custom_link)
     client, _engine = _app(monkeypatch, svc_client=svc)
     response = client.get("/auth/magic/some.token")
     assert response.status_code == 307
     assert response.headers["location"] == custom_link
-    assert "workeros.floom.dev/auth/magic" not in response.headers["location"]
+    assert "floom.dev/auth/magic" not in response.headers["location"]
 
 
 def test_generate_link_called_with_correct_params(monkeypatch):

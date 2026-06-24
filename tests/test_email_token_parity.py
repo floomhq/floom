@@ -186,7 +186,7 @@ def test_rendered_welcome_email_no_stale_hex() -> None:
     build_welcome_email = _try_import_builder()
     email = build_welcome_email(
         to="test@example.com",
-        dashboard_url="https://workeros.floom.dev",
+        dashboard_url="https://floom.dev",
     )
     html = email.html
 

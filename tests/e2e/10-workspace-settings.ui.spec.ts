@@ -3,7 +3,7 @@
  */
 import { test, expect } from "@playwright/test";
 
-const BASE = "https://workeros.floom.dev";
+const BASE = "https://floom.dev";
 const ORIGINAL_NAME = "Nova Search";
 
 test.describe("Settings — Workspace tab", () => {

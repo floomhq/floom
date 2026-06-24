@@ -9,7 +9,7 @@ export const metadata = {
 };
 
 // Same-origin proxy keeps PKCE + session cookies on the dashboard host
-// (workeros.floom.dev/app), not the Railway API subdomain.
+// (floom.dev/app), not the Railway API subdomain.
 const PROXY_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/app/api/proxy";
 
 const oauthLoginUrl = (provider: "google" | "github", next = "/app", switchAccount = false) => {

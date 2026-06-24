@@ -3,7 +3,7 @@
  */
 import { test, expect } from "@playwright/test";
 
-const BASE = "https://workeros.floom.dev";
+const BASE = "https://floom.dev";
 const SHARED_WORKER_NAME = "Clone Test Worker";
 
 test.describe("Workers list — visibility badge", () => {

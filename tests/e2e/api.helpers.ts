@@ -1,8 +1,8 @@
 // Shared helpers for API-level Playwright tests.
 
 export const API = "https://workeros-api.floom.dev/api";
-export const WEB = "https://workeros.floom.dev/app";
-export const BASE = "https://workeros.floom.dev";
+export const WEB = "https://floom.dev/app";
+export const BASE = "https://floom.dev";
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();

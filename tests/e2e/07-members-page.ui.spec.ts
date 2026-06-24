@@ -4,7 +4,7 @@
  */
 import { test, expect } from "@playwright/test";
 
-const BASE = "https://workeros.floom.dev";
+const BASE = "https://floom.dev";
 
 test.describe("Members page (admin view)", () => {
   test.beforeEach(async ({ page }) => {

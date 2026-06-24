@@ -23,7 +23,7 @@ async function openMemberPage(browser: Browser) {
   await ctx.addCookies([{
     name: "workeros_active_workspace",
     value: WORKSPACE_ID,
-    domain: "workeros.floom.dev",
+    domain: "floom.dev",
     path: "/",
     secure: true,
     sameSite: "Lax" as const,

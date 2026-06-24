@@ -1,6 +1,6 @@
 # workeros-cloud — agent instructions
 
-**This repo is the hosted, multi-tenant Cloud product** at `workeros.floom.dev`
+**This repo is the hosted, multi-tenant Cloud product** at `floom.dev`
 (landing) + `workeros-api.floom.dev` (FastAPI). It is a thin Supabase-backed
 **wrapper** around the **WorkerOS engine `floomhq/floom`** (private repo,
 single-tenant), vendored as the `engine/` git submodule.

@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 # Gmail and other clients require an absolute https URL for <img> in email; data
 # URIs are stripped. The asset is hosted (and verified 200) at
 # workers.floom.dev/brand/floom-email-logo@2x.png — the cloud root domain
-# (workeros.floom.dev) is behind an auth middleware that blocks static assets.
+# (floom.dev) is behind an auth middleware that blocks static assets.
 FLOOM_EMAIL_LOGO_URL = "https://workers.floom.dev/brand/floom-email-logo@2x.png"
 
 
@@ -39,7 +39,7 @@ class TransactionalEmail:
 
 
 def build_welcome_email(*, to: str, dashboard_url: str) -> TransactionalEmail:
-    safe_dashboard_url = dashboard_url.rstrip("/") or "https://workeros.floom.dev"
+    safe_dashboard_url = dashboard_url.rstrip("/") or "https://floom.dev"
     dashboard_link = f"{safe_dashboard_url}/app"
     html = _workeros_email_html(
         preheader="Your Floom workspace is ready.",
@@ -115,7 +115,7 @@ def _workeros_email_html(
 <tr><td align="center" class="workeros-shell" style="padding:40px 16px;">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
 <tr><td class="workeros-band" style="background:{T.BG_BAND};border-radius:{T.RADIUS_CARD} {T.RADIUS_CARD} 0 0;padding:26px 36px;">
-<a href="https://workeros.floom.dev" style="text-decoration:none;display:inline-block;"><img src="{FLOOM_EMAIL_LOGO_URL}" width="120" height="42" alt="Floom" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;"></a>
+<a href="https://floom.dev" style="text-decoration:none;display:inline-block;"><img src="{FLOOM_EMAIL_LOGO_URL}" width="120" height="42" alt="Floom" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;"></a>
 </td></tr>
 <tr><td class="workeros-card workeros-card-bg" style="background:{T.BG_CARD};border-radius:0 0 {T.RADIUS_CARD} {T.RADIUS_CARD};padding:40px 40px 44px;">
 <p style="margin:0 0 10px;font-family:{T.FONT};font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:{T.MUTED};">{safe_eyebrow}</p>
@@ -127,7 +127,7 @@ def _workeros_email_html(
 <p style="font-family:{T.FONT};font-size:13px;line-height:1.55;margin:16px 0 0;color:{T.MUTED};">{safe_footer_note}</p>
 </td></tr>
 <tr><td style="padding:28px 4px 4px;font-family:{T.FONT};font-size:12px;line-height:1.6;color:{T.MUTED};">
-<a href="https://workeros.floom.dev" style="color:{T.INK};font-weight:650;text-decoration:none;">Floom</a> &middot; <a href="mailto:team@floom.dev" style="color:{T.ACCENT};text-decoration:underline;">team@floom.dev</a>
+<a href="https://floom.dev" style="color:{T.INK};font-weight:650;text-decoration:none;">Floom</a> &middot; <a href="mailto:team@floom.dev" style="color:{T.ACCENT};text-decoration:underline;">team@floom.dev</a>
 </td></tr>
 </table>
 </td></tr>

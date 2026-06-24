@@ -26,7 +26,7 @@ floomhq/workeros-cloud      (private, hosted)         Supabase auth, RLS multi-t
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│  workeros.floom.dev   (Next.js, Vercel)                   │
+│  floom.dev   (Next.js, Vercel)                            │
 │  - Supabase auth (Google OAuth + email)                   │
 │  - Per-user dashboard at /app                             │
 │  - Workspace switcher + cloud shell overlay               │
@@ -61,7 +61,7 @@ Supabase (Postgres + Storage) is the source of truth; API servers are **stateles
 
 ```bash
 npx @floomhq/floom@latest login
-# → opens browser to workeros.floom.dev/cli-auth
+# → opens browser to floom.dev/cli-auth
 # → Supabase OAuth (Google / email)
 # → returns short-lived code
 # → CLI stores at ~/.workeros/credentials.json
@@ -73,7 +73,7 @@ After login, the MCP package detects credentials and uses Supabase JWT for API c
 
 | Layer | Choice |
 |---|---|
-| Frontend | Next.js (Vercel) — `workeros.floom.dev` |
+| Frontend | Next.js (Vercel) — `floom.dev` |
 | Backend | FastAPI on Railway - `workeros-api.floom.dev` |
 | Auth | Supabase Auth (Google OAuth + email magic link) |
 | DB | Supabase Postgres with row-level security |
@@ -205,4 +205,4 @@ Phase 6 — Multi-tenant cron + webhooks
 Private. Floom internal.
 
 ## Hosting & worker storage (read before touching cloud workers/deploys)
-workeros.floom.dev = CLOUD = **Railway** backend (manual `railway up`) + Vercel frontend. workers.floom.dev = OSS = AX41. Cloud workers are stored portably in Supabase `_files` (never a disk path). Full model: [docs/CLOUD-WORKER-STORAGE-MODEL.md](docs/CLOUD-WORKER-STORAGE-MODEL.md).
+floom.dev = CLOUD = **Railway** backend (manual `railway up`) + Vercel frontend. workers.floom.dev = OSS = AX41. Cloud workers are stored portably in Supabase `_files` (never a disk path). Full model: [docs/CLOUD-WORKER-STORAGE-MODEL.md](docs/CLOUD-WORKER-STORAGE-MODEL.md).

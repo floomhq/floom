@@ -12,8 +12,8 @@ from apps.api.routes import auth
 def _settings() -> SimpleNamespace:
     return SimpleNamespace(
         api_base="https://workeros-api.floom.dev",
-        dashboard_origin="https://workeros.floom.dev",
-        frontend_url="https://workeros.floom.dev/app",
+        dashboard_origin="https://floom.dev",
+        frontend_url="https://floom.dev/app",
         supabase_url="https://test.supabase.co",
     )
 
@@ -201,7 +201,7 @@ def test_frontend_redirect_rejects_unallowed_request_origin(monkeypatch):
         ),
     )
 
-    assert redirect == "https://workeros.floom.dev/app/settings"
+    assert redirect == "https://floom.dev/app/settings"
 
 
 def test_callback_url_honors_local_dashboard_proxy_override(monkeypatch):
@@ -277,8 +277,8 @@ def test_callback_without_query_params_returns_fragment_bridge(monkeypatch):
     assert "text/html" in response.headers["content-type"]
     assert "/auth/fragment-session" in response.text
     assert "Missing auth callback parameters" not in response.text
-    assert "https://workeros.floom.dev/app/login?error=auth_callback_missing" in response.text
-    assert "https://workeros.floom.dev/login?error=auth_callback_missing" not in response.text
+    assert "https://floom.dev/app/login?error=auth_callback_missing" in response.text
+    assert "https://floom.dev/login?error=auth_callback_missing" not in response.text
 
 
 def test_email_magic_link_rejects_invalid_email_before_supabase(monkeypatch):
@@ -407,7 +407,7 @@ def test_callback_accepts_qp_safe_encoded_token_query_separator(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "https://workeros.floom.dev/app"
+    assert response.headers["location"] == "https://floom.dev/app"
     assert auth_client.verify_payloads == [
         {
             "token_hash": "e978abc123",
@@ -611,7 +611,7 @@ def test_fragment_session_verifies_token_and_sets_cookie(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["redirect_to"] == "https://workeros.floom.dev/app/overview"
+    assert response.json()["redirect_to"] == "https://floom.dev/app/overview"
     assert "workeros_cloud_session=" in response.headers["set-cookie"]
 
 
