@@ -286,8 +286,10 @@ def _backfill_worker_files_from_git(workspace_id: str, git_dir: Path) -> None:
                 continue
 
             manifest = dict(sv_rows.data[0]["manifest_json"] or {})
-            existing_files = manifest.get("_files") or {}
-            if existing_files:
+            # An offloaded worker (bundle in Storage) legitimately has no inline
+            # _files — that's not a gap to backfill. Check the marker too so we
+            # don't re-inline a bundle that was deliberately moved to Storage.
+            if manifest.get("_files") or manifest.get("_files_in_storage"):
                 continue  # Already has files — nothing to backfill
 
             # Read all non-yml files from the git workspace
@@ -307,11 +309,13 @@ def _backfill_worker_files_from_git(workspace_id: str, git_dir: Path) -> None:
                 continue  # Nothing to backfill
 
             manifest["_files"] = files
+            from apps.api.db.supabase_repos import _offload_bundle_files
+            manifest = _offload_bundle_files(manifest, str(sv_id))
             svc.table("skill_versions").update(
                 {"manifest_json": manifest}
             ).eq("id", sv_id).execute()
             logger.info(
-                "backfill: restored _files for worker %s/%s (%d files)",
+                "backfill: restored files for worker %s/%s (%d files)",
                 workspace_id, worker_id, len(files),
             )
         except Exception as exc:
@@ -563,7 +567,11 @@ def _write_worker(git_dir: Path, workspace_id: str, worker_id: str) -> bool:
         return False
 
     manifest: dict = dict(sv_rows.data[0]["manifest_json"] or {})
-    files: dict = manifest.pop("_files", {}) or {}
+    # Resolve from inline _files OR Storage (offloaded workers) so the git
+    # workspace commit includes worker code even after the bundle moved to Storage.
+    from apps.api.db.supabase_repos import resolve_worker_files
+    files: dict = dict(resolve_worker_files(manifest, str(sv_id)))
+    manifest.pop("_files", None)
 
     # Fall back to disk if _files is empty (e.g. freshly imported worker)
     if not files:
@@ -589,6 +597,13 @@ def _write_worker(git_dir: Path, workspace_id: str, worker_id: str) -> bool:
         (worker_dir / fname).write_text(content, encoding="utf-8")
 
     manifest.pop("_files", None)
+    # Strip cloud-internal bundle markers so they never leak into the committed
+    # worker.yml (which feeds git restore / re-discovery and could otherwise
+    # falsely flag a worker as offloaded when its bundle is not in Storage).
+    manifest.pop("_files_in_storage", None)
+    _rt = manifest.get("runtime")
+    if isinstance(_rt, dict):
+        _rt.pop("bundle_sha256", None)
     yml = yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True)
     (worker_dir / "worker.yml").write_text(yml, encoding="utf-8")
     return True
@@ -820,6 +835,8 @@ def sync_checkout_to_workers(
         )
         if rows.data and rows.data[0].get("skill_version_id"):
             sv_id = rows.data[0]["skill_version_id"]
+            from apps.api.db.supabase_repos import _offload_bundle_files
+            manifest = _offload_bundle_files(manifest, str(sv_id))
             svc.table("skill_versions").update({"manifest_json": manifest}).eq("id", sv_id).execute()
             logger.info("sync_checkout_to_workers: updated skill_versions sv=%s", sv_id)
     except Exception as exc:

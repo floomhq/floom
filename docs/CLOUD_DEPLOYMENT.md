@@ -179,6 +179,43 @@ memory:
     equals: record_candidate_feedback
 ```
 
+## Worker Bundle Storage Offload (workers-list perf)
+
+Worker bundle code used to be inlined in `skill_versions.manifest_json._files`,
+so `GET /workers` (a `select(*)`) transferred ~18 MB of code it never displays
+(~9 s). Bundles now live in the `worker-bundles` Storage bucket (auto-created at
+startup) with a `_files_in_storage` marker; the list transfers metadata only.
+
+**Default OFF — deploying the code changes nothing.** The write-side offload is
+gated by an env flag; the read side is always active but a no-op until a bundle
+is actually offloaded. `_files` is a cross-host contract (every executor reads it
+to run a worker — see `docs/CLOUD-WORKER-STORAGE-MODEL.md`), so the cutover is
+strictly ordered:
+
+```bash
+# Phase 3 only — set AFTER every executor is on this code AND the backfill ran.
+WORKEROS_BUNDLE_OFFLOAD=1   # default off; new writes keep bundles inline until set
+```
+
+**Cutover (do NOT skip the order — backfilling before all executors are updated
+reproduces the NovaSearch-v4 `worker_not_found` outage):**
+
+1. Deploy this code to **every** executor on this Supabase: Railway
+   `workeros-cloud-api` + `workeros-cloud-worker`, the AX41 mirror (if it drains
+   this DB), and any local backend. Flag stays OFF → zero behaviour change. (The
+   secrets-page speedup is independent and live immediately.)
+2. After all are confirmed updated, run the backfill (idempotent; the API keeps an
+   inline-`_files` read fallback so workers run throughout):
+   ```bash
+   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... python ops/backfill_worker_bundles.py --dry-run
+   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... python ops/backfill_worker_bundles.py
+   ```
+   This is the moment the workers list gets fast (~18.5 MB → ~0.3 MB).
+3. Set `WORKEROS_BUNDLE_OFFLOAD=1` on every executor so new/edited workers stay lean.
+
+**Rollback:** unset `WORKEROS_BUNDLE_OFFLOAD` (stops new offloads; already-offloaded
+workers still run on this code). Full procedure: `docs/RUNBOOK-bundle-offload-cutover.md`.
+
 ## LLM Quota Controls
 
 LLM-heavy workers, such as NovaSearch judge runs, must declare:

@@ -1037,13 +1037,20 @@ def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any, *, merg
     sv_rows = sv_resp.data or []
     raw_mj = sv_rows[0].get("manifest_json") if sv_rows else {}
     manifest_json = raw_mj if isinstance(raw_mj, dict) else (_json.loads(raw_mj) if isinstance(raw_mj, str) else {})
+    from apps.api.db.supabase_repos import _offload_bundle_files, resolve_worker_files
     incoming_files = _sanitize_cloud_worker_files(files)
     if merge_existing:
-        existing_raw = manifest_json.get("_files") or {}
+        # Pull existing files from inline _files OR Storage (offloaded workers),
+        # so a partial edit never silently drops an offloaded bundle's other files.
+        existing_raw = resolve_worker_files(manifest_json, sv_id)
         existing_files = _sanitize_cloud_worker_files(existing_raw) if isinstance(existing_raw, dict) else {}
         incoming_files = {**existing_files, **incoming_files}
     manifest_json.pop("_files", None)
     manifest_json["_files"] = incoming_files
+    # Single write choke-point: offload to Storage when enabled (flag-gated),
+    # else store inline. Keeps every main.py write path (create/update/clone)
+    # consistent and never leaves a stale _files_in_storage marker.
+    manifest_json = _offload_bundle_files(manifest_json, sv_id)
     svc.table("skill_versions").update({"manifest_json": manifest_json}).eq("id", sv_id).execute()
 
 
@@ -1684,7 +1691,8 @@ async def cloud_share_worker_to_workspace(worker_id: str, request: Request) -> A
         if sv_rows:
             raw_mj = sv_rows[0].get("manifest_json") or {}
             mj = raw_mj if isinstance(raw_mj, dict) else (_json.loads(raw_mj) if isinstance(raw_mj, str) else {})
-            files = mj.get("_files") or {}
+            from apps.api.db.supabase_repos import resolve_worker_files
+            files = resolve_worker_files(mj, sv_id)
 
     if not files:
         files = _read_worker_files_from_disk(worker_id)
@@ -1782,7 +1790,8 @@ async def cloud_clone_worker(token: str, request: Request) -> Any:
         if sv_rows:
             raw_mj = sv_rows[0].get("manifest_json") or {}
             mj = raw_mj if isinstance(raw_mj, dict) else (_json.loads(raw_mj) if isinstance(raw_mj, str) else {})
-            files = mj.get("_files") or {}
+            from apps.api.db.supabase_repos import resolve_worker_files
+            files = resolve_worker_files(mj, sv_id)
 
     if not files:
         # Fall back to disk materialisation if Supabase files are missing.

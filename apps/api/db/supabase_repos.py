@@ -446,6 +446,182 @@ def _skill_version_id(worker_id: str, manifest: dict[str, Any]) -> str:
     return f"sv_{worker_id}_{version}"
 
 
+def _bundle_sha256(files: Mapping[str, Any]) -> str | None:
+    """Canonical content hash of a worker's ``_files`` dict.
+
+    Mirrors the engine's ``db/sqlite.py::_bundle_sha256_from_manifest_files`` so
+    a bundle hashes identically whether the engine computes it from disk or we
+    persist it here. Used as the engine warm-pool key (``runtime.bundle_sha256``)
+    once the inline ``_files`` no longer ships in the manifest.
+    """
+    import hashlib
+
+    if not isinstance(files, Mapping) or not files:
+        return None
+    digest = hashlib.sha256()
+    included = 0
+    for rel_path, content in sorted(files.items()):
+        if not isinstance(rel_path, str) or not isinstance(content, str):
+            continue
+        path = Path(rel_path)
+        if (
+            not rel_path
+            or path.is_absolute()
+            or ".." in path.parts
+            or (path.parts and path.parts[0] == "inputs")
+            or "__pycache__" in path.parts
+            or path.suffix == ".pyc"
+            or (path.parts and path.parts[0] in {".pytest_cache", ".ruff_cache"})
+        ):
+            continue
+        path_bytes = path.as_posix().encode("utf-8")
+        content_bytes = content.encode("utf-8")
+        digest.update(len(path_bytes).to_bytes(8, "big"))
+        digest.update(path_bytes)
+        digest.update(len(content_bytes).to_bytes(8, "big"))
+        digest.update(content_bytes)
+        included += 1
+    return digest.hexdigest() if included else None
+
+
+def _bundle_offload_enabled() -> bool:
+    """Whether new writes move ``_files`` to Storage (vs. keep them inline).
+
+    OFF by default so deploying this code changes NOTHING: workers keep storing
+    ``_files`` inline exactly as before, and every executor (Railway, AX41, local)
+    keeps running them unchanged. The flag is flipped to ``1`` only AFTER every
+    executor that reads this Supabase is on this code — at which point the
+    read path (get_recipe/get) can hydrate Storage-backed bundles everywhere, so
+    moving ``_files`` out of the row is safe. See docs/CLOUD-WORKER-STORAGE-MODEL.md.
+
+    The READ path is always active regardless of this flag: it only triggers on
+    the ``_files_in_storage`` marker, which is absent until a bundle is offloaded,
+    so it's a no-op for inline workers.
+    """
+    return (os.environ.get("WORKEROS_BUNDLE_OFFLOAD") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _clear_bundle_markers(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``manifest`` with the Storage-offload markers removed.
+
+    Used when a worker is (re)stored with an authoritative inline ``_files`` so a
+    stale ``_files_in_storage`` / ``runtime.bundle_sha256`` from a prior offload
+    can't mislead the run path (wrong warm-pool identity, or a needless Storage
+    fetch). Leaves the inline ``_files`` and all real fields intact.
+    """
+    out = {k: v for k, v in manifest.items() if k != "_files_in_storage"}
+    runtime = out.get("runtime")
+    if isinstance(runtime, dict) and "bundle_sha256" in runtime:
+        out["runtime"] = {k: v for k, v in runtime.items() if k != "bundle_sha256"}
+    return out
+
+
+def _offload_bundle_files(manifest: Any, skill_version_id: str) -> Any:
+    """Move ``manifest['_files']`` into Supabase Storage; return a lean manifest.
+
+    Keeps the metadata row small (the win behind the workers-list slowness) while
+    preserving everything the run path needs: a ``_files_in_storage`` marker so
+    ``get_recipe`` re-fetches the bundle, and ``runtime.bundle_sha256`` so the
+    engine warm-pool key stays stable. No-op when there is no bundle or when the
+    offload flag is off (the safe default — bundle stays inline). On any upload
+    failure we return the ORIGINAL manifest (bundle stays inline) so a Storage
+    hiccup can never drop a worker's code.
+    """
+    if not isinstance(manifest, dict):
+        return manifest
+    files = manifest.get("_files")
+    if not _bundle_offload_enabled():
+        # Flag off: keep the bundle inline. If a fresh inline bundle is present it
+        # is now authoritative — strip any stale offload markers so get_recipe
+        # neither keeps an outdated runtime.bundle_sha256 (wrong warm-pool key for
+        # the edited code) nor tries Storage. With no inline bundle, preserve the
+        # marker so an already-offloaded row stays readable.
+        if isinstance(files, dict) and files:
+            return _clear_bundle_markers(manifest)
+        return manifest
+    if not isinstance(files, dict) or not files:
+        return manifest
+    try:
+        sanitized = _sanitize_worker_files(files)
+    except Exception:
+        # A malformed _files dict: leave it inline rather than risk losing it.
+        _repo_logger.warning(
+            "bundle offload: _files for %s failed sanitization; storing inline",
+            skill_version_id,
+            exc_info=True,
+        )
+        return manifest
+    try:
+        from apps.api import worker_bundles
+
+        worker_bundles.upload_bundle(skill_version_id, sanitized)
+    except Exception:
+        _repo_logger.warning(
+            "bundle offload: Storage upload failed for %s; storing inline",
+            skill_version_id,
+            exc_info=True,
+        )
+        return manifest
+    lean = {k: v for k, v in manifest.items() if k != "_files"}
+    lean["_files_in_storage"] = True
+    sha = _bundle_sha256(sanitized)
+    if sha:
+        runtime = dict(lean["runtime"]) if isinstance(lean.get("runtime"), dict) else {}
+        runtime["bundle_sha256"] = sha
+        lean["runtime"] = runtime
+    return lean
+
+
+def resolve_worker_files(manifest: Any, skill_version_id: str) -> dict[str, str]:
+    """Return a worker's ``_files`` from the manifest (inline) or Storage (offloaded).
+
+    The single read-side counterpart to ``_offload_bundle_files``: every cloud
+    path that needs a worker's bundle (clone, git restore, materialize) must go
+    through here so an offloaded worker is never treated as "no files". Returns
+    ``{}`` only when the worker genuinely has no bundle.
+    """
+    if not isinstance(manifest, Mapping):
+        return {}
+    files = manifest.get("_files")
+    if isinstance(files, dict) and files:
+        return dict(files)
+    if manifest.get("_files_in_storage") and skill_version_id:
+        from apps.api import worker_bundles
+
+        return worker_bundles.load_bundle(str(skill_version_id)) or {}
+    return {}
+
+
+def _materialize_storage_bundle(worker_id: str, skill: Mapping[str, Any] | None) -> None:
+    """Fetch a Storage-offloaded bundle and write it to WORKERS_DIR (idempotent).
+
+    The worker DETAIL "Source" tab reads files from disk first (the engine's
+    ``_read_worker_files``), so single-worker resolves must hydrate the bundle to
+    disk just like a run does. Bounded to one fetch+write per skill version per
+    process via ``_materialized_versions``; a no-op for non-offloaded workers.
+    """
+    if not isinstance(skill, Mapping):
+        return
+    manifest = _json_load(skill.get("manifest_json"), {})
+    if not isinstance(manifest, dict) or not manifest.get("_files_in_storage"):
+        return
+    sv_id = str(skill.get("id") or "")
+    if not sv_id:
+        return
+    version_key = f"{worker_id}::{sv_id}"
+    if version_key in _materialized_versions:
+        return
+    from apps.api import worker_bundles
+
+    files = worker_bundles.load_bundle(sv_id)
+    if files:
+        _materialize_worker_files(
+            worker_id, _sanitize_worker_files(files), version_key=version_key
+        )
+
+
 def _config_from_manifest(
     *,
     worker_id: str,
@@ -1362,8 +1538,13 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 resource_type="worker",
                 resource_id=worker_id,
             )
-        skill_map = self._skill_versions_by_id([row.get("skill_version_id")])
-        return _worker_record_from_rows(row, skill_map.get(row.get("skill_version_id")))
+        skill = self._skill_versions_by_id([row.get("skill_version_id")]).get(
+            row.get("skill_version_id")
+        )
+        # Single-worker resolve (detail/Source tab reads files from disk first):
+        # hydrate the Storage-offloaded bundle to disk. Idempotent per process.
+        _materialize_storage_bundle(str(row.get("id") or worker_id), skill)
+        return _worker_record_from_rows(row, skill)
 
     def get_any(self, *, worker_id: str) -> dict[str, Any] | None:
         # Contract (engine db.interface + OSS sqlite impl): get_any is a
@@ -1422,16 +1603,30 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             manifest = _json_load(rows[0].get("manifest_json"), {})
             if not isinstance(manifest, dict):
                 return
+            # Idempotent on bundle content: the persisted manifest no longer holds
+            # _files (it's offloaded to Storage), so compare the disk bundle's hash
+            # to the stored runtime.bundle_sha256 instead of the raw _files dict.
+            stored_sha = None
+            runtime = manifest.get("runtime")
+            if isinstance(runtime, dict):
+                stored_sha = runtime.get("bundle_sha256")
+            if (
+                manifest.get("_files_in_storage")
+                and stored_sha
+                and stored_sha == _bundle_sha256(disk_files)
+            ):
+                return
             if manifest.get("_files") == disk_files:
                 return
             manifest["_files"] = disk_files
+            manifest = _offload_bundle_files(manifest, skill_version_id)
             self._execute_skill_versions_scoped(
                 lambda: self._client.table("skill_versions")
                 .update({"manifest_json": manifest})
                 .eq("id", skill_version_id)
             )
             _repo_logger.info(
-                "#269 captured %d on-disk file(s) into _files for worker %s",
+                "#269 captured %d on-disk file(s) into Storage bundle for worker %s",
                 len(disk_files),
                 worker_id,
             )
@@ -1455,6 +1650,8 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             workspace_id=workspace_id,
             user_id=user_id,
         )
+        # Offload the worker bundle (_files) to Storage; persist a lean manifest.
+        manifest_to_store = _offload_bundle_files(manifest_json, skill_version_id)
         self._client.table("skill_versions").upsert(
             {
                 "id": skill_version_id,
@@ -1462,7 +1659,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 "user_id": user_id,
                 "name": manifest_json.get("name") or name,
                 "version": str(manifest_json.get("version") or "0.1.0"),
-                "manifest_json": manifest_json,
+                "manifest_json": manifest_to_store,
                 "bundle_path": fields.get("bundle_path") or f"workers/{worker_id}",
                 "created_at": created_at,
             },
@@ -1562,6 +1759,8 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             user_id=user_id,
         )
 
+        # Offload the worker bundle (_files) to Storage; persist a lean manifest.
+        manifest_to_store = _offload_bundle_files(manifest_json, skill_version_id)
         self._client.table("skill_versions").upsert(
             {
                 "id": skill_version_id,
@@ -1569,7 +1768,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 "user_id": user_id,
                 "name": manifest_json.get("name") or name,
                 "version": str(manifest_json.get("version") or "0.1.0"),
-                "manifest_json": manifest_json,
+                "manifest_json": manifest_to_store,
                 "bundle_path": fields.get("bundle_path") or f"workers/{worker_id}",
                 "created_at": created_at,
             },
@@ -1644,7 +1843,10 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         if manifest_json is not None or bundle_path is not None:
             payload: dict[str, Any] = {}
             if manifest_json is not None:
-                payload["manifest_json"] = _json_storage_value(manifest_json, {})
+                payload["manifest_json"] = _offload_bundle_files(
+                    _json_storage_value(manifest_json, {}),
+                    str(worker["skill_version_id"]),
+                )
             if bundle_path is not None:
                 payload["bundle_path"] = bundle_path
             self._execute_skill_versions_scoped(
@@ -1963,6 +2165,29 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
 
         # Work on a copy so we never mutate the Supabase response object.
         manifest_json = dict(_json_load(skill.get("manifest_json"), {}))
+        # The bundle now lives in Supabase Storage (not inline in manifest_json).
+        # For single-worker resolves (runs/scheduler) pull it back so heal +
+        # materialize behave exactly as when _files shipped inline. List/batch
+        # renders never need the code, so they skip the fetch — that's the whole
+        # point of offloading the bundle off the metadata row.
+        if (
+            manifest_json.get("_files_in_storage")
+            and not batch_render
+            and "_files" not in manifest_json
+        ):
+            fetched = resolve_worker_files(manifest_json, str(skill.get("id") or ""))
+            if fetched:
+                manifest_json["_files"] = fetched
+            else:
+                # Fail loud at the portability boundary: an offloaded worker whose
+                # bundle can't be fetched must NOT silently resolve a config that
+                # then runs stale/empty disk files. (Transient Storage errors are
+                # retryable; callers that tolerate this — e.g. detail input_values
+                # — already wrap get_recipe in try/except.)
+                raise RuntimeError(
+                    f"worker {worker_id}: bundle marked in Storage but could not be "
+                    f"fetched (skill_version {skill.get('id')})"
+                )
         # Self-heal a clobbered manifest (contract lost, recipe still in _files)
         # before stripping _files, so the run resolves the real recipe.
         manifest_json = _heal_manifest_contract(manifest_json, worker_id=worker_id)
@@ -3969,14 +4194,24 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
         "last_used_at,created_at,updated_at,last_checked_at,last_check_status,last_check_error"
     )
 
-    def _decrypt_row(self, row: dict) -> dict:
-        """Resolve plaintext from Vault or legacy Fernet blob. Strips raw fields."""
+    def _decrypt_row(self, row: dict, vault_values: dict[str, str] | None = None) -> dict:
+        """Resolve plaintext from Vault or legacy Fernet blob. Strips raw fields.
+
+        ``vault_values`` is an optional pre-fetched {vault_id: plaintext} map from
+        a single batched RPC (see ``list()``); when a row's id is present we use
+        it instead of a per-secret Vault read, collapsing the list N+1. A cache
+        miss still falls back to a single read, so this stays correct even if the
+        batch RPC is unavailable (deploy-order tolerant, mirrors ``resolve()``).
+        """
         vault_id = row.pop("vault_secret_id", None)
         ciphertext = _bytea_bytes(row.pop("value", None))
         if vault_id:
+            vid = str(vault_id)
+            if vault_values is not None and vid in vault_values:
+                row["value"] = vault_values[vid]
+                return row
             try:
-                from uuid import UUID
-                row["value"] = vault_read_secret(self._client, UUID(str(vault_id)))
+                row["value"] = vault_read_secret(self._client, UUID(vid))
             except Exception as exc:
                 _repo_logger.warning("vault_read_secret failed for %s: %s", row.get("name"), exc)
                 row["value"] = None
@@ -4002,8 +4237,31 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
         builder = self._client.table("secrets").select(self._SELECT)
         builder = _scope_by_workspace(builder, user_id=user_id)
-        response = builder.order("name").execute()
-        return [self._decrypt_row(dict(item)) for item in _response_rows(response)]
+        rows = [dict(item) for item in _response_rows(builder.order("name").execute())]
+        if not rows:
+            return []
+        # Batch-resolve all Vault-backed values in ONE RPC instead of a Vault
+        # read per secret (the old N+1). Legacy Fernet rows decrypt locally.
+        vault_ids: list[UUID] = []
+        for row in rows:
+            vid = row.get("vault_secret_id")
+            if not vid:
+                continue
+            try:
+                vault_ids.append(UUID(str(vid)))
+            except (TypeError, ValueError):
+                _repo_logger.warning("invalid vault_secret_id for secret %s", row.get("name"))
+        vault_values: dict[str, str] = {}
+        if vault_ids:
+            try:
+                vault_values = vault_read_secrets(self._client, vault_ids)
+            except Exception as exc:
+                # Deploy-order tolerant: if the batch RPC isn't applied yet,
+                # _decrypt_row falls back to a per-secret read on cache miss.
+                _repo_logger.warning(
+                    "vault_read_secrets failed in list(); per-secret fallback: %s", exc
+                )
+        return [self._decrypt_row(row, vault_values) for row in rows]
 
     def get(self, *, user_id: str, name: str) -> dict[str, Any] | None:
         builder = self._client.table("secrets").select(self._SELECT)

@@ -1048,6 +1048,8 @@ def _override_git_rollback_for_cloud() -> None:
                 )
                 if rows.data and rows.data[0].get("skill_version_id"):
                     sv_id = rows.data[0]["skill_version_id"]
+                    from apps.api.db.supabase_repos import _offload_bundle_files  # noqa: PLC0415
+                    manifest = _offload_bundle_files(manifest, str(sv_id))
                     svc.table("skill_versions").update(
                         {"manifest_json": manifest}
                     ).eq("id", sv_id).execute()
@@ -1583,6 +1585,21 @@ def _install_worker_call_signing_key() -> None:
     run_token.set_worker_call_secret_resolver(lambda: derived)
 
 
+def _bootstrap_worker_bundles_storage() -> None:
+    """Create the worker-bundles Supabase Storage bucket (idempotent).
+
+    Worker code bundles (_files) live here instead of inline in
+    skill_versions.manifest_json, so listing workers no longer downloads
+    megabytes of bundle bytes the grid never displays.
+    """
+    from apps.api.worker_bundles import ensure_bucket
+    try:
+        ensure_bucket()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("worker bundles bucket bootstrap failed: %s", exc)
+
+
 def _bootstrap_git_bundles_storage() -> None:
     """Create the workeros-git-bundles Supabase Storage bucket (idempotent)."""
     from apps.api.cloud_git_local import ensure_bucket
@@ -1638,6 +1655,7 @@ def register_cloud_components() -> None:
     _bootstrap_contexts_storage()
     _bootstrap_git_bundles_storage()
     _bootstrap_run_artifacts_storage()
+    _bootstrap_worker_bundles_storage()
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
     _override_run_executor_workspace_context()
