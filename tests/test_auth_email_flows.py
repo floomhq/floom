@@ -18,14 +18,46 @@ def _settings() -> SimpleNamespace:
     )
 
 
+def _local_settings() -> SimpleNamespace:
+    return SimpleNamespace(
+        api_base="http://127.0.0.1:8002",
+        dashboard_origin="http://localhost:3000",
+        frontend_url="http://localhost:3000/app",
+        supabase_url="https://test.supabase.co",
+    )
+
+
 class _AuthClient:
     def __init__(self, *, signup_response: SimpleNamespace | None = None, user: SimpleNamespace | None = None) -> None:
         self.signup_payloads: list[dict] = []
         self.otp_payloads: list[dict] = []
         self.verify_payloads: list[dict] = []
         self.refresh_payloads: list[str] = []
+        self.oauth_payloads: list[dict] = []
         self.signup_response = signup_response
         self.user = user
+        self._storage_key = "test-storage"
+        self._storage = SimpleNamespace(
+            get_item=lambda key: "test-code-verifier"
+            if key == "test-storage-code-verifier"
+            else None
+        )
+
+    def sign_in_with_oauth(self, payload: dict):
+        self.oauth_payloads.append(payload)
+        return SimpleNamespace(url="https://supabase.test/auth/v1/authorize")
+
+    def exchange_code_for_session(self, payload: dict):
+        self.verify_payloads.append(payload)
+        user = self.user or SimpleNamespace(id="user-1", email="new@example.com")
+        session = SimpleNamespace(
+            access_token="access-token-123",
+            refresh_token="refresh-token-123",
+            expires_at=1_900_000_000,
+            expires_in=3600,
+            user=user,
+        )
+        return SimpleNamespace(user=user, session=session)
 
     def sign_in_with_otp(self, payload: dict):
         self.otp_payloads.append(payload)
@@ -170,6 +202,70 @@ def test_frontend_redirect_rejects_unallowed_request_origin(monkeypatch):
     )
 
     assert redirect == "https://workeros.floom.dev/app/settings"
+
+
+def test_callback_url_honors_local_dashboard_proxy_override(monkeypatch):
+    monkeypatch.setattr(auth, "get_cloud_settings", _settings)
+    monkeypatch.setenv(
+        "WORKEROS_OAUTH_CALLBACK_BASE",
+        "http://localhost:3000/app/api/proxy",
+    )
+
+    callback_url = auth._callback_url(next_path="/app", request=_request())
+
+    assert callback_url == "http://localhost:3000/app/api/proxy/auth/callback?next=%2Fapp"
+
+
+def test_localhost_cloud_session_cookie_is_not_secure(monkeypatch):
+    monkeypatch.setattr(auth, "get_cloud_settings", _local_settings)
+    response = auth.JSONResponse({"ok": True})
+
+    auth._set_cookie(response, "workeros_cloud_session", "session-value", max_age=60)
+
+    set_cookie = response.headers["set-cookie"]
+    assert "workeros_cloud_session=session-value" in set_cookie
+    assert "Secure" not in set_cookie
+
+
+def test_localhost_google_oauth_forces_fresh_account_prompt(monkeypatch):
+    auth_client = _AuthClient()
+    client = _app(monkeypatch, auth_client)
+    monkeypatch.setenv(
+        "WORKEROS_OAUTH_CALLBACK_BASE",
+        "http://localhost:3000/app/api/proxy",
+    )
+
+    response = client.get("/auth/login?provider=google&next=/app", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert auth_client.oauth_payloads[0]["options"]["query_params"] == {
+        "prompt": "select_account",
+    }
+
+
+def test_proxied_callback_returns_html_redirect_with_session_cookie(monkeypatch):
+    original_cookie_domain = auth._cookie_domain
+    auth_client = _AuthClient()
+    client = _app(monkeypatch, auth_client)
+    monkeypatch.setenv("WORKEROS_ALLOWED_FRONTEND_ORIGINS", "http://localhost:3000")
+    monkeypatch.setenv("WORKEROS_COOKIE_DOMAIN", "none")
+    monkeypatch.setattr(auth, "get_cloud_settings", _local_settings)
+    monkeypatch.setattr(auth, "_cookie_domain", original_cookie_domain)
+
+    response = client.get(
+        "/auth/callback?code=code-1&next=/app",
+        headers={
+            "x-workeros-frontend-origin": "http://localhost:3000",
+            "cookie": "workeros_cloud_pkce_verifier=test-code-verifier",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert 'location.replace("http://localhost:3000/app")' in response.text
+    set_cookie = response.headers["set-cookie"]
+    assert "workeros_cloud_session=" in set_cookie
+    assert "Secure" not in set_cookie
 
 
 def test_callback_without_query_params_returns_fragment_bridge(monkeypatch):

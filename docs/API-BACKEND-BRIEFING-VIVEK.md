@@ -53,8 +53,17 @@ FLOOM_API_BASE=http://127.0.0.1:8000
 For Cloud wrapper development against a local Cloud API:
 
 ```bash
+WORKEROS_ROLE=web
 WORKEROS_API_BASE=http://127.0.0.1:8000
-NEXT_PUBLIC_WORKEROS_API_BASE=http://127.0.0.1:8000
+NEXT_PUBLIC_WORKEROS_API_BASE=/app/api/proxy
+WORKEROS_OAUTH_CALLBACK_BASE=http://localhost:3000/app/api/proxy
+WORKEROS_COOKIE_DOMAIN=none
+```
+
+Supabase Auth must allow this redirect URL for local Cloud dashboard login:
+
+```text
+http://localhost:3000/app/api/proxy/auth/callback
 ```
 
 For Cloud wrapper development against production Cloud API:

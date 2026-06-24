@@ -313,15 +313,26 @@ def _cookie_domain() -> str | None:
     return "." + ".".join(parts[-2:])
 
 
+def _cookie_secure_required() -> bool:
+    settings = get_cloud_settings()
+    for raw_url in (settings.dashboard_origin, settings.frontend_url, settings.api_base):
+        parsed = urlparse(raw_url or "")
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme == "http" and hostname in {"localhost", "127.0.0.1", "::1"}:
+            return False
+    return True
+
+
 def _set_cookie(response: JSONResponse | RedirectResponse, name: str, value: str, *, max_age: int) -> None:
     parts = [
         f"{name}={value}",
         f"Max-Age={int(max_age)}",
         "Path=/",
         "HttpOnly",
-        "Secure",
         "SameSite=lax",
     ]
+    if _cookie_secure_required():
+        parts.append("Secure")
     domain = _cookie_domain()
     if domain:
         parts.append(f"Domain={domain}")
@@ -337,11 +348,22 @@ def _clear_cookie(response: JSONResponse | RedirectResponse, name: str) -> None:
         response.delete_cookie(
             key=name,
             httponly=True,
-            secure=True,
+            secure=_cookie_secure_required(),
             samesite="lax",
             path="/",
             domain=domain,
         )
+
+
+def _html_redirect_response(url: str) -> HTMLResponse:
+    target = json.dumps(url)
+    return HTMLResponse(
+        "<!doctype html>"
+        "<html><head><meta charset=\"utf-8\">"
+        "<meta name=\"robots\" content=\"noindex\">"
+        f"<script>location.replace({target});</script>"
+        "</head><body></body></html>"
+    )
 
 
 def _session_cookie_key_material() -> str:
@@ -704,6 +726,8 @@ def login(
             )
         client = new_supabase_anon_client()
         options: dict[str, Any] = {"redirect_to": callback_url}
+        if callback_url.startswith(("http://localhost:", "http://127.0.0.1:")):
+            options["query_params"] = {"prompt": "select_account"}
         if normalized_provider == "github":
             options["scopes"] = "read:user user:email"
         # Google SSO survives Workeros logout — without prompt=select_account the
@@ -992,6 +1016,7 @@ def callback(
     user_code: str | None = None,
 ):
     next_path = _safe_next(next)
+    frontend_origin = _request_frontend_origin(request)
     callback_url = _callback_url(
         next_path=next_path,
     )
@@ -1052,7 +1077,11 @@ def callback(
 
     _upsert_user_row(user)
     _maybe_send_welcome_email(user)
-    response = RedirectResponse(_frontend_redirect(next_path, request), status_code=303)
+    redirect_url = _frontend_redirect(next_path, request)
+    if code and frontend_origin:
+        response = _html_redirect_response(redirect_url)
+    else:
+        response = RedirectResponse(redirect_url, status_code=303)
     _set_cookie(
         response,
         _SESSION_COOKIE_NAME,
