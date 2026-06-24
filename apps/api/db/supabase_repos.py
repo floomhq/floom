@@ -4520,6 +4520,36 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
                 return []
             raise
 
+    def list_pending_for_workspace(
+        self,
+        *,
+        workspace_id: str,
+        owner_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        try:
+            bounded = int(limit)
+        except (TypeError, ValueError):
+            bounded = 100
+        bounded = max(1, min(bounded, 200))
+        try:
+            builder = (
+                self._client.table(self._TABLE)
+                .select("*")
+                .eq("workspace_id", workspace_id)
+                .eq("status", "pending")
+                .order("created_at")
+                .limit(bounded)
+            )
+            if owner_id:
+                builder = builder.eq("owner_id", owner_id)
+            response = builder.execute()
+            return _response_rows(response)
+        except Exception as exc:
+            if _is_table_not_found(exc) or _is_undefined_column(exc):
+                return []
+            raise
+
     def count_pending(self, *, owner_id: str) -> int:
         try:
             builder = (

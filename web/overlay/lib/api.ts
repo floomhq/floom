@@ -95,7 +95,7 @@ async function fetchApi(path: string, input: RequestInfo | URL, init?: RequestIn
 }
 
 function isSignedApprovalProxyPath(path: string): boolean {
-  return path.startsWith("/approvals/public/");
+  return path.startsWith("/approvals/public/") || path.startsWith("/approvals/public-batch/");
 }
 
 function currentPathForLoginNext(): string {

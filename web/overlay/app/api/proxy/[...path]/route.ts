@@ -119,7 +119,8 @@ async function handler(
   // current consumer) reads the session cookie directly on the backend, so
   // we skip the JWT-required guard for those paths.
   const isAuthPath = path[0] === "auth";
-  const isSignedApprovalPath = path[0] === "approvals" && path[1] === "public";
+  const isSignedApprovalPath =
+    path[0] === "approvals" && (path[1] === "public" || path[1] === "public-batch");
   // Preserve the raw encoded pathname for file routes. `params.path` can
   // normalize already-encoded filenames differently between local Next and
   // Vercel, which breaks files that intentionally contain `%20`.
