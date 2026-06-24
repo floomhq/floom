@@ -56,15 +56,24 @@ class _FakeWorkers:
             "id": worker_id,
             "user_id": self.owner_id,
             "owner_id": self.owner_id,
+            "workspace_id": "ws_1",
             "manifest": dict(self.manifest),
             "manifest_json": dict(self.manifest),
         }
 
     def get(self, *, user_id: str, worker_id: str):
-        # Retained for other callers; archive/restore now uses get_any.
+        # Retained for callers that use workspace-scoped reads.
         row = self.get_any(worker_id=worker_id)
-        if row is None or str(row["user_id"]) != str(user_id):
+        if row is None:
             return None
+        if str(row["user_id"]) != str(user_id):
+            from apps.api.auth.workspace_context import get_active_member_role, get_active_workspace_id
+
+            active_workspace_id = get_active_workspace_id()
+            if active_workspace_id and str(row.get("workspace_id") or "") != str(active_workspace_id):
+                return None
+            if get_active_member_role() not in {"admin", "member"}:
+                return None
         return row
 
     def update(self, *, user_id: str, worker_id: str, manifest_json: dict[str, object]):
@@ -79,7 +88,64 @@ class _FakeWorkers:
         return self.get(user_id=user_id, worker_id=worker_id)
 
 
-def _make_archive_request(monkeypatch, main, *, caller_user_id: str, caller_role: str | None = None):
+class _VisibilityRequest:
+    async def json(self):
+        return {"visibility": "shared"}
+
+
+class _VisibilityWorkers:
+    def __init__(self):
+        self.visibility_set: list[tuple[str, str]] = []
+
+    def get(self, *, user_id: str, worker_id: str):
+        assert user_id == "user_fede"
+        assert worker_id == "foreign-worker"
+        return None
+
+    def get_any(self, *, worker_id: str):
+        assert worker_id == "foreign-worker"
+        return {
+            "id": "foreign-worker",
+            "user_id": "user_fede",
+            "owner_id": "user_fede",
+            "workspace_id": "ws_b",
+            "visibility": "private",
+        }
+
+    def set_visibility(self, *, worker_id: str, visibility: str):
+        self.visibility_set.append((worker_id, visibility))
+
+
+class _CloneLinkWorkers:
+    def __init__(self, *, row: dict[str, object] | None = None):
+        self.row = row
+        self.clone_tokens: list[tuple[str, str, str]] = []
+
+    def get(self, *, user_id: str, worker_id: str):
+        assert user_id == "user_fede"
+        if self.row is None:
+            assert worker_id == "foreign-worker"
+            return None
+        assert worker_id == self.row["id"]
+        if str(self.row["user_id"]) != str(user_id):
+            return None
+        return dict(self.row)
+
+    def get_any(self, *, worker_id: str):
+        raise AssertionError("clone-link must not use global worker lookup")
+
+    def set_clone_token(self, *, worker_id: str, token_hash: str, expires_at: str):
+        self.clone_tokens.append((worker_id, token_hash, expires_at))
+
+
+def _make_archive_request(
+    monkeypatch,
+    main,
+    *,
+    caller_user_id: str,
+    caller_role: str | None = None,
+    caller_workspace_id: str | None = "ws_1",
+):
     """Wire common monkeypatches for _cloud_set_worker_archived tests."""
     async def verify(_self, _request):
         return SimpleNamespace(user_id=caller_user_id)
@@ -99,6 +165,9 @@ def _make_archive_request(monkeypatch, main, *, caller_user_id: str, caller_role
     if caller_role is not None:
         from apps.api.auth import workspace_context as _wsc
         monkeypatch.setattr(_wsc, "get_active_member_role", lambda: caller_role)
+    if caller_workspace_id is not None:
+        from apps.api.auth import workspace_context as _wsc
+        monkeypatch.setattr(_wsc, "get_active_workspace_id", lambda: caller_workspace_id)
 
 
 def test_cloud_archive_and_restore_write_supabase_manifest(monkeypatch, tmp_path):
@@ -164,3 +233,106 @@ def test_admin_can_archive_any_workspace_worker(monkeypatch, tmp_path):
 
     assert result["archived"] is True
     assert len(workers.updates) == 1
+
+
+def test_admin_cannot_archive_other_workspace_worker_by_id(monkeypatch, tmp_path):
+    main = _load_cloud_main(monkeypatch, tmp_path)
+    workers = _FakeWorkers(owner_id="owner_user")
+    repos = SimpleNamespace(workers=workers)
+
+    original_get_any = workers.get_any
+
+    def get_any_other_workspace(*, worker_id: str):
+        row = original_get_any(worker_id=worker_id)
+        if row is not None:
+            row["workspace_id"] = "ws_b"
+        return row
+
+    workers.get_any = get_any_other_workspace
+
+    _make_archive_request(
+        monkeypatch,
+        main,
+        caller_user_id="admin_user",
+        caller_role="admin",
+        caller_workspace_id="ws_a",
+    )
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: repos)
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        asyncio.run(
+            main._cloud_set_worker_archived("worker-archive-test", object(), archived=True)
+        )
+
+    assert exc_info.value.status_code == 404
+    assert workers.updates == []
+
+
+def test_visibility_patch_hides_same_owner_other_workspace_worker(monkeypatch, tmp_path):
+    main = _load_cloud_main(monkeypatch, tmp_path)
+    workers = _VisibilityWorkers()
+    repos = SimpleNamespace(workers=workers)
+
+    async def verify(_self, _request):
+        return SimpleNamespace(user_id="user_fede")
+
+    monkeypatch.setattr("apps.api.auth.supabase_provider.SupabaseAuthProvider.verify", verify)
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: repos)
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        asyncio.run(
+            main.cloud_set_worker_visibility("foreign-worker", _VisibilityRequest())
+        )
+
+    assert exc_info.value.status_code == 404
+    assert workers.visibility_set == []
+
+
+def test_clone_link_hides_same_owner_other_workspace_worker(monkeypatch, tmp_path):
+    main = _load_cloud_main(monkeypatch, tmp_path)
+    workers = _CloneLinkWorkers()
+    repos = SimpleNamespace(workers=workers)
+
+    async def verify(_self, _request):
+        return SimpleNamespace(user_id="user_fede")
+
+    monkeypatch.setattr("apps.api.auth.supabase_provider.SupabaseAuthProvider.verify", verify)
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: repos)
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        asyncio.run(
+            main.cloud_generate_clone_link("foreign-worker", object())
+        )
+
+    assert exc_info.value.status_code == 404
+    assert workers.clone_tokens == []
+
+
+def test_clone_link_allows_same_workspace_owner(monkeypatch, tmp_path):
+    main = _load_cloud_main(monkeypatch, tmp_path)
+    workers = _CloneLinkWorkers(
+        row={
+            "id": "worker-same-workspace",
+            "user_id": "user_fede",
+            "owner_id": "user_fede",
+            "workspace_id": "ws_a",
+        }
+    )
+    repos = SimpleNamespace(workers=workers)
+
+    async def verify(_self, _request):
+        return SimpleNamespace(user_id="user_fede")
+
+    monkeypatch.setattr("apps.api.auth.supabase_provider.SupabaseAuthProvider.verify", verify)
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: repos)
+
+    result = asyncio.run(
+        main.cloud_generate_clone_link("worker-same-workspace", object())
+    )
+
+    assert result["token"].startswith("wct_")
+    assert len(workers.clone_tokens) == 1
+    worker_id, token_hash, expires_at = workers.clone_tokens[0]
+    assert worker_id == "worker-same-workspace"
+    assert token_hash != result["token"]
+    assert expires_at == result["expires_at"]

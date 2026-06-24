@@ -1301,19 +1301,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
 
         rows = self._worker_rows(user_id=user_id, worker_id=worker_id)
         if not rows:
-            if not get_active_workspace_id():
-                return None
-            response = (
-                self._client.table("workers")
-                .select("*")
-                .eq("id", worker_id)
-                .eq("user_id", user_id)
-                .limit(1)
-                .execute()
-            )
-            row = _first_row(response)
-            if row is None:
-                return None
+            return None
         else:
             row = rows[0]
         # Log when an admin reads a private worker they don't own.
@@ -2762,21 +2750,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         response = builder.eq("id", run_id).limit(1).execute()
         row = _first_row(response)
         if row is None:
-            if not get_active_workspace_id():
-                return None
-            fallback = (
-                self._client.table("runs")
-                .select(
-                    "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id"
-                )
-                .eq("id", run_id)
-                .eq("user_id", user_id)
-                .limit(1)
-                .execute()
-            )
-            row = _first_row(fallback)
-            if row is None:
-                return None
+            return None
         return self._decorate_run_rows([row])[0]
 
     def get_any(self, *, run_id: str) -> dict[str, Any] | None:
@@ -3198,15 +3172,14 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             q = q.gte("timestamp", since)
         # Filter by worker via runs table join isn't directly possible in supabase-py,
         # so fetch recent logs and filter by runs that belong to this worker.
-        runs_resp = (
+        runs_builder = (
             self._client.table("runs")
             .select("id")
             .eq("user_id", user_id)
             .eq("worker_id", worker_id)
-            .order("created_at", desc=True)
-            .limit(100)
-            .execute()
         )
+        runs_builder = _scope_by_workspace(runs_builder, user_id=user_id)
+        runs_resp = runs_builder.order("created_at", desc=True).limit(100).execute()
         run_ids = [r["id"] for r in _response_rows(runs_resp)]
         if not run_ids:
             return []
@@ -4445,14 +4418,16 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
 
     def get(self, *, owner_id: str, approval_id: str) -> dict[str, Any] | None:
         try:
-            response = (
+            builder = (
                 self._client.table(self._TABLE)
                 .select("*")
                 .eq("owner_id", owner_id)
                 .eq("id", approval_id)
-                .limit(1)
-                .execute()
             )
+            workspace_id = get_active_workspace_id()
+            if workspace_id:
+                builder = builder.eq("workspace_id", workspace_id)
+            response = builder.limit(1).execute()
             return _first_row(response)
         except Exception as exc:
             if _is_table_not_found(exc):
@@ -4527,15 +4502,16 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             bounded = 100
         bounded = max(1, min(bounded, 200))
         try:
-            response = (
+            builder = (
                 self._client.table(self._TABLE)
                 .select("*")
                 .eq("owner_id", owner_id)
                 .eq("status", "pending")
-                .order("created_at")
-                .limit(bounded)
-                .execute()
             )
+            workspace_id = get_active_workspace_id()
+            if workspace_id:
+                builder = builder.eq("workspace_id", workspace_id)
+            response = builder.order("created_at").limit(bounded).execute()
             return _response_rows(response)
         except Exception as exc:
             if _is_table_not_found(exc):
@@ -4544,13 +4520,16 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
 
     def count_pending(self, *, owner_id: str) -> int:
         try:
-            response = (
+            builder = (
                 self._client.table(self._TABLE)
                 .select("id", count="exact")
                 .eq("owner_id", owner_id)
                 .eq("status", "pending")
-                .execute()
             )
+            workspace_id = get_active_workspace_id()
+            if workspace_id:
+                builder = builder.eq("workspace_id", workspace_id)
+            response = builder.execute()
             return int(getattr(response, "count", 0) or 0)
         except Exception as exc:
             if _is_table_not_found(exc):

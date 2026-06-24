@@ -215,6 +215,22 @@ def _resolve_role(*, workspace_id: str, user_id: str) -> str | None:
     return workspace_repo.get_member_role(workspace_id=workspace_id, user_id=user_id)
 
 
+def _requested_workspace_id(request: Request) -> str | None:
+    header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
+    query_workspace_id = request.query_params.get("workspace_id")
+    path_workspace_id = ""
+    if request.url.path.startswith("/mcp/"):
+        path_workspace_id = str(request.path_params.get("workspace_id") or "").strip()
+    cookie_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+    requested = (
+        (header_workspace_id or "").strip()
+        or path_workspace_id
+        or (query_workspace_id or "").strip()
+        or (cookie_workspace_id or "").strip()
+    )
+    return requested or None
+
+
 class SupabaseAuthProvider:
     """Cloud auth provider: local JWT verify via Supabase JWKS.
 
@@ -474,14 +490,7 @@ class SupabaseAuthProvider:
         email: str | None = None,
         request: Request,
     ) -> AuthContext:
-        header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
-        cookie_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
-        query_workspace_id = request.query_params.get("workspace_id")
-        requested_workspace_id = (
-            (header_workspace_id or "").strip()
-            or (query_workspace_id or "").strip()
-            or cookie_workspace_id
-        )
+        requested_workspace_id = _requested_workspace_id(request)
 
         if workspace_id and requested_workspace_id and requested_workspace_id != workspace_id:
             raise HTTPException(status_code=403, detail="token is not valid for this workspace")
@@ -537,14 +546,7 @@ class SupabaseAuthProvider:
         # the requested workspace_id is owned by user_id; an unauthorized
         # header/cookie falls back to the user's default workspace, never
         # leaks data from another user's workspace.
-        header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
-        cookie_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
-        query_workspace_id = request.query_params.get("workspace_id")
-        requested_workspace_id = (
-            (header_workspace_id or "").strip()
-            or (query_workspace_id or "").strip()
-            or cookie_workspace_id
-        )
+        requested_workspace_id = _requested_workspace_id(request)
 
         # Cache key includes the requested workspace so explicit switches
         # (workspace switcher, CLI --workspace flag) are not served stale.

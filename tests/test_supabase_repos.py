@@ -272,7 +272,7 @@ def test_approval_repository_get_public_loads_by_id_without_owner_scope():
     assert ("id", "apr_test") in client.table_ref.filters
 
 
-def test_worker_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale():
+def test_worker_get_hides_owned_exact_id_when_workspace_cookie_is_stale():
     now_iso = _now_iso()
     worker_id = "granola-hubspot-meeting-actions"
     skill_version_id = "sv_granola"
@@ -313,8 +313,7 @@ def test_worker_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale(
             worker_id=worker_id,
         )
 
-    assert result is not None
-    assert result["id"] == worker_id
+    assert result is None
 
 
 def test_worker_get_exposes_archive_fields_from_manifest_json():
@@ -442,7 +441,7 @@ def test_secret_resolve_batches_vault_reads_and_last_used_updates():
     assert rows[3]["last_used_at"] == now_iso
 
 
-def test_run_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale():
+def test_run_get_hides_owned_exact_id_when_workspace_cookie_is_stale():
     now_iso = _now_iso()
     run_id = "run_8290101e249b"
     worker_id = "granola-hubspot-meeting-sync"
@@ -488,9 +487,7 @@ def test_run_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale():
             run_id=run_id,
         )
 
-    assert result is not None
-    assert result["id"] == run_id
-    assert result["worker_id"] == worker_id
+    assert result is None
 
 
 def _now_iso() -> str:

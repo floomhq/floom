@@ -22,7 +22,14 @@ from apps.api.auth.supabase_provider import (
 )
 
 
-def _request(*, cookie: str | None = None, header: str | None = None) -> Request:
+def _request(
+    *,
+    cookie: str | None = None,
+    header: str | None = None,
+    path: str = "/api/workers",
+    path_params: dict[str, str] | None = None,
+    query_string: bytes = b"",
+) -> Request:
     raw_headers: list[tuple[bytes, bytes]] = [(b"authorization", b"Bearer test-jwt")]
     if cookie:
         raw_headers.append((b"cookie", f"{ACTIVE_WORKSPACE_COOKIE}={cookie}".encode()))
@@ -32,9 +39,10 @@ def _request(*, cookie: str | None = None, header: str | None = None) -> Request
         {
             "type": "http",
             "method": "GET",
-            "path": "/api/workers",
-            "query_string": b"",
+            "path": path,
+            "query_string": query_string,
             "headers": raw_headers,
+            "path_params": path_params or {},
         }
     )
 
@@ -101,6 +109,55 @@ def test_no_header_or_cookie_passes_none(_patched):
         user_id="user-1",
         email="u@example.com",
         requested_id=None,
+    )
+
+
+def test_mcp_url_workspace_used_when_header_absent(_patched):
+    resolver, _ = _patched
+    provider = SupabaseAuthProvider()
+    asyncio.run(
+        provider.verify(
+            _request(path="/mcp/ws_url", path_params={"workspace_id": "ws_url"})
+        )
+    )
+    resolver.assert_called_once_with(
+        user_id="user-1",
+        email="u@example.com",
+        requested_id="ws_url",
+    )
+
+
+def test_mcp_url_workspace_beats_stale_cookie(_patched):
+    resolver, _ = _patched
+    provider = SupabaseAuthProvider()
+    asyncio.run(
+        provider.verify(
+            _request(cookie="ws_cookie", path="/mcp/ws_url", path_params={"workspace_id": "ws_url"})
+        )
+    )
+    resolver.assert_called_once_with(
+        user_id="user-1",
+        email="u@example.com",
+        requested_id="ws_url",
+    )
+
+
+def test_mcp_url_workspace_beats_query_workspace(_patched):
+    resolver, _ = _patched
+    provider = SupabaseAuthProvider()
+    asyncio.run(
+        provider.verify(
+            _request(
+                path="/mcp/ws_url",
+                path_params={"workspace_id": "ws_url"},
+                query_string=b"workspace_id=ws_query",
+            )
+        )
+    )
+    resolver.assert_called_once_with(
+        user_id="user-1",
+        email="u@example.com",
+        requested_id="ws_url",
     )
 
 

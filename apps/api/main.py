@@ -1362,6 +1362,8 @@ async def cloud_get_worker(worker_id: str, request: Request) -> Any:
 
     Delegates to the engine's _build_worker_detail then augments the response
     with cloud-only fields: visibility and published_at (from Supabase).
+    The active workspace context from auth remains authoritative: a worker in a
+    different workspace must be indistinguishable from a missing worker.
     """
     import asyncio as _asyncio
 
@@ -1388,26 +1390,10 @@ async def cloud_get_worker(worker_id: str, request: Request) -> Any:
         role=getattr(auth, "role", None) or "member",
         auth_method=getattr(auth, "auth_method", "secret"),
     )
-    try:
-        result = await _asyncio.to_thread(
-            engine_main._build_worker_detail, worker_id,
-            user_id=auth.user_id, repos=repos
-        )
-    except HTTPException as exc:
-        if exc.status_code != 404:
-            raise
-        raw_worker = repos.workers.get_any(worker_id=worker_id) or {}
-        owner_id = raw_worker.get("owner_id") or raw_worker.get("user_id") or ""
-        actual_workspace_id = str(raw_worker.get("workspace_id") or "")
-        if str(owner_id) != str(auth.user_id) or not actual_workspace_id:
-            raise
-        from apps.api.auth.workspace_context import active_workspace
-
-        with active_workspace(actual_workspace_id, "admin"):
-            result = await _asyncio.to_thread(
-                engine_main._build_worker_detail, worker_id,
-                user_id=auth.user_id, repos=repos
-            )
+    result = await _asyncio.to_thread(
+        engine_main._build_worker_detail, worker_id,
+        user_id=auth.user_id, repos=repos
+    )
     if result is None:
         raise HTTPException(status_code=404, detail="worker not found")
 
@@ -1423,10 +1409,9 @@ async def cloud_get_worker(worker_id: str, request: Request) -> Any:
 async def cloud_get_run(run_id: str, request: Request) -> Any:
     """Cloud override for exact run detail deep links.
 
-    Lists stay scoped to the active workspace. Exact owned deep links can be
-    opened from activity cards and notifications even when the browser still has
-    an older workspace cookie, so recover the row's workspace before delegating
-    to the engine run-detail builder.
+    Lists and exact run reads both stay scoped to the active workspace. A run in
+    another workspace owned by the same account must return 404 for this
+    workspace-bound request.
     """
     import asyncio as _asyncio
 
@@ -1453,26 +1438,10 @@ async def cloud_get_run(run_id: str, request: Request) -> Any:
         role=getattr(auth, "role", None) or "member",
         auth_method=getattr(auth, "auth_method", "secret"),
     )
-    try:
-        return await _asyncio.to_thread(
-            engine_main.get_run, run_id,
-            auth=engine_auth, repos=repos
-        )
-    except HTTPException as exc:
-        if exc.status_code != 404:
-            raise
-        raw_run = repos.runs.get_any(run_id=run_id) or {}
-        owner_id = raw_run.get("owner_id") or raw_run.get("user_id") or ""
-        actual_workspace_id = str(raw_run.get("workspace_id") or "")
-        if str(owner_id) != str(auth.user_id) or not actual_workspace_id:
-            raise
-        from apps.api.auth.workspace_context import active_workspace
-
-        with active_workspace(actual_workspace_id, "admin"):
-            return await _asyncio.to_thread(
-                engine_main.get_run, run_id,
-                auth=engine_auth, repos=repos
-            )
+    return await _asyncio.to_thread(
+        engine_main.get_run, run_id,
+        auth=engine_auth, repos=repos
+    )
 
 
 @app.patch("/workers/{worker_id}/visibility")
@@ -1514,7 +1483,7 @@ async def cloud_set_worker_visibility(worker_id: str, request: Request) -> Any:
         raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'")
 
     repos = engine_main.get_repositories()
-    worker = repos.workers.get_any(worker_id=worker_id)
+    worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="worker not found")
     owner_id = worker.get("owner_id") or worker.get("user_id") or ""
@@ -1522,7 +1491,7 @@ async def cloud_set_worker_visibility(worker_id: str, request: Request) -> Any:
         raise HTTPException(status_code=403, detail="forbidden")
 
     repos.workers.set_visibility(worker_id=worker_id, visibility=visibility)
-    updated = repos.workers.get_any(worker_id=worker_id) or {}
+    updated = repos.workers.get(user_id=auth.user_id, worker_id=worker_id) or {}
     return {
         "visibility": updated.get("visibility") or "private",
         "published_at": updated.get("published_at"),
@@ -1544,7 +1513,7 @@ async def _cloud_set_worker_archived(worker_id: str, request: Request, *, archiv
     from datetime import datetime, timezone
 
     from apps.api.auth.supabase_provider import SupabaseAuthProvider
-    from apps.api.auth.workspace_context import get_active_member_role
+    from apps.api.auth.workspace_context import get_active_member_role, get_active_workspace_id
 
     provider = SupabaseAuthProvider()
     try:
@@ -1556,10 +1525,13 @@ async def _cloud_set_worker_archived(worker_id: str, request: Request, *, archiv
 
     engine_main._raise_if_protected_worker_mutation(worker_id)
     repos = engine_main.get_repositories()
-    # Use get_any (unscoped by user) to look up the worker, then explicitly
-    # check ownership so that non-owner members cannot archive shared workers.
+    # get_any is global for worker-id collision checks, so pair it with an
+    # explicit active-workspace check before applying owner/admin authority.
     worker = repos.workers.get_any(worker_id=worker_id)
     if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    active_workspace_id = get_active_workspace_id()
+    if active_workspace_id and str(worker.get("workspace_id") or "") != str(active_workspace_id):
         raise HTTPException(status_code=404, detail="Worker not found")
 
     # SECURITY (#1165): enforce owner-or-admin. The worker owner may always
@@ -1628,7 +1600,7 @@ async def cloud_generate_clone_link(worker_id: str, request: Request) -> Any:
         raise HTTPException(status_code=401, detail="Authentication failed")
 
     repos = engine_main.get_repositories()
-    worker = repos.workers.get_any(worker_id=worker_id)
+    worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="worker not found")
     owner_id = worker.get("owner_id") or worker.get("user_id") or ""
