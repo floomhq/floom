@@ -3,583 +3,286 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WorkerOS Cloud — Issue Inventory (from scratch)</title>
+  <title>WorkerOS Cloud — Issue Table (share with Vivek)</title>
   <style>
     :root {
-      --bg: #f4f2ef;
-      --paper: #fff;
-      --ink: #141518;
-      --muted: #6b6560;
-      --line: #ddd9d2;
-      --accent: #3e6fe0;
-      --ok: #1a7f4b;
-      --ok-bg: #e8f5ee;
-      --warn: #b45309;
-      --warn-bg: #fff4e5;
-      --bad: #b42318;
-      --bad-bg: #fdecea;
-      --open: #7c3aed;
-      --open-bg: #f3eeff;
-      --code: #eceae6;
-      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-      --radius: 10px;
+      --bg: #f4f2ef; --paper: #fff; --ink: #141518; --muted: #6b6560; --line: #ddd9d2;
+      --accent: #3e6fe0; --ok: #1a7f4b; --ok-bg: #e8f5ee; --warn: #b45309; --warn-bg: #fff4e5;
+      --bad: #b42318; --bad-bg: #fdecea; --open: #7c3aed; --open-bg: #f3eeff;
+      --code: #eceae6; --mono: ui-monospace, Menlo, Consolas, monospace;
+      --sans: ui-sans-serif, system-ui, sans-serif; --radius: 10px;
     }
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      font-family: var(--sans);
-      background: var(--bg);
-      color: var(--ink);
-      line-height: 1.55;
-      font-size: 15px;
-    }
+    body { margin: 0; font-family: var(--sans); background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.5; }
     a { color: var(--accent); }
-    pre.ascii {
-      font-family: var(--mono);
-      font-size: 11.5px;
-      line-height: 1.35;
-      background: #1a1a1e;
-      color: #e8e6e1;
-      padding: 1rem 1.1rem;
-      border-radius: var(--radius);
-      overflow-x: auto;
-      margin: 0.75rem 0 1rem;
-      white-space: pre;
+    header { background: var(--paper); border-bottom: 1px solid var(--line); padding: 1.25rem 1.5rem; }
+    header h1 { margin: 0 0 .25rem; font-size: 1.35rem; }
+    header .meta { color: var(--muted); font-size: .88rem; }
+    .share-bar {
+      margin-top: .75rem; padding: .65rem .85rem; background: #eef6ff; border: 1px solid #93c5fd;
+      border-radius: 8px; font-size: .85rem;
     }
-    pre.ascii.light {
-      background: var(--code);
-      color: var(--ink);
-      border: 1px solid var(--line);
+    .share-bar code { background: #fff; padding: .1rem .35rem; border-radius: 4px; font-size: .82em; }
+    .toolbar {
+      position: sticky; top: 0; z-index: 20; background: rgba(244,242,239,.95); backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line); padding: .5rem 1rem; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center;
     }
-    header.hero {
-      background: var(--paper);
-      border-bottom: 1px solid var(--line);
-      padding: 2rem 1.5rem 1.5rem;
-    }
-    header.hero h1 {
-      margin: 0 0 0.35rem;
-      font-size: 1.55rem;
-      letter-spacing: -0.02em;
-    }
-    header.hero .sub {
-      color: var(--muted);
-      font-size: 0.92rem;
-      max-width: 52rem;
-    }
-    nav.toc {
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      background: rgba(244,242,239,.92);
-      backdrop-filter: blur(8px);
-      border-bottom: 1px solid var(--line);
-      padding: 0.5rem 1.5rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.35rem 0.75rem;
-      font-size: 0.82rem;
-    }
-    nav.toc a {
-      text-decoration: none;
-      color: var(--muted);
-      padding: 0.2rem 0.45rem;
-      border-radius: 6px;
-    }
-    nav.toc a:hover { background: var(--code); color: var(--ink); }
-    main {
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 1.25rem 1.5rem 4rem;
-    }
-    section.block {
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 1.25rem 1.35rem;
-      margin-bottom: 1.25rem;
-      box-shadow: 0 1px 2px rgba(20,21,24,.04);
-    }
-    section.block h2 {
-      margin: 0 0 0.35rem;
-      font-size: 1.15rem;
-      letter-spacing: -0.015em;
-    }
-    section.block .lead {
-      color: var(--muted);
-      font-size: 0.9rem;
-      margin: 0 0 1rem;
-    }
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-      gap: 0.65rem;
-      margin: 1rem 0;
-    }
-    .stat {
-      background: var(--code);
-      border-radius: 8px;
-      padding: 0.65rem 0.75rem;
-      text-align: center;
-    }
-    .stat .n { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
-    .stat .l { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-    table.issues {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.88rem;
-    }
-    table.issues th {
-      text-align: left;
-      font-size: 0.72rem;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      color: var(--muted);
-      padding: 0.55rem 0.5rem;
-      border-bottom: 2px solid var(--line);
-    }
-    table.issues td {
-      padding: 0.65rem 0.5rem;
-      border-bottom: 1px solid var(--line);
-      vertical-align: top;
-    }
-    table.issues tr:last-child td { border-bottom: 0; }
-    table.issues code {
-      font-family: var(--mono);
-      font-size: 0.82em;
-      background: var(--code);
-      padding: 0.1rem 0.35rem;
-      border-radius: 4px;
-    }
-    .badge {
-      display: inline-block;
-      font-size: 0.68rem;
-      font-weight: 650;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      padding: 0.15rem 0.45rem;
-      border-radius: 5px;
-      white-space: nowrap;
-    }
+    .toolbar input, .toolbar select { font: inherit; padding: .35rem .55rem; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
+    .toolbar label { font-size: .78rem; color: var(--muted); }
+    main { padding: 1rem 1rem 3rem; overflow-x: auto; }
+    table { width: 100%; min-width: 1100px; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    th { text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+         padding: .55rem .6rem; background: var(--code); border-bottom: 2px solid var(--line); position: sticky; top: 42px; z-index: 5; }
+    td { padding: .55rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+    tr:hover td { background: #faf9f7; }
+    tr.hidden { display: none; }
+    .id { font-family: var(--mono); font-size: .82em; font-weight: 600; white-space: nowrap; }
+    .badge { display: inline-block; font-size: .62rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+             padding: .12rem .4rem; border-radius: 4px; white-space: nowrap; }
     .badge.p1 { background: var(--bad-bg); color: var(--bad); }
     .badge.p2 { background: var(--warn-bg); color: var(--warn); }
     .badge.p3 { background: var(--code); color: var(--muted); }
-    .badge.fixed { background: var(--ok-bg); color: var(--ok); }
+    .badge.live { background: var(--ok-bg); color: var(--ok); }
     .badge.disk { background: #e8f0fe; color: var(--accent); }
     .badge.open { background: var(--open-bg); color: var(--open); }
-    .badge.verify { background: var(--warn-bg); color: var(--warn); }
-    .badge.cloud { background: #fef3c7; color: #92400e; }
-    .badge.engine { background: #dbeafe; color: #1e40af; }
-    .detail {
-      font-size: 0.84rem;
-      color: var(--muted);
-      margin-top: 0.2rem;
+    .badge.manual { background: var(--warn-bg); color: var(--warn); }
+    .badge.track { background: var(--code); color: var(--muted); }
+    .owner { font-size: .72rem; color: var(--muted); }
+    .shot-cell { width: 140px; min-width: 140px; }
+    .shot-wrap { position: relative; width: 128px; }
+    .shot-wrap img {
+      width: 128px; height: 72px; object-fit: cover; object-position: top left;
+      border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; background: var(--code);
     }
-    .honesty {
-      background: #fff8e6;
-      border: 1px solid #e6c200;
-      border-radius: var(--radius);
-      padding: 0.85rem 1rem;
-      font-size: 0.88rem;
-      margin-bottom: 1.25rem;
+    .shot-wrap img:hover { border-color: var(--accent); }
+    .shot-empty {
+      width: 128px; height: 72px; border: 2px dashed var(--line); border-radius: 6px;
+      display: flex; align-items: center; justify-content: center; font-size: .65rem; color: var(--muted);
+      text-align: center; padding: .25rem; cursor: pointer; background: #faf9f7;
     }
-    footer {
-      text-align: center;
-      color: var(--muted);
-      font-size: 0.8rem;
-      padding: 2rem 1rem;
+    .shot-empty:hover { border-color: var(--accent); color: var(--accent); }
+    .shot-empty input { display: none; }
+    .detail { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
+    pre.ascii {
+      font-family: var(--mono); font-size: 10.5px; line-height: 1.3; background: #1a1a1e; color: #e8e6e1;
+      padding: .85rem 1rem; border-radius: var(--radius); overflow-x: auto; white-space: pre; margin: 1rem 0;
     }
-    h3 { font-size: 0.95rem; margin: 1.25rem 0 0.5rem; }
+    .appendix { max-width: 900px; margin: 2rem auto 0; padding: 0 1rem; }
+    .appendix h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
+    .lightbox {
+      display: none; position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.85);
+      align-items: center; justify-content: center; padding: 1rem; cursor: zoom-out;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img { max-width: 95vw; max-height: 95vh; border-radius: 8px; }
+    .count { font-size: .78rem; color: var(--muted); margin-left: auto; }
+    .howto { font-size: .82rem; color: var(--muted); margin: .5rem 1rem 0; max-width: 900px; }
   </style>
 </head>
 <body>
 
-<header class="hero">
-<pre class="ascii">╔══════════════════════════════════════════════════════════════════════════════╗
-║  WORKEROS CLOUD — FULL ISSUE INVENTORY                                       ║
-║  rebuilt from scratch · 2026-06-24                                             ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║  cloud  workeros-cloud @ 9586a9bc                                            ║
-║  engine floomhq/floom  @ 806c6057  (submodule)                               ║
-║  live    workeros.floom.dev  ·  workeros-api.floom.dev                       ║
-╚══════════════════════════════════════════════════════════════════════════════╝</pre>
-  <h1>Issue inventory — honest status</h1>
-  <p class="sub">Every finding from the June 23 audit, localhost checklist, live session notes, UI fix batches, infra gaps, and test harness debt — with ASCII context diagrams. Status reflects <strong>what is verified</strong>, not what was claimed in prior reports.</p>
+<header>
+  <h1>WorkerOS Cloud — Issue table</h1>
+  <p class="meta">cloud <code>ac39785f</code> · engine <code>a990795d</code> · built 2026-06-24 · for Vivek review</p>
+  <div class="share-bar">
+    <strong>Share link:</strong> <code id="share-url">(deploying…)</code>
+    · Repo path: <code>test-results/workeros-issue-inventory-2026-06-24/</code>
+  </div>
 </header>
 
-<nav class="toc">
-  <a href="#summary">Summary</a>
-  <a href="#arch">Architecture</a>
-  <a href="#pipeline">Ship pipeline</a>
-  <a href="#audit">A-series audit</a>
-  <a href="#checklist">C-series checklist</a>
-  <a href="#live">L-series live UX</a>
-  <a href="#ui-fix">U-series UI fixes</a>
-  <a href="#infra">D-series deploy</a>
-  <a href="#tests">T-series tests</a>
-  <a href="#cli">B-series CLI</a>
-  <a href="#passed">What passed</a>
-</nav>
-
-<main>
-
-<div class="honesty">
-  <strong>Methodology (this report):</strong> Built from <code>docs/AUDIT-2026-06-23.md</code>, <code>docs/LOCALHOST-AUDIT-CHECKLIST.md</code>, <code>UI-FIX-LOG.md</code>, and live re-verification on 2026-06-24. Prior HTML report screenshots labeled “verified” without visual match are <em>not</em> trusted here. “Fixed on disk” ≠ live prod until engine bump + deploy.
+<div class="toolbar">
+  <label>Search <input type="search" id="q" placeholder="id, issue, area…" /></label>
+  <label>Status <select id="status-filter"><option value="">All</option></select></label>
+  <label>Severity <select id="sev-filter"><option value="">All</option><option>P1</option><option>P2</option><option>P3</option></select></label>
+  <label>Screenshots <select id="shot-filter"><option value="">All</option><option value="yes">Has screenshot</option><option value="no">Missing screenshot</option></select></label>
+  <span class="count" id="count"></span>
 </div>
 
-<section class="block" id="summary">
-  <h2>Summary counts</h2>
-  <p class="lead">Rough totals across all tracked items below.</p>
-  <div class="stats">
-    <div class="stat"><div class="n">47</div><div class="l">Total items</div></div>
-    <div class="stat"><div class="n">18</div><div class="l">Fixed verified</div></div>
-    <div class="stat"><div class="n">14</div><div class="l">Fixed on disk</div></div>
-    <div class="stat"><div class="n">9</div><div class="l">Open / prod gap</div></div>
-    <div class="stat"><div class="n">6</div><div class="l">Needs manual verify</div></div>
-  </div>
-  <pre class="ascii light">STATUS LEGEND
-─────────────
-  [✓ LIVE]     verified on prod or localhost in browser / curl
-  [~ DISK]     code merged or patched locally; NOT confirmed live
-  [! OPEN]     still broken or not shipped
-  [? MANUAL]   needs authenticated browser / OAuth / E2E
-  [— TRACK]    known debt, not blocking this audit batch</pre>
-</section>
+<p class="howto">
+  <strong>Add screenshots:</strong> drop PNG into <code>screenshots/</code> named <code>{ID}.png</code> (e.g. <code>C-01.png</code>) and redeploy —
+  or click empty slot to preview locally (browser-only, not saved until file is in repo).
+</p>
 
-<section class="block" id="arch">
-  <h2>Architecture — where issues live</h2>
-  <p class="lead">Cloud wrapper vs engine submodule. Fixes in the wrong layer get wiped on sync.</p>
-<pre class="ascii">                    ┌─────────────────────────────────────────┐
-                    │  workeros.floom.dev  (landing / apex)   │
-                    │  app/  — marketing, /login, /start/*  │
-                    └──────────────────┬──────────────────────┘
-                                       │ rewrite /app/*
-                                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  DASHBOARD  web/  (= engine/apps/web + cloud overlay)            │
-│  ┌─────────────────────┐    ┌─────────────────────────────────┐  │
-│  │ engine/apps/web     │    │ web/overlay/  (cloud-only)      │  │
-│  │ workers, runs,      │    │ login, proxy, auth, middleware  │  │
-│  │ library, settings,  │───▶│ npm run sync layers overlay ON  │  │
-│  │ collections, Emily  │    │ TOP of generated tree           │  │
-│  └─────────────────────┘    └─────────────────────────────────┘  │
-└───────────────────────────────┬──────────────────────────────────┘
-                                │ /app/api/proxy/*
-                                ▼
-                    ┌─────────────────────────────────────────┐
-                    │  Railway  workeros-cloud-api            │
-                    │  engine/apps/api + Supabase repos       │
-                    └─────────────────────────────────────────┘
-
-BUG CLASS: login #665 landed in web/app/login (generated) but overlay
-           web/overlay/app/login was stale → sync restored OLD UI every build
-</pre>
-</section>
-
-<section class="block" id="pipeline">
-  <h2>Ship pipeline — why “on main” ≠ “live”</h2>
-<pre class="ascii">  code on main ──▶ engine PR + submodule bump ──▶ railway up (api+worker)
-        │                                              │
-        │         cd web && npm run sync &&           │
-        └────────▶ vercel deploy (dashboard) ─────────┤
-                                                       ▼
-                                          ops/smoke-routes.sh  MUST PASS
-                                                       │
-                       ┌───────────────────────────────┴────────────────┐
-                       │ FAILURES SEEN THIS AUDIT:                      │
-                       │  · landing apex 404 (wrong Vercel team/alias)  │
-                       │  · dashboard CI domain_not_verified            │
-                       │  · listWorkspaceChangelog missing (fixed)      │
-                       │  · sha256sum false-pass on macOS (fixed)       │
-                       └────────────────────────────────────────────────┘
-</pre>
-</section>
-
-<section class="block" id="audit">
-  <h2>A-series — Formal audit findings (2026-06-23)</h2>
-  <p class="lead">From <code>docs/AUDIT-2026-06-23.md</code>. Severity P1 = ship blocker.</p>
-  <table class="issues">
-    <thead><tr><th>ID</th><th>Sev</th><th>Finding</th><th>Owner</th><th>Status</th></tr></thead>
-    <tbody>
-      <tr>
-        <td><code>A-01</code></td><td><span class="badge p1">P1</span></td>
-        <td><strong>/start/slack</strong> and <strong>/start/whatsapp</strong> return branded 404<div class="detail">CHANNELS dict lost slack/whatsapp; tests in start-channel-819 fail</div></td>
-        <td><span class="badge cloud">cloud</span></td>
-        <td><span class="badge disk">~ DISK</span> code restored; <span class="badge open">! OPEN</span> prod still 404 until landing deploy</td>
-      </tr>
-      <tr>
-        <td><code>A-02</code></td><td><span class="badge p1">P1</span></td>
-        <td><strong>/app/login</strong> old UI — not landing-aligned design (#665)<div class="detail">Was “Sign in to Floom”; copy-only fix insufficient. Overlay sync bug restored old split-panel (“Floom Cloud”, letter avatars)</div></td>
-        <td><span class="badge cloud">cloud</span></td>
-        <td><span class="badge fixed">✓ LIVE</span> localhost re-verified 2026-06-24 after overlay fix</td>
-      </tr>
-      <tr>
-        <td><code>A-03</code></td><td><span class="badge p2">P2</span></td>
-        <td><code>ops/smoke-routes.sh</code> chunkset check false-pass on macOS<div class="detail">sha256sum missing → empty hash always matched</div></td>
-        <td><span class="badge cloud">cloud</span></td>
-        <td><span class="badge fixed">✓ LIVE</span> portable sha256_of + fail-closed</td>
-      </tr>
-      <tr>
-        <td><code>A-04</code></td><td><span class="badge p2">P2</span></td>
-        <td>Web vitest: 25 failures / 11 files<div class="detail">Many Next 16 cookies() harness gaps, not prod bugs — #436</div></td>
-        <td><span class="badge cloud">cloud</span> <span class="badge engine">engine</span></td>
-        <td><span class="badge open">— TRACK</span></td>
-      </tr>
-      <tr>
-        <td><code>A-05</code></td><td><span class="badge p2">P2</span></td>
-        <td>Landing vitest 8 failures (start-channel-819)</td>
-        <td><span class="badge cloud">cloud</span></td>
-        <td><span class="badge fixed">✓ LIVE</span> 16/16 after A-01 restore</td>
-      </tr>
-      <tr>
-        <td><code>A-06</code></td><td><span class="badge p2">P2</span></td>
-        <td><code>floom workers push</code> ships stale cached bundle — #637</td>
-        <td><span class="badge engine">engine</span></td>
-        <td><span class="badge open">— TRACK</span></td>
-      </tr>
-      <tr>
-        <td><code>A-07</code></td><td><span class="badge p2">P2</span></td>
-        <td>CLI device-approval page dead-ends when not logged in — #588</td>
-        <td><span class="badge cloud">cloud</span></td>
-        <td><span class="badge open">— TRACK</span></td>
-      </tr>
-      <tr>
-        <td><code>A-08</code></td><td><span class="badge p3">P3</span></td>
-        <td>Playwright E2E blocked — no WORKEROS_E2E_ADMIN_TOKEN</td>
-        <td><span class="badge cloud">cloud</span></td>
-        <td><span class="badge open">— TRACK</span></td>
-      </tr>
-      <tr>
-        <td><code>A-09</code></td><td><span class="badge p3">P3</span></td>
-        <td>Pytest blocked (disk + Python 3.14 dep resolution on audit machine)</td>
-        <td>infra</td>
-        <td><span class="badge open">— TRACK</span></td>
-      </tr>
-      <tr>
-        <td><code>A-10</code></td><td><span class="badge p3">P3</span></td>
-        <td>Worker Overview ASCII diagram — worker node saturated accent blue (off-palette)</td>
-        <td><span class="badge engine">engine</span></td>
-        <td><span class="badge disk">~ DISK</span> WorkerAsciiDiagram → ink tone; needs bump</td>
-      </tr>
-      <tr>
-        <td><code>A-11</code></td><td><span class="badge p2">P2</span></td>
-        <td>Composio connect: infinite spinner, rogue router.replace after unmount, “Googlecalendar” name</td>
-        <td><span class="badge engine">engine</span></td>
-        <td><span class="badge disk">~ DISK</span> #1943; redirect-flow-guard test passes</td>
-      </tr>
-      <tr>
-        <td><code>A-12</code></td><td><span class="badge p1">P1</span></td>
-        <td>Library tab loads ~30s — GET /contexts hydrates every pack from Storage for file counts</td>
-        <td><span class="badge engine">engine</span></td>
-        <td><span class="badge disk">~ DISK</span> hydrate=False on cached summary; cloud #664 follow-up</td>
-      </tr>
-      <tr>
-        <td><code>A-13</code></td><td><span class="badge p1">P1</span></td>
-        <td>Memory folder scope toggle silent no-op; wrong name convention (<code>&lt;id&gt;-memory</code> vs <code>memory-&lt;id&gt;</code>)</td>
-        <td><span class="badge engine">engine</span></td>
-        <td><span class="badge disk">~ DISK</span> #1946; pinned read-only row + tests</td>
-      </tr>
-      <tr>
-        <td><code>A-14</code></td><td><span class="badge p2">P2</span></td>
-        <td>Worker detail tab labeled “Brain” vs nav “Library”</td>
-        <td><span class="badge engine">engine</span></td>
-        <td><span class="badge disk">~ DISK</span> WORKER_DETAIL_TAB_LABEL mapping</td>
-      </tr>
-      <tr>
-        <td><code>A-15</code></td><td><span class="badge p1">P1</span></td>
-        <td>Composio authorize proxy route renders <strong>blank page</strong> instead of redirecting to connect.composio.dev</td>
-        <td><span class="badge cloud">cloud</span></td>
-        <td><span class="badge disk">~ DISK</span> proxy allowance fix in overlay</td>
-      </tr>
-    </tbody>
-  </table>
-</section>
-
-<section class="block" id="checklist">
-  <h2>C-series — Localhost audit checklist (#1–13)</h2>
-  <p class="lead">From <code>docs/LOCALHOST-AUDIT-CHECKLIST.md</code>.</p>
-<pre class="ascii">  localhost dev recipe
-  ────────────────────
-  Terminal A:  bash ops/dev-local-api.sh        (needs SUPABASE_SERVICE_ROLE_KEY)
-  Terminal B:  cd web && npm run dev:local       (NOT plain npm run dev — prod OAuth cookies)
-
-  Supabase allowlist: http://localhost:3000/app/api/proxy/auth/callback
-</pre>
-  <table class="issues">
-    <thead><tr><th>#</th><th>Item</th><th>Status</th><th>Evidence / notes</th></tr></thead>
-    <tbody>
-      <tr><td>C-01</td><td>Dashboard login = landing design (#665): “Hire AI workers.”, Today card, squircle row icons, centered “Welcome back”</td><td><span class="badge fixed">✓ LIVE</span></td><td>localhost:3000/app/login re-verified 2026-06-24</td></tr>
-      <tr><td>C-02</td><td>MCP install panel — 6 client icons in a row</td><td><span class="badge verify">? MANUAL</span></td><td>prod screenshot; engine #1959</td></tr>
-      <tr><td>C-03</td><td>MCP config shows workeros-api.floom.dev host</td><td><span class="badge verify">? MANUAL</span></td><td>same panel</td></tr>
-      <tr><td>C-04</td><td>Emily home empty — real PromptInput composer</td><td><span class="badge disk">~ DISK</span></td><td>EmilyHomeEmpty + vitest</td></tr>
-      <tr><td>C-05</td><td>Collection control strip (search / view toggle / add)</td><td><span class="badge verify">? MANUAL</span></td><td>workers collection; #1959</td></tr>
-      <tr><td>C-06</td><td>Settings collection — <strong>list view default</strong> (not gallery)</td><td><span class="badge disk">~ DISK</span></td><td>emptyState("grid") bug fixed 2026-06-24; needs engine PR</td></tr>
-      <tr><td>C-07</td><td>Connections collection + humanized provider names</td><td><span class="badge disk">~ DISK</span></td><td>redirect test passes</td></tr>
-      <tr><td>C-08</td><td>Connections redirect — no stale router.replace after unmount</td><td><span class="badge fixed">✓ LIVE</span></td><td>connections-redirect-flow-guard.dom.test.tsx</td></tr>
-      <tr><td>C-09</td><td>Connections redirect — terminal “Still waiting” state</td><td><span class="badge verify">? MANUAL</span></td><td>test skipped in jsdom (timers)</td></tr>
-      <tr><td>C-10</td><td>User avatar squircle (not circle)</td><td><span class="badge disk">~ DISK</span></td><td>Avatar.tsx #1959; prod still round until deploy</td></tr>
-      <tr><td>C-11</td><td>Emily send button squircle</td><td><span class="badge disk">~ DISK</span></td><td>PromptInput.tsx #1959</td></tr>
-      <tr><td>C-12</td><td>Localhost Gmail OAuth callback path</td><td><span class="badge fixed">✓ LIVE</span></td><td>test_localhost_google_oauth_forces_fresh_account_prompt</td></tr>
-      <tr><td>C-13</td><td>/start/slack + /start/whatsapp landing routes</td><td><span class="badge open">! OPEN</span></td><td>tests pass; prod 404</td></tr>
-    </tbody>
-  </table>
-</section>
-
-<section class="block" id="live">
-  <h2>L-series — Live session UX findings</h2>
-  <p class="lead">Observed during interactive audit; may overlap A/C items.</p>
-<pre class="ascii">  EMILY HOME                         SETTINGS COLLECTION
-  ┌─────────────────────────┐        ┌──────────────────────────────┐
-  │ [grey bg regression?]   │        │  DEFAULT VIEW                │
-  │ greeting size           │        │  ┌──────┐ ┌──────┐  WRONG     │
-  │ tool-call status chips  │        │  │ card │ │ card │  gallery  │
-  │ Uses: inline tokens     │        │  └──────┘ └──────┘  first     │
-  └─────────────────────────┘        │  ──────────────────          │
-                                     │  │ row  │ row  │  RIGHT      │
-                                     │  list first (C-06 fix)       │
-                                     └──────────────────────────────┘
-</pre>
-  <table class="issues">
-    <thead><tr><th>ID</th><th>Area</th><th>Issue</th><th>Status</th></tr></thead>
-    <tbody>
-      <tr><td>L-01</td><td>Emily home</td><td>Grey background on empty state (should match app bg)</td><td><span class="badge disk">~ DISK</span></td></tr>
-      <tr><td>L-02</td><td>Emily home</td><td>Greeting typography size/weight off spec</td><td><span class="badge verify">? MANUAL</span></td></tr>
-      <tr><td>L-03</td><td>MCP settings</td><td>Client logos missing or wrong (IconSprite)</td><td><span class="badge disk">~ DISK</span> #1959</td></tr>
-      <tr><td>L-04</td><td>MCP settings</td><td>“Create key” flow / copy</td><td><span class="badge verify">? MANUAL</span></td></tr>
-      <tr><td>L-05</td><td>MCP config</td><td>Shows localhost:8000 in prod-facing copy</td><td><span class="badge verify">? MANUAL</span></td></tr>
-      <tr><td>L-06</td><td>Library</td><td>Empty state / slow first load</td><td><span class="badge disk">~ DISK</span> A-12</td></tr>
-      <tr><td>L-07</td><td>Auth</td><td>Session switch (?switch=1) for Google account picker</td><td><span class="badge disk">~ DISK</span></td></tr>
-      <tr><td>L-08</td><td>Collections</td><td>View toggle order — list left, gallery right</td><td><span class="badge fixed">✓ LIVE</span> collection-view test</td></tr>
-      <tr><td>L-09</td><td>Approvals</td><td>Detail pane / proposed output layout</td><td><span class="badge disk">~ DISK</span> #1562 test</td></tr>
-      <tr><td>L-10</td><td>Emily chat</td><td>Tool-call in-progress UX (status line)</td><td><span class="badge disk">~ DISK</span></td></tr>
-      <tr><td>L-11</td><td>Connections</td><td>Blank authorize page (A-15)</td><td><span class="badge disk">~ DISK</span></td></tr>
-      <tr><td>L-12</td><td>Settings</td><td>Gallery default instead of list (C-06)</td><td><span class="badge disk">~ DISK</span> fixed 2026-06-24</td></tr>
-      <tr><td>L-13</td><td>Settings</td><td>Backups / version history UI</td><td><span class="badge verify">? MANUAL</span></td></tr>
-      <tr><td>L-14</td><td>Run detail</td><td>Lightweight ?shape=run load / back nav hang</td><td><span class="badge disk">~ DISK</span> batch 2</td></tr>
-      <tr><td>L-15</td><td>Workers</td><td>Inline tool tokens in Emily prompt (Uses: chips)</td><td><span class="badge disk">~ DISK</span></td></tr>
-    </tbody>
-  </table>
-</section>
-
-<section class="block" id="ui-fix">
-  <h2>U-series — UI fix log batches (PR 1–4)</h2>
-  <p class="lead">From <code>UI-FIX-LOG.md</code>. DOM-test verified; browser screenshots often blocked.</p>
-  <table class="issues">
-    <thead><tr><th>Batch</th><th>Theme</th><th>Items closed</th><th>Score</th></tr></thead>
-    <tbody>
-      <tr><td>U-01</td><td>Fail-closed errors</td><td>useMembers, connections metadata, library detail, MCP secrets, run CSV export, Used-by links</td><td>8/10</td></tr>
-      <tr><td>U-02</td><td>Settings profile save</td><td>/auth/profile path, inline errors, admin gate on /me failure, PAT + system info retry</td><td>8/10</td></tr>
-      <tr><td>U-03</td><td>List defaults + h1</td><td>Settings list default (claimed — was still grid until 2026-06-24), CollectionView h1, workers/library/connections list-default</td><td>9/10*</td></tr>
-      <tr><td>U-04</td><td>A11y tokens</td><td>Button focus rings, 44px hit areas, IconButton size, brain file type tokens, terminal dark mode</td><td>8/10</td></tr>
-    </tbody>
-  </table>
-  <p class="detail">* U-03 settings list default was documented as done but code still had <code>emptyState("grid")</code> — corrected 2026-06-24.</p>
-</section>
-
-<section class="block" id="infra">
-  <h2>D-series — Deploy &amp; infra gaps</h2>
-<pre class="ascii">  PROD GAP MAP (2026-06-24)
-  ─────────────────────────
-  workeros.floom.dev/          ──▶ 404 apex (landing not on correct alias)
-  /start/slack                 ──▶ 404 (code on main, not deployed)
-  /start/whatsapp              ──▶ 404
-  /app/login                   ──▶ may lag localhost overlay fix
-  /app/settings                ──▶ gallery default until engine bump
-  dashboard squircles          ──▶ round avatars until #1959 deploy
-  vercel deploy (Mac)          ──▶ wrong team (fedes-projects vs floomhq)
-</pre>
-  <table class="issues">
-    <thead><tr><th>ID</th><th>Issue</th><th>Status</th></tr></thead>
-    <tbody>
-      <tr><td>D-01</td><td>Localhost OAuth breaks when web/.env.local points API at prod (Domain=.floom.dev cookies)</td><td><span class="badge fixed">✓ LIVE</span> dev:local recipe</td></tr>
-      <tr><td>D-02</td><td>Prior audit HTML reused audit-preview PNGs — fraudulent “verified” badges</td><td><span class="badge fixed">✓ LIVE</span> this report replaces it</td></tr>
-      <tr><td>D-03</td><td>Screenshot 01 was corrupt (black “Pretty print” screen)</td><td><span class="badge fixed">✓ LIVE</span> replaced</td></tr>
-      <tr><td>D-04</td><td>Dashboard Vercel CI deploy failures (domain_not_verified, missing env)</td><td><span class="badge open">! OPEN</span></td></tr>
-      <tr><td>D-05</td><td>listWorkspaceChangelog missing from cloud api overlay — build fail</td><td><span class="badge fixed">✓ LIVE</span> 9586a9bc</td></tr>
-      <tr><td>D-06</td><td>Login #665 overlay sync bug — generated file ≠ overlay source</td><td><span class="badge fixed">✓ LIVE</span> fixed 2026-06-24</td></tr>
-      <tr><td>D-07</td><td>Engine bump requires reviewed PR; local engine/ edits diverge upstream</td><td><span class="badge open">— TRACK</span></td></tr>
-      <tr><td>D-08</td><td>Railway auto-deploy on main — smoke gate must pass</td><td><span class="badge verify">? MANUAL</span></td></tr>
-    </tbody>
-  </table>
-</section>
-
-<section class="block" id="tests">
-  <h2>T-series — Test harness debt</h2>
-<pre class="ascii">  vitest landscape (audit snapshot)
-  ─────────────────────────────────
-  landing   16 tests   ──▶ 16 pass (after A-01)
-  web       785 tests  ──▶ 760 pass / 25 fail
-            │
-            ├─ proxy-location-1044 (7)     cookies() outside request
-            ├─ login-magic-link-1702 (4)  async RSC empty in jsdom
-            ├─ api-session-redirect (4)
-            └─ overlay parity, cli-auth, emily-r9, …
-
-  pytest     BLOCKED (disk / py3.14)
-  playwright BLOCKED (no E2E token)
-</pre>
-  <table class="issues">
-    <thead><tr><th>ID</th><th>Suite</th><th>Issue</th><th>Status</th></tr></thead>
-    <tbody>
-      <tr><td>T-01</td><td>web vitest</td><td>25 failures — triage harness vs real bugs (#436)</td><td><span class="badge open">— TRACK</span></td></tr>
-      <tr><td>T-02</td><td>check-drift</td><td>Dashboard/engine byte parity gate</td><td><span class="badge fixed">✓ LIVE</span> passes</td></tr>
-      <tr><td>T-03</td><td>collection-view</td><td>List default, toggle order, grouped list</td><td><span class="badge fixed">✓ LIVE</span> 32 pass batch</td></tr>
-      <tr><td>T-04</td><td>settings-collection</td><td>Excluded from web vitest project — runs in engine only</td><td><span class="badge verify">? MANUAL</span></td></tr>
-      <tr><td>T-05</td><td>smoke-routes.sh</td><td>Post-deploy hard gate</td><td><span class="badge fixed">✓ LIVE</span> when run on Linux CI</td></tr>
-    </tbody>
-  </table>
-</section>
-
-<section class="block" id="cli">
-  <h2>B-series — CLI &amp; backend</h2>
-  <table class="issues">
-    <thead><tr><th>ID</th><th>Item</th><th>Status</th></tr></thead>
-    <tbody>
-      <tr><td>B-01</td><td>floom doctor / whoami / workers list against cloud</td><td><span class="badge fixed">✓ LIVE</span></td></tr>
-      <tr><td>B-02</td><td>Credentials path doc drift (~/.floom vs ~/.workeros)</td><td><span class="badge open">— TRACK</span></td></tr>
-      <tr><td>B-03</td><td>workers push stale bundle (#637)</td><td><span class="badge open">— TRACK</span></td></tr>
-      <tr><td>B-04</td><td>CLI auth device flow dead-end without session (#588)</td><td><span class="badge open">— TRACK</span></td></tr>
-      <tr><td>B-05</td><td>Memory persistence / rejected runs (#1958)</td><td><span class="badge disk">~ DISK</span> engine 806c6057</td></tr>
-      <tr><td>B-06</td><td>E2B warm pool env flags for perf</td><td><span class="badge verify">? MANUAL</span> ops docs</td></tr>
-    </tbody>
-  </table>
-</section>
-
-<section class="block" id="passed">
-  <h2>What passed (do not regress)</h2>
-<pre class="ascii light">  ✓  /integrations     searchable catalog, 1,047+ tools
-  ✓  /login (apex)      "Welcome back", Sign in · Floom Workers
-  ✓  /start/mcp         full pre-auth install flow
-  ✓  /                  hero + bottom prompt boxes
-  ✓  check-drift        zero dashboard/engine drift
-  ✓  smoke-routes       route 200/307 (when checksum tool present)
-  ✓  CLI health         doctor, whoami, workers list
-</pre>
-</section>
-
-<section class="block">
-  <h2>Priority queue — what to ship next</h2>
-<pre class="ascii">  NOW (P1 live gaps)
-  ──────────────────
-   1. Engine PR: settings list default + all batch-2 engine fixes → submodule bump
-   2. Landing deploy: /start/slack, /start/whatsapp, apex 404
-   3. Dashboard deploy: sync + vercel on floomhq team + smoke gate
-   4. Manual verify: squircle avatars, MCP panel, connections timeout UI
-
-  THEN (P2)
-  ─────────
-   · Triage 25 web vitest harness failures (#436)
-   · Cloud #664 parallel Storage reads
-   · CLI #637 / #588
-</pre>
-</section>
-
+<main>
+<table id="issues">
+  <thead>
+    <tr>
+      <th>ID</th><th>Sev</th><th>Area</th><th>Issue</th><th>Status</th><th>Owner</th><th>Screenshot</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
 </main>
 
-<footer>
-  Generated 2026-06-24 · workeros-cloud issue inventory · open in browser: <code>test-results/workeros-issue-inventory-2026-06-24/index.html</code>
-</footer>
+<div class="appendix">
+  <h2>Architecture (ASCII)</h2>
+<pre class="ascii">  workeros.floom.dev (landing)          workeros-api.floom.dev (Railway)
+         │                                        ▲
+         │ /app/* rewrite                         │ /app/api/proxy
+         ▼                                        │
+  DASHBOARD = engine/apps/web + web/overlay/ ─────┘
+  npm run sync layers overlay ON TOP → login, proxy, auth
 
+  BUG: #665 login fix hit generated web/app/login but overlay kept old UI</pre>
+
+  <h2>Ship pipeline (ASCII)</h2>
+<pre class="ascii">  main → engine PR + submodule bump → railway (api+worker)
+       → web sync + vercel (dashboard) → ops/smoke-routes.sh MUST PASS
+
+  LAST CI FAIL (28122419848):
+    · Dashboard build: listWorkspaceChangelog missing (fixed ac39785f)
+    · Landing apex: /v3/integrations still 404 after alias</pre>
+</div>
+
+<div class="lightbox" id="lightbox"><img alt="" /></div>
+
+<script>
+const ISSUES = [
+  { id:"A-01", sev:"P1", area:"Landing", issue:"/start/slack + /start/whatsapp 404", detail:"CHANNELS dict lost entries; tests fixed on disk", status:"open", owner:"cloud", shot:"" },
+  { id:"A-02", sev:"P1", area:"Login", issue:"Dashboard /app/login old UI (not landing #665 design)", detail:"Overlay sync bug — fixed localhost 2026-06-24", status:"live", owner:"cloud", shot:"C-01" },
+  { id:"A-03", sev:"P2", area:"CI", issue:"smoke-routes.sh false-pass on macOS (sha256sum)", detail:"Portable sha256_of + fail-closed", status:"live", owner:"cloud", shot:"" },
+  { id:"A-04", sev:"P2", area:"Tests", issue:"Web vitest 25 failures (#436)", detail:"Many Next 16 cookies() harness gaps", status:"track", owner:"cloud+engine", shot:"" },
+  { id:"A-05", sev:"P2", area:"Tests", issue:"Landing vitest start-channel-819 failures", detail:"Fixed with A-01 restore — 16/16", status:"live", owner:"cloud", shot:"" },
+  { id:"A-06", sev:"P2", area:"CLI", issue:"workers push stale bundle (#637)", status:"track", owner:"engine", shot:"" },
+  { id:"A-07", sev:"P2", area:"CLI", issue:"Device-approval dead-end without session (#588)", status:"track", owner:"cloud", shot:"" },
+  { id:"A-08", sev:"P3", area:"E2E", issue:"Playwright blocked — no E2E token", status:"track", owner:"cloud", shot:"" },
+  { id:"A-09", sev:"P3", area:"Tests", issue:"Pytest blocked (disk / py3.14)", status:"track", owner:"infra", shot:"" },
+  { id:"A-10", sev:"P3", area:"Workers", issue:"ASCII diagram worker node accent blue off-palette", status:"disk", owner:"engine", shot:"" },
+  { id:"A-11", sev:"P2", area:"Connections", issue:"Composio infinite spinner + rogue navigation + provider name", status:"disk", owner:"engine", shot:"" },
+  { id:"A-12", sev:"P1", area:"Library", issue:"Library tab ~30s load (hydrates all packs for counts)", status:"disk", owner:"engine", shot:"" },
+  { id:"A-13", sev:"P1", area:"Workers", issue:"Memory folder scope toggle silent no-op", status:"disk", owner:"engine", shot:"" },
+  { id:"A-14", sev:"P2", area:"Workers", issue:"Tab labeled Brain vs nav Library", status:"disk", owner:"engine", shot:"" },
+  { id:"A-15", sev:"P1", area:"Connections", issue:"Authorize proxy route blank page", status:"disk", owner:"cloud", shot:"" },
+
+  { id:"C-01", sev:"P1", area:"Login", issue:"Landing-aligned login on /app/login", status:"live", owner:"cloud", shot:"C-01" },
+  { id:"C-02", sev:"P2", area:"Settings", issue:"MCP install panel — 6 client icons", status:"manual", owner:"engine", shot:"C-02" },
+  { id:"C-03", sev:"P2", area:"Settings", issue:"MCP config shows workeros-api.floom.dev", status:"manual", owner:"engine", shot:"C-02" },
+  { id:"C-04", sev:"P2", area:"Emily", issue:"Home empty — real PromptInput composer", status:"disk", owner:"engine", shot:"" },
+  { id:"C-05", sev:"P2", area:"Workers", issue:"Collection control strip (search / toggle / add)", status:"manual", owner:"engine", shot:"C-05" },
+  { id:"C-06", sev:"P2", area:"Settings", issue:"List view default (NOT gallery first)", detail:"emptyState grid bug fixed 2026-06-24", status:"disk", owner:"engine", shot:"C-06" },
+  { id:"C-07", sev:"P2", area:"Connections", issue:"Collection + humanized provider names", status:"disk", owner:"engine", shot:"C-07" },
+  { id:"C-08", sev:"P2", area:"Connections", issue:"Redirect — no stale router.replace after unmount", status:"live", owner:"engine", shot:"" },
+  { id:"C-09", sev:"P2", area:"Connections", issue:"Redirect — terminal Still waiting state", status:"manual", owner:"engine", shot:"" },
+  { id:"C-10", sev:"P2", area:"UI", issue:"User avatar squircle (not circle)", status:"disk", owner:"engine", shot:"" },
+  { id:"C-11", sev:"P2", area:"Emily", issue:"Send button squircle", status:"disk", owner:"engine", shot:"" },
+  { id:"C-12", sev:"P2", area:"Auth", issue:"Localhost Gmail OAuth callback path", status:"live", owner:"cloud", shot:"" },
+  { id:"C-13", sev:"P1", area:"Landing", issue:"/start/slack + /start/whatsapp on prod", status:"open", owner:"cloud", shot:"" },
+
+  { id:"L-01", sev:"P2", area:"Emily", issue:"Grey background on empty state", status:"disk", owner:"engine", shot:"" },
+  { id:"L-02", sev:"P3", area:"Emily", issue:"Greeting typography size/weight", status:"manual", owner:"engine", shot:"" },
+  { id:"L-03", sev:"P2", area:"MCP", issue:"Client logos missing/wrong (IconSprite)", status:"disk", owner:"engine", shot:"C-02" },
+  { id:"L-04", sev:"P2", area:"MCP", issue:"Create key flow / copy", status:"manual", owner:"engine", shot:"" },
+  { id:"L-05", sev:"P2", area:"MCP", issue:"localhost:8000 in prod-facing copy", status:"manual", owner:"engine", shot:"" },
+  { id:"L-06", sev:"P1", area:"Library", issue:"Empty state / slow first load", status:"disk", owner:"engine", shot:"" },
+  { id:"L-07", sev:"P2", area:"Auth", issue:"Session switch (?switch=1) Google picker", status:"disk", owner:"cloud", shot:"" },
+  { id:"L-08", sev:"P3", area:"Collections", issue:"View toggle order — list left, gallery right", status:"live", owner:"engine", shot:"" },
+  { id:"L-09", sev:"P2", area:"Approvals", issue:"Detail pane / proposed output layout", status:"disk", owner:"engine", shot:"" },
+  { id:"L-10", sev:"P2", area:"Emily", issue:"Tool-call in-progress UX", status:"disk", owner:"engine", shot:"" },
+  { id:"L-11", sev:"P1", area:"Connections", issue:"Blank authorize page", status:"disk", owner:"cloud", shot:"" },
+  { id:"L-12", sev:"P2", area:"Settings", issue:"Gallery default instead of list", status:"disk", owner:"engine", shot:"C-06" },
+  { id:"L-13", sev:"P2", area:"Settings", issue:"Backups / version history UI", status:"manual", owner:"engine", shot:"" },
+  { id:"L-14", sev:"P2", area:"Runs", issue:"?shape=run lightweight load / back nav", status:"disk", owner:"engine", shot:"" },
+  { id:"L-15", sev:"P2", area:"Emily", issue:"Inline tool tokens (Uses: chips)", status:"disk", owner:"engine", shot:"" },
+
+  { id:"D-01", sev:"P2", area:"Dev", issue:"Localhost OAuth breaks with prod API in .env.local", status:"live", owner:"cloud", shot:"" },
+  { id:"D-02", sev:"P2", area:"Process", issue:"Prior audit reused fake screenshots", status:"live", owner:"cloud", shot:"" },
+  { id:"D-03", sev:"P2", area:"Process", issue:"Corrupt login screenshot (black screen)", status:"live", owner:"cloud", shot:"C-01" },
+  { id:"D-04", sev:"P1", area:"Deploy", issue:"Vercel CI failures (domain / env)", status:"open", owner:"cloud", shot:"" },
+  { id:"D-05", sev:"P1", area:"Deploy", issue:"listWorkspaceChangelog missing — build fail", status:"live", owner:"cloud", shot:"" },
+  { id:"D-06", sev:"P1", area:"Deploy", issue:"Login #665 overlay sync bug", status:"live", owner:"cloud", shot:"C-01" },
+  { id:"D-07", sev:"P2", area:"Process", issue:"Engine local edits diverge upstream", status:"track", owner:"process", shot:"" },
+  { id:"D-08", sev:"P2", area:"Deploy", issue:"Railway smoke gate on main push", status:"manual", owner:"cloud", shot:"" },
+];
+
+const SHOT_FILES = {
+  "C-01": "01-localhost-login-welcome-back.png",
+  "C-02": "05-prod-mcp-install-panel.png",
+  "C-05": "03-prod-workers-collection.png",
+  "C-06": "04-prod-settings-collection.png",
+  "C-07": "06-prod-connections-collection.png",
+};
+
+const STATUS_LABEL = { live:"✓ LIVE", disk:"~ DISK", open:"! OPEN", manual:"? MANUAL", track:"— TRACK" };
+const STATUS_CLASS = { live:"live", disk:"disk", open:"open", manual:"manual", track:"track" };
+
+const tbody = document.getElementById("tbody");
+const lightbox = document.getElementById("lightbox");
+const lbImg = lightbox.querySelector("img");
+
+function shotSrc(key) {
+  const f = SHOT_FILES[key];
+  return f ? `screenshots/${f}` : `screenshots/${key}.png`;
+}
+
+function renderShot(row, key) {
+  if (!key) {
+    return `<div class="shot-empty" data-id="${row.id}">+ add<br/>${row.id}.png<input type="file" accept="image/*"/></div>`;
+  }
+  const src = shotSrc(key);
+  return `<div class="shot-wrap"><img src="${src}" alt="${row.id}" loading="lazy" onerror="this.parentElement.innerHTML=emptySlot('${row.id}')"/></div>`;
+}
+
+function emptySlot(id) {
+  return `<div class="shot-empty" data-id="${id}">+ add<br/>${id}.png<input type="file" accept="image/*"/></div>`;
+}
+
+ISSUES.forEach(row => {
+  const tr = document.createElement("tr");
+  tr.dataset.status = row.status;
+  tr.dataset.sev = row.sev;
+  tr.dataset.shot = row.shot ? "yes" : "no";
+  tr.innerHTML = `
+    <td class="id">${row.id}</td>
+    <td><span class="badge ${row.sev.toLowerCase()}">${row.sev}</span></td>
+    <td>${row.area}</td>
+    <td><strong>${row.issue}</strong>${row.detail ? `<div class="detail">${row.detail}</div>` : ""}</td>
+    <td><span class="badge ${STATUS_CLASS[row.status]}">${STATUS_LABEL[row.status]}</span></td>
+    <td class="owner">${row.owner}</td>
+    <td class="shot-cell">${renderShot(row, row.shot)}</td>`;
+  tbody.appendChild(tr);
+});
+
+document.getElementById("share-url").textContent = location.href;
+
+const statusFilter = document.getElementById("status-filter");
+["live","disk","open","manual","track"].forEach(s => {
+  const o = document.createElement("option"); o.value = s; o.textContent = STATUS_LABEL[s]; statusFilter.appendChild(o);
+});
+
+function applyFilters() {
+  const q = document.getElementById("q").value.toLowerCase();
+  const st = statusFilter.value;
+  const sev = document.getElementById("sev-filter").value;
+  const sh = document.getElementById("shot-filter").value;
+  let n = 0;
+  tbody.querySelectorAll("tr").forEach(tr => {
+    const text = tr.textContent.toLowerCase();
+    const ok = (!q || text.includes(q)) && (!st || tr.dataset.status === st)
+      && (!sev || tr.dataset.sev === sev) && (!sh || tr.dataset.shot === sh);
+    tr.classList.toggle("hidden", !ok);
+    if (ok) n++;
+  });
+  document.getElementById("count").textContent = `${n} / ${ISSUES.length} shown`;
+}
+["q","status-filter","sev-filter","shot-filter"].forEach(id =>
+  document.getElementById(id).addEventListener("input", applyFilters));
+applyFilters();
+
+tbody.addEventListener("click", e => {
+  const img = e.target.closest("img");
+  if (img) { lbImg.src = img.src; lightbox.classList.add("open"); return; }
+  const empty = e.target.closest(".shot-empty");
+  if (empty) empty.querySelector("input")?.click();
+});
+lightbox.addEventListener("click", () => lightbox.classList.remove("open"));
+
+tbody.addEventListener("change", e => {
+  if (e.target.type !== "file" || !e.target.files[0]) return;
+  const wrap = e.target.closest(".shot-empty");
+  if (!wrap) return;
+  const url = URL.createObjectURL(e.target.files[0]);
+  wrap.outerHTML = `<div class="shot-wrap"><img src="${url}" alt="preview"/></div>`;
+});
+</script>
 </body>
 </html>
