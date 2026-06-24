@@ -436,6 +436,116 @@ def _schedule_retry(
     t.start()
 
 
+_PERMANENT_RETRY_ERROR_CODES = {
+    "cancelled",
+    "cancelled_before_start",
+    "cancelled_queued",
+    "invalid_outputs_shape",
+    "invalid_worker",
+    "missing_connection",
+    "missing_required_input",
+    "missing_secret",
+    "output_token_limit",
+    "output_too_large",
+    "quality_gate_failed",
+    "schema_violation",
+    "spend_cap_exceeded",
+    "token_cap_exceeded",
+    "user_cancel",
+    "worker_deleted",
+    "worker_disabled",
+    "worker_not_found",
+}
+
+_TRANSIENT_RETRY_ERROR_CODES = {
+    "context_mount_failed",
+    "e2b_quota_exhausted",
+    "e2b_sandbox_error",
+    "interrupted_by_restart",
+    "mcp_connect_failed",
+    "run_abandoned_server_restart",
+    "run_claimed_without_dispatch",
+    "timeout",
+}
+
+_PERMANENT_RETRY_CATEGORIES = {
+    "auth",
+    "cancelled",
+    "config",
+    "quality",
+    "validation",
+}
+
+_TRANSIENT_RETRY_CATEGORIES = {
+    "network",
+    "timeout",
+}
+
+
+@dataclass(frozen=True)
+class _RetryDecision:
+    retryable: bool
+    permanent: bool
+    category: str
+    reason: str
+
+
+def _retry_config_exactly_allows_error(retry_cfg: Any, error_code: str) -> bool:
+    if not retry_cfg or not error_code:
+        return False
+    allowed = {
+        str(item).strip().lower()
+        for item in (getattr(retry_cfg, "on", None) or [])
+        if str(item).strip()
+    }
+    return error_code in allowed
+
+
+def _retry_config_allows_all(retry_cfg: Any) -> bool:
+    if not retry_cfg:
+        return False
+    allowed = {
+        str(item).strip().lower()
+        for item in (getattr(retry_cfg, "on", None) or [])
+        if str(item).strip()
+    }
+    return not allowed or "all" in allowed
+
+
+def _classify_retry_failure(
+    *,
+    error_code: str | None,
+    error: str | None = None,
+    result_retryable: bool = False,
+    retry_cfg: Any = None,
+) -> _RetryDecision:
+    """Return the retry decision for a failed run.
+
+    Permanent setup/auth/validation/control-limit failures veto driver
+    retryable=True and manifest retry:on=["all"]. A manifest can still opt into
+    a permanent code by naming that exact error code in retry.on.
+    """
+    code = (error_code or "").strip().lower()
+    from services import run_metrics
+
+    category = run_metrics.classify_failure(error_code=code, error=error)
+    if _retry_config_exactly_allows_error(retry_cfg, code):
+        return _RetryDecision(True, False, category, "manifest_exact_error")
+    if code in _PERMANENT_RETRY_ERROR_CODES:
+        return _RetryDecision(False, True, category, "permanent_failure")
+    if code in _TRANSIENT_RETRY_ERROR_CODES:
+        return _RetryDecision(True, False, category, "transient_failure")
+    if category in _PERMANENT_RETRY_CATEGORIES:
+        return _RetryDecision(False, True, category, "permanent_failure")
+    if category in _TRANSIENT_RETRY_CATEGORIES:
+        return _RetryDecision(True, False, category, "transient_failure")
+    if result_retryable:
+        return _RetryDecision(True, False, category, "driver_retryable")
+    if _retry_config_allows_all(retry_cfg):
+        return _RetryDecision(True, False, category, "manifest_all")
+    return _RetryDecision(False, False, category, "not_retryable")
+
+
 def _schedule_retry_for_failed_run(
     *,
     run_id: str,
@@ -445,6 +555,7 @@ def _schedule_retry_for_failed_run(
     config: Any,
     result_retryable: bool,
     result_error_code: str | None,
+    result_error: str | None = None,
     repos: "Repositories",
     log_fn,
 ) -> bool:
@@ -453,7 +564,18 @@ def _schedule_retry_for_failed_run(
         return False
 
     retry_cfg = getattr(config, "retry", None) if config else None
-    if not retry_cfg and not result_retryable:
+    decision = _classify_retry_failure(
+        error_code=result_error_code,
+        error=result_error,
+        result_retryable=result_retryable,
+        retry_cfg=retry_cfg,
+    )
+    if not decision.retryable:
+        if decision.permanent:
+            log_fn(
+                f"Not retrying permanent {decision.category} failure",
+                level="info",
+            )
         return False
 
     current_run_row = repos.runs.get_any(run_id=run_id)
@@ -467,7 +589,7 @@ def _schedule_retry_for_failed_run(
     if result_retryable:
         delay_seconds = min(base_delay_seconds * (2**current_attempt), 3600)
 
-    label = "retryable failure" if result_retryable and not retry_cfg else "retry"
+    label = "retryable failure" if decision.reason != "manifest_all" and not retry_cfg else "retry"
     log_fn(
         f"Scheduling {label} {current_attempt + 1}/{max_attempts - 1} in {delay_seconds}s",
         level="info",
@@ -1765,11 +1887,7 @@ def _dispatch_orphan_timeout_seconds() -> int:
 
 
 def _is_infra_retry_error_code(error_code: str | None) -> bool:
-    return (error_code or "").strip().lower() in {
-        "e2b_sandbox_error",
-        "e2b_quota_exhausted",
-        "run_claimed_without_dispatch",
-    }
+    return (error_code or "").strip().lower() in _TRANSIENT_RETRY_ERROR_CODES
 
 
 def _retryable_driver_max_attempts(error_code: str | None) -> int:
@@ -1926,8 +2044,7 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
         return False
     # Bound recovery to one attempt per lineage. The retry run is tagged
     # trigger_source="restart_retry"; if it too gets abandoned we do NOT recover
-    # it again. This is robust even though create() does not persist
-    # retry_attempt, so a misconfigured worker cannot loop the executor forever.
+    # it again, so a misconfigured worker cannot loop the executor forever.
     trigger_source = str(run.get("trigger_source") or "")
     if trigger_source.startswith("restart_retry"):
         return False
@@ -3143,6 +3260,7 @@ def execute_run(
                 config=config,
                 result_retryable=bool(getattr(result, "retryable", False)),
                 result_error_code=result_error_code,
+                result_error=result_error,
                 repos=repos_obj,
                 log_fn=log_fn,
             )

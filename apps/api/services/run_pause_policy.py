@@ -2,16 +2,16 @@
 
 Extracted verbatim from run_service.py: persisting a worker's paused flag,
 auto-pausing scheduled workers after repeated setup failures, the workspace
-setting/toggle accessors, and the consecutive-failure auto-pause policy.
-run_service re-imports these names for backward compatibility. The missing-
-secret pause threshold helper is lazy-imported from run_service.
+setting/toggle accessors, and the deprecated consecutive-failure auto-pause
+compatibility shim. run_service re-imports these names for backward
+compatibility. The missing-secret pause threshold helper is lazy-imported from
+run_service.
 """
 from __future__ import annotations
 
 import logging
 import os
 import re
-import sqlite3
 from typing import Optional
 
 from db.factory import Repositories
@@ -152,14 +152,16 @@ def _workspace_failure_email_recipients() -> list[str]:
 
 
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
-    # #794: workspace setting 'auto_pause_enabled' overrides the env var.
-    # Default ON (opt-out). Broken scheduled workers inflated failure rate to
-    # 1,683/1,866 runs over 7 days (#526).
-    return _workspace_toggle(
+    # Deprecated/no-op for broad consecutive-failure auto-pause. The workspace
+    # setting and env var are still accepted by settings APIs for compatibility,
+    # but repeated automatic failures now remain visible through incidents,
+    # overview attention, and run history instead of disabling the scheduler.
+    _workspace_toggle(
         "auto_pause_enabled",
         env_var="WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES",
-        default=True,
+        default=False,
     )
+    return False
 
 
 def _alert_consecutive_failure_threshold() -> int:
@@ -177,39 +179,13 @@ def _maybe_pause_worker_after_consecutive_failures(
     user_id: str | None,
     repos: Repositories,
 ) -> bool:
-    """Optionally pause automatic workers that keep failing consecutively."""
-    if not user_id or not _auto_pause_on_consecutive_failures_enabled():
+    """Deprecated compatibility shim for broad consecutive-failure auto-pause.
+
+    Repeated automatic failures are now surfaced through the incident/overview
+    paths without mutating worker.enabled. The older setup-specific missing
+    secret pause path remains separate.
+    """
+    if not user_id:
         return False
-    threshold = _alert_consecutive_failure_threshold()
-    try:
-        rows, _ = repos.runs.list(user_id=user_id, worker_id=worker_id, limit=threshold, offset=0)
-    except sqlite3.OperationalError as exc:
-        if "no such table:" in str(exc).lower():
-            logger.debug("Skipping auto-pause check for %s: run tables unavailable: %s", worker_id, exc)
-            return False
-        raise
-    if len(rows) < threshold:
-        return False
-    automatic_sources = {"schedule", "scheduled", "webhook", "composio", "trigger"}
-    for row in rows:
-        if row.get("status") != RunStatus.FAILED.value:
-            return False
-        if str(row.get("trigger_source") or "").lower() not in automatic_sources:
-            return False
-
-    _persist_worker_paused_flag(
-        worker_id,
-        repos=repos,
-        user_id=user_id,
-        archive_reason=(
-            f"Paused automatically after {threshold} consecutive automatic run failures."
-        ),
-    )
-    logger.warning(
-        "Auto-paused worker %s after %d consecutive automatic failures",
-        worker_id,
-        threshold,
-    )
-    return True
-
-
+    _auto_pause_on_consecutive_failures_enabled()
+    return False
