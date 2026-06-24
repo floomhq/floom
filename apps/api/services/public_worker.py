@@ -292,6 +292,14 @@ def _standalone_share_payload(token: str, repos: "Repositories") -> Dict[str, An
             return _public_approvals_batch_payload(token, repos)
         raise HTTPException(status_code=404, detail="Share link not found")
 
+    try:
+        from routers.approvals import _load_approvals_batch_share, _public_approvals_batch_payload
+
+        _load_approvals_batch_share(token)
+        return _public_approvals_batch_payload(token, repos)
+    except HTTPException:
+        pass
+
     # Backward compatibility for worker short links created before the unified
     # share table existed.
     worker = _load_short_link_public_worker(token, repos)

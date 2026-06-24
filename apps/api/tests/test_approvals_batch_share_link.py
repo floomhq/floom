@@ -88,6 +88,9 @@ def _seed_approval(
     status: str = "pending",
     run_status: str | None = None,
     preview_payload: str | None = None,
+    label: str | None = None,
+    preview: str | None = None,
+    decision_input_json: str = "{}",
 ) -> dict:
     repos = main.get_repositories()
     repos.workers.create(
@@ -114,10 +117,10 @@ def _seed_approval(
         run_id=run_id,
         worker_id=worker_id,
         status=status,
-        label=f"Approve {approval_id}",
-        preview=f"Preview for {approval_id}",
+        label=label if label is not None else f"Approve {approval_id}",
+        preview=preview if preview is not None else f"Preview for {approval_id}",
         preview_payload_json=preview_payload,
-        decision_input_json="{}",
+        decision_input_json=decision_input_json,
         created_at="2026-06-24T00:00:00Z",
     )
 
@@ -177,6 +180,42 @@ def test_mint_and_public_batch_lists_only_pending_workspace_items(client_and_mai
     assert "api_token" not in item["preview_payload"]["nested"]
 
 
+def test_batch_share_link_is_idempotent_and_uses_top_level_standalone_url(client_and_main, monkeypatch):
+    client, main = client_and_main
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://floom.dev/app")
+    _seed_approval(main, approval_id="apr_local", run_id="run_local", worker_id="w_local")
+
+    first = client.post("/approvals/batch-share-link")
+    second = client.post("/approvals/batch-share-link")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["token"] == second.json()["token"]
+    assert first.json()["url"] == f"https://floom.dev/s/{first.json()['token']}"
+    assert "/app/s/" not in first.json()["url"]
+    assert client.get(f"/approvals/public-batch/{first.json()['token']}").status_code == 200
+
+
+def test_public_batch_allows_floom_preflight_for_decision(client_and_main):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_cors", run_id="run_cors", worker_id="w_cors")
+    token = _batch_token(client)
+
+    response = client.options(
+        f"/approvals/public-batch/{token}/items/apr_cors/decision",
+        headers={
+            "origin": "https://floom.dev",
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["access-control-allow-origin"] == "https://floom.dev"
+    assert "POST" in response.headers["access-control-allow-methods"]
+    assert "Content-Type" in response.headers["access-control-allow-headers"]
+
+
 def test_public_batch_decision_approves_and_creates_follow_up(client_and_main):
     client, main = client_and_main
     _seed_approval(main, approval_id="apr_approve", run_id="run_approve", worker_id="w_approve")
@@ -197,6 +236,63 @@ def test_public_batch_decision_approves_and_creates_follow_up(client_and_main):
     row = main.get_repositories().approvals.get(owner_id=OWNER, approval_id="apr_approve")
     assert row["status"] == "approved"
     assert row["follow_up_run_id"] == body["run_id"]
+
+
+def test_public_batch_decision_rejects_and_persists_rejected_status(client_and_main):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_reject", run_id="run_reject", worker_id="w_reject")
+    token = _batch_token(client)
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    response = anon.post(
+        f"/approvals/public-batch/{token}/items/apr_reject/decision",
+        json={"decision": "rejected", "reason": "Not this one"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body == {"status": "rejected", "run_id": "run_reject"}
+
+    repos = main.get_repositories()
+    row = repos.approvals.get(owner_id=OWNER, approval_id="apr_reject")
+    assert row["status"] == "rejected"
+    run = repos.runs.get(user_id=OWNER, run_id="run_reject")
+    assert run["status"] == main.RunStatus.REJECTED.value
+
+
+def test_public_batch_humanizes_title_and_strips_internal_error_preview(client_and_main):
+    client, main = client_and_main
+    _seed_approval(
+        main,
+        approval_id="apr_publish",
+        run_id="run_publish",
+        worker_id="content-pub-cp2",
+        label="content-pub-cp2",
+        preview=(
+            "Token source per account: personal1:input, personal2:input\n"
+            '{"http_error":429,"error":"RATE_LIMIT_EXCEEDED"}\n'
+            "channel 'youtube' not connected in personal-2"
+        ),
+        preview_payload='{"channels":["youtube","linkedin"],"caption":"belong in public"}',
+        decision_input_json='{"channels":["youtube","linkedin"],"caption":"belong in public"}',
+    )
+    token = _batch_token(client)
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    response = anon.get(f"/approvals/public-batch/{token}")
+    assert response.status_code == 200, response.text
+    item = response.json()["approvals"][0]
+
+    assert item["label"] == "Publish 'belong in public' to YouTube + LinkedIn"
+    rendered = f"{item['label']}\n{item['preview']}"
+    assert "content-pub-cp2" not in item["label"]
+    assert "Token source per account" not in rendered
+    assert "http_error" not in rendered
+    assert "RATE_LIMIT_EXCEEDED" not in rendered
+    assert "not connected" not in rendered
 
 
 def test_public_batch_rejects_wrong_workspace_item_and_bad_token(client_and_main):

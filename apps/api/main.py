@@ -1142,7 +1142,14 @@ def _cors_allowed_origins() -> List[str]:
         return [origin.strip() for origin in configured.split(",") if origin.strip()]
 
     # #921: explicit production origins only — no wildcard subdomain match.
-    origins = ["http://localhost:3000", "https://localhost:3000"]
+    origins = [
+        "http://localhost:3000",
+        "https://localhost:3000",
+        "https://floom.dev",
+        "https://www.floom.dev",
+        "https://workers.floom.dev",
+        "https://workeros.floom.dev",
+    ]
     if os.environ.get("WORKEROS_DEV"):
         origins.extend(["http://localhost:3000", "http://localhost:3011"])
     return origins

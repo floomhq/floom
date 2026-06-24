@@ -61,6 +61,7 @@ describe("middleware auth gate", () => {
       "/api/proxy/approvals/public/abc-123/approve?token=xyz",
       "/api/proxy/approvals/public/abc-123/reject?token=xyz",
       "/api/proxy/approvals/public/abc-123/artifacts/a1/download?token=xyz",
+      "/api/proxy/approvals/public-batch/fls_abc123/items/apr_1/decision",
     ];
     for (const p of paths) {
       const res = await middleware(req(p));

@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import re
+import sqlite3
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -64,7 +65,8 @@ from services.uploads import _store_uploaded_blob
 from services.worker_access import _delete_worker_impl
 from services.product_events import emit_approval_decided
 from services.share_links import (
-    _create_or_get_standalone_share_link,
+    _mint_standalone_share_token,
+    _standalone_share_url,
     _load_standalone_share_row,
 )
 
@@ -78,6 +80,101 @@ _PUBLIC_BATCH_RATE_BUCKETS: dict[str, list[float]] = {}
 _PUBLIC_BATCH_RATE_WINDOW_SECONDS = 60.0
 _PUBLIC_BATCH_READ_LIMIT = 120
 _PUBLIC_BATCH_ACTION_LIMIT = 30
+_APPROVAL_LEAK_PATTERNS = (
+    "token source per account",
+    '"http_error"',
+    "http_error",
+    "rate_limit_exceeded",
+    "rate limit exceeded",
+    "not connected",
+)
+_APPROVAL_BATCH_SHARE_SQL = """
+    CREATE TABLE IF NOT EXISTS approval_batch_share_links (
+        token TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(workspace_id, owner_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_approval_batch_share_workspace
+        ON approval_batch_share_links(workspace_id, owner_id);
+"""
+
+
+def _ensure_approval_batch_share_links_table() -> None:
+    from db import get_db
+
+    with get_db() as conn:
+        conn.executescript(_APPROVAL_BATCH_SHARE_SQL)
+
+
+def _create_or_get_approvals_batch_share_link(*, workspace_id: str, owner_id: str) -> Dict[str, str]:
+    from db import get_db, now_iso
+
+    workspace_id = _safe_workspace_id(workspace_id) or ""
+    if not workspace_id or not owner_id:
+        raise HTTPException(status_code=409, detail="Approval batch cannot be shared")
+    _ensure_approval_batch_share_links_table()
+    with get_db() as conn:
+        existing = conn.execute(
+            """
+            SELECT token
+            FROM approval_batch_share_links
+            WHERE workspace_id = ? AND owner_id = ?
+            LIMIT 1
+            """,
+            (workspace_id, owner_id),
+        ).fetchone()
+        if existing and existing["token"]:
+            token = str(existing["token"])
+            return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+
+        for _ in range(8):
+            token = _mint_standalone_share_token()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO approval_batch_share_links
+                        (token, workspace_id, owner_id, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (token, workspace_id, owner_id, now_iso()),
+                )
+                return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+            except sqlite3.IntegrityError:
+                existing = conn.execute(
+                    """
+                    SELECT token
+                    FROM approval_batch_share_links
+                    WHERE workspace_id = ? AND owner_id = ?
+                    LIMIT 1
+                    """,
+                    (workspace_id, owner_id),
+                ).fetchone()
+                if existing and existing["token"]:
+                    token = str(existing["token"])
+                    return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+                continue
+    raise HTTPException(status_code=500, detail="Could not create approval batch link")
+
+
+def _load_approval_batch_share_row(token: str) -> Dict[str, Any] | None:
+    from db import get_db
+
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    _ensure_approval_batch_share_links_table()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT workspace_id, owner_id, created_at
+            FROM approval_batch_share_links
+            WHERE token = ?
+            LIMIT 1
+            """,
+            (token,),
+        ).fetchone()
+    return dict(row) if row else None
 _BATCH_SENSITIVE_KEYS = {
     "authorization",
     "bearer",
@@ -359,19 +456,184 @@ def _approval_kind(approval: Dict[str, Any]) -> str:
     return kind if kind in {"run", "agent_tool", "destructive_delete"} else "run"
 
 
+def _parsed_decision_input(approval: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        parsed = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        parsed = {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _looks_like_worker_slug(value: str, worker_id: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return True
+    if worker_id and text == worker_id:
+        return True
+    return bool(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+){1,5}", text))
+
+
+def _contains_public_approval_leak(value: Any) -> bool:
+    try:
+        text = json.dumps(value, default=str).lower() if not isinstance(value, str) else value.lower()
+    except Exception:
+        text = str(value).lower()
+    return any(pattern in text for pattern in _APPROVAL_LEAK_PATTERNS)
+
+
+def _walk_strings(value: Any, *, depth: int = 0) -> list[str]:
+    if depth > 6:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, dict):
+        out: list[str] = []
+        for item in value.values():
+            out.extend(_walk_strings(item, depth=depth + 1))
+        return out
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value[:50]:
+            out.extend(_walk_strings(item, depth=depth + 1))
+        return out
+    return []
+
+
+def _extract_public_batch_channels(*values: Any) -> list[str]:
+    candidates: list[str] = []
+    channel_keys = {"channel", "channels", "platform", "platforms", "destination", "destinations", "target", "targets"}
+
+    def visit(value: Any, key_hint: str = "", depth: int = 0) -> None:
+        if depth > 6:
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                visit(item, str(key).lower(), depth + 1)
+            return
+        if isinstance(value, list):
+            for item in value[:20]:
+                visit(item, key_hint, depth + 1)
+            return
+        if isinstance(value, str) and (key_hint in channel_keys or value.lower() in {"youtube", "linkedin", "x", "twitter", "instagram", "tiktok"}):
+            candidates.append(value)
+
+    for value in values:
+        visit(value)
+
+    cleaned: list[str] = []
+    aliases = {"x": "X", "twitter": "X", "youtube": "YouTube", "linkedin": "LinkedIn"}
+    for raw in candidates:
+        for piece in re.split(r"[,/+&]", raw):
+            value = piece.strip().strip("'\"")
+            if not value:
+                continue
+            lower = value.lower()
+            label = aliases.get(lower) or value.replace("_", " ").replace("-", " ").title()
+            if label not in cleaned:
+                cleaned.append(label)
+    return cleaned[:4]
+
+
+def _extract_public_batch_caption(*values: Any) -> str | None:
+    keys = ("caption", "post", "text", "body", "message", "title", "topic", "subject")
+    for value in values:
+        if isinstance(value, dict):
+            for key in keys:
+                item = value.get(key)
+                if isinstance(item, str) and item.strip():
+                    return item.strip()
+        for item in _walk_strings(value):
+            if len(item.split()) >= 2 and not _contains_public_approval_leak(item):
+                return item
+    return None
+
+
+def _caption_snippet(text: str | None) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    quoted = re.search(r"['\"]([^'\"]{2,60})['\"]", cleaned)
+    if quoted:
+        return quoted.group(1).strip()
+    words = cleaned.split()
+    return " ".join(words[:6]).strip(".,;:")[:60]
+
+
+def _public_batch_human_label(
+    approval: Dict[str, Any],
+    decision_input: Dict[str, Any],
+    preview_payload: Any,
+) -> str:
+    worker_id = str(approval.get("worker_id") or "")
+    existing = str(approval.get("label") or "").strip()
+    channels = _extract_public_batch_channels(decision_input, preview_payload, approval.get("preview"))
+    caption = _caption_snippet(_extract_public_batch_caption(decision_input, preview_payload, approval.get("preview")))
+    if channels and caption:
+        return f"Publish '{caption}' to {' + '.join(channels)}"
+    if channels:
+        return f"Publish to {' + '.join(channels)}"
+    if existing and not _looks_like_worker_slug(existing, worker_id) and not _contains_public_approval_leak(existing):
+        return existing[:160]
+    return "Review proposed action"
+
+
+def _public_batch_clean_preview(
+    approval: Dict[str, Any],
+    decision_input: Dict[str, Any],
+    preview_payload: Any,
+) -> str:
+    raw = str(approval.get("preview") or "").strip()
+    if raw and not _contains_public_approval_leak(raw):
+        lines = [
+            line.strip()
+            for line in raw.splitlines()
+            if line.strip() and not _contains_public_approval_leak(line)
+        ]
+        if lines:
+            return "\n".join(lines)[:2000]
+    channels = _extract_public_batch_channels(decision_input, preview_payload, raw)
+    caption = _extract_public_batch_caption(decision_input, preview_payload)
+    parts: list[str] = []
+    if channels:
+        parts.append(f"Channels: {' + '.join(channels)}")
+    if caption:
+        parts.append(f"Caption: {caption[:1000]}")
+    return "\n".join(parts) if parts else "Review the proposed action details before deciding."
+
+
 def _public_batch_approval_item(approval: Dict[str, Any], repos: Repositories) -> Dict[str, Any]:
     public = _public_approval_response(approval, repos)
+    decision_input = _parsed_decision_input(approval)
     public.pop("decision_input_json", None)
     public.pop("edited_output_json", None)
     public.pop("follow_up_run_id", None)
     public.pop("workspace_id", None)
     public["preview_payload"] = _scrub_public_batch_value(public.get("preview_payload"))
+    public["label"] = _public_batch_human_label(approval, decision_input, public.get("preview_payload"))
+    public["preview"] = _public_batch_clean_preview(approval, decision_input, public.get("preview_payload"))
     public["kind"] = _approval_kind(approval)
     public["action_token"] = try_approval_public_token(dict(approval))
     return public
 
 
 def _load_approvals_batch_share(token: str) -> Dict[str, Any]:
+    row = _load_approval_batch_share_row(token)
+    if row:
+        workspace_id = _safe_workspace_id(str(row.get("workspace_id") or ""))
+        if not workspace_id:
+            raise HTTPException(status_code=404, detail="Approval batch link not found")
+        return {
+            "entity_type": "approvals_batch",
+            "entity_id": workspace_id,
+            "owner_id": str(row.get("owner_id") or ""),
+            "created_at": row.get("created_at"),
+        }
+
+    # Backward compatibility for batch links minted by the first rollout, which
+    # used the generic standalone_share_links table and rotated token_hash on
+    # each mint. Those old bearer URLs keep resolving; new mints use the stable
+    # approval_batch_share_links table above.
     row = _load_standalone_share_row(token)
     if not row or str(row.get("entity_type") or "") != "approvals_batch":
         raise HTTPException(status_code=404, detail="Approval batch link not found")
@@ -780,13 +1042,9 @@ def create_approvals_batch_share_link(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
-    """Mint or rotate one public actionable link for pending approvals in a workspace."""
+    """Create-or-get one public actionable link for pending approvals in a workspace."""
     workspace_id = _active_workspace_id_for_batch(request, auth)
-    return _create_or_get_standalone_share_link(
-        entity_type="approvals_batch",
-        entity_id=workspace_id,
-        owner_id=auth.user_id,
-    )
+    return _create_or_get_approvals_batch_share_link(workspace_id=workspace_id, owner_id=auth.user_id)
 
 
 def _public_approvals_batch_payload(

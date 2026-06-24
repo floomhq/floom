@@ -176,6 +176,16 @@ const nextConfig: NextConfig = {
         source: "/c/:token",
         destination: `${apiBase}/c/:token`,
       },
+      // Hosted dashboard builds use basePath="/app". Public share links must
+      // remain top-level no-auth URLs, so /s/* is rewritten into the app route
+      // without changing the browser URL.
+      ...(APP_BASE_PATH
+        ? [{
+            source: "/s/:path*",
+            destination: `${APP_BASE_PATH}/s/:path*`,
+            basePath: false as const,
+          }]
+        : []),
     ];
   },
   async headers() {
