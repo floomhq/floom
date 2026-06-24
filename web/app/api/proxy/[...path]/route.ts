@@ -33,18 +33,6 @@ const SUPABASE_ORIGIN = (() => {
   }
 })();
 
-function requestOrigin(req: NextRequest): string {
-  const proto =
-    req.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim() ||
-    req.nextUrl.protocol.replace(/:$/, "") ||
-    "https";
-  const host =
-    req.headers.get("x-forwarded-host")?.split(",", 1)[0]?.trim() ||
-    req.headers.get("host")?.split(",", 1)[0]?.trim() ||
-    req.nextUrl.host;
-  return `${proto}://${host}`;
-}
-
 async function getAccessToken(
   req: NextRequest,
 ): Promise<{ token: string | null; refreshedCookies: string[] }> {
@@ -78,7 +66,7 @@ function safeProxyLocation(location: string | null, req: NextRequest): string | 
     return null;
   }
 
-  if (parsed.origin === requestOrigin(req)) {
+  if (parsed.origin === req.nextUrl.origin) {
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   }
 
@@ -172,7 +160,7 @@ async function handler(
     forwardHeaders.Authorization = `Bearer ${accessToken}`;
   }
   if (isAuthPath) {
-    forwardHeaders["x-workeros-frontend-origin"] = requestOrigin(req);
+    forwardHeaders["x-workeros-frontend-origin"] = req.nextUrl.origin;
     const cookieHeader = req.headers.get("cookie");
     if (cookieHeader) forwardHeaders.cookie = cookieHeader;
   }

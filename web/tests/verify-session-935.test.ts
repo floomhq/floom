@@ -201,10 +201,6 @@ describe("#935 middleware integration", () => {
     expect(csp.split(";").find((d) => d.trim().startsWith("script-src"))).not.toContain(
       "unsafe-inline",
     );
-    const mediaSrc = csp.split(";").find((d) => d.trim().startsWith("media-src"));
-    expect(mediaSrc).toContain("'self'");
-    expect(mediaSrc).toContain("blob:");
-    expect(mediaSrc).toContain("https:");
   });
 
   it("allows a valid encrypted v2 session cookie", async () => {

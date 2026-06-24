@@ -46,6 +46,8 @@ export const SLUG_ALIASES: Record<string, string> = {
 // Slugs whose symbols live under the #icon-* prefix rather than #brand-*.
 const ICON_PREFIX_SLUGS = new Set([
   "anthropic",
+  "claude-code",
+  "codex",
   "cursor",
   "windsurf",
   "continue",
@@ -102,10 +104,10 @@ function LetterFallback({ slug, className }: { slug: string; className?: string 
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center rounded-[var(--radius-squircle)] bg-[var(--ink)]/[0.06] font-medium leading-none text-[var(--ink-mute)]",
+        "inline-flex items-center justify-center font-semibold leading-none text-[var(--ink-mute)]",
         className,
       )}
-      style={{ fontSize: "0.62em" }}
+      style={{ fontSize: "0.72em" }}
       aria-hidden="true"
     >
       {letter}

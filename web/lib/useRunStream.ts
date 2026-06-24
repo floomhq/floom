@@ -114,7 +114,11 @@ export function useRunStream(runId: string | null | undefined) {
           consecutivePollFailures = 0;
           setStreamUnavailable(false);
           setError(null);
-          const terminal = run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+          const terminal =
+            run.status === "completed" ||
+            run.status === "failed" ||
+            run.status === "cancelled" ||
+            run.status === "rejected";
           if (terminal) {
             sawFinish = true;
             setFallbackRun(run);

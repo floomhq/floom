@@ -35,7 +35,21 @@
   </header>
 
   <div class="banner">
-    <strong>Methodology (honest):</strong> Each screenshot below is a unique capture. Unauthenticated routes were shot on <code>localhost:3000</code>. Authenticated dashboard routes were shot on <code>workeros.floom.dev</code> with a real Google session — the dashboard tree is synced from the same engine SHA (<code>npm run check-drift</code> PASS). No mock-login board. No recycled PNGs.
+    <strong>Screenshot audit (checked before opening):</strong>
+    <ul style="margin:.5rem 0 0; padding-left:1.25rem;">
+      <li><code>01-localhost-login-welcome-back.png</code> — <strong>REPLACED twice</strong>: (1) corrupt black screen; (2) showed <em>old</em> overlay UI (“Floom Cloud”, letter avatars) despite “Welcome back” copy. Fix: PR #665 landed in generated <code>web/app/login</code> but overlay source was never updated — sync kept restoring old UI. Overlay fixed 2026-06-24; screenshot shows landing-aligned design (“Hire AI workers.”, Today card, squircle row icons).</li>
+      <li><code>02-prod-workers-empty.png</code> — <strong>DELETED</strong> (mislabeled: was another login page, not workers; unused in report).</li>
+      <li><code>03-prod-workers-collection.png</code> — ✅ workers table + search + list/grid + Add filter (prod session).</li>
+      <li><code>04-prod-settings-collection.png</code> — ✅ settings card grid (prod session).</li>
+      <li><code>05-prod-mcp-install-panel.png</code> — ✅ MCP tab, 6 client icons, <code>workeros-api.floom.dev</code> URL (prod session).</li>
+      <li><code>06-prod-connections-collection.png</code> — ✅ connections list + search (prod session).</li>
+      <li>All 5 remaining PNGs have unique SHA-256 hashes (no recycled images).</li>
+      <li>Squircle avatar + Emily send button: <strong>not visible</strong> in prod shots (still round) — code-only fix until dashboard redeploy.</li>
+    </ul>
+  </div>
+
+  <div class="banner" style="background:#eef6ff;border-color:#93c5fd;">
+    <strong>Methodology:</strong> Unauthenticated routes shot on <code>localhost:3000</code>. Authenticated routes shot on <code>workeros.floom.dev</code> with a real Google session. No mock-login board. No recycled PNGs.
   </div>
 
   <main>
@@ -54,10 +68,10 @@
 
       <div class="item">
         <span class="badge ok">VERIFIED</span><span class="badge env">localhost</span>
-        <strong>#1 — Login copy “Welcome back”</strong>
-        <p>Dashboard login at <code>/app/login</code> shows “Welcome back”, OAuth buttons, magic link panel.</p>
-        <img src="screenshots/01-localhost-login-welcome-back.png" alt="localhost login Welcome back" width="800" />
-        <p class="caption">localhost:3000/app/login — 2026-06-24</p>
+        <strong>#1 — Dashboard login adopts landing design (#665)</strong>
+        <p>Not just copy: left panel is “Hire AI workers.” + Today activity card + stat footer; auth card is centered “Welcome back” / “Magic link, password, or OAuth.” Old overlay (“Floom Cloud”, “Recent worker runs”, LR/PU letter avatars) was a sync bug — overlay <code>web/overlay/app/login/page.tsx</code> restored on every <code>npm run sync</code>.</p>
+        <img src="screenshots/01-localhost-login-welcome-back.png" alt="localhost login landing-aligned design" width="800" />
+        <p class="caption">localhost:3000/app/login — re-verified 2026-06-24 after overlay fix</p>
       </div>
 
       <div class="item">
@@ -69,11 +83,11 @@
       </div>
 
       <div class="item">
-        <span class="badge ok">VERIFIED</span><span class="badge env">prod session*</span>
-        <strong>#6 — Settings collection grid</strong>
-        <p>Workspace + account settings cards with search and view toggle.</p>
-        <img src="screenshots/04-prod-settings-collection.png" alt="settings collection grid" width="800" />
-        <p class="caption">workeros.floom.dev/app/settings</p>
+        <span class="badge warn">OPEN</span><span class="badge env">code fix</span>
+        <strong>#6 — Settings collection should default to list (not gallery)</strong>
+        <p>Workspace + account settings with search and view toggle — but resting view must be <strong>list first</strong>. Prod screenshot below shows gallery default (bug: <code>emptyState("grid")</code> + <code>view.default: "grid"</code>). Fixed on disk in engine <code>settings/page.tsx</code>; not yet deployed.</p>
+        <img src="screenshots/04-prod-settings-collection.png" alt="settings collection (prod — still gallery default)" width="800" />
+        <p class="caption">workeros.floom.dev/app/settings — prod still gallery-first until engine bump</p>
       </div>
 
       <div class="item">

@@ -30,14 +30,19 @@ describe("medium issue batch source guards", () => {
     const source = read("components/mcp/McpInstallPanel.tsx");
 
     expect(source).toContain("MCP_CLIENTS");
-    expect(source).toContain('label: "Claude"');
+    expect(source).toContain('label: "Claude Code"');
     expect(source).toContain('label: "Cursor"');
     expect(source).toContain('label: "Codex"');
-    expect(source).toContain('icon: "anthropic"');
+    expect(source).toContain('icon: "claude-code"');
+    expect(source).toContain('icon: "codex"');
     expect(source).toContain('icon: "vscode"');
     expect(source).toContain("BrandLogo");
+    expect(source).not.toContain('icon: "anthropic"');
+    expect(source).not.toContain('icon: "openai"');
     expect(source).not.toContain("client.mark");
     expect(source).not.toContain('mark: "C"');
+    expect(source).not.toContain("grid-cols-2");
+    expect(source).not.toContain("bg-[var(--bg-2)] px-3 py-2.5");
     expect(source).toContain('aria-label="Supported MCP clients"');
   });
 });

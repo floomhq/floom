@@ -422,7 +422,7 @@ describe("CollectionView — states (§7)", () => {
     const { container } = render(<Harness config={makeConfig({ items: [] })} />);
     expect(screen.getByText("No workers yet")).toBeInTheDocument();
     // No search box, view toggle, tag bar, or toolbar add button on the empty surface.
-    expect(container.querySelector(".c-toolbar")).not.toBeInTheDocument();
+    expect(container.querySelector(".c-controlstrip")).not.toBeInTheDocument();
     expect(container.querySelector(".c-srch")).not.toBeInTheDocument();
     expect(container.querySelector(".c-tagbar-wrap")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "View mode" })).not.toBeInTheDocument();
@@ -441,7 +441,7 @@ describe("CollectionView — states (§7)", () => {
       />,
     );
     expect(screen.getByText("No workers yet")).toBeInTheDocument();
-    expect(container.querySelector(".c-toolbar")).toBeInTheDocument();
+    expect(container.querySelector(".c-controlstrip")).toBeInTheDocument();
     expect(container.querySelector(".c-srch")).toBeInTheDocument();
   });
 });

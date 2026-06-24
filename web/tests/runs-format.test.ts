@@ -33,6 +33,7 @@ describe("runStatusPill", () => {
   it("maps run statuses to tones", () => {
     expect(runStatusPill("completed").tone).toBe("ok");
     expect(runStatusPill("failed").tone).toBe("err");
+    expect(runStatusPill("rejected")).toEqual({ tone: "err", label: "Rejected" });
     expect(runStatusPill("running").tone).toBe("run");
     expect(runStatusPill("queued").tone).toBe("idle");
     expect(runStatusPill("pending_approval").tone).toBe("warn");

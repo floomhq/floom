@@ -56,6 +56,7 @@ function cloudApexRedirects(): RedirectRule[] {
     "settings",
     "members",
     "cli-auth",
+    "login",
     "install",
     "invite",
   ];

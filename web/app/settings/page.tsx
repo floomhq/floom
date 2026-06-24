@@ -146,7 +146,7 @@ function ScopeCrossLink({
   targetSel: string;
 }) {
   return (
-    <div className="flex items-start gap-2.5 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3.5 py-3 text-xs leading-relaxed text-[var(--ink-soft)]">
+    <div className="flex items-start gap-2.5 text-xs leading-relaxed text-[var(--ink-soft)]">
       <Info className="mt-0.5 size-3.5 shrink-0 text-[var(--ink-mute)]" />
       <span>
         <span className="font-semibold text-foreground">{title}</span> {body}{" "}
@@ -504,7 +504,7 @@ function SettingsContent() {
   );
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
-    ...emptyState("grid"),
+    ...emptyState("list"),
     sel: null,
   }));
 
@@ -3014,9 +3014,7 @@ function EmailChannelStatus() {
   return (
     <div className="c-ltable">
       <div className="c-lrow" style={{ gridTemplateColumns: "auto 1fr auto", cursor: "default" }}>
-        <div className="grid size-9 place-items-center rounded-[var(--radius-ui)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
-          <Mail className="size-4" />
-        </div>
+        <Mail className="size-4 shrink-0 text-[var(--ink-soft)]" />
         <div className="c-lp-tx">
           <div className="nm">Email</div>
           <div className="sub">

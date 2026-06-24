@@ -21,12 +21,18 @@ type RedirectPhase =
   | "api_key"
   | "timeout";
 
+const DEFAULT_POLL_TIMEOUT_MS = 2 * 60 * 1000;
+
 function RedirectInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const slug = (searchParams.get("app") || "").trim().toLowerCase();
   const returnTo = normalizeReturnTo(searchParams.get("return_to"));
   const providerName = useMemo(() => formatProviderName(slug), [slug]);
+  const pollTimeoutMs = useMemo(() => {
+    const raw = Number(searchParams.get("debug_poll_ms"));
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_POLL_TIMEOUT_MS;
+  }, [searchParams]);
 
   const [phase, setPhase] = useState<RedirectPhase>("preparing");
   const [redirectUrl, setRedirectUrl] = useState("");
@@ -56,7 +62,7 @@ function RedirectInner() {
   const startPolling = useCallback(() => {
     cancelledRef.current = false;
     setPhase("waiting");
-    const deadline = Date.now() + 2 * 60 * 1000;
+    const deadline = Date.now() + pollTimeoutMs;
     const tick = async () => {
       if (cancelledRef.current) return;
       try {
@@ -91,7 +97,7 @@ function RedirectInner() {
       }
     };
     pollRef.current = setTimeout(tick, 2000);
-  }, [slug, returnTo, router, connectionId]);
+  }, [slug, returnTo, router, connectionId, pollTimeoutMs]);
 
   useEffect(() => {
     return () => {

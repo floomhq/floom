@@ -208,33 +208,6 @@ describe("api proxy route", () => {
     expect(res.headers.get("location")).toBe(supaLocation);
   });
 
-  it("uses the browser Host header as the frontend origin when Next listens on 0.0.0.0", async () => {
-    process.env.WORKEROS_API_BASE = "http://127.0.0.1:8002";
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("<!doctype html>", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
-    );
-    const { GET } = await loadRoute();
-
-    await GET(
-      new NextRequest("http://0.0.0.0:3000/app/api/proxy/auth/callback?next=%2Fapp", {
-        headers: { host: "localhost:3000" },
-      }),
-      { params: Promise.resolve({ path: ["auth", "callback"] }) },
-    );
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8002/auth/callback?next=%2Fapp",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "x-workeros-frontend-origin": "http://localhost:3000",
-        }),
-      }),
-    );
-  });
-
   it("still strips a non-configured supabase-lookalike origin", async () => {
     process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     process.env.WORKEROS_CLOUD_SUPABASE_URL = "https://sgizlsyygvlqosgwdimb.supabase.co";

@@ -45,12 +45,12 @@ Login path: `/app/login` → **Continue with Google** → `/app/overview`.
 
 | # | Item | Status | Evidence |
 |---|------|--------|----------|
-| 1 | Dashboard login says **Welcome back** (not “Sign in to Floom”) | ✅ localhost | `screenshots/01-localhost-login-welcome-back.png` |
+| 1 | Dashboard login adopts **landing design** (#665): “Hire AI workers.” panel, Today activity card, centered “Welcome back” + “Magic link, password, or OAuth.” (not old “Floom Cloud / Recent worker runs” overlay) | ✅ localhost (2026-06-24 re-verify) | `test-results/localhost-audit-report-2026-06-24/screenshots/01-localhost-login-welcome-back.png` |
 | 2 | MCP install panel — 6 client icons in a row | ✅ prod UI* | `screenshots/05-prod-mcp-install-panel.png` |
 | 3 | MCP config shows `workeros-api.floom.dev` host | ✅ prod UI* | same |
 | 4 | Emily home empty — real PromptInput composer | ✅ code + tests | engine `EmilyHomeEmpty` + vitest |
 | 5 | Collection control strip (search / view toggle / add) | ✅ prod UI* | `screenshots/03-prod-workers-collection.png` |
-| 6 | Settings grid collection view | ✅ prod UI* | `screenshots/04-prod-settings-collection.png` |
+| 6 | Settings collection — **list view default** (not gallery), search + view toggle | ⏳ code fix on disk | engine `settings/page.tsx` — needs engine PR + bump |
 | 7 | Connections collection + humanized provider names | ✅ prod UI* + test | `screenshots/06-prod-connections-collection.png`, redirect test |
 | 8 | Connections redirect — no stale router.replace after unmount | ✅ test | `connections-redirect-flow-guard.dom.test.tsx` |
 | 9 | Connections redirect — terminal “Still waiting” state | ⚠️ manual | test skipped (jsdom timer); verify in browser |
