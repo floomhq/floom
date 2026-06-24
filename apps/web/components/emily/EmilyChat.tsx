@@ -1065,7 +1065,7 @@ export function EmilyDock({ className }: { className?: string }) {
       coreHasMessages ||
       coreConversationId !== null ||
       readStoredConversationId() !== null;
-    if (hasExistingThread && !createLatched) {
+    if (hasExistingThread && !createLatched && !confirmReplaceOpen) {
       setPendingCreatePrime(primeParam);
       setConfirmReplaceOpen(true);
       return;
@@ -1076,6 +1076,7 @@ export function EmilyDock({ className }: { className?: string }) {
     coreConversationId,
     coreHasMessages,
     coreReady,
+    confirmReplaceOpen,
     createLatched,
     createParam,
     isHomeRoute,

@@ -1,14 +1,13 @@
 // Single source of truth for the OSS single-user API secret (x-floom-secret).
 //
-// The same token is used by Settings → Connect & automate (CliCommandPanel) AND
-// the sidebar MCP-install popup AND the shared MCP-install panel. It is minted
-// via the CLI device-auth flow (POST /cli-auth/devices → /approve → /poll) and
-// cached in sessionStorage (#1185: not localStorage, so XSS/extensions can't
-// read it across sessions). Legacy localStorage keys are migrated + purged.
+// The same token is used by the sidebar MCP-install popup and the shared
+// MCP-install panel. It is minted via the CLI device-auth flow
+// (POST /cli-auth/devices -> /approve -> /poll) and cached in sessionStorage
+// (#1185: not localStorage, so XSS/extensions can't read it across sessions).
+// Legacy localStorage keys are migrated + purged.
 //
-// Before this lib, readStoredSecret() + generateToken() were copy-pasted into
-// both CliCommandPanel and McpInstallModal. Two copies of the same security-
-// sensitive flow drift. This is the one implementation.
+// Keep the token-generation flow centralized; this is security-sensitive code
+// and must not drift across MCP install surfaces.
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 
 const SECRET_SESSION_KEY = "workeros_api_secret";
