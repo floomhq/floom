@@ -25,8 +25,8 @@ describe("P1 UI copy regressions", () => {
 
     expect(workers).not.toMatch(/knowledge packs?/i);
     expect(privacy).not.toMatch(/brain packs?|knowledge packs?/i);
-    expect(workers).toContain("Could not load brain folders.");
-    expect(privacy).toContain("Conversations and brain folders");
+    expect(workers).toContain("Could not load worker details.");
+    expect(privacy).toContain("Conversations and Library folders");
   });
 
   it("keeps cli auth terminal status glyphs as lucide icons", () => {

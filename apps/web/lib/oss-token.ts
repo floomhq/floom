@@ -32,13 +32,13 @@ function errorDetail(response: Response, body: JsonBody, fallback: string): stri
     return body.detail || "Sign in to create an API key";
   }
   if (response.status === 403) {
-    return body.detail || "Not authorized — refresh the page and try again";
+    return body.detail || "Not authorized. Refresh the page and try again";
   }
   if (response.status === 429) {
-    return body.detail || "Too many requests — wait a moment and try again";
+    return body.detail || "Too many requests. Wait a moment and try again";
   }
   if (response.status === 404) {
-    return body.detail || "API route not found — check your deployment base path";
+    return body.detail || "API route not found. Check your deployment base path";
   }
   return body.detail || fallback;
 }
