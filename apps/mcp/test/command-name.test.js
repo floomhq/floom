@@ -18,6 +18,10 @@ const CLI_PATH = join(process.cwd(), "dist", "cli.js");
 async function runAs(name, args, env = {}) {
   const dir = await mkdtemp(join(tmpdir(), "workeros-cmdname-"));
   const wrapperPath = join(dir, name);
+  const childEnv = { ...env };
+  if (childEnv.HOME && !Object.hasOwn(childEnv, "XDG_CONFIG_HOME")) {
+    childEnv.XDG_CONFIG_HOME = join(childEnv.HOME, ".config");
+  }
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({ type: "module" }),
@@ -39,7 +43,7 @@ async function runAs(name, args, env = {}) {
       WORKEROS_API_TOKEN: "",
       FLOOM_API_BASE: "",
       FLOOM_API_SECRET: "",
-      ...env,
+      ...childEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

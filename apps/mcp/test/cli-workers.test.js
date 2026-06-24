@@ -68,6 +68,10 @@ async function makeWorkerDir(options = {}) {
 }
 
 async function runCli(args, env = {}) {
+  const childEnv = { ...env };
+  if (childEnv.HOME && !Object.hasOwn(childEnv, "XDG_CONFIG_HOME")) {
+    childEnv.XDG_CONFIG_HOME = join(childEnv.HOME, ".config");
+  }
   const child = spawn(process.execPath, ["dist/cli.js", ...args], {
     cwd: process.cwd(),
     env: {
@@ -77,7 +81,7 @@ async function runCli(args, env = {}) {
       WORKEROS_API_TOKEN: "",
       FLOOM_API_BASE: "",
       FLOOM_API_SECRET: "",
-      ...env,
+      ...childEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

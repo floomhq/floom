@@ -390,9 +390,13 @@ async function withClient(mock, secret, fn, entry = "dist/server.js") {
 }
 
 async function runCli(args, env = {}, stdin = "") {
+  const childEnv = { ...env };
+  if (childEnv.HOME && !Object.hasOwn(childEnv, "XDG_CONFIG_HOME")) {
+    childEnv.XDG_CONFIG_HOME = join(childEnv.HOME, ".config");
+  }
   const child = spawn(process.execPath, ["dist/cli.js", ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...childEnv },
     stdio: ["pipe", "pipe", "pipe"],
   });
   child.stdin.end(stdin);
@@ -784,8 +788,10 @@ test("credentials migrate from legacy workeros path and logout clears both paths
 
     const previousHome = process.env.HOME;
     const previousUserProfile = process.env.USERPROFILE;
+    const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
     process.env.HOME = home;
     process.env.USERPROFILE = home;
+    process.env.XDG_CONFIG_HOME = join(home, ".config");
     try {
       const { readCredentials, clearCredentials } = await import("../dist/lib/credentials.js");
       const preferred = await readCredentials();
@@ -805,6 +811,8 @@ test("credentials migrate from legacy workeros path and logout clears both paths
       else process.env.HOME = previousHome;
       if (previousUserProfile === undefined) delete process.env.USERPROFILE;
       else process.env.USERPROFILE = previousUserProfile;
+      if (previousXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
     }
   } finally {
     await rm(home, { recursive: true, force: true });

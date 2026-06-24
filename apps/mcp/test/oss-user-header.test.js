@@ -24,6 +24,7 @@ async function withTempHome(fn) {
   for (const key of [
     "HOME",
     "USERPROFILE",
+    "XDG_CONFIG_HOME",
     "WORKEROS_API_TOKEN",
     "WORKEROS_API_SECRET",
     "FLOOM_API_SECRET",
@@ -39,6 +40,7 @@ async function withTempHome(fn) {
     delete process.env[key];
   }
   process.env.HOME = home;
+  process.env.XDG_CONFIG_HOME = join(home, ".config");
   try {
     return await fn(home);
   } finally {
@@ -183,7 +185,7 @@ test("MCP server sends x-floom-user on API calls in OSS mode", async () => {
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
   const home = await mkdtemp(join(tmpdir(), "wos-user-srv-"));
-  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, ".config") };
   delete env.WORKEROS_API_TOKEN;
   env.WORKEROS_API_BASE = base;
   env.WORKEROS_API_SECRET = "env-secret";

@@ -16,11 +16,15 @@ import { runsShowCommand } from "../dist/commands/runs.js";
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-runs-show-"));
   const originalHome = process.env.HOME;
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
   process.env.HOME = home;
+  process.env.XDG_CONFIG_HOME = join(home, ".config");
   try {
     return await fn();
   } finally {
     process.env.HOME = originalHome;
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
   }
 }
 
