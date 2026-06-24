@@ -45,12 +45,12 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
 <body>
 <header class="top">
   <h1>WorkerOS Cloud — Issue inventory</h1>
-  <p class="meta">23 items (deduped from 47) · cloud main · 2026-06-24 · for Vivek</p>
+  <p class="meta">22 items (deduped from 47) · cloud main · 2026-06-24 · for Vivek</p>
   <p class="meta" style="margin-top:.35rem">Merged duplicates: LOGIN-01 ← A-02/C-01/D-06 · MCP-01 ← C-02/C-03/L-03 · CONN-01 ← A-11/A-15/C-07–09 · SETTINGS-01 ← C-06/L-12 · LIB-01 ← A-12/L-06 · EMILY-01 ← C-04/L-01/L-10/L-15</p>
   <div class="perm"><strong>Permanent URL:</strong> <a href="https://workeros.floom.dev/audit">https://workeros.floom.dev/audit</a></div>
   <div class="stats">
     <span>✓ LIVE 3</span><span>◐ PARTIAL 1</span><span>~ DISK 9</span><span>! OPEN 1</span>
-    <span>? MANUAL 4</span><span>— TRACK 5</span>
+    <span>? MANUAL 4</span><span>— TRACK 4</span>
   </div>
 </header>
 <div class="toolbar">
@@ -59,7 +59,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <label>Sev <select id="vf"><option value="">All</option><option>P1</option><option>P2</option><option>P3</option></select></label>
   <span id="cnt" style="margin-left:auto;font-size:.8rem;color:var(--muted)"></span>
 </div>
-<nav class="toc"><a href="#A-01">A-01</a><a href="#LOGIN-01">LOGIN-01</a><a href="#MCP-01">MCP-01</a><a href="#SETTINGS-01">SETTINGS-01</a><a href="#CONN-01">CONN-01</a><a href="#LIB-01">LIB-01</a><a href="#A-03">A-03</a><a href="#A-04">A-04</a><a href="#A-06">A-06</a><a href="#A-07">A-07</a><a href="#A-10">A-10</a><a href="#A-13">A-13</a><a href="#A-14">A-14</a><a href="#EMILY-01">EMILY-01</a><a href="#UI-01">UI-01</a><a href="#AUTH-01">AUTH-01</a><a href="#L-09">L-09</a><a href="#L-13">L-13</a><a href="#L-14">L-14</a><a href="#D-04">D-04</a><a href="#D-07">D-07</a><a href="#D-08">D-08</a><a href="#INFRA-01">INFRA-01</a></nav>
+<nav class="toc"><a href="#A-01">A-01</a><a href="#LOGIN-01">LOGIN-01</a><a href="#MCP-01">MCP-01</a><a href="#SETTINGS-01">SETTINGS-01</a><a href="#CONN-01">CONN-01</a><a href="#LIB-01">LIB-01</a><a href="#A-03">A-03</a><a href="#A-04">A-04</a><a href="#A-06">A-06</a><a href="#A-07">A-07</a><a href="#A-10">A-10</a><a href="#A-13">A-13</a><a href="#A-14">A-14</a><a href="#EMILY-01">EMILY-01</a><a href="#UI-01">UI-01</a><a href="#AUTH-01">AUTH-01</a><a href="#L-09">L-09</a><a href="#L-13">L-13</a><a href="#L-14">L-14</a><a href="#D-04">D-04</a><a href="#D-07">D-07</a><a href="#INFRA-01">INFRA-01</a></nav>
 <main id="main">
 <article class="issue" id="A-01" data-status="live" data-sev="P1">
   <header class="issue-head">
@@ -77,7 +77,9 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   /start/slack ──▶ 404 OK?     user clicks ──▶ 404 (confusing)
 
   FIX: NEXT_PUBLIC_CHANNELS slack/wa flag + hide ChannelActions</pre>
-  <div class="shot-empty">No screenshot yet — <code>A-01</code></div>
+  <figure class="shot"><a href="/audit/screenshots/07-localhost-landing-hero.png"><img src="/audit/screenshots/07-localhost-landing-hero.png" alt="A-01" loading="lazy"/></a><figcaption>07-localhost-landing-hero.png</figcaption></figure>
+<figure class="shot"><a href="/audit/screenshots/10-localhost-start-slack-disabled.png"><img src="/audit/screenshots/10-localhost-start-slack-disabled.png" alt="A-01" loading="lazy"/></a><figcaption>10-localhost-start-slack-disabled.png</figcaption></figure>
+<figure class="shot"><a href="/audit/screenshots/09-localhost-start-mcp.png"><img src="/audit/screenshots/09-localhost-start-mcp.png" alt="A-01" loading="lazy"/></a><figcaption>09-localhost-start-mcp.png</figcaption></figure>
 </article>
 <article class="issue" id="LOGIN-01" data-status="partial" data-sev="P1">
   <header class="issue-head">
@@ -96,6 +98,8 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   │ V3Shell + Today  │          │ no V3Shell theme │
   └──────────────────┘          └──────────────────┘</pre>
   <figure class="shot"><a href="/audit/screenshots/01-localhost-login-welcome-back.png"><img src="/audit/screenshots/01-localhost-login-welcome-back.png" alt="LOGIN-01" loading="lazy"/></a><figcaption>01-localhost-login-welcome-back.png</figcaption></figure>
+<figure class="shot"><a href="/audit/screenshots/01-prod-app-login-current.png"><img src="/audit/screenshots/01-prod-app-login-current.png" alt="LOGIN-01" loading="lazy"/></a><figcaption>01-prod-app-login-current.png</figcaption></figure>
+<figure class="shot"><a href="/audit/screenshots/08-localhost-landing-login-hire-pill.png"><img src="/audit/screenshots/08-localhost-landing-login-hire-pill.png" alt="LOGIN-01" loading="lazy"/></a><figcaption>08-localhost-landing-login-hire-pill.png</figcaption></figure>
 </article>
 <article class="issue" id="MCP-01" data-status="manual" data-sev="P2">
   <header class="issue-head">
@@ -114,6 +118,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   Surfaces: sidebar MCP popup ═══ Settings MCP tab
             (same McpInstallPanel.tsx)</pre>
   <figure class="shot"><a href="/audit/screenshots/05-prod-mcp-install-panel.png"><img src="/audit/screenshots/05-prod-mcp-install-panel.png" alt="MCP-01" loading="lazy"/></a><figcaption>05-prod-mcp-install-panel.png</figcaption></figure>
+<figure class="shot"><a href="/audit/screenshots/16-mcp-sidebar-popup.png"><img src="/audit/screenshots/16-mcp-sidebar-popup.png" alt="MCP-01" loading="lazy"/></a><figcaption>16-mcp-sidebar-popup.png</figcaption></figure>
 </article>
 <article class="issue" id="SETTINGS-01" data-status="disk" data-sev="P2">
   <header class="issue-head">
@@ -164,7 +169,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <pre class="ascii">  GET /contexts ──▶ for EACH pack:
                          download ALL files from Storage
                          just for file_count  ──▶ ~30s</pre>
-  <div class="shot-empty">No screenshot yet — <code>LIB-01</code></div>
+  <figure class="shot"><a href="/audit/screenshots/11-prod-library-contexts.png"><img src="/audit/screenshots/11-prod-library-contexts.png" alt="LIB-01" loading="lazy"/></a><figcaption>11-prod-library-contexts.png</figcaption></figure>
 </article>
 <article class="issue" id="A-03" data-status="live" data-sev="P2">
   <header class="issue-head">
@@ -219,7 +224,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <h2>Device-approval dead-end (#588)</h2>
   
   <pre class="ascii">  cli-auth ──▶ no session ──▶ dead end (need login?next=)</pre>
-  <div class="shot-empty">No screenshot yet — <code>A-07</code></div>
+  <figure class="shot"><a href="/audit/screenshots/21-prod-cli-auth.png"><img src="/audit/screenshots/21-prod-cli-auth.png" alt="A-07" loading="lazy"/></a><figcaption>21-prod-cli-auth.png</figcaption></figure>
 </article>
 <article class="issue" id="A-10" data-status="disk" data-sev="P3">
   <header class="issue-head">
@@ -232,7 +237,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <h2>ASCII diagram worker node accent blue</h2>
   
   <pre class="ascii">  [trigger]──▶[WORKER]──▶[output]  was BLUE → fix --ink</pre>
-  <div class="shot-empty">No screenshot yet — <code>A-10</code></div>
+  <figure class="shot"><a href="/audit/screenshots/15-prod-worker-overview.png"><img src="/audit/screenshots/15-prod-worker-overview.png" alt="A-10" loading="lazy"/></a><figcaption>15-prod-worker-overview.png</figcaption></figure>
 </article>
 <article class="issue" id="A-13" data-status="disk" data-sev="P1">
   <header class="issue-head">
@@ -247,7 +252,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <pre class="ascii">  Read ◀──toggle──▶ Read&amp;write
   PUT /workers/files ──▶ validator force writeable:True
   toast &quot;Brain updated&quot; (lie)</pre>
-  <div class="shot-empty">No screenshot yet — <code>A-13</code></div>
+  <figure class="shot"><a href="/audit/screenshots/17-prod-worker-library-tab-brain-label.png"><img src="/audit/screenshots/17-prod-worker-library-tab-brain-label.png" alt="A-13" loading="lazy"/></a><figcaption>17-prod-worker-library-tab-brain-label.png</figcaption></figure>
 </article>
 <article class="issue" id="A-14" data-status="disk" data-sev="P2">
   <header class="issue-head">
@@ -260,7 +265,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <h2>Tab Brain vs nav Library label mismatch</h2>
   
   <pre class="ascii">  left nav: Library    worker tab: Brain  ✗</pre>
-  <div class="shot-empty">No screenshot yet — <code>A-14</code></div>
+  <figure class="shot"><a href="/audit/screenshots/17-prod-worker-library-tab-brain-label.png"><img src="/audit/screenshots/17-prod-worker-library-tab-brain-label.png" alt="A-14" loading="lazy"/></a><figcaption>17-prod-worker-library-tab-brain-label.png</figcaption></figure>
 </article>
 <article class="issue" id="EMILY-01" data-status="disk" data-sev="P2">
   <header class="issue-head">
@@ -279,7 +284,8 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   │ warm --bg-app (not grey)    │
   │ &quot;Searching connections…&quot;    │
   └─────────────────────────────┘</pre>
-  <div class="shot-empty">No screenshot yet — <code>EMILY-01</code></div>
+  <figure class="shot"><a href="/audit/screenshots/03-prod-workers-collection.png"><img src="/audit/screenshots/03-prod-workers-collection.png" alt="EMILY-01" loading="lazy"/></a><figcaption>03-prod-workers-collection.png</figcaption></figure>
+<figure class="shot"><a href="/audit/screenshots/12-prod-assistant-emily.png"><img src="/audit/screenshots/12-prod-assistant-emily.png" alt="EMILY-01" loading="lazy"/></a><figcaption>12-prod-assistant-emily.png</figcaption></figure>
 </article>
 <article class="issue" id="UI-01" data-status="manual" data-sev="P2">
   <header class="issue-head">
@@ -308,7 +314,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <pre class="ascii">  npm run dev:local + ops/dev-local-api.sh
   callback: localhost:3000/app/api/proxy/auth/callback
   /app/login?switch=1 ──▶ Google account chooser</pre>
-  <div class="shot-empty">No screenshot yet — <code>AUTH-01</code></div>
+  <figure class="shot"><a href="/audit/screenshots/20-prod-login-switch-signin.png"><img src="/audit/screenshots/20-prod-login-switch-signin.png" alt="AUTH-01" loading="lazy"/></a><figcaption>20-prod-login-switch-signin.png</figcaption></figure>
 </article>
 <article class="issue" id="L-09" data-status="disk" data-sev="P2">
   <header class="issue-head">
@@ -321,7 +327,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <h2>Proposed output layout</h2>
   
   <pre class="ascii">  approval detail ──▶ proposed output container queries</pre>
-  <div class="shot-empty">No screenshot yet — <code>L-09</code></div>
+  <figure class="shot"><a href="/audit/screenshots/13-prod-approvals.png"><img src="/audit/screenshots/13-prod-approvals.png" alt="L-09" loading="lazy"/></a><figcaption>13-prod-approvals.png</figcaption></figure>
 </article>
 <article class="issue" id="L-13" data-status="manual" data-sev="P2">
   <header class="issue-head">
@@ -334,7 +340,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <h2>Backups / version history</h2>
   
   <pre class="ascii">  Settings → Backups → restore points list</pre>
-  <div class="shot-empty">No screenshot yet — <code>L-13</code></div>
+  <figure class="shot"><a href="/audit/screenshots/14-prod-settings-backups.png"><img src="/audit/screenshots/14-prod-settings-backups.png" alt="L-13" loading="lazy"/></a><figcaption>14-prod-settings-backups.png</figcaption></figure>
 </article>
 <article class="issue" id="L-14" data-status="disk" data-sev="P2">
   <header class="issue-head">
@@ -347,7 +353,8 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <h2>?shape=run lightweight load</h2>
   
   <pre class="ascii">  /app/run/id?shape=run ──▶ skip heavy payload</pre>
-  <div class="shot-empty">No screenshot yet — <code>L-14</code></div>
+  <figure class="shot"><a href="/audit/screenshots/23-prod-worker-runs-tab.png"><img src="/audit/screenshots/23-prod-worker-runs-tab.png" alt="L-14" loading="lazy"/></a><figcaption>23-prod-worker-runs-tab.png</figcaption></figure>
+<figure class="shot"><a href="/audit/screenshots/18-prod-runs-list.png"><img src="/audit/screenshots/18-prod-runs-list.png" alt="L-14" loading="lazy"/></a><figcaption>18-prod-runs-list.png</figcaption></figure>
 </article>
 <article class="issue" id="D-04" data-status="open" data-sev="P1">
   <header class="issue-head">
@@ -362,24 +369,11 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <pre class="ascii">  vercel deploy ──▶ landing job
   /v3/integrations 404 ──▶ alias blocked
   /audit ──▶ 404 until landing ships public/audit</pre>
-  <div class="shot-empty">No screenshot yet — <code>D-04</code></div>
+  <figure class="shot"><a href="/audit/screenshots/22-prod-audit-page.png"><img src="/audit/screenshots/22-prod-audit-page.png" alt="D-04" loading="lazy"/></a><figcaption>22-prod-audit-page.png</figcaption></figure>
 </article>
-<article class="issue" id="D-07" data-status="track" data-sev="P2">
+<article class="issue" id="D-07" data-status="manual" data-sev="P2">
   <header class="issue-head">
     <span class="id">D-07</span>
-    <span class="badge p2">P2</span>
-    <span class="badge track">— TRACK</span>
-    <span class="area">Process</span>
-    <span class="owner">process</span>
-  </header>
-  <h2>Engine local edits diverge from floomhq/floom</h2>
-  
-  <pre class="ascii">  hand-edit engine/ ──▶ next bump wipes ──▶ PR floom first</pre>
-  <div class="shot-empty">No screenshot yet — <code>D-07</code></div>
-</article>
-<article class="issue" id="D-08" data-status="manual" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">D-08</span>
     <span class="badge p2">P2</span>
     <span class="badge manual">? MANUAL</span>
     <span class="area">Deploy</span>
@@ -388,7 +382,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <h2>Railway smoke gate after push main</h2>
   
   <pre class="ascii">  push main ──▶ railway up ──▶ ops/smoke-routes.sh</pre>
-  <div class="shot-empty">No screenshot yet — <code>D-08</code></div>
+  <div class="shot-empty">No screenshot yet — <code>D-07</code></div>
 </article>
 <article class="issue" id="INFRA-01" data-status="track" data-sev="P3">
   <header class="issue-head">
@@ -414,7 +408,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
     const t=(q.value||"").toLowerCase(),s=sf.value,v=vf.value;let n=0;
     issues.forEach(el=>{const ok=(!t||el.textContent.toLowerCase().includes(t))&&(!s||el.dataset.status===s)&&(!v||el.dataset.sev===v);
       el.classList.toggle("hidden",!ok);if(ok)n++;});
-    cnt.textContent=n+" / 23 shown";
+    cnt.textContent=n+" / 22 shown";
   }
   q.oninput=sf.onchange=vf.onchange=filt;filt();
   const lb=document.getElementById("lb"),img=lb.querySelector("img");

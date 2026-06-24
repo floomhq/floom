@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Generate static audit inventory HTML — no JS required to render issues. */
-import { writeFileSync, mkdirSync, cpSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, cpSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,13 +11,7 @@ const OUT_DIRS = [
   join(ROOT, "test-results/workeros-issue-inventory-2026-06-24"),
 ];
 
-const SHOTS = {
-  "C-01": "01-localhost-login-welcome-back.png",
-  "C-02": "05-prod-mcp-install-panel.png",
-  "C-05": "03-prod-workers-collection.png",
-  "C-06": "04-prod-settings-collection.png",
-  "C-07": "06-prod-connections-collection.png",
-};
+/** @typedef {{ id:string, sev:string, area:string, issue:string, detail?:string, status:string, owner:string, shot?:string, extraShots?:string[], ascii:string }} Issue */
 
 const STATUS = {
   live: { label: "✓ LIVE", cls: "live" },
@@ -39,7 +33,8 @@ const ISSUES = [
       "NEXT_PUBLIC_LANDING_CHANNEL_SLACK/WHATSAPP default off. Landing hides Add to Slack / WhatsApp QR; /start/slack|whatsapp → 404 unless flag set at build time.",
     status: "live",
     owner: "cloud",
-    shot: "",
+    shot: "07-localhost-landing-hero.png",
+    extraShots: ["10-localhost-start-slack-disabled.png", "09-localhost-start-mcp.png"],
     ascii: `  INTENDED (now):              ACTUAL (landing):
   showSlack=false              [Add to Slack]  ← still visible
   showWhatsApp=false           [WhatsApp QR]   ← still visible
@@ -56,7 +51,8 @@ const ISSUES = [
       "Supersedes A-02, C-01, D-06. Overlay sync was restoring old split-panel; layout closer now but Hire was blue TEXT only (landing uses .v3-hl blue background pill). Fix on disk in web/overlay/app/login/page.tsx — NOT verified LIVE.",
     status: "partial",
     owner: "cloud",
-    shot: "C-01",
+    shot: "01-localhost-login-welcome-back.png",
+    extraShots: ["01-prod-app-login-current.png", "08-localhost-landing-login-hire-pill.png"],
     ascii: `  landing /login                 /app/login (was)
   ┌──────────────────┐          ┌──────────────────┐
   │ [Hire] AI workers│          │ Hire AI workers  │
@@ -73,7 +69,8 @@ const ISSUES = [
       "Supersedes C-02, C-03, L-03, L-04, L-05. ONE component: McpInstallPanel (McpInstallModal wraps it). Want Claude Code, Cursor, Codex, VS Code, Windsurf, Cline as real logos — NOT grey boxes with letters “C”, “CX”. Same panel in left sidebar popup and Settings → Connect & automate → MCP.",
     status: "manual",
     owner: "engine",
-    shot: "C-02",
+    shot: "05-prod-mcp-install-panel.png",
+    extraShots: ["16-mcp-sidebar-popup.png"],
     ascii: `  WANT (icon row):          NOT this (prod screenshot):
   [🟠claude][◻cursor][◻codex]   [C][CX][C][VS][W][CL]
   [◻vscode][◻surf][◻cline]       grey squares + initials
@@ -89,7 +86,7 @@ const ISSUES = [
     detail: "Supersedes C-06, L-12. emptyState('grid') + view default grid in settings/page.tsx.",
     status: "disk",
     owner: "engine",
-    shot: "C-06",
+    shot: "04-prod-settings-collection.png",
     ascii: `  WRONG (was):          RIGHT (fix):
   [⊞ grid pressed]      [≡ list pressed]
   ┌───┐ ┌───┐           │ General      │
@@ -104,7 +101,7 @@ const ISSUES = [
     detail: "Supersedes A-11, A-15, C-07, C-08, C-09, L-11. cancelledRef on unmount; Still waiting terminal; authorize proxy 302; Googlecalendar → Google Calendar.",
     status: "disk",
     owner: "engine+cloud",
-    shot: "C-07",
+    shot: "06-prod-connections-collection.png",
     ascii: `  connect ──▶ poll ──▶ navigate away
                     │
                     └──▶ stale tick ──▶ router.replace ✗
@@ -121,7 +118,7 @@ const ISSUES = [
     detail: "Supersedes A-12, L-06. hydrate=False when cached summary exists.",
     status: "disk",
     owner: "engine",
-    shot: "",
+    shot: "11-prod-library-contexts.png",
     ascii: `  GET /contexts ──▶ for EACH pack:
                          download ALL files from Storage
                          just for file_count  ──▶ ~30s`,
@@ -167,7 +164,7 @@ const ISSUES = [
     issue: "Device-approval dead-end (#588)",
     status: "track",
     owner: "cloud",
-    shot: "",
+    shot: "21-prod-cli-auth.png",
     ascii: `  cli-auth ──▶ no session ──▶ dead end (need login?next=)`,
   },
   {
@@ -177,7 +174,7 @@ const ISSUES = [
     issue: "ASCII diagram worker node accent blue",
     status: "disk",
     owner: "engine",
-    shot: "",
+    shot: "15-prod-worker-overview.png",
     ascii: `  [trigger]──▶[WORKER]──▶[output]  was BLUE → fix --ink`,
   },
   {
@@ -187,7 +184,7 @@ const ISSUES = [
     issue: "Memory scope toggle silent no-op",
     status: "disk",
     owner: "engine",
-    shot: "",
+    shot: "17-prod-worker-library-tab-brain-label.png",
     ascii: `  Read ◀──toggle──▶ Read&write
   PUT /workers/files ──▶ validator force writeable:True
   toast "Brain updated" (lie)`,
@@ -199,7 +196,7 @@ const ISSUES = [
     issue: "Tab Brain vs nav Library label mismatch",
     status: "disk",
     owner: "engine",
-    shot: "",
+    shot: "17-prod-worker-library-tab-brain-label.png",
     ascii: `  left nav: Library    worker tab: Brain  ✗`,
   },
   {
@@ -210,7 +207,8 @@ const ISSUES = [
     detail: "Supersedes C-04, L-01, L-02, L-10, L-15.",
     status: "disk",
     owner: "engine",
-    shot: "",
+    shot: "03-prod-workers-collection.png",
+    extraShots: ["12-prod-assistant-emily.png"],
     ascii: `  /app/assistant
   ┌─────────────────────────────┐
   │ real PromptInput + chips    │
@@ -227,7 +225,7 @@ const ISSUES = [
     detail: "Supersedes C-05, C-10, C-11.",
     status: "manual",
     owner: "engine",
-    shot: "C-05",
+    shot: "03-prod-workers-collection.png",
     ascii: `  Workers: [🔍][≡|⊞][+ Add][New worker]
   avatar (○) → (▢)   composer send (○) → (▢)`,
   },
@@ -239,7 +237,7 @@ const ISSUES = [
     detail: "Supersedes C-12, L-07, D-01.",
     status: "live",
     owner: "cloud",
-    shot: "",
+    shot: "20-prod-login-switch-signin.png",
     ascii: `  npm run dev:local + ops/dev-local-api.sh
   callback: localhost:3000/app/api/proxy/auth/callback
   /app/login?switch=1 ──▶ Google account chooser`,
@@ -251,7 +249,7 @@ const ISSUES = [
     issue: "Proposed output layout",
     status: "disk",
     owner: "engine",
-    shot: "",
+    shot: "13-prod-approvals.png",
     ascii: `  approval detail ──▶ proposed output container queries`,
   },
   {
@@ -261,7 +259,7 @@ const ISSUES = [
     issue: "Backups / version history",
     status: "manual",
     owner: "engine",
-    shot: "",
+    shot: "14-prod-settings-backups.png",
     ascii: `  Settings → Backups → restore points list`,
   },
   {
@@ -271,7 +269,8 @@ const ISSUES = [
     issue: "?shape=run lightweight load",
     status: "disk",
     owner: "engine",
-    shot: "",
+    shot: "23-prod-worker-runs-tab.png",
+    extraShots: ["18-prod-runs-list.png"],
     ascii: `  /app/run/id?shape=run ──▶ skip heavy payload`,
   },
   {
@@ -282,23 +281,13 @@ const ISSUES = [
     detail: "Dashboard build fixes landed; landing apex /v3/integrations 404 blocks alias; workeros.floom.dev/audit still pending.",
     status: "open",
     owner: "cloud",
-    shot: "",
+    shot: "22-prod-audit-page.png",
     ascii: `  vercel deploy ──▶ landing job
   /v3/integrations 404 ──▶ alias blocked
   /audit ──▶ 404 until landing ships public/audit`,
   },
   {
     id: "D-07",
-    sev: "P2",
-    area: "Process",
-    issue: "Engine local edits diverge from floomhq/floom",
-    status: "track",
-    owner: "process",
-    shot: "",
-    ascii: `  hand-edit engine/ ──▶ next bump wipes ──▶ PR floom first`,
-  },
-  {
-    id: "D-08",
     sev: "P2",
     area: "Deploy",
     issue: "Railway smoke gate after push main",
@@ -326,13 +315,16 @@ function esc(s) {
 }
 
 function shotHtml(row) {
-  const key = row.shot;
-  if (!key) {
+  const files = [row.shot, ...(row.extraShots ?? [])].filter(Boolean);
+  if (!files.length) {
     return `<div class="shot-empty">No screenshot yet — <code>${esc(row.id)}</code></div>`;
   }
-  const file = SHOTS[key] || `${row.id}.png`;
-  const src = `/audit/screenshots/${file}`;
-  return `<figure class="shot"><a href="${esc(src)}"><img src="${esc(src)}" alt="${esc(row.id)}" loading="lazy"/></a><figcaption>${esc(file)}</figcaption></figure>`;
+  return files
+    .map((file) => {
+      const src = `/audit/screenshots/${file}`;
+      return `<figure class="shot"><a href="${esc(src)}"><img src="${esc(src)}" alt="${esc(row.id)}" loading="lazy"/></a><figcaption>${esc(file)}</figcaption></figure>`;
+    })
+    .join("\n");
 }
 
 function issueCard(row) {
@@ -440,22 +432,18 @@ ${ISSUES.map(issueCard).join("\n")}
 </body>
 </html>`;
 
-const srcShots = join(ROOT, "test-results/workeros-issue-inventory-2026-06-24/screenshots");
 const primaryOut = join(ROOT, "public/audit");
-mkdirSync(join(primaryOut, "screenshots"), { recursive: true });
+const shotDir = join(primaryOut, "screenshots");
+mkdirSync(shotDir, { recursive: true });
 writeFileSync(join(primaryOut, "index.html"), html);
-if (existsSync(srcShots)) {
-  for (const f of Object.values(SHOTS)) {
-    cpSync(join(srcShots, f), join(primaryOut, "screenshots", f), { force: true });
-  }
-}
-console.log("wrote", join(primaryOut, "index.html"));
+const pngFiles = readdirSync(shotDir).filter((f) => f.endsWith(".png"));
+console.log("wrote", join(primaryOut, "index.html"), `(${pngFiles.length} screenshots)`);
 
-for (const dir of OUT_DIRS.filter(d => d !== primaryOut)) {
+for (const dir of OUT_DIRS.filter((d) => d !== primaryOut)) {
   mkdirSync(join(dir, "screenshots"), { recursive: true });
   writeFileSync(join(dir, "index.html"), html);
-  for (const f of Object.values(SHOTS)) {
-    cpSync(join(primaryOut, "screenshots", f), join(dir, "screenshots", f), { force: true });
+  for (const f of pngFiles) {
+    cpSync(join(shotDir, f), join(dir, "screenshots", f), { force: true });
   }
   console.log("wrote", join(dir, "index.html"));
 }
