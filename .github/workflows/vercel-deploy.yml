@@ -240,11 +240,6 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          dashboard_build_sha="$(git -C engine rev-parse HEAD)"
-          echo "DASHBOARD_BUILD_SHA=$dashboard_build_sha" >> "$GITHUB_ENV"
-          export NEXT_PUBLIC_BUILD_SHA="$dashboard_build_sha"
-          export NEXT_PUBLIC_BUILD_REF="main"
-          export NEXT_PUBLIC_BUILD_SOURCE="github-actions"
           # `vercel build` (run from root, rootDir=web) runs web/'s build script:
           # re-syncs (no-op, detects pre-synced tree) then `next build` with the
           # engine seams baked into web/package.json. Engine source is present on
@@ -322,25 +317,43 @@ jobs:
           # until all hold: (1) the dashboard project's production deploy id is
           # the deploy we just shipped, (2) the public /app/login route serves
           # a login screen without route loops or server errors, and (3) the
-          # dashboard alias serves the build SHA stamped during this run.
+          # dashboard alias serves the same Next static chunkset as the immutable
+          # deployment URL.
+          chunkset_hash() {
+            local url="$1" tmp body assets count hash
+            tmp="$(mktemp -d)"
+            body="$tmp/body.html"
+            assets="$tmp/assets.txt"
+            if ! python3 ops/http-client.py fetch --url "$url" --output "$body" --timeout 30; then
+              rm -rf "$tmp"
+              return 1
+            fi
+            grep -Eo '(/app)?/_next/static/[^"<>[:space:]]+' "$body" \
+              | sed -E 's#^/app##; s#[\\]+$##; s#[?].*$##' \
+              | sort -u > "$assets" || true
+            count="$(wc -l < "$assets" | tr -d ' ')"
+            if [ "$count" -eq 0 ]; then
+              rm -rf "$tmp"
+              return 1
+            fi
+            hash="$(sha256sum "$assets" | awk '{print $1}')"
+            rm -rf "$tmp"
+            echo "$hash:$count"
+          }
           for i in $(seq 1 30); do
             proj_id="$(python3 ops/http-client.py vercel-json-get \
               --url "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_ID}?teamId=${DASHBOARD_SCOPE}" \
               --field targets.production.id)"
             code="$(python3 ops/http-client.py status --url "https://workeros.floom.dev/app/login" --timeout 20 || true)"
-            alias_sha=""
-            tmp="$(mktemp)"
-            if python3 ops/http-client.py fetch --url "https://${DASHBOARD_PROD_ALIAS}/app/version" --output "$tmp" --timeout 20; then
-              alias_sha="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1], encoding="utf-8")).get("build_sha") or "").strip())' "$tmp")"
-            fi
-            rm -f "$tmp"
-            echo "attempt $i: dashboard prod id=$proj_id (expected ${DEPLOY_ID}); /app/login=$code; ${DASHBOARD_PROD_ALIAS}/app/version build_sha=$alias_sha (expected ${DASHBOARD_BUILD_SHA})"
-            if [ "$proj_id" = "$DEPLOY_ID" ] && [ "$code" = "200" ] && [ "$alias_sha" = "$DASHBOARD_BUILD_SHA" ]; then
-              echo "Dashboard /app is fresh: prod == $DEPLOY_ID, /app/login==200, and ${DASHBOARD_PROD_ALIAS}/app/version reports ${DASHBOARD_BUILD_SHA}."
+            deploy_chunk="$(chunkset_hash "${DEPLOY_URL}/app/login" || true)"
+            alias_chunk="$(chunkset_hash "https://${DASHBOARD_PROD_ALIAS}/app/login" || true)"
+            echo "attempt $i: dashboard prod id=$proj_id (expected ${DEPLOY_ID}); /app/login=$code; deploy chunkset=$deploy_chunk; ${DASHBOARD_PROD_ALIAS} chunkset=$alias_chunk"
+            if [ "$proj_id" = "$DEPLOY_ID" ] && [ "$code" = "200" ] && [ -n "$deploy_chunk" ] && [ "$deploy_chunk" = "$alias_chunk" ]; then
+              echo "Dashboard /app is fresh: prod == $DEPLOY_ID, /app/login==200, and ${DASHBOARD_PROD_ALIAS} serves the deployed chunkset $deploy_chunk."
               break
             fi
             if [ "$i" = "30" ]; then
-              echo "::error::Dashboard did not converge: prod ($proj_id) != $DEPLOY_ID, /app/login != 200, or ${DASHBOARD_PROD_ALIAS}/app/version did not report ${DASHBOARD_BUILD_SHA}."
+              echo "::error::Dashboard did not converge: prod ($proj_id) != $DEPLOY_ID, /app/login != 200, or ${DASHBOARD_PROD_ALIAS} did not serve the deployed chunkset."
               exit 1
             fi
             sleep 10
