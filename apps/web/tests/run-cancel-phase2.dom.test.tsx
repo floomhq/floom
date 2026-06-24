@@ -29,7 +29,9 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/lib/query/hooks", () => ({
   RUNS_FIRST_PAGE_QUERY_PARAMS: { limit: 50, offset: 0 },
+  qk: { runs: (params: unknown) => ["runs", params] },
   useRuns: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
+  useStreamedInitialData: vi.fn(),
 }));
 
 vi.mock("@/lib/useRunLogStream", () => ({

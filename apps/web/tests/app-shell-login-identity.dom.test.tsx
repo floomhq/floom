@@ -5,6 +5,8 @@ const { pathname } = vi.hoisted(() => ({ pathname: vi.fn(() => "/login") }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathname(),
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/components/layout/sidebar", () => ({
