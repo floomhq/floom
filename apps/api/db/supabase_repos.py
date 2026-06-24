@@ -2966,7 +2966,13 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             updates["error_code"] = error_code
         if status == RunStatus.RUNNING.value:
             updates["started_at"] = datetime.now(timezone.utc).isoformat()
-        if status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
+        rejected_status = getattr(getattr(RunStatus, "REJECTED", None), "value", "rejected")
+        if status in {
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+            rejected_status,
+        }:
             completed_at = datetime.now(timezone.utc).isoformat()
             updates["completed_at"] = completed_at
             started_at = run.get("started_at")

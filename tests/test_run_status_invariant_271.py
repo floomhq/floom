@@ -65,6 +65,13 @@ def test_update_status_failed_passes_through(monkeypatch):
     assert client.payload["error"] == "boom"
 
 
+def test_update_status_rejected_persists_rejected_terminal(monkeypatch):
+    repo, client = _repo(monkeypatch)
+    repo.update_status(user_id="u1", run_id="r1", status="rejected")
+    assert client.payload["status"] == "rejected"
+    assert "completed_at" in client.payload
+
+
 def test_update_method_enforces_same_invariant(monkeypatch):
     repo, client = _repo(monkeypatch)
     repo.update(
