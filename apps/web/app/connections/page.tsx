@@ -7,12 +7,12 @@ const ConnectionsCollection = nextDynamic(() => import("./ConnectionsCollection"
 // must not be baked into a statically-cached shell shared across requests.
 export const dynamic = "force-dynamic";
 
-export default async function ConnectionsPage() {
-  let initialConnections: import("@/lib/types").ConnectionItem[] = [];
-  try {
-    initialConnections = await fetchConnections();
-  } catch {
-    // Fall through — client will fetch on mount
-  }
-  return <ConnectionsCollection initialConnections={initialConnections} />;
+// perf: stream the connections fetch instead of awaiting it (see
+// workers/page.tsx + useStreamedInitialData). Awaiting blocked first paint
+// behind the backend round-trip and showed loading.tsx on every navigation.
+export default function ConnectionsPage() {
+  const initialConnectionsPromise = fetchConnections().catch(
+    () => [] as import("@/lib/types").ConnectionItem[],
+  );
+  return <ConnectionsCollection initialConnectionsPromise={initialConnectionsPromise} />;
 }

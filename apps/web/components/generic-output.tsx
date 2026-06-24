@@ -193,21 +193,30 @@ function ObjectTable({ rows }: { rows: Array<Record<string, unknown>> }) {
 /** Render a plain object of scalar values as a labeled key→value list. */
 function KeyValueList({ obj }: { obj: Record<string, unknown> }) {
   const entries = Object.entries(obj);
+  // Go two-column only when the CONTAINER (not the viewport) is wide enough.
+  // In a narrow split/detail pane the viewport can be wide while this column is
+  // tiny — a viewport `sm:` breakpoint would still give the key up to 180px and
+  // crush the value to a few characters per line (the approval-review side-pane
+  // bug). A container query keys the layout off the actual available width:
+  // below ~24rem the rows stack full-width, at/above it the key takes a capped
+  // column and the value flexes.
   return (
-    <dl className="grid gap-x-4 gap-y-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 text-sm sm:grid-cols-[minmax(0,180px)_1fr]">
-      {entries.map(([key, value]) => (
-        <div key={key} className="contents">
-          <dt className="text-xs font-medium text-muted-foreground sm:py-0.5">{humanizeColumn(sanitizeOutputText(key))}</dt>
-          <dd className="min-w-0 sm:py-0.5">
-            {isScalar(value) || value == null ? (
-              <CellValue value={value} />
-            ) : (
-              <JsonCode value={value} />
-            )}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <div className="@container">
+      <dl className="grid gap-x-4 gap-y-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 text-sm @sm:grid-cols-[minmax(0,160px)_minmax(0,1fr)]">
+        {entries.map(([key, value]) => (
+          <div key={key} className="contents">
+            <dt className="text-xs font-medium text-muted-foreground @sm:py-0.5">{humanizeColumn(sanitizeOutputText(key))}</dt>
+            <dd className="min-w-0 @sm:py-0.5">
+              {isScalar(value) || value == null ? (
+                <CellValue value={value} />
+              ) : (
+                <JsonCode value={value} />
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 

@@ -10,8 +10,10 @@
  * and REMOVABLE (operator can drop one before generating).
  *
  * Connections render their real brand logo (BrandLogo sprite); capabilities
- * render a small lucide glyph. No coloured badges, no gradients — faint muted
- * chrome consistent with PromptText.
+ * render a small lucide glyph. Each chip is the SHARED InlineToolToken — the
+ * exact "[logo] Name" inline highlight the marketing landing prompt box uses —
+ * so the composer chip row and the landing/home inline tokens can never drift
+ * into divergent treatments again. No coloured badges, no bordered pills.
  *
  * Used under every prompt box: /workers/new, the /workers landing hero, and the
  * Emily assistant composer. One component, every surface (DRY).
@@ -19,7 +21,7 @@
 
 import { useMemo } from "react";
 import { Globe, Clock, Mail, X, type LucideIcon } from "lucide-react";
-import { BrandLogo } from "@/components/connections/BrandLogo";
+import { InlineToolToken } from "@/components/InlineToolToken";
 import { detectPromptItems } from "@/lib/prompt-detect";
 import { cn } from "@/lib/utils";
 
@@ -61,27 +63,26 @@ export function PromptChips({
       {visible.map((it) => {
         const CapIcon = it.kind === "capability" ? CAPABILITY_ICONS[it.id] : undefined;
         return (
-          <span
+          <InlineToolToken
             key={it.id}
-            className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-2)] py-0.5 pl-2 pr-1.5 text-xs text-foreground"
+            brand={it.brand}
+            icon={CapIcon ? <CapIcon className="size-[13px]" /> : undefined}
+            className="text-xs"
+            trailing={
+              removable ? (
+                <button
+                  type="button"
+                  onClick={() => onDismiss?.(it.id)}
+                  className="ml-0.5 inline-flex size-3.5 translate-y-[1px] items-center justify-center rounded-[var(--radius-pill)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  aria-label={`Remove ${it.label}`}
+                >
+                  <X className="size-3" />
+                </button>
+              ) : undefined
+            }
           >
-            {it.brand ? (
-              <BrandLogo icon={it.brand} className="size-3.5 shrink-0" />
-            ) : CapIcon ? (
-              <CapIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : null}
-            <span className="leading-none">{it.label}</span>
-            {removable && (
-              <button
-                type="button"
-                onClick={() => onDismiss?.(it.id)}
-                className="ml-0.5 inline-flex size-3.5 items-center justify-center rounded-[var(--radius-pill)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                aria-label={`Remove ${it.label}`}
-              >
-                <X className="size-3" />
-              </button>
-            )}
-          </span>
+            {it.label}
+          </InlineToolToken>
         );
       })}
     </div>

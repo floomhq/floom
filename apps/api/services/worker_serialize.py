@@ -529,7 +529,20 @@ def _build_worker_detail(
     role: Optional[str] = None,
     include_grants: bool = False,
     owner_aliases: Optional[set[str]] = None,
+    shape: Optional[str] = None,
 ) -> WorkerDetail:
+    # shape="run" (the standalone /run/{id} run-form page) only needs the
+    # worker's identity + config (name, description, connections, inputs,
+    # outputs, trigger, enabled). The full detail assembly does ~6 extra,
+    # mostly-sequential repository round-trips (recent runs, latest-run OUTPUT
+    # body, 7-day stats batch, input-values recipe, available secret +
+    # connection slugs) plus reads and serializes the on-disk bundle — for
+    # fede-secretary-inbox that manifest alone is ~61 KB. On the Cloud backend
+    # those add up to ~6-8s warm (the stats batch alone measured ~3s) and tens
+    # of seconds on a cold Railway container, all of which blocks the run page's
+    # single un-timed fetch behind "Loading worker…". The run form renders none
+    # of those heavy fields, so skip them entirely for shape="run".
+    lightweight = shape == "run"
     from models import RunStatus, WorkerConfig, WorkerDetail, WorkerFile
     worker = _get_visible_worker(
         worker_id, user_id=user_id, repos=repos, role=role, include_grants=include_grants
@@ -537,15 +550,19 @@ def _build_worker_detail(
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    recent_runs = [
-        _make_run_summary(row)
-        for row in repos.runs.list_for_worker(
-            user_id=user_id,
-            worker_id=worker_id,
-            limit=10,
-            offset=0,
-        )
-    ]
+    recent_runs = (
+        []
+        if lightweight
+        else [
+            _make_run_summary(row)
+            for row in repos.runs.list_for_worker(
+                user_id=user_id,
+                worker_id=worker_id,
+                limit=10,
+                offset=0,
+            )
+        ]
+    )
 
     # #815: latest output — the most recent COMPLETED run's output, fetched once
     # so the detail page renders an output-first overview without a second call.
@@ -582,20 +599,34 @@ def _build_worker_detail(
     # disabled / never-run, see _resolve_worker_status). The worker dict already
     # carries `enabled` (same w.enabled column get_recipe reads), so no separate
     # recipe fetch is needed.
-    available_secret_names = _available_secret_names_for_user(user_id, repos)
-    available_conn_slugs_detail = _available_connection_slugs_for_user(user_id, repos)
-    status = _resolve_worker_status(
-        worker,
-        config=config,
-        available_secret_names=available_secret_names,
-        last_run_status=recent_runs[0].status if recent_runs else None,
-        has_run=bool(recent_runs),
-    )
-    # #556: compute specific missing items.
-    _det_req_secrets = _worker_required_secret_names(worker) if config else []
-    _det_missing_secrets = [s for s in _det_req_secrets if s not in available_secret_names]
-    _det_req_conns = _worker_connection_slugs(worker)
-    _det_missing_connections = [c for c in _det_req_conns if c.lower() not in available_conn_slugs_detail]
+    # The run form does not render status / missing-secret / missing-connection
+    # badges, so skip the two availability round-trips for shape="run".
+    if lightweight:
+        available_secret_names = set()
+        status = _resolve_worker_status(
+            worker,
+            config=config,
+            available_secret_names=available_secret_names,
+            last_run_status=None,
+            has_run=False,
+        )
+        _det_missing_secrets = []
+        _det_missing_connections = []
+    else:
+        available_secret_names = _available_secret_names_for_user(user_id, repos)
+        available_conn_slugs_detail = _available_connection_slugs_for_user(user_id, repos)
+        status = _resolve_worker_status(
+            worker,
+            config=config,
+            available_secret_names=available_secret_names,
+            last_run_status=recent_runs[0].status if recent_runs else None,
+            has_run=bool(recent_runs),
+        )
+        # #556: compute specific missing items.
+        _det_req_secrets = _worker_required_secret_names(worker) if config else []
+        _det_missing_secrets = [s for s in _det_req_secrets if s not in available_secret_names]
+        _det_req_conns = _worker_connection_slugs(worker)
+        _det_missing_connections = [c for c in _det_req_conns if c.lower() not in available_conn_slugs_detail]
     # `enabled` mirrors the same w.enabled column the resolver reads; stock /
     # filesystem workers carry no enabled flag and are treated as enabled.
     worker_enabled = bool(worker.get("enabled", True))
@@ -605,7 +636,7 @@ def _build_worker_detail(
     skill_md_content: Optional[str] = None
     run_py_content: Optional[str] = None
     worker_files: List[WorkerFile] = []
-    if _worker_source_visible_to_api(worker_id):
+    if not lightweight and _worker_source_visible_to_api(worker_id):
         try:
             worker_dir = _worker_bundle_dir(worker_id, config)
             yml_path = worker_dir / "worker.yml"
@@ -635,7 +666,7 @@ def _build_worker_detail(
     # (owner / workspace admin / run rights). Treat it as a secret.
     from webhook_service import build_webhook_url as _build_webhook_url
     webhook_url: Optional[str] = None
-    if _worker_has_webhook_trigger(worker, config):
+    if not lightweight and _worker_has_webhook_trigger(worker, config):
         if _worker_permissions(worker, user_id=user_id, repos=repos, owner_aliases=owner_aliases).can_run:
             try:
                 # Token derives from the worker's current rotatable secret (backfilled
@@ -657,10 +688,14 @@ def _build_worker_detail(
     if config and config.runtime and config.runtime.bundle_path:
         config.runtime.bundle_path = Path(config.runtime.bundle_path).name
 
-    last_run_detail = _make_worker_detail_last_run(
-        recent_runs[0] if recent_runs else None,
-        user_id=user_id,
-        repos=repos,
+    last_run_detail = (
+        None
+        if lightweight
+        else _make_worker_detail_last_run(
+            recent_runs[0] if recent_runs else None,
+            user_id=user_id,
+            repos=repos,
+        )
     )
 
     # Round-09 gap #1: surface the saved default inputs (recipe column
@@ -669,12 +704,13 @@ def _build_worker_detail(
     # scheduler reads (_effective_scheduled_inputs). Falls back to empty on any
     # recipe-fetch failure rather than failing the whole detail response.
     saved_input_values: Dict[str, Any] = {}
-    try:
-        recipe = repos.workers.get_recipe(worker_id=worker_id)
-        if isinstance(recipe, dict) and isinstance(recipe.get("input_values"), dict):
-            saved_input_values = recipe["input_values"]
-    except Exception:
-        logger.debug("input_values recipe fetch failed for worker %s", worker_id, exc_info=True)
+    if not lightweight:
+        try:
+            recipe = repos.workers.get_recipe(worker_id=worker_id)
+            if isinstance(recipe, dict) and isinstance(recipe.get("input_values"), dict):
+                saved_input_values = recipe["input_values"]
+        except Exception:
+            logger.debug("input_values recipe fetch failed for worker %s", worker_id, exc_info=True)
 
     return WorkerDetail(
         id=worker["id"],
@@ -700,7 +736,7 @@ def _build_worker_detail(
         recent_runs=recent_runs,
         latest_output=latest_output,  # #815
         latest_output_run_id=latest_output_run_id,  # #815
-        recent_stats=_get_stats_batch([worker_id], user_id=user_id, repos=repos).get(worker_id),
+        recent_stats=None if lightweight else _get_stats_batch([worker_id], user_id=user_id, repos=repos).get(worker_id),
         manifest_yaml=manifest_yaml,
         run_py=run_py,
         skill_md_content=skill_md_content,

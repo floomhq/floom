@@ -9,8 +9,17 @@ import { sanitizeRedirect } from "@/lib/redirects";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
+import { getSupportedApp } from "@/components/connections/connection-data";
 
-type RedirectPhase = "preparing" | "ready" | "waiting_click" | "waiting" | "done" | "error" | "api_key";
+type RedirectPhase =
+  | "preparing"
+  | "ready"
+  | "waiting_click"
+  | "waiting"
+  | "done"
+  | "error"
+  | "api_key"
+  | "timeout";
 
 function RedirectInner() {
   const searchParams = useSearchParams();
@@ -33,13 +42,23 @@ function RedirectInner() {
   // Dedup guard so the auto-open effect fires exactly once per redirectUrl,
   // even across React StrictMode double-invokes / re-renders.
   const autoOpenedRef = useRef("");
+  // Mounted guard. The poll loop is a recursive setTimeout whose ticks do async
+  // awaits; an in-flight tick can resolve AFTER the user has navigated away
+  // (e.g. clicked a worker in the sidebar). Without this guard that stale tick
+  // would (a) reschedule a new timer the unmount cleanup can't reach and
+  // (b) call router.replace(returnTo), yanking the user back to the connect
+  // screen unexpectedly. Every async boundary checks this before acting.
+  const cancelledRef = useRef(false);
 
   // Poll connections list until the new connection appears as active,
-  // then navigate back. Stops after 2 minutes.
+  // then navigate back. Stops after 2 minutes with a visible terminal state
+  // (never an endless spinner).
   const startPolling = useCallback(() => {
+    cancelledRef.current = false;
     setPhase("waiting");
     const deadline = Date.now() + 2 * 60 * 1000;
     const tick = async () => {
+      if (cancelledRef.current) return;
       try {
         // Sync status from Composio first so our DB reflects reality.
         // The Composio /connected_accounts/link flow never calls our callback
@@ -48,18 +67,27 @@ function RedirectInner() {
         if (connectionId) {
           await api.connections.status(connectionId).catch(() => null);
         }
+        if (cancelledRef.current) return;
         const list = await api.connections.list();
+        if (cancelledRef.current) return;
         const active = list.find(
           (c) => c.app_name?.toLowerCase() === slug && c.status === "active"
         );
         if (active) {
           setPhase("done");
-          setTimeout(() => router.replace(returnTo), 1200);
+          pollRef.current = setTimeout(() => {
+            if (!cancelledRef.current) router.replace(returnTo);
+          }, 1200);
           return;
         }
       } catch { /* ignore */ }
+      if (cancelledRef.current) return;
       if (Date.now() < deadline) {
         pollRef.current = setTimeout(tick, 3000);
+      } else {
+        // Don't spin forever: surface a terminal "still waiting" state with a
+        // way to retry or leave, so the page is never stuck loading.
+        setPhase("timeout");
       }
     };
     pollRef.current = setTimeout(tick, 2000);
@@ -67,6 +95,7 @@ function RedirectInner() {
 
   useEffect(() => {
     return () => {
+      cancelledRef.current = true;
       if (pollRef.current) clearTimeout(pollRef.current);
     };
   }, []);
@@ -106,10 +135,19 @@ function RedirectInner() {
     setError("");
 
     let cancelled = false;
+    // Don't let a hung backend leave the page spinning on "preparing" forever
+    // (e.g. when the authorize route never returns). After 30s, surface a
+    // retryable error instead of an endless loader.
+    const initiateTimeout = setTimeout(() => {
+      if (cancelled) return;
+      setPhase("error");
+      setError("Authorization is taking longer than expected. Please try again.");
+    }, 30_000);
     (async () => {
       try {
         const result = await api.connections.initiate(slug);
         if (cancelled) return;
+        clearTimeout(initiateTimeout);
         if (result.redirect_url) {
           setRedirectUrl(result.redirect_url);
           setConnectionId(result.id ?? "");
@@ -119,6 +157,7 @@ function RedirectInner() {
         router.replace(returnTo);
       } catch (caught) {
         if (cancelled) return;
+        clearTimeout(initiateTimeout);
         const message = caught instanceof Error ? caught.message : "Failed to start authorization.";
         if (message.startsWith("api_key_only:")) {
           setPhase("api_key");
@@ -130,7 +169,10 @@ function RedirectInner() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      clearTimeout(initiateTimeout);
+    };
   }, [slug, providerName, returnTo, router]);
 
   return (
@@ -179,6 +221,35 @@ function RedirectInner() {
                   <Button type="button" onClick={() => window.location.reload()}>Try again</Button>
                   <Link href={returnTo} className={buttonVariants({ variant: "ghost", className: "w-full" })}>
                     Cancel
+                  </Link>
+                </div>
+              </>
+
+            ) : phase === "timeout" ? (
+              <>
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted">
+                  <ShieldCheck className="size-5 text-muted-foreground" />
+                </div>
+                <h1 className="mt-4 text-xl font-semibold">Still waiting for {providerName}</h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  We haven&apos;t detected the connection yet. Finish authorizing in
+                  the Composio tab, then check again.
+                </p>
+                <div className="mt-6 flex flex-col gap-2">
+                  <Button type="button" onClick={startPolling}>Check again</Button>
+                  {redirectUrl && (
+                    <a
+                      href={redirectUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={buttonVariants({ variant: "outline", className: "w-full" })}
+                    >
+                      <ExternalLink className="size-4 mr-2" />
+                      Open Composio again
+                    </a>
+                  )}
+                  <Link href={returnTo} className={buttonVariants({ variant: "ghost", className: "w-full" })}>
+                    Go to connections
                   </Link>
                 </div>
               </>
@@ -322,13 +393,14 @@ function normalizeReturnTo(value: string | null): string {
   return sanitizeRedirect(value, "/connections");
 }
 
+// Humanize a provider slug into its proper display name. Delegates to the
+// shared SUPPORTED_APPS map so multi-word providers render correctly
+// ("googlecalendar" -> "Google Calendar", "hubspot" -> "HubSpot") instead of
+// the naive title-case that produced "Googlecalendar". Unknown slugs fall back
+// to getSupportedApp's titleize (splits on - / _).
 function formatProviderName(slug: string): string {
   if (!slug) return "this app";
-  return slug
-    .split(/[-_]/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return getSupportedApp(slug).displayName;
 }
 
 export default function ConnectionsRedirectPage() {

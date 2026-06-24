@@ -266,7 +266,7 @@ export function ApprovalReviewBody({
   const expiry = formatExpiry(approval.expires_at);
 
   return (
-    <div style={{ maxWidth: 820, margin: "0 auto" }}>
+    <div className="c-appr-root" style={{ maxWidth: 820, margin: "0 auto" }}>
       <Pager
         worker={worker}
         index={index}

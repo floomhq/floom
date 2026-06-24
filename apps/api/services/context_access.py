@@ -406,9 +406,23 @@ def _context_summary(
 ) -> "ContextSummary":
     from contexts import context_dir, context_owner_id, context_tree_summary
     from models import AssetPermissions, ContextSummary
-    root = context_dir(name)
     cached_summary = (metadata.get(name) or {}).get("summary")
-    summary = cached_summary if isinstance(cached_summary, dict) else context_tree_summary(root)
+    if isinstance(cached_summary, dict):
+        # Fast path: the cached summary already carries file_count / size /
+        # updated_at, so building a LIST/summary row never needs the pack's file
+        # bytes. Suppress hydration (#1813 seam) so a summary build can't trigger
+        # a full pack download from remote storage in hosted mode. Without this,
+        # listing the Library hydrated EVERY pack from Supabase Storage just to
+        # render counts — one serialized download per file per pack — which made
+        # the worker-detail Library tab take ~30s to open on a fresh container.
+        root = context_dir(name, hydrate=False)
+        summary = cached_summary
+    else:
+        # No cached summary yet (pack never recorded one) — fall back to walking
+        # the pack on disk, which hydrates it in hosted mode. Rare on the list
+        # path because writes call refresh_context_summary_metadata.
+        root = context_dir(name)
+        summary = context_tree_summary(root)
     is_system = _is_system_context_pack(name, metadata)
     description = _context_description(root)
     if description is None and is_system:

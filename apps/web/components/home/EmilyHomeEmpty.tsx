@@ -26,7 +26,7 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
-import { BrandLogo } from "@/components/connections/BrandLogo";
+import { InlineToolToken } from "@/components/InlineToolToken";
 import { tokenisePrompt } from "@/lib/prompt-detect";
 import { isMachineLabel } from "@/lib/workspace/display-name";
 import { resolveWorkersGate } from "./emily-home-empty";
@@ -110,10 +110,10 @@ function attentionToFix(item: SystemOverviewAttentionItem, idx: number): FixItem
 
 // Inline tool tokens (Federico 2026-06-21): render an example prompt with its
 // tool names highlighted INLINE, each with its real brand icon — the same
-// register as the marketing landing prompt box (PromptText/tokenisePrompt), NOT
-// a separate "Uses [pill] [pill]" row. Matched tool terms get a faint --bg-3
-// token + the BrandLogo sprite; plain text renders as-is. The button's
-// accessible name stays the full prompt string so seeding + a11y are unchanged.
+// register as the marketing landing prompt box, NOT a separate "Uses [pill]
+// [pill]" row. Uses the SHARED InlineToolToken so this and the PromptChips
+// composer row can't diverge. The button's accessible name stays the full prompt
+// string so seeding + a11y are unchanged.
 function PromptTokens({ text }: { text: string }) {
   const segments = tokenisePrompt(text);
   return (
@@ -123,15 +123,9 @@ function PromptTokens({ text }: { text: string }) {
           return <span key={i}>{seg.text}</span>;
         }
         return (
-          <span
-            key={i}
-            className="inline-flex items-baseline gap-[3px] rounded-[var(--radius-ui)] bg-[var(--bg-3)] px-[5px] py-px mx-px align-baseline text-ink"
-          >
-            {seg.brand && (
-              <BrandLogo icon={seg.brand} className="size-[13px] shrink-0 translate-y-[1px]" />
-            )}
-            <span>{seg.text}</span>
-          </span>
+          <InlineToolToken key={i} brand={seg.brand} className="mx-px">
+            {seg.text}
+          </InlineToolToken>
         );
       })}
     </>

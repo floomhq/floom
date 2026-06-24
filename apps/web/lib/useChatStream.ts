@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
-import type { AttachedFile, ChatMessage } from "./emily-chat-types";
+import type { AttachedFile, CardStatus, ChatMessage } from "./emily-chat-types";
 import {
   CONVERSATION_STORAGE_KEY,
   readStoredConversationId,
@@ -1081,6 +1081,44 @@ export function reduceSSEEvent(
     default:
       return prev;
   }
+}
+
+
+const IN_FLIGHT_TOOL_CARD_STATUSES = new Set<CardStatus>([
+  "starting",
+  "running",
+  "queued",
+  "drafting",
+  "generating",
+  "smoke",
+  "pending_approval",
+  "loading",
+]);
+
+export type StreamingActivityKind = "idle" | "thinking" | "writing";
+
+export function getStreamingActivity(
+  messages: ChatMessage[],
+  isStreaming: boolean,
+): { kind: StreamingActivityKind } {
+  if (!isStreaming) return { kind: "idle" };
+
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  if (!lastAssistant?.parts?.length) return { kind: "thinking" };
+
+  const hasInFlightTool = lastAssistant.parts.some(
+    (part) =>
+      part.type === "tool-card" &&
+      IN_FLIGHT_TOOL_CARD_STATUSES.has(part.card.status),
+  );
+  if (hasInFlightTool) return { kind: "idle" };
+
+  const hasStreamingText = lastAssistant.parts.some(
+    (part) => part.type === "text" && part.streaming,
+  );
+  if (hasStreamingText) return { kind: "writing" };
+
+  return { kind: "thinking" };
 }
 
 export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {

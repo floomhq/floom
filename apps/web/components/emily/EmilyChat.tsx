@@ -30,8 +30,10 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
+import { Task } from "@/components/ai-elements/task";
 import {
   getAutoOpenRunDetailsHref,
+  getStreamingActivity,
   shouldAutoOpenRunDetails,
   useChatStream,
 } from "@/lib/useChatStream";
@@ -226,21 +228,14 @@ function SuggestionPills({
   );
 }
 
-// ── Typing indicator ──────────────────────────────────────────────────────────
+// ── Streaming activity (thinking / writing; idle while tools run) ─────────────
 
-function TypingIndicator() {
+function StreamingActivityRow({ kind }: { kind: "thinking" | "writing" }) {
+  const title = kind === "writing" ? "Writing…" : "Thinking…";
   return (
     <div className="flex items-start gap-2">
       <EmilyAvatar size="sm" active />
-      <div className="flex gap-1 py-1.5 px-1">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className="size-1.5 rounded-[var(--radius-pill)] bg-muted-foreground/40 animate-bounce"
-            style={{ animationDelay: `${i * 150}ms` }}
-          />
-        ))}
-      </div>
+      <Task title={title} status="running" className="min-w-0 flex-1 border-0 bg-transparent p-0 shadow-none" />
     </div>
   );
 }
@@ -864,7 +859,12 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 <p className="leading-relaxed break-words min-w-0">{error}</p>
               </div>
             )}
-            {isStreaming && <TypingIndicator />}
+            {(() => {
+              const activity = getStreamingActivity(messages, isStreaming);
+              return activity.kind !== "idle" ? (
+                <StreamingActivityRow kind={activity.kind} />
+              ) : null;
+            })()}
             <div ref={bottomRef} />
           </div>
         )}
