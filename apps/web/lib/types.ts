@@ -488,7 +488,7 @@ export interface PublicWorker {
 export interface StandaloneShareLink {
   token: string;
   url: string;
-  entity_type: "worker" | "brain_file" | "brain_pack" | "run";
+  entity_type: "worker" | "brain_file" | "brain_pack" | "run" | "review_pack" | "approvals_batch";
 }
 
 export interface PublicShareFile {
@@ -537,13 +537,15 @@ export interface SqliteView {
 }
 
 export interface StandaloneShare {
-  entity_type: "worker" | "brain_file" | "brain_pack";
+  entity_type: "worker" | "brain_file" | "brain_pack" | "run" | "approvals_batch";
   title: string;
   description?: string | null;
   worker?: PublicWorker;
   pack?: PublicSharePack;
   file?: PublicShareFile | null;
   files: PublicShareFile[];
+  approvals?: ApprovalRow[];
+  workspace_id?: string;
 }
 
 export interface WorkerSuggestion {
