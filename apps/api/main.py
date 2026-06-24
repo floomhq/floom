@@ -223,6 +223,24 @@ async def lifespan(_app: FastAPI):
         _logging.getLogger("workeros.cloud").info(
             "WORKEROS_ROLE=%s: scheduler/drain/recovery disabled in this process (HTTP only).", _role
         )
+    # PostHog ingestion canary: emit one synthetic `posthog_ingestion_canary`
+    # event at startup so every cloud deploy PROVES capture reaches project 479185
+    # (turns "deployed" into "deployed AND verified"; this is the check
+    # workeros-analytics/verify_deploy.py keys off). The engine's own lifespan
+    # (engine/apps/api/main.py) fires this, but the cloud runs `apps.api.main:app`,
+    # whose lifespan never did — so the canary was always absent on the cloud.
+    # Fail-soft: no-op when POSTHOG_API_KEY is unset / analytics disabled; never
+    # raises, so a canary problem can never block startup.
+    try:
+        _ai_obs = import_engine_module("services.ai_observability")
+        if _ai_obs.emit_ingestion_canary(source="cloud-startup"):
+            _logging.getLogger("workeros.cloud").info(
+                "PostHog ingestion canary emitted at cloud startup (role=%s).", _role
+            )
+    except Exception:  # pragma: no cover - analytics must never break startup
+        _logging.getLogger("workeros.cloud").debug(
+            "PostHog ingestion canary emit failed at startup", exc_info=True
+        )
     try:
         yield
     finally:
