@@ -114,20 +114,20 @@ function test556OverviewComputesMissingForAllWorkers(): void {
 // #556 Surface 3 — Frontend: AlertsBell shows setup_incomplete items
 // ---------------------------------------------------------------------------
 
-function test556AlertsBellSetupItems(): void {
-  const s = src("components/overview/AlertsBell.tsx");
-  assert(s.includes("setupItems"), "AlertsBell must define setupItems");
+function test556SidebarBadgeSetupItems(): void {
+  const overview = src("lib/useSelfOverviewItems.ts");
+  const sidebar = src("components/layout/sidebar.tsx");
   assert(
-    s.includes("type === \"setup_incomplete\""),
-    "AlertsBell must filter items with type=setup_incomplete",
+    overview.includes("api.system.overview()") && overview.includes("needs_attention"),
+    "Nav badge counts must derive from the overview needs_attention payload",
   );
   assert(
-    s.includes("need setup"),
-    "AlertsBell must render 'need setup' text for setup_incomplete items",
+    overview.includes("connection_expired") && overview.includes("failure_cluster"),
+    "Nav badge counts must preserve the actionable overview item filters",
   );
   assert(
-    s.includes("KeyRound"),
-    "AlertsBell must use KeyRound icon for setup items",
+    sidebar.includes('badge: "connections"') && sidebar.includes('badge: "runs"'),
+    "Sidebar must surface contextual badges on Connections and Runs",
   );
 }
 
@@ -143,7 +143,7 @@ const tests: [string, () => void][] = [
   ["#551 scheduler skips run when connections missing", test551SchedulerSkipsRunOnMissingConnections],
   ["#556 Surface 3: system_overview adds setup_incomplete attention items", test556OverviewSetupIncompleteItems],
   ["#556 Surface 3: overview computes missing secrets/connections per worker", test556OverviewComputesMissingForAllWorkers],
-  ["#556 Surface 3: AlertsBell renders setup_incomplete with KeyRound icon", test556AlertsBellSetupItems],
+  ["#556 Surface 3: sidebar renders contextual overview badges", test556SidebarBadgeSetupItems],
 ];
 
 let passed = 0;

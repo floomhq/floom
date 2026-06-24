@@ -35,22 +35,27 @@ function test562MissingConnectionsDirectLink(): void {
 }
 
 function test562MissingSecretsDirectLink(): void {
-  const s = src("components/overview/AlertsBell.tsx");
+  const browse = src("app/connections/browse/page.tsx");
+  const redirect = src("app/connections/redirect/page.tsx");
   assert(
-    s.includes("setup_incomplete") && s.includes("connections/secrets"),
-    "Missing secrets alert must link to /connections/secrets",
+    browse.includes("/connections/secrets?prefill="),
+    "Browse empty-search secret affordance must link to /connections/secrets with prefill",
+  );
+  assert(
+    redirect.includes("/connections/secrets?prefill="),
+    "API-key-only connection fallback must link to /connections/secrets with prefill",
   );
 }
 
 function test562TopLevelSecretLinkUpdated(): void {
-  const s = src("components/overview/AlertsBell.tsx");
+  const s = src("app/secrets/page.tsx");
   assert(
-    !s.includes('href="/secrets"'),
-    "Top-level 'Add secret →' link must not point to bare /secrets (stale path)",
+    s.includes("redirect(`/connections/secrets"),
+    "Legacy /secrets route must redirect to /connections/secrets",
   );
   assert(
-    s.includes("connections/secrets"),
-    "Top-level secret link must point to /connections/secrets",
+    s.includes("URLSearchParams") && s.includes("?${query}"),
+    "Legacy /secrets redirect must preserve query params such as prefill and return_to",
   );
 }
 
