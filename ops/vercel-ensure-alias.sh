@@ -76,7 +76,7 @@ import sys, json
 d = json.load(sys.stdin)
 for v in d.get("verification") or []:
     if v.get("type") == "TXT":
-        print(f"::warning::Add TXT {v.get(\"domain\")} = {v.get(\"value\")}", file=sys.stderr)
+        print(f"::warning::Add TXT {v.get('domain')} = {v.get('value')}", file=sys.stderr)
 '
 }
 

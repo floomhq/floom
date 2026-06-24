@@ -252,7 +252,7 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          timeout 10m npx --yes vercel@50.22.1 deploy --prebuilt --prod --yes \
+          timeout 10m npx --yes vercel@50.22.1 deploy --prebuilt --prod --yes --archive=tgz \
             --scope "$DASHBOARD_SCOPE" --token "$VERCEL_TOKEN" \
             | tee deploy-url.txt
           DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy-url.txt | tail -1)"
