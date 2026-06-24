@@ -10,6 +10,7 @@ import shutil
 import time
 import queue
 import sqlite3
+import inspect
 from html import escape
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -260,7 +261,11 @@ def _cache_ttl_seconds(env_name: str, default: float) -> float:
 
 
 _recipe_cache_lock = threading.Lock()
-_recipe_cache_by_worker: dict[str, tuple[float, Optional[tuple[str | None, WorkerConfig, Optional[Dict[str, Any]]]]]] = {}
+_RecipeCacheKey = tuple[str, str | None, str | None]
+_recipe_cache_by_worker: dict[
+    _RecipeCacheKey,
+    tuple[float, Optional[tuple[str | None, WorkerConfig, Optional[Dict[str, Any]]]]],
+] = {}
 _secret_cache_lock = threading.Lock()
 _secret_cache_by_key: dict[tuple[str, str], tuple[float, Dict[str, str]]] = {}
 
@@ -324,7 +329,8 @@ def invalidate_worker_run_cache(worker_id: str | None = None) -> None:
     """Drop per-process run hot-path caches after worker recipe mutations."""
     with _recipe_cache_lock:
         if worker_id:
-            _recipe_cache_by_worker.pop(worker_id, None)
+            for key in [key for key in _recipe_cache_by_worker if key[0] == worker_id]:
+                _recipe_cache_by_worker.pop(key, None)
         else:
             _recipe_cache_by_worker.clear()
     if worker_id:
@@ -648,6 +654,44 @@ def _worker_owner_id(worker_id: str, repos: Repositories | None = None) -> str |
     return _repos(repos).workers.get_owner(worker_id=worker_id)
 
 
+def _recipe_cache_key(
+    worker_id: str,
+    *,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
+) -> _RecipeCacheKey:
+    user_scope = str(user_id).strip() if user_id else None
+    workspace_scope = str(workspace_id).strip() if workspace_id else None
+    return (worker_id, user_scope or None, workspace_scope or None)
+
+
+def _call_worker_get_recipe(
+    workers_repo: Any,
+    *,
+    worker_id: str,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
+) -> Dict[str, Any] | None:
+    """Call repository get_recipe with every explicit scope it supports."""
+    method = workers_repo.get_recipe
+    kwargs: dict[str, Any] = {"worker_id": worker_id}
+    if user_id is not None:
+        kwargs["user_id"] = user_id
+    workspace_scope = str(workspace_id).strip() if workspace_id else None
+    if workspace_scope:
+        try:
+            params = inspect.signature(method).parameters
+            supports_workspace = (
+                "workspace_id" in params
+                or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values())
+            )
+        except (TypeError, ValueError):
+            supports_workspace = False
+        if supports_workspace:
+            kwargs["workspace_id"] = workspace_scope
+    return method(**kwargs)
+
+
 def _run_scope(run_id: str, repos: Repositories | None = None) -> tuple[str, str] | None:
     repos_obj = _repos(repos)
     run_row = repos_obj.runs.get_any(run_id=run_id)
@@ -662,20 +706,30 @@ def _run_scope(run_id: str, repos: Repositories | None = None) -> tuple[str, str
 def _load_worker_recipe(
     worker_id: str,
     repos: Repositories | None = None,
+    *,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
+    run_id: str | None = None,
 ) -> Optional[tuple[str | None, WorkerConfig, Optional[Dict[str, Any]]]]:
     """Load the executable recipe from the repository layer plus instance row."""
     ttl = _cache_ttl_seconds("WORKEROS_RUN_RECIPE_CACHE_TTL_SECONDS", 10.0)
+    cache_key = _recipe_cache_key(worker_id, user_id=user_id, workspace_id=workspace_id)
     if ttl > 0:
         now = time.monotonic()
         with _recipe_cache_lock:
-            cached = _recipe_cache_by_worker.get(worker_id)
+            cached = _recipe_cache_by_worker.get(cache_key)
             if cached is not None and cached[0] > now:
                 return cached[1]
 
     repos_obj = _repos(repos)
     loaded: Optional[tuple[str | None, WorkerConfig, Optional[Dict[str, Any]]]] = None
     try:
-        recipe = repos_obj.workers.get_recipe(worker_id=worker_id)
+        recipe = _call_worker_get_recipe(
+            repos_obj.workers,
+            worker_id=worker_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
         if recipe:
             config = recipe.get("config")
             if isinstance(config, WorkerConfig):
@@ -698,35 +752,77 @@ def _load_worker_recipe(
                 )
                 if ttl > 0:
                     with _recipe_cache_lock:
-                        _recipe_cache_by_worker[worker_id] = (time.monotonic() + ttl, loaded)
+                        _recipe_cache_by_worker[cache_key] = (time.monotonic() + ttl, loaded)
                 return loaded
     except Exception:
-        logger.exception("Failed to load worker recipe from database for %s", worker_id)
+        logger.exception(
+            "Failed to load worker recipe from database for worker=%s run=%s user_id=%s workspace_id=%s",
+            worker_id,
+            run_id,
+            user_id,
+            workspace_id,
+        )
 
     config = get_worker_config(worker_id)
     if not config:
         if ttl > 0:
             with _recipe_cache_lock:
-                _recipe_cache_by_worker[worker_id] = (time.monotonic() + ttl, None)
+                _recipe_cache_by_worker[cache_key] = (time.monotonic() + ttl, None)
         return None
     loaded = (_worker_owner_id(worker_id, repos_obj), config, None)
     if ttl > 0:
         with _recipe_cache_lock:
-            _recipe_cache_by_worker[worker_id] = (time.monotonic() + ttl, loaded)
+            _recipe_cache_by_worker[cache_key] = (time.monotonic() + ttl, loaded)
     return loaded
 
 
 def _get_worker_config_for_run(
     worker_id: str,
     repos: Repositories | None = None,
+    *,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
 ) -> Optional[WorkerConfig]:
-    loaded = _load_worker_recipe(worker_id, repos=repos)
+    loaded = _load_worker_recipe(
+        worker_id,
+        repos=repos,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
     return loaded[1] if loaded else None
 
 
-def get_worker_config_for_run(worker_id: str) -> Optional[WorkerConfig]:
+def get_worker_config_for_run(
+    worker_id: str,
+    *,
+    repos: Repositories | None = None,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
+) -> Optional[WorkerConfig]:
     """Return the DB-resolved worker recipe used for run execution."""
-    return _get_worker_config_for_run(worker_id)
+    return _get_worker_config_for_run(
+        worker_id,
+        repos=repos,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
+
+
+def get_worker_recipe_for_run(
+    worker_id: str,
+    *,
+    repos: Repositories | None = None,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
+) -> Dict[str, Any] | None:
+    """Return the repository recipe with the same explicit scope used by runs."""
+    repos_obj = _repos(repos)
+    return _call_worker_get_recipe(
+        repos_obj.workers,
+        worker_id=worker_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
 
 
 def _merge_instance_inputs(instance: Optional[Dict[str, Any]], inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -840,7 +936,7 @@ def create_run(
     repos_obj = _repos(repos)
     _ensure_prerun_disk_space()
     run_id = f"run_{uuid.uuid4().hex[:12]}"
-    loaded = _load_worker_recipe(worker_id, repos=repos_obj)
+    loaded = _load_worker_recipe(worker_id, repos=repos_obj, user_id=user_id)
     owner_id = user_id or (loaded[0] if loaded else None) or _worker_owner_id(worker_id, repos_obj)
     if not owner_id:
         raise ValueError(f"Worker {worker_id} owner not found")
@@ -2634,10 +2730,35 @@ def execute_run(
     _mark_active_run_stage(run_id, "execute_start")
     repos_obj = _repos(repos)
     perf.mark("repos")
-    owner_id = user_id or _worker_owner_id(worker_id, repos_obj)
+    try:
+        current_run = repos_obj.runs.get_any(run_id=run_id)
+    except Exception:
+        logger.warning("Failed to fetch run scope for %s before recipe load", run_id, exc_info=True)
+        current_run = None
+    perf.mark("run_scope_fetch")
+    run_workspace_id = (
+        str(current_run.get("workspace_id")).strip()
+        if isinstance(current_run, dict) and current_run.get("workspace_id")
+        else None
+    )
+    owner_id = (
+        user_id
+        or (
+            str(current_run.get("user_id")).strip()
+            if isinstance(current_run, dict) and current_run.get("user_id")
+            else None
+        )
+        or _worker_owner_id(worker_id, repos_obj)
+    )
     perf.mark("owner")
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
-    loaded = _load_worker_recipe(worker_id, repos_obj)
+    loaded = _load_worker_recipe(
+        worker_id,
+        repos=repos_obj,
+        user_id=owner_id,
+        workspace_id=run_workspace_id,
+        run_id=run_id,
+    )
     perf.mark("load_recipe")
     config = loaded[1] if loaded else None
     instance = loaded[2] if loaded else None
@@ -2667,7 +2788,6 @@ def execute_run(
         )
 
     try:
-        current_run = repos_obj.runs.get_any(run_id=run_id)
         perf.mark("status_fetch")
         current_status = (current_run or {}).get("status")
         if current_status in {
@@ -2692,6 +2812,13 @@ def execute_run(
 
         if not config:
             err = "Worker config not found"
+            logger.error(
+                "Worker config not found for run=%s worker=%s user_id=%s workspace_id=%s",
+                run_id,
+                worker_id,
+                owner_id,
+                run_workspace_id,
+            )
             update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="invalid_worker", user_id=owner_id, repos=repos_obj)
             publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
             log_fn(err, level="error")

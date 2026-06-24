@@ -1406,7 +1406,7 @@ class SqliteWorkerRepository:
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT id, owner_id, cron_expr, cron_timezone, next_run_at
+                SELECT id, owner_id, workspace_id, cron_expr, cron_timezone, next_run_at
                 FROM workers
                 WHERE enabled = 1 AND trigger_type IN ('schedule', 'cron', 'scheduled')
                 ORDER BY created_at, id
@@ -1470,7 +1470,13 @@ class SqliteWorkerRepository:
             )
         _invalidate_run_worker_cache()
 
-    def get_recipe(self, *, worker_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+    def get_recipe(
+        self,
+        *,
+        worker_id: str,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any] | None:
         cache = _recipe_cache.get()
         if cache is not None and worker_id in cache:
             # Cache hit — return what was pre-fetched by list().
@@ -1482,6 +1488,9 @@ class SqliteWorkerRepository:
         if user_id is not None:
             where += " AND w.owner_id = ?"
             params.append(user_id)
+        if workspace_id is not None:
+            where += " AND COALESCE(w.workspace_id, 'local-default') = ?"
+            params.append(workspace_id)
         with get_db() as conn:
             row = conn.execute(
                 f"""

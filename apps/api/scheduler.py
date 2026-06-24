@@ -22,16 +22,31 @@ from zoneinfo import ZoneInfo
 from croniter import croniter
 
 from db.factory import get_repositories
-from run_service import create_run, get_worker_config_for_run, start_run
+from run_service import (
+    create_run,
+    get_worker_config_for_run,
+    get_worker_recipe_for_run,
+    start_run,
+)
 from alerting import alerting_tick
 from services.product_events import emit_product_event
 
 
-def _missing_secrets_for_scheduled_worker(repos, worker_id: str, user_id: str | None) -> list[str]:
+def _missing_secrets_for_scheduled_worker(
+    repos,
+    worker_id: str,
+    user_id: str | None,
+    workspace_id: str | None = None,
+) -> list[str]:
     """Return required secret names not yet configured for this worker's owner."""
     if not user_id:
         return []
-    config = get_worker_config_for_run(worker_id)
+    config = get_worker_config_for_run(
+        worker_id,
+        repos=repos,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
     required = list(getattr(config, "secrets", []) or []) if config else []
     if not required:
         return []
@@ -42,11 +57,21 @@ def _missing_secrets_for_scheduled_worker(repos, worker_id: str, user_id: str | 
     return [s for s in required if s not in available]
 
 
-def _missing_connections_for_scheduled_worker(repos, worker_id: str, user_id: str | None) -> list[str]:
+def _missing_connections_for_scheduled_worker(
+    repos,
+    worker_id: str,
+    user_id: str | None,
+    workspace_id: str | None = None,
+) -> list[str]:
     """Return required connection slugs not yet active for this worker's owner."""
     if not user_id:
         return []
-    config = get_worker_config_for_run(worker_id)
+    config = get_worker_config_for_run(
+        worker_id,
+        repos=repos,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
     raw_connections = list(getattr(config, "connections", []) or []) if config else []
     required_slugs: list[str] = []
     for c in raw_connections:
@@ -230,12 +255,28 @@ def _worker_is_archived(worker_id: str) -> bool:
         return False
 
 
-def _effective_scheduled_inputs(repos, worker_id: str) -> tuple[dict[str, object], list[str]]:
+def _effective_scheduled_inputs(
+    repos,
+    worker_id: str,
+    *,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
+) -> tuple[dict[str, object], list[str]]:
     """Return inputs a schedule run will see, plus missing required fields."""
-    config = get_worker_config_for_run(worker_id)
+    config = get_worker_config_for_run(
+        worker_id,
+        repos=repos,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
     recipe = None
     try:
-        recipe = repos.workers.get_recipe(worker_id=worker_id)
+        recipe = get_worker_recipe_for_run(
+            worker_id,
+            repos=repos,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
     except Exception:
         recipe = None
 
@@ -267,6 +308,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
         trigger_id = row["id"]
         worker_id = row["worker_id"]
         user_id = row.get("owner_id")
+        workspace_id = row.get("workspace_id")
         cron_expr = _cron_expr_from_trigger_config(row.get("config_json"))
         if not cron_expr:
             logger.warning(
@@ -338,7 +380,12 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             )
             continue
 
-        scheduled_inputs, missing_inputs = _effective_scheduled_inputs(repos, worker_id)
+        scheduled_inputs, missing_inputs = _effective_scheduled_inputs(
+            repos,
+            worker_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
         if missing_inputs:
             if new_next:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
@@ -351,7 +398,12 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             continue
 
         # #551: Block upfront if required secrets/connections are not configured.
-        _sched_missing_secrets = _missing_secrets_for_scheduled_worker(repos, worker_id, user_id)
+        _sched_missing_secrets = _missing_secrets_for_scheduled_worker(
+            repos,
+            worker_id,
+            user_id,
+            workspace_id=workspace_id,
+        )
         if _sched_missing_secrets:
             if new_next:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
@@ -360,7 +412,12 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 trigger_id, worker_id, ", ".join(_sched_missing_secrets),
             )
             continue
-        _sched_missing_conns = _missing_connections_for_scheduled_worker(repos, worker_id, user_id)
+        _sched_missing_conns = _missing_connections_for_scheduled_worker(
+            repos,
+            worker_id,
+            user_id,
+            workspace_id=workspace_id,
+        )
         if _sched_missing_conns:
             if new_next:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
@@ -456,6 +513,7 @@ def _tick() -> None:
     for w in workers:
         worker_id = w["id"]
         user_id = w.get("owner_id")
+        workspace_id = w.get("workspace_id")
         cron_expr = w.get("cron_expr")
         cron_timezone = w.get("cron_timezone") or "UTC"
         if not cron_expr:
@@ -522,7 +580,12 @@ def _tick() -> None:
             continue
 
         # Fire the run
-        scheduled_inputs, missing_inputs = _effective_scheduled_inputs(repos, worker_id)
+        scheduled_inputs, missing_inputs = _effective_scheduled_inputs(
+            repos,
+            worker_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
         if missing_inputs:
             if new_next:
                 repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
@@ -534,7 +597,12 @@ def _tick() -> None:
             continue
 
         # #551: Block upfront if required secrets/connections are not configured.
-        _sched_missing_secrets = _missing_secrets_for_scheduled_worker(repos, worker_id, user_id)
+        _sched_missing_secrets = _missing_secrets_for_scheduled_worker(
+            repos,
+            worker_id,
+            user_id,
+            workspace_id=workspace_id,
+        )
         if _sched_missing_secrets:
             if new_next:
                 repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
@@ -543,7 +611,12 @@ def _tick() -> None:
                 worker_id, ", ".join(_sched_missing_secrets),
             )
             continue
-        _sched_missing_conns = _missing_connections_for_scheduled_worker(repos, worker_id, user_id)
+        _sched_missing_conns = _missing_connections_for_scheduled_worker(
+            repos,
+            worker_id,
+            user_id,
+            workspace_id=workspace_id,
+        )
         if _sched_missing_conns:
             if new_next:
                 repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)

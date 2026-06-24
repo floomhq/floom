@@ -113,7 +113,13 @@ class WorkerRepository(Protocol):
 
     def delete_skill_version(self, *, skill_version_id: str) -> None: ...
 
-    def get_recipe(self, *, worker_id: str, user_id: str | None = None) -> RowDict | None: ...
+    def get_recipe(
+        self,
+        *,
+        worker_id: str,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> RowDict | None: ...
 
     def upsert_webhook_secret_hash(
         self,
