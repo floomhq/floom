@@ -98,20 +98,44 @@ ensure_domain() {
 alias_deploy() {
   local domain="$1"
   echo "Aliasing ${domain} -> ${DEPLOY}..."
+  local resp err ok
+  # Alias without teamId first — floomhq team tokens often 404 with ?teamId= on this endpoint.
   resp="$(api -X POST \
-    "https://api.vercel.com/v2/deployments/${DEPLOY}/aliases?teamId=${TEAM}" \
+    "https://api.vercel.com/v2/deployments/${DEPLOY}/aliases" \
     -H "Content-Type: application/json" \
     -d "{\"alias\":\"${domain}\"}")"
-  echo "$resp"
-  echo "$resp" | python3 -c '
+  echo "  alias (no teamId): $resp"
+  ok="$(echo "$resp" | python3 -c '
 import sys, json
 d = json.load(sys.stdin)
 err = d.get("error") or {}
 ok = bool(d.get("uid")) or err.get("code") in ("not_modified",)
-if not ok:
-    print(f"::error::Alias failed: {err}", file=sys.stderr)
-sys.exit(0 if ok else 1)
+print("1" if ok else "0")
+')"
+  if [[ "$ok" != "1" ]]; then
+    resp="$(api -X POST \
+      "https://api.vercel.com/v2/deployments/${DEPLOY}/aliases?teamId=${TEAM}" \
+      -H "Content-Type: application/json" \
+      -d "{\"alias\":\"${domain}\"}")"
+    echo "  alias (teamId): $resp"
+    ok="$(echo "$resp" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+err = d.get("error") or {}
+ok = bool(d.get("uid")) or err.get("code") in ("not_modified",)
+print("1" if ok else "0")
+')"
+  fi
+  if [[ "$ok" != "1" ]]; then
+    echo "$resp" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+err = d.get("error") or {}
+print(f"::error::Alias failed: {err}", file=sys.stderr)
 '
+    return 1
+  fi
+  return 0
 }
 
 alias_domain() {
