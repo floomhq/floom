@@ -36,6 +36,7 @@ jobs:
       VERCEL_LANDING_PROJECT_ID: ${{ secrets.VERCEL_WORKEROS_CLOUD_LANDING_PROJECT_ID }}
       VERCEL_LANDING_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       APEX_DOMAIN: workeros.floom.dev
+      LANDING_ALIASES: workeros.floom.dev,floom.dev
 
     steps:
       - uses: actions/checkout@v4
@@ -84,13 +85,11 @@ jobs:
           fi
           echo "DEPLOY_URL=$DEPLOY_URL" >> "$GITHUB_ENV"
 
-      - name: Re-alias apex to the new deploy
+      - name: Re-alias landing domains to the new deploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          # Do not rely on Vercel auto-promotion. Resolve the new deploy id and
-          # explicitly point the apex at it via the v2 aliases API.
           DEPLOY_ID="$(curl -sS \
             "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${VERCEL_LANDING_ORG_ID}" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
@@ -100,16 +99,13 @@ jobs:
             exit 1
           fi
           echo "DEPLOY_ID=$DEPLOY_ID" >> "$GITHUB_ENV"
-          echo "Re-aliasing $APEX_DOMAIN -> $DEPLOY_ID"
-          RESP="$(curl -sS -X POST \
-            "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${VERCEL_LANDING_ORG_ID}" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"alias\":\"${APEX_DOMAIN}\"}")"
-          echo "$RESP"
-          # Accept success OR the idempotent "already associated" (not_modified) case.
-          echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code")=="not_modified"; sys.exit(0 if ok else 1)' \
-            || { echo "::error::Re-alias of ${APEX_DOMAIN} failed."; exit 1; }
+          chmod +x ops/vercel-ensure-alias.sh
+          args=(--team "$VERCEL_LANDING_ORG_ID" --project "$VERCEL_LANDING_PROJECT_ID" --deploy "$DEPLOY_ID")
+          IFS=',' read -r -a aliases <<< "$LANDING_ALIASES"
+          for alias in "${aliases[@]}"; do
+            args+=(--domain "$alias")
+          done
+          bash ops/vercel-ensure-alias.sh "${args[@]}"
 
       - name: Verify apex serves the NEW deploy
         run: |
@@ -151,11 +147,10 @@ jobs:
     timeout-minutes: 20
 
     env:
-      # The landing project rewrites /app/* to the fedes-projects dashboard
-      # production domain. Pin the accessible production project explicitly so
-      # dashboard deploys advance the same build that floom.dev/app and
-      # workeros.floom.dev/app serve.
-      DASHBOARD_SCOPE: fedes-projects-5891bd50
+      # Dashboard lives on the floomhq Vercel team (same org as landing). The
+      # landing rewrite points /app/* at r9-detail.floom.dev, which must track
+      # this project's production deploy.
+      DASHBOARD_SCOPE: ${{ secrets.VERCEL_ORG_ID }}
       DASHBOARD_PROJECT_NAME: workeros-cloud-dashboard
       DASHBOARD_PROD_ALIAS: r9-detail.floom.dev
 
@@ -208,14 +203,14 @@ jobs:
         working-directory: web
         run: npm run sync -- --quiet
 
-      - name: Pin Vercel project link (fedes dashboard)
+      - name: Pin Vercel project link (floomhq dashboard)
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
           # Pin the link BEFORE pull so `vercel pull`/`build`/`deploy` target the
-          # canonical fedes-projects workeros-cloud-dashboard project regardless
-          # of stale repo secrets or old same-named projects.
+          # floomhq workeros-cloud-dashboard project regardless of stale secrets
+          # or same-named projects on other teams.
           dashboard_project_id="$(curl -sS \
             "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_NAME}?teamId=${DASHBOARD_SCOPE}" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \

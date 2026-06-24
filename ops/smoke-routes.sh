@@ -32,6 +32,7 @@ sha256_of() {
 OS_HOST="https://workers.floom.dev"
 OS_API="https://workers-api.floom.dev"
 CLOUD_HOST="https://workeros.floom.dev"
+CLOUD_LANDING_HOST="https://floom.dev"
 CLOUD_API="https://workeros-api.floom.dev"
 CLOUD_DASHBOARD_HOST="${CLOUD_DASHBOARD_HOST:-https://r9-detail.floom.dev}"
 CLOUD_APP_HOSTS=(
@@ -43,6 +44,7 @@ CLOUD_APP_HOSTS=(
 # any 4xx/5xx means the deploy is not promotable.
 CLOUD_ROUTES=(
   "/"
+  "/login"
   "/app"
   "/app/login"
   "/app/overview"
@@ -52,6 +54,14 @@ CLOUD_ROUTES=(
   "/app/assistant"
   "/app/workers/granola-hubspot-meeting-actions"
   "/app/runs/run_8290101e249b"
+)
+
+CLOUD_LANDING_ROUTES=(
+  "/"
+  "/login"
+  "/start/slack"
+  "/start/whatsapp"
+  "/start/mcp"
 )
 
 OS_ROUTES=(
@@ -158,6 +168,9 @@ if [[ "$TARGET" == "all" || "$TARGET" == "cloud" ]]; then
   check "cloud-api" "$CLOUD_API/healthz"
   for route in "${CLOUD_ROUTES[@]}"; do
     check "cloud" "$CLOUD_HOST$route"
+  done
+  for route in "${CLOUD_LANDING_ROUTES[@]}"; do
+    check "cloud-landing" "$CLOUD_LANDING_HOST$route"
   done
   check_cloud_dashboard_chunkset
 fi
