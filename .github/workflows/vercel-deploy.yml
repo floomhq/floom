@@ -359,18 +359,18 @@ jobs:
             sleep 10
           done
 
-      - name: Post-deploy smoke gate (cloud routes via apex)
+      - name: Post-deploy smoke gate (dashboard /app routes)
         run: |
           set -uo pipefail
-          # Verify the apex /app rewrite now serves the new dashboard deploy with
+          # Verify the public /app routes now serve the new dashboard deploy with
           # no 508 route loops / 5xx. Retry to allow the prod alias to propagate.
           for i in $(seq 1 12); do
-            if SMOKE_HTTP_CLIENT=python bash ops/smoke-routes.sh cloud; then
-              echo "Cloud smoke gate passed."
+            if SMOKE_HTTP_CLIENT=python bash ops/smoke-routes.sh dashboard; then
+              echo "Dashboard smoke gate passed."
               exit 0
             fi
             echo "smoke attempt $i failed; retrying after alias propagation..."
             sleep 15
           done
-          echo "::error::Cloud smoke gate failed after deploy."
+          echo "::error::Dashboard smoke gate failed after deploy."
           exit 1

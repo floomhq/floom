@@ -6,6 +6,7 @@
 # Usage:
 #   bash ops/smoke-routes.sh          # check both OS and Cloud
 #   bash ops/smoke-routes.sh cloud    # Cloud only
+#   bash ops/smoke-routes.sh dashboard # Cloud dashboard /app only
 #   bash ops/smoke-routes.sh os       # OS only
 #
 # Run this after every production deploy and before relying on a production alias.
@@ -162,9 +163,9 @@ check_cloud_dashboard_chunkset() {
 }
 
 case "$TARGET" in
-  all|cloud|os) ;;
+  all|cloud|dashboard|os) ;;
   *)
-    echo "Usage: bash ops/smoke-routes.sh [all|cloud|os]" >&2
+    echo "Usage: bash ops/smoke-routes.sh [all|cloud|dashboard|os]" >&2
     exit 2
     ;;
 esac
@@ -185,6 +186,18 @@ if [[ "$TARGET" == "all" || "$TARGET" == "cloud" ]]; then
   done
   for route in "${CLOUD_LANDING_ROUTES[@]}"; do
     check "cloud-landing" "$CLOUD_LANDING_HOST$route"
+  done
+  check_cloud_dashboard_chunkset
+fi
+
+if [[ "$TARGET" == "dashboard" ]]; then
+  echo "== Cloud dashboard =="
+  check "cloud-api" "$CLOUD_API/healthz"
+  for app_host in "${CLOUD_APP_HOSTS[@]}"; do
+    for route in "${CLOUD_ROUTES[@]}"; do
+      [[ "$route" == /app* ]] || continue
+      check "cloud-app" "${app_host%/}$route"
+    done
   done
   check_cloud_dashboard_chunkset
 fi
