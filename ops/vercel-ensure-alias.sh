@@ -90,8 +90,17 @@ sys.exit(0 if ok else 1)
 }
 
 for domain in "${DOMAINS[@]}"; do
-  ensure_domain "$domain"
-  alias_deploy "$domain"
+  if ensure_domain "$domain"; then
+    alias_deploy "$domain"
+  else
+    echo "::warning::Skipping alias for ${domain}; complete DNS verification first." >&2
+    fail=1
+  fi
 done
+
+if [[ "${fail:-0}" -ne 0 ]]; then
+  echo "::error::One or more domains could not be verified/aliased." >&2
+  exit 1
+fi
 
 echo "All domains aliased: ${DOMAINS[*]}"

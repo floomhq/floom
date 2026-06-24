@@ -36,7 +36,7 @@ jobs:
       VERCEL_LANDING_PROJECT_ID: ${{ secrets.VERCEL_WORKEROS_CLOUD_LANDING_PROJECT_ID }}
       VERCEL_LANDING_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       APEX_DOMAIN: workeros.floom.dev
-      LANDING_ALIASES: workeros.floom.dev,floom.dev
+      LANDING_ALIASES: floom.dev,workeros.floom.dev
 
     steps:
       - uses: actions/checkout@v4
@@ -266,9 +266,6 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          # Keep the dashboard production domain attached to the just-promoted
-          # deploy. The landing rewrite points at this domain, so this is the
-          # build floom.dev/app and workeros.floom.dev/app inherit.
           DEPLOY_ID="$(curl -sS \
             "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${DASHBOARD_SCOPE}" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
@@ -278,6 +275,21 @@ jobs:
             exit 1
           fi
           echo "DEPLOY_ID=$DEPLOY_ID" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            state="$(curl -sS \
+              "https://api.vercel.com/v13/deployments/${DEPLOY_ID}?teamId=${DASHBOARD_SCOPE}" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin).get("readyState",""))')"
+            echo "attempt $i: deploy ${DEPLOY_ID} readyState=${state}"
+            if [ "$state" = "READY" ]; then
+              break
+            fi
+            if [ "$i" = "60" ]; then
+              echo "::error::Dashboard deploy ${DEPLOY_ID} never reached READY."
+              exit 1
+            fi
+            sleep 10
+          done
           echo "Ensuring $DASHBOARD_PROD_ALIAS aliases $DEPLOY_ID"
           RESP="$(curl -sS -X POST \
             "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${DASHBOARD_SCOPE}" \
