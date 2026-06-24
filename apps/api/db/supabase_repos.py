@@ -263,12 +263,16 @@ def _materialize_worker_files(
     at the expected path. Supabase is the source of truth in cloud mode;
     the filesystem is a write-through cache rebuilt on demand.
 
-    ``version_key`` ("worker_id::skill_version_id") memoizes the write per
-    process: the same bundle is written at most once, so repeated config
-    resolutions (runs/detail) don't pay the disk cost again. A new code version
-    has a new key, so updates re-materialize.
+    ``version_key`` memoizes the write per process: the same bundle is written
+    at most once, so repeated config resolutions (runs/detail) don't pay the disk
+    cost again. The effective key includes the embedded file content hash because
+    cloud updates can reuse the same skill_version row for an existing worker.
     """
-    if version_key and version_key in _materialized_versions:
+    bundle_sha256 = _bundle_sha256_from_worker_files(files)
+    effective_key = (
+        f"{version_key}::{bundle_sha256}" if version_key and bundle_sha256 else version_key
+    )
+    if effective_key and effective_key in _materialized_versions:
         return
     workers_dir_env = (os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
     workers_dir = Path(workers_dir_env) if workers_dir_env else Path("/opt/workeros-cloud/var/workers")
@@ -280,8 +284,8 @@ def _materialize_worker_files(
             fpath = worker_dir / safe_name
             fpath.parent.mkdir(parents=True, exist_ok=True)
             fpath.write_text(content, encoding="utf-8")
-        if version_key:
-            _materialized_versions.add(version_key)
+        if effective_key:
+            _materialized_versions.add(effective_key)
         _repo_logger.debug("Materialized %d file(s) for worker %s to %s", len(files), worker_id, worker_dir)
     except Exception:
         _repo_logger.warning("Failed to materialize files for worker %s", worker_id, exc_info=True)
@@ -374,6 +378,45 @@ def _sanitize_worker_files(files: Mapping[str, Any]) -> dict[str, str]:
             raise ValueError(f"worker file content must be text: {safe_path!r}")
         sanitized[safe_path] = raw_content
     return sanitized
+
+
+def _bundle_sha256_from_worker_files(files: Mapping[str, Any]) -> str | None:
+    digest = hashlib.sha256()
+    included = 0
+    for rel_path, content in sorted(files.items()):
+        if not isinstance(rel_path, str) or not isinstance(content, str):
+            continue
+        try:
+            safe_path = _validate_worker_file_path(rel_path)
+        except ValueError:
+            continue
+        if _should_ignore_worker_file(safe_path):
+            continue
+        path_bytes = safe_path.encode("utf-8")
+        content_bytes = content.encode("utf-8")
+        digest.update(len(path_bytes).to_bytes(8, "big"))
+        digest.update(path_bytes)
+        digest.update(len(content_bytes).to_bytes(8, "big"))
+        digest.update(content_bytes)
+        included += 1
+    if included == 0:
+        return None
+    return digest.hexdigest()
+
+
+def _attach_bundle_sha256(manifest: dict[str, Any]) -> dict[str, Any]:
+    files = manifest.get("_files")
+    if not isinstance(files, Mapping):
+        return manifest
+    bundle_sha256 = _bundle_sha256_from_worker_files(files)
+    if not bundle_sha256:
+        return manifest
+    out = dict(manifest)
+    runtime = out.get("runtime")
+    runtime = dict(runtime) if isinstance(runtime, Mapping) else {}
+    runtime["bundle_sha256"] = bundle_sha256
+    out["runtime"] = runtime
+    return out
 
 
 def _json_storage_value(value: Any, default: Any) -> Any:
@@ -1923,6 +1966,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         # Self-heal a clobbered manifest (contract lost, recipe still in _files)
         # before stripping _files, so the run resolves the real recipe.
         manifest_json = _heal_manifest_contract(manifest_json, worker_id=worker_id)
+        manifest_json = _attach_bundle_sha256(manifest_json)
 
         # Cloud: Supabase is the source of truth for worker code. If
         # _files is present in manifest_json, materialize them to
