@@ -108,6 +108,7 @@ def revoke_worker_share_link(
 @worker_admin_router.get("/workers/{worker_id}", response_model=WorkerDetail)
 def get_worker_detail(
     worker_id: str,
+    shape: Optional[str] = None,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -115,6 +116,13 @@ def get_worker_detail(
     # include_grants=True: a specific-people grantee (#767/#768) can VIEW the
     # worker detail. This is the only caller that opts in; mutation endpoints
     # keep owner/workspace-only access.
+    #
+    # shape="run": the standalone /run/{id} run-form page needs only the
+    # worker identity + config. Skips the heavy detail-only assembly (recent
+    # runs, latest-run output body, 7-day stats batch, input-values recipe,
+    # available secret/connection slugs, on-disk bundle read incl. the ~61 KB
+    # manifest). That work measured ~6-8s warm on Cloud and tens of seconds on
+    # a cold container, and the run form renders none of it.
     return _build_worker_detail(
         canonical_id,
         user_id=_worker_access_user_id(auth),
@@ -122,6 +130,7 @@ def get_worker_detail(
         role=_worker_repo_role(auth),
         include_grants=True,
         owner_aliases={auth.user_id, auth.username or ""},
+        shape=shape if shape == "run" else None,
     )
 
 

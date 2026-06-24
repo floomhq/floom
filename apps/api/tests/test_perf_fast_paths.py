@@ -485,7 +485,13 @@ def test_context_summary_uses_cached_metadata_without_tree_walk(monkeypatch, tmp
     def fail_tree_summary(_root):
         raise AssertionError("context list path walked files despite cached summary")
 
-    monkeypatch.setattr(contexts, "context_dir", lambda _name: root)
+    captured: dict[str, object] = {}
+
+    def fake_context_dir(_name, *, hydrate=True):
+        captured["hydrate"] = hydrate
+        return root
+
+    monkeypatch.setattr(contexts, "context_dir", fake_context_dir)
     monkeypatch.setattr(contexts, "context_tree_summary", fail_tree_summary)
 
     summary = context_access._context_summary("pack", metadata)
@@ -493,6 +499,12 @@ def test_context_summary_uses_cached_metadata_without_tree_walk(monkeypatch, tmp
     assert summary.file_count == 123
     assert summary.total_size_bytes == 4567
     assert summary.updated_at == "2026-06-18T00:00:00+00:00"
+    # Perf guard: when the cached summary is present the summary/list path must
+    # NOT hydrate the pack. In hosted mode context_dir() hydration downloads the
+    # whole pack from Supabase Storage; doing that per-pack while listing made the
+    # worker-detail Library tab take ~30s to open. hydrate=False is the seam that
+    # keeps the listing metadata-only and instant.
+    assert captured["hydrate"] is False
 
 
 def test_context_write_refreshes_summary_metadata(monkeypatch, tmp_path):

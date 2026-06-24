@@ -7,12 +7,12 @@ const RunsCollection = nextDynamic(() => import("./RunsCollection"));
 // must not be baked into a statically-cached shell shared across requests.
 export const dynamic = "force-dynamic";
 
-export default async function RunsPage() {
-  let initialRuns: import("@/lib/types").RunSummary[] = [];
-  try {
-    initialRuns = await fetchRuns({ limit: 50, offset: 0 });
-  } catch {
-    // Fall through — RunsCollection will fetch on the client side
-  }
-  return <RunsCollection initialRuns={initialRuns} />;
+// perf: stream the first-page fetch instead of awaiting it (see workers/page.tsx
+// + useStreamedInitialData). Awaiting blocked first paint behind the backend
+// round-trip and showed loading.tsx on every navigation.
+export default function RunsPage() {
+  const initialRunsPromise = fetchRuns({ limit: 50, offset: 0 }).catch(
+    () => [] as import("@/lib/types").RunSummary[],
+  );
+  return <RunsCollection initialRunsPromise={initialRunsPromise} />;
 }

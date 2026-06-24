@@ -69,6 +69,45 @@ describe("WorkerBrainEditor", () => {
     expect(screen.queryByRole("button", { name: /Connect a memory folder/i })).not.toBeInTheDocument();
   });
 
+  it("locks the worker's own memory folder to Read & write (no silent-revert toggle/detach)", () => {
+    // The engine force-pins the worker's memory context writeable and re-mounts
+    // it on every save, so an interactive toggle/detach here would silently
+    // revert while still firing a success toast. The row must be locked instead.
+    render(
+      <WorkerBrainEditor
+        contexts={[{ name: "memory-morning-brief", writeable: true }, "company-facts"]}
+        availablePacks={[{ name: "memory-morning-brief" }, { name: "company-facts" }]}
+        editable
+        onChange={vi.fn()}
+        memoryFolderName="memory-morning-brief"
+        memoryPinned
+      />,
+    );
+    // No Read toggle and no detach for the pinned memory row...
+    expect(screen.queryByRole("group", { name: "memory-morning-brief access" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove memory-morning-brief" })).not.toBeInTheDocument();
+    // ...but a locked Read & write indicator is shown.
+    expect(screen.getByTitle(/always read & write/i)).toBeInTheDocument();
+    // A normal (non-memory) folder keeps its interactive controls.
+    expect(screen.getByRole("group", { name: "company-facts access" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove company-facts" })).toBeInTheDocument();
+  });
+
+  it("does not lock the memory folder when memory is disabled (memoryPinned false)", () => {
+    render(
+      <WorkerBrainEditor
+        contexts={[{ name: "memory-morning-brief", writeable: true }]}
+        availablePacks={[{ name: "memory-morning-brief" }]}
+        editable
+        onChange={vi.fn()}
+        memoryFolderName="memory-morning-brief"
+        memoryPinned={false}
+      />,
+    );
+    expect(screen.getByRole("group", { name: "memory-morning-brief access" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove memory-morning-brief" })).toBeInTheDocument();
+  });
+
   it("hides the memory CTA in read-only mode", () => {
     render(
       <WorkerBrainEditor

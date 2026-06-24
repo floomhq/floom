@@ -7,12 +7,16 @@ const WorkersCollection = nextDynamic(() => import("./WorkersCollection"));
 // must not be baked into a statically-cached shell shared across requests.
 export const dynamic = "force-dynamic";
 
-export default async function WorkersPage() {
-  let initialWorkers: import("@/lib/types").WorkerSummary[] = [];
-  try {
-    initialWorkers = await fetchWorkerList({ include_archived: true });
-  } catch {
-    // Fall through — WorkersCollection will fetch on the client side
-  }
-  return <WorkersCollection initialWorkers={initialWorkers} />;
+// perf: do NOT `await` the list here. Awaiting blocks the RSC behind a ~0.7-1s
+// backend round-trip (query + proxy/Railway hops) and shows loading.tsx for that
+// whole window on EVERY navigation, defeating the cache-first client. Stream the
+// fetch as an unawaited promise instead; the client renders cache-first
+// immediately and seeds from this promise only on a true cold start
+// (useStreamedInitialData). Keeps the #654 cold-start SSR benefit, drops the
+// per-navigation skeleton.
+export default function WorkersPage() {
+  const initialWorkersPromise = fetchWorkerList({ include_archived: true }).catch(
+    () => [] as import("@/lib/types").WorkerSummary[],
+  );
+  return <WorkersCollection initialWorkersPromise={initialWorkersPromise} />;
 }

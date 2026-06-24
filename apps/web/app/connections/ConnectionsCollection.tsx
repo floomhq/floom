@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { useConnections, useMembers, useSecrets, useWorkers } from "@/lib/query/hooks";
+import { useConnections, useMembers, useSecrets, useWorkers, useStreamedInitialData, qk } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
@@ -634,11 +634,22 @@ function ConnAdvancedMenu({
 }
 
 export default function ConnectionsCollection({
-  initialConnections,
+  initialConnections = [],
+  initialConnectionsPromise,
 }: {
-  initialConnections: ConnectionItem[];
+  initialConnections?: ConnectionItem[];
+  // perf: streamed first-load fetch (see connections/page.tsx +
+  // useStreamedInitialData). The page no longer blocks the RSC on this fetch.
+  initialConnectionsPromise?: Promise<ConnectionItem[]>;
 }) {
-  const connectionsQuery = useConnections(initialConnections);
+  useStreamedInitialData(qk.connections, initialConnectionsPromise);
+  // Pass undefined (not []) as initialData when empty so the query still fetches
+  // on a cold start — an empty-array initialData would mark the query "fresh" and
+  // suppress the first fetch (staleTime 30s + refetchOnMount:false), leaving the
+  // surface permanently empty.
+  const connectionsQuery = useConnections(
+    initialConnections.length > 0 ? initialConnections : undefined,
+  );
   const secretsQuery = useSecrets();
   const workersQuery = useWorkers();
   const membersQuery = useMembers();

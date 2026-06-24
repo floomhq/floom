@@ -18,6 +18,7 @@ export function Tool({
   duration,
   className,
   children,
+  defaultOpen = false,
 }: {
   name: string;
   args?: unknown;
@@ -28,13 +29,14 @@ export function Tool({
   duration?: string;
   className?: string;
   children?: ReactNode;
+  defaultOpen?: boolean;
 }) {
   const normalizedStatus = normalizeStatus(status);
   const state = normalizedStatus ?? (result === undefined && !children ? "called" : isError ? "error" : "done");
   const displayState = status ? humanizeStatus(status) : state;
   const showState = Boolean(status) || state !== "done";
   return (
-    <Collapsible defaultOpen={false}>
+    <Collapsible defaultOpen={defaultOpen}>
       <div className={cn("rounded-[var(--radius-card)] bg-[var(--bg-2)] shadow-[var(--shadow-card)]", className)}>
         <CollapsibleTrigger className="group flex w-full items-center gap-2.5 px-3 py-2 text-left">
           {/* Status icon — error gets a red X, running gets a muted hammer, done gets nothing */}

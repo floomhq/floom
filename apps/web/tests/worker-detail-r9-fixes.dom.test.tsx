@@ -112,12 +112,14 @@ describe("R9 worker-detail FIX 1 — Developer disclosure is inline on the tab r
     expect(tabRow!.querySelector('[role="menuitemcheckbox"]')).toBeNull();
   });
 
-  it("clicking Developer once reveals ALL developer tabs (Source, Versions, Brain, Tools) as real tabs", async () => {
+  it("clicking Developer once reveals ALL developer tabs (Source, Versions, Library, Tools) as real tabs", async () => {
     await openDetail();
     // Initially no advanced tabs visible.
     expect(screen.queryByRole("tab", { name: "Source" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Versions" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Brain" })).toBeNull();
+    // The "Brain" tab is surfaced to operators as "Library" (internal id stays
+    // "Brain"); assert on the user-facing label.
+    expect(screen.queryByRole("tab", { name: "Library" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Tools" })).toBeNull();
 
     // Click Developer — all four appear as real selectable tabs.
@@ -125,7 +127,7 @@ describe("R9 worker-detail FIX 1 — Developer disclosure is inline on the tab r
     fireEvent.click(advBtn);
     await waitFor(() => expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy());
     expect(screen.getByRole("tab", { name: "Versions" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Brain" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Library" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Tools" })).toBeTruthy();
   });
 

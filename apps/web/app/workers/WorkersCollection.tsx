@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
-import { useWorkers, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
+import { useWorkers, useStreamedInitialData, qk, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
 import type {
   WorkerSummary,
   WorkerDetail,
@@ -22,6 +22,7 @@ import type {
 import { formatVersionRows } from "@/lib/workers/versions";
 import {
   WORKER_DETAIL_TABS,
+  WORKER_DETAIL_TAB_LABEL,
   type WorkerDetailTab,
   SETUP_SUBTABS,
   type SetupSubtab,
@@ -401,7 +402,7 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
         <div>
           <h4 style={h4}>
             <Brain className="inline-block size-[11px] align-[-1px] mr-1" aria-hidden="true" />
-            Company brain it uses
+            Library it uses
           </h4>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {contexts.map((spec) => {
@@ -757,7 +758,7 @@ function BrainTab({ w }: { w: WorkerSummary }) {
     api.contexts
       .list()
       .then(setPacks)
-      .catch((err) => reportError("Could not load brain folders.", err));
+      .catch((err) => reportError("Could not load your Library.", err));
   }, []);
   useEffect(() => {
     refreshPacks();
@@ -766,16 +767,19 @@ function BrainTab({ w }: { w: WorkerSummary }) {
   if (d === null) return <DetailError />;
   const editable = can("edit", d);
   const contexts = d.config?.contexts ?? [];
-  // Per-worker memory folder convention: "<worker-id>-memory". Connecting it
-  // gives the worker a writeable folder it owns by default (issue 6b).
-  const memoryFolderName = `${w.id}-memory`;
+  // Per-worker memory folder. MUST match the engine convention
+  // (models.default_worker_memory_context_name = "memory-<id>", overridable via
+  // memory.context); the old "<id>-memory" guess never matched the folder the
+  // engine actually mounts, so the Connect-CTA and pin detection both missed.
+  const memoryEnabled = d.config?.memory?.enabled !== false;
+  const memoryFolderName = d.config?.memory?.context || `memory-${w.id}`;
   const save = async (next: WorkerContextSpec[]) => {
     setBusy(true);
     try {
       applyDetail(await persistYml(d, patchBrainContexts(workerYml(d), next)));
-      toast.success("Brain updated");
+      toast.success("Library updated");
     } catch {
-      toast.error("Could not update brain folders.");
+      toast.error("Could not update the Library.");
     } finally {
       setBusy(false);
     }
@@ -810,6 +814,7 @@ function BrainTab({ w }: { w: WorkerSummary }) {
       busy={busy}
       onChange={(next) => void save(next)}
       memoryFolderName={memoryFolderName}
+      memoryPinned={memoryEnabled}
       onAttachMemory={attachMemory}
     />
   );
@@ -2079,13 +2084,19 @@ export type WorkersExtraView = {
 const WORKERS_VIEW_KEY = "workers";
 
 export default function WorkersCollection({
-  initialWorkers,
+  initialWorkers = [],
+  initialWorkersPromise,
   extraViews = [],
 }: {
-  initialWorkers: WorkerSummary[];
+  initialWorkers?: WorkerSummary[];
+  // perf: the page streams the first-load fetch as an unawaited promise so the
+  // RSC is not blocked behind the backend round-trip. We seed the cache from it
+  // in the background (cold start only); a warm cache renders instantly.
+  initialWorkersPromise?: Promise<WorkerSummary[]>;
   extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
+  useStreamedInitialData(qk.workers(WORKERS_LIST_QUERY_OPTS), initialWorkersPromise);
   // Cache-first workers list (TanStack Query): returning to /workers renders
   // instantly from cache with no skeleton; a slow/failed refetch keeps showing
   // the cached list instead of flashing "Something went wrong". Local `workers`
@@ -2383,7 +2394,7 @@ export default function WorkersCollection({
             const Tab = WORKER_TAB_COMPONENT[key];
             return {
               key,
-              label: key,
+              label: WORKER_DETAIL_TAB_LABEL[key],
               // #1251 / #1679: badge matches the count listed in the Runs tab.
               // Both read the SAME worker-scoped runs cache (api.runs.list) so the
               // badge can no longer disagree with the tab body or flip 0↔1: until

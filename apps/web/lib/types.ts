@@ -156,6 +156,11 @@ export interface WorkerConfig {
   secrets: string[];
   connections: WorkerConnectionSpec[];  // Composio app slugs and MCP server specs
   contexts: WorkerContextSpec[];
+  // Per-worker memory. When enabled (the default), the engine force-mounts the
+  // worker's own memory context (`memory.context` or `memory-<id>`) as a
+  // writeable local folder it can never be downgraded to read-only or detached
+  // without disabling memory — the brain editor must reflect that pin.
+  memory?: { enabled?: boolean; context?: string | null };
   outputs: WorkerOutput[];
   csv_required_columns?: string[];
 }

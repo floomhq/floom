@@ -70,4 +70,38 @@ describe("#1562 approval proposed output", () => {
     renderBody(baseRow({ preview: "   ", decision_input_json: "{}" }));
     expect(screen.getByText("No proposed output attached to this request.")).toBeTruthy();
   });
+
+  // Approval-review side-pane bug: in the narrow detail pane the proposed-output
+  // key/value list crushed values to ~4-5 chars per line (e.g. an Audit Job Id
+  // wrapped as "2026 / 0623T / 2359 / ..."). Root cause: the KV grid used a
+  // VIEWPORT `sm:` breakpoint + a 180px key column, so a wide viewport with a
+  // narrow pane still gave the key 180px and starved the value. The fix keys the
+  // layout off the CONTAINER width via a container query.
+  it("renders a JSON-object proposed output as a key/value list that keeps the full value", () => {
+    const { container } = renderBody(
+      baseRow({
+        preview: JSON.stringify({
+          audit_job_id: "20260623T235947Z-12f591be69bf",
+          status: "audit_started",
+          decision_required: false,
+        }),
+        preview_type: "json",
+        decision_input_json: "{}",
+      }),
+    );
+    // Humanized keys render.
+    expect(screen.getByText("Audit Job Id")).toBeTruthy();
+    expect(screen.getByText("Status")).toBeTruthy();
+    // The long token is present in FULL (not split into char-level fragments).
+    expect(screen.getByText("20260623T235947Z-12f591be69bf")).toBeTruthy();
+    expect(screen.getByText("audit_started")).toBeTruthy();
+    // The two-column layout is gated on the CONTAINER (a container-query
+    // wrapper + `@sm:` grid), never a bare viewport `sm:` breakpoint.
+    const cq = container.querySelector(".\\@container");
+    expect(cq).not.toBeNull();
+    const dl = cq?.querySelector("dl");
+    expect(dl).not.toBeNull();
+    expect(dl?.className).toContain("@sm:grid-cols-");
+    expect(dl?.className).not.toMatch(/(^|\s)sm:grid-cols-/);
+  });
 });

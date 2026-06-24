@@ -23,6 +23,7 @@ export function GenericToolCard({ card }: { card: GenericToolCardType }) {
         callId={callId}
         status={status}
         duration={duration}
+        defaultOpen={inFlight}
       />
       {actions && actions.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
