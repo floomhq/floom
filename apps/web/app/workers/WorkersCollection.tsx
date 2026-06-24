@@ -2021,7 +2021,7 @@ function WorkerDetailActions({
 
 /**
  * A compact prompt input shown in the workers empty state so users can
- * describe what they want done and jump straight into the Emily create flow.
+ * describe what they want done and open the dedicated /workers/new page.
  */
 function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }) {
   const [value, setValue] = useState("");
@@ -2417,7 +2417,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) }, // #902/2026-06-19: create = the home fullscreen Emily, primed. Label matches the sidebar primary CTA (one action, one label).
+    add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) },
     states: {
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {

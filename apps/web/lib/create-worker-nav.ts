@@ -1,4 +1,4 @@
-export function createWorkerHref(prime?: string | null): string {
-  const href = "/?create=1";
-  return prime ? `${href}&prime=${encodeURIComponent(prime)}` : href;
+export function createWorkerHref(prompt?: string | null): string {
+  const href = "/workers/new";
+  return prompt ? `${href}?prompt=${encodeURIComponent(prompt)}` : href;
 }

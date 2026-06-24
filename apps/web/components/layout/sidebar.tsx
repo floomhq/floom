@@ -335,12 +335,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   };
   return (
     <div className="px-3 pt-3 pb-3 space-y-1.5">
-      {/* #902 (wireframe newbtn): creating a worker = a conversation with
-          Emily. Federico 2026-06-19: it is the SAME fullscreen Emily as the home
-          (the dock-fullscreen surface), primed for create via `create=1`, not a
-          separate full-page chat with its own header. */}
-      {/* Global primary CTA: canonical Button (size lg = h-9) rendered as the
-          create-worker Link. Same primary token + label everywhere. */}
+      {/* New worker opens the dedicated create page; Emily stays in the rail. */}
       <Link
         href={createWorkerHref()}
         prefetch={false}
@@ -532,6 +527,13 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
         {/* ── Icon rail (collapsed) ─────────────────────────────────────────── */}
         {collapsed && (
           <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
+            <Link
+              href={createWorkerHref()}
+              title="New worker"
+              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] bg-[var(--primary)] text-[var(--primary-text)] transition-[background,opacity] duration-150 hover:opacity-90"
+            >
+              <Plus className="w-4 h-4" />
+            </Link>
             {nav.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               const badge = resolveNavBadge(item.badge, badgeCounts);
