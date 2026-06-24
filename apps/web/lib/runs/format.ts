@@ -46,6 +46,8 @@ export function runStatusPill(status: RunStatus): { tone: PillTone; label: strin
       return { tone: "err", label: "Failed" };
     case "cancelled":
       return { tone: "err", label: "Cancelled" };
+    case "rejected":
+      return { tone: "err", label: "Rejected" };
     case "running":
       return { tone: "run", label: "Running" };
     case "pending_approval":
