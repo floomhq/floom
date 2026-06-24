@@ -193,10 +193,10 @@ jobs:
       # upload only the prebuilt output via `vercel deploy --prebuilt`. This mirrors
       # the proven manual path in docs/CLOUD_FIX_REPORT_2026-06-05.md.
       #
-      # IMPORTANT: the dashboard Vercel project has rootDirectory=web, so the
-      # vercel CLI must run from the REPO ROOT (it resolves into web/ itself).
-      # Running from web/ makes it look for web/web and fail with ENOENT. Only the
-      # sync step runs inside web/ (it writes the generated tree there).
+      # Run Vercel from web/ so the dashboard project builds the dashboard package
+      # (`web@...`) and not the repo-root landing package (`workeros-cloud@...`).
+      # A root build deploys landing rewrites to the dashboard project and leaves
+      # /app/* pointing back at the stale r9-detail deployment.
       - name: Sync dashboard from engine
         working-directory: web
         run: npm run sync -- --quiet
@@ -222,12 +222,14 @@ jobs:
             exit 1
           fi
           echo "DASHBOARD_PROJECT_ID=$dashboard_project_id" >> "$GITHUB_ENV"
-          mkdir -p .vercel
+          mkdir -p .vercel web/.vercel
           printf '{"projectId":"%s","orgId":"%s"}\n' \
             "$dashboard_project_id" "$DASHBOARD_SCOPE" > .vercel/project.json
+          cp .vercel/project.json web/.vercel/project.json
           cat .vercel/project.json
 
       - name: Pull Vercel project settings
+        working-directory: web
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
@@ -236,18 +238,20 @@ jobs:
             --scope "$DASHBOARD_SCOPE" --token "$VERCEL_TOKEN"
 
       - name: Build (prebuilt) on runner
+        working-directory: web
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          # `vercel build` (run from root, rootDir=web) runs web/'s build script:
-          # re-syncs (no-op, detects pre-synced tree) then `next build` with the
-          # engine seams baked into web/package.json. Engine source is present on
-          # the runner, so it builds a complete tree into .vercel/output.
+          # `vercel build` runs web/'s build script: re-syncs (no-op, detects
+          # pre-synced tree) then `next build` with the engine seams baked into
+          # web/package.json. Engine source is present on the runner, so it builds
+          # a complete dashboard tree into web/.vercel/output.
           timeout 15m npx --yes vercel@50.22.1 build --prod \
             --scope "$DASHBOARD_SCOPE" --token "$VERCEL_TOKEN"
 
       - name: Deploy prebuilt to production
+        working-directory: web
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |

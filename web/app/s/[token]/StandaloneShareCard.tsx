@@ -13,6 +13,7 @@ import { GenericOutput } from "@/components/generic-output";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { approvalActionLine } from "@/components/share/ApprovalActionItems";
 import { ApprovalReviewBody } from "@/components/share/ApprovalReviewBody";
+import { findPreviewMedia } from "@/components/share/PreviewMedia";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import { SHARE_CARD_BODY_HEIGHT, FloomMark } from "@/components/share/ShareCardShell";
 import { API_BASE } from "@/lib/api";
@@ -79,6 +80,11 @@ function isApprovalBatchShare(share: StandaloneShare): share is ApprovalBatchSha
   return share.entity_type === "approvals_batch";
 }
 
+function firstPreviewMediaIndex(approvals: BatchApprovalRow[]): number {
+  const index = approvals.findIndex((approval) => findPreviewMedia(approval.preview));
+  return index >= 0 ? index : 0;
+}
+
 async function decideBatchApproval(
   token: string,
   approvalId: string,
@@ -106,8 +112,9 @@ async function decideBatchApproval(
 }
 
 function ApprovalsBatchShareCard({ share, token }: { share: ApprovalBatchShare; token: string }) {
-  const [approvals, setApprovals] = useState<BatchApprovalRow[]>(share.approvals || []);
-  const [index, setIndex] = useState(0);
+  const initialApprovals = share.approvals || [];
+  const [approvals, setApprovals] = useState<BatchApprovalRow[]>(initialApprovals);
+  const [index, setIndex] = useState(() => firstPreviewMediaIndex(initialApprovals));
   const [comments, setComments] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
