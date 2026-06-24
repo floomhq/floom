@@ -1296,6 +1296,16 @@ export interface VersionSummary {
   asset_id: string;
 }
 
+/** Unified git timeline entry (#772 /workspace/changelog). */
+export interface ChangelogEntry {
+  asset_type: string;
+  asset_id: string;
+  asset_name: string;
+  sha: string;
+  message: string;
+  committed_at: string;
+}
+
 export interface VersionFile {
   path: string;
   content: string;

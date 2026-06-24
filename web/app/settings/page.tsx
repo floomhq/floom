@@ -13,6 +13,8 @@ import type {
   PersonalAccessToken,
   PlatformConfig,
   SystemInfo,
+  ChangelogEntry,
+  GitWorkspaceStatus,
   VersionSummary,
   WorkspaceAgentInfo,
   WorkspaceMember,
@@ -58,6 +60,7 @@ import {
   DEFAULT_ASSISTANT_NAME,
 } from "@/lib/workspace/assistant-name";
 import { modelLabel } from "@/lib/model-labels";
+import { formatRelative } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -67,6 +70,7 @@ import {
   Code2,
   Copy,
   Download,
+  ExternalLink,
   History,
   Info,
   KeyRound,
@@ -2503,27 +2507,49 @@ function MembersSettingsPanel() {
   );
 }
 
-// "Backups & history": the non-developer home for downloading a copy of the
-// workspace, and undo a recent change (restore points). Git vocabulary
-// (commit/SHA/branch) is deliberately kept out of the UI; the underlying
-// data is the same git-backed version history, surfaced in plain language.
-// GitHub connect lives in Account · "Connect & automate", not here (MECE).
+// "Backups & history": download a workspace copy, browse the unified git
+// timeline (workers, library, notes), undo recent workspace-note/persona edits,
+// and surface GitHub sync status when connected. Git SHA/branch vocabulary stays
+// out of the UI; connect/setup lives under Account · Connect & automate.
 type UndoScope = "instructions" | "base";
+
+function changelogScopeLabel(assetType: string, assetName: string): string {
+  switch (assetType) {
+    case "worker":
+      return `Worker · ${assetName}`;
+    case "context":
+      return `Library · ${assetName}`;
+    case "workspace_instructions":
+      return "Workspace notes";
+    case "workspace_base_persona":
+      return "Base persona";
+    case "workspace_tools":
+      return "Workspace tools";
+    default:
+      return assetName || assetType;
+  }
+}
 
 function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [workspaceVersions, setWorkspaceVersions] = useState<VersionSummary[] | null>(null);
   const [baseVersions, setBaseVersions] = useState<VersionSummary[] | null>(null);
+  const [changelog, setChangelog] = useState<ChangelogEntry[] | null>(null);
+  const [gitStatus, setGitStatus] = useState<GitWorkspaceStatus | null>(null);
   const [exporting, setExporting] = useState(false);
   const [pendingUndo, setPendingUndo] = useState<{ scope: UndoScope; version: VersionSummary } | null>(null);
   const [undoing, setUndoing] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [workspace, base] = await Promise.allSettled([
+    const [workspace, base, timeline, git] = await Promise.allSettled([
       api.system.listWorkspaceVersions(),
       api.system.listWorkspaceBaseVersions(),
+      api.system.listWorkspaceChangelog(),
+      api.system.gitStatus(),
     ]);
     setWorkspaceVersions(workspace.status === "fulfilled" ? workspace.value : []);
     setBaseVersions(base.status === "fulfilled" ? base.value : []);
+    setChangelog(timeline.status === "fulfilled" ? timeline.value : []);
+    setGitStatus(git.status === "fulfilled" ? git.value : null);
   }, []);
 
   useEffect(() => {
@@ -2578,7 +2604,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
       ) : null}
 
       {canManageWorkspace ? (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border [border-color:var(--bd-div)] px-4 py-3.5">
+        <section className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-sm font-medium">Download a copy</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -2593,6 +2619,68 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
       ) : null}
 
       <section className="space-y-1">
+        <h2 className="text-sm font-medium">Workspace history</h2>
+        <p className="text-xs text-muted-foreground">
+          Every save to workers, library folders, and workspace notes appears here.
+          {gitStatus?.connected
+            ? " Connected repos receive these commits when Floom pushes to GitHub."
+            : " To back up to GitHub, connect a repo under Account · Connect & automate."}
+        </p>
+        {gitStatus?.connected && gitStatus.repo_url ? (
+          <p className="text-xs text-muted-foreground">
+            <a
+              href={gitStatus.repo_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
+            >
+              {gitStatus.repo_full_name ?? "GitHub repo"}
+              <ExternalLink className="size-3 shrink-0" />
+            </a>
+            {gitStatus.last_pushed_at ? (
+              <> · Last pushed {formatRelative(gitStatus.last_pushed_at)}</>
+            ) : (
+              <> · Not pushed yet</>
+            )}
+          </p>
+        ) : !gitStatus?.connected ? (
+          <p className="text-xs text-muted-foreground">
+            <button
+              type="button"
+              className="font-medium text-[var(--accent)] hover:underline"
+              onClick={() => navigateSettingsSelection("connect")}
+            >
+              Connect GitHub
+            </button>
+          </p>
+        ) : null}
+      </section>
+
+      {changelog === null ? (
+        <Skeleton className="h-24 w-full" />
+      ) : changelog.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No saved changes yet.</p>
+      ) : (
+        <div className="space-y-1">
+          {changelog.map((entry, index) => (
+            <div
+              key={`${entry.asset_type}-${entry.sha}-${index}`}
+              className="flex items-start justify-between gap-3 [border-bottom:var(--bd-div)] py-2 text-sm last:[border-bottom:0]"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">{entry.message || "Saved change"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {changelogScopeLabel(entry.asset_type, entry.asset_name)}
+                  {" · "}
+                  {entry.committed_at ? new Date(entry.committed_at).toLocaleString() : ""}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <section className="space-y-1 pt-2">
         <h2 className="text-sm font-medium">{canManageWorkspace ? "Undo a change" : "Change history"}</h2>
         <p className="text-xs text-muted-foreground">
           {canManageWorkspace
@@ -2622,7 +2710,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
             <DialogTitle>Undo to this restore point?</DialogTitle>
           </DialogHeader>
           {pendingUndo && (
-            <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5 text-sm space-y-1">
+            <div className="space-y-1 text-sm">
               {pendingUndo.version.message && (
                 <p className="font-medium">{pendingUndo.version.message}</p>
               )}
