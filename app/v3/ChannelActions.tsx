@@ -12,7 +12,12 @@ const MCP_CLIENTS: { name: string; logo: React.ReactNode }[] = [
   { name: "Cursor", logo: <CursorLogo /> },
 ];
 
-type Channel = "slack" | "whatsapp" | "mcp";
+import {
+  isSlackChannelEnabled,
+  isWhatsAppChannelEnabled,
+  type LandingChannel,
+} from "@/lib/landing-channels";
+
 type Modal = "whatsapp" | "mcp" | null;
 
 const MCP_CONFIG = `{
@@ -136,10 +141,10 @@ export function McpHeaderButton() {
   );
 }
 
-export function ChannelActions({ compact = false, only }: { compact?: boolean; only?: Channel }) {
+export function ChannelActions({ compact = false, only }: { compact?: boolean; only?: LandingChannel }) {
   const [modal, setModal] = useState<Modal>(null);
-  const showSlack = !only || only === "slack";
-  const showWhatsApp = !only || only === "whatsapp";
+  const showSlack = isSlackChannelEnabled() && (!only || only === "slack");
+  const showWhatsApp = isWhatsAppChannelEnabled() && (!only || only === "whatsapp");
   const showMcp = !only || only === "mcp";
 
   return (

@@ -2,14 +2,29 @@
 // non-dev-friendly inline controls instead of dumping visitors into docs.
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import StartChannelPage, { generateStaticParams } from "@/app/start/[channel]/page";
 
 const root = path.resolve(__dirname, "../..");
 
 describe("pre-auth /start/<channel> pages (#819)", () => {
-  it("covers slack, whatsapp and mcp", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXT_PUBLIC_LANDING_CHANNEL_SLACK", "");
+    vi.stubEnv("NEXT_PUBLIC_LANDING_CHANNEL_WHATSAPP", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("only prebuilds enabled channels (mcp by default)", () => {
+    expect(generateStaticParams().map((p) => p.channel)).toEqual(["mcp"]);
+  });
+
+  it("prebuilds slack and whatsapp when flags are on", () => {
+    vi.stubEnv("NEXT_PUBLIC_LANDING_CHANNEL_SLACK", "1");
+    vi.stubEnv("NEXT_PUBLIC_LANDING_CHANNEL_WHATSAPP", "1");
     expect(generateStaticParams().map((p) => p.channel).sort()).toEqual([
       "mcp",
       "slack",
@@ -17,12 +32,12 @@ describe("pre-auth /start/<channel> pages (#819)", () => {
     ]);
   });
 
-  it("slack: full flow shown pre-auth, sign-in deferred to the final CTA", async () => {
+  it("slack: full flow shown pre-auth when enabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LANDING_CHANNEL_SLACK", "1");
     render(await StartChannelPage({ params: Promise.resolve({ channel: "slack" }) }));
     expect(screen.getByText("Floom in Slack")).toBeTruthy();
     const cta = screen.getByText("Add to Slack").closest("a")!;
     expect(cta.getAttribute("href")).toBe("https://workeros-api.floom.dev/slack/install/start");
-    // Channel install is public; the shared nav chrome has its own sign-in CTA.
     const main = document.querySelector("main")!;
     const anchors = Array.from(main.querySelectorAll("a")).filter((a) =>
       (a.getAttribute("href") ?? "").startsWith("/login"),
@@ -30,7 +45,8 @@ describe("pre-auth /start/<channel> pages (#819)", () => {
     expect(anchors).toHaveLength(0);
   });
 
-  it("whatsapp: pre-auth flow with deferred bind", async () => {
+  it("whatsapp: pre-auth flow with deferred bind when enabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LANDING_CHANNEL_WHATSAPP", "1");
     render(await StartChannelPage({ params: Promise.resolve({ channel: "whatsapp" }) }));
     fireEvent.click(screen.getByText("WhatsApp QR"));
     expect(screen.getByText("Message Emily").closest("a")!.getAttribute("href")).toBe("https://wa.me/16503999709");

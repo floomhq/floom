@@ -5,7 +5,6 @@ tests/
 *.py
 *.pdf
 data/
-app/
 ops/
 docs/
 node_modules

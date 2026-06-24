@@ -49,7 +49,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <p class="meta" style="margin-top:.35rem">Merged duplicates: LOGIN-01 ← A-02/C-01/D-06 · MCP-01 ← C-02/C-03/L-03 · CONN-01 ← A-11/A-15/C-07–09 · SETTINGS-01 ← C-06/L-12 · LIB-01 ← A-12/L-06 · EMILY-01 ← C-04/L-01/L-10/L-15</p>
   <div class="perm"><strong>Permanent URL:</strong> <a href="https://workeros.floom.dev/audit">https://workeros.floom.dev/audit</a></div>
   <div class="stats">
-    <span>✓ LIVE 2</span><span>◐ PARTIAL 1</span><span>~ DISK 9</span><span>! OPEN 2</span>
+    <span>✓ LIVE 3</span><span>◐ PARTIAL 1</span><span>~ DISK 9</span><span>! OPEN 1</span>
     <span>? MANUAL 4</span><span>— TRACK 5</span>
   </div>
 </header>
@@ -61,16 +61,16 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
 </div>
 <nav class="toc"><a href="#A-01">A-01</a><a href="#LOGIN-01">LOGIN-01</a><a href="#MCP-01">MCP-01</a><a href="#SETTINGS-01">SETTINGS-01</a><a href="#CONN-01">CONN-01</a><a href="#LIB-01">LIB-01</a><a href="#A-03">A-03</a><a href="#A-04">A-04</a><a href="#A-06">A-06</a><a href="#A-07">A-07</a><a href="#A-10">A-10</a><a href="#A-13">A-13</a><a href="#A-14">A-14</a><a href="#EMILY-01">EMILY-01</a><a href="#UI-01">UI-01</a><a href="#AUTH-01">AUTH-01</a><a href="#L-09">L-09</a><a href="#L-13">L-13</a><a href="#L-14">L-14</a><a href="#D-04">D-04</a><a href="#D-07">D-07</a><a href="#D-08">D-08</a><a href="#INFRA-01">INFRA-01</a></nav>
 <main id="main">
-<article class="issue" id="A-01" data-status="open" data-sev="P1">
+<article class="issue" id="A-01" data-status="live" data-sev="P1">
   <header class="issue-head">
     <span class="id">A-01</span>
     <span class="badge p1">P1</span>
-    <span class="badge open">! OPEN</span>
+    <span class="badge live">✓ LIVE</span>
     <span class="area">Landing</span>
     <span class="owner">cloud</span>
   </header>
-  <h2>Slack + WhatsApp should be OFF — landing still exposes them</h2>
-  <p class="detail">Not a “restore /start routes” bug. Channels are not prod-ready; hero + /start/slack|whatsapp should respect a kill-switch. Code on disk has routes; prod 404 may be correct until flag + deploy. Hide Add to Slack / WhatsApp on landing until enabled.</p>
+  <h2>Slack + WhatsApp kill-switch — hidden until flag on</h2>
+  <p class="detail">NEXT_PUBLIC_LANDING_CHANNEL_SLACK/WHATSAPP default off. Landing hides Add to Slack / WhatsApp QR; /start/slack|whatsapp → 404 unless flag set at build time.</p>
   <pre class="ascii">  INTENDED (now):              ACTUAL (landing):
   showSlack=false              [Add to Slack]  ← still visible
   showWhatsApp=false           [WhatsApp QR]   ← still visible

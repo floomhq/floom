@@ -9,11 +9,14 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ChannelActions } from "@/app/v3/ChannelActions";
 import { V3Shell } from "../../v3/V3Shell";
-
-type ChannelKey = "slack" | "whatsapp" | "mcp";
+import {
+  enabledLandingChannels,
+  isLandingChannelEnabled,
+  type LandingChannel,
+} from "@/lib/landing-channels";
 
 const CHANNELS: Record<
-  ChannelKey,
+  LandingChannel,
   {
     name: string;
     title: string;
@@ -58,7 +61,7 @@ const CHANNELS: Record<
 };
 
 export function generateStaticParams() {
-  return Object.keys(CHANNELS).map((channel) => ({ channel }));
+  return enabledLandingChannels().map((channel) => ({ channel }));
 }
 
 export async function generateMetadata({
@@ -67,7 +70,7 @@ export async function generateMetadata({
   params: Promise<{ channel: string }>;
 }): Promise<Metadata> {
   const { channel } = await params;
-  const c = CHANNELS[channel as ChannelKey];
+  const c = CHANNELS[channel as LandingChannel];
   if (!c) return { title: "Floom" };
   return {
     title: `${c.title} · Floom`,
@@ -81,8 +84,8 @@ export default async function StartChannelPage({
   params: Promise<{ channel: string }>;
 }) {
   const { channel } = await params;
-  const c = CHANNELS[channel as ChannelKey];
-  if (!c) notFound();
+  const c = CHANNELS[channel as LandingChannel];
+  if (!c || !isLandingChannelEnabled(channel as LandingChannel)) notFound();
 
   return (
     <V3Shell>
@@ -110,7 +113,7 @@ export default async function StartChannelPage({
         </ol>
 
         <div className="mt-10">
-          <ChannelActions compact only={channel as ChannelKey} />
+          <ChannelActions compact only={channel as LandingChannel} />
           <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">{c.ctaNote}</p>
         </div>
       </main>

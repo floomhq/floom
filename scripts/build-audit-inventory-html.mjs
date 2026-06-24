@@ -34,10 +34,10 @@ const ISSUES = [
     id: "A-01",
     sev: "P1",
     area: "Landing",
-    issue: "Slack + WhatsApp should be OFF — landing still exposes them",
+    issue: "Slack + WhatsApp kill-switch — hidden until flag on",
     detail:
-      "Not a “restore /start routes” bug. Channels are not prod-ready; hero + /start/slack|whatsapp should respect a kill-switch. Code on disk has routes; prod 404 may be correct until flag + deploy. Hide Add to Slack / WhatsApp on landing until enabled.",
-    status: "open",
+      "NEXT_PUBLIC_LANDING_CHANNEL_SLACK/WHATSAPP default off. Landing hides Add to Slack / WhatsApp QR; /start/slack|whatsapp → 404 unless flag set at build time.",
+    status: "live",
     owner: "cloud",
     shot: "",
     ascii: `  INTENDED (now):              ACTUAL (landing):
