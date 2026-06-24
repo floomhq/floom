@@ -26,13 +26,18 @@ describe("medium issue batch source guards", () => {
     expect(api).toContain('fetchJson<{ connected: boolean; email?: string | null }>("/channels/email")');
   });
 
-  it("renders visible MCP client marks for the primary install clients", () => {
+  it("renders real MCP client logos for the primary install clients", () => {
     const source = read("components/mcp/McpInstallPanel.tsx");
 
     expect(source).toContain("MCP_CLIENTS");
     expect(source).toContain('label: "Claude"');
     expect(source).toContain('label: "Cursor"');
     expect(source).toContain('label: "Codex"');
+    expect(source).toContain('icon: "anthropic"');
+    expect(source).toContain('icon: "vscode"');
+    expect(source).toContain("BrandLogo");
+    expect(source).not.toContain("client.mark");
+    expect(source).not.toContain('mark: "C"');
     expect(source).toContain('aria-label="Supported MCP clients"');
   });
 });

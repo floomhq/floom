@@ -278,8 +278,8 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       value={state.view}
       onChange={setView}
       options={[
-        { value: "grid", label: "Grid view", icon: <LayoutGrid />, iconOnly: true },
         { value: "list", label: "List view", icon: <ListIcon />, iconOnly: true },
+        { value: "grid", label: "Grid view", icon: <LayoutGrid />, iconOnly: true },
       ]}
     />
   );

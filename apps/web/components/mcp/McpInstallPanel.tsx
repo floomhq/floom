@@ -20,18 +20,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Check, Copy, RefreshCw, ArrowRight } from "lucide-react";
 
+import { BrandLogo } from "@/components/connections/BrandLogo";
 import { buildMcpJson } from "@/lib/mcp-config";
 import { getActiveWorkspaceId } from "@/lib/api";
 import { getPublicApiHost } from "@/lib/api-base";
 import { generateOssToken, readStoredSecret } from "@/lib/oss-token";
 
 const MCP_CLIENTS = [
-  { label: "Claude", mark: "C" },
-  { label: "Cursor", mark: ">" },
-  { label: "Codex", mark: "CX" },
-  { label: "VS Code", mark: "{}" },
-  { label: "Windsurf", mark: "W" },
-  { label: "Cline", mark: "CL" },
+  { label: "Claude", icon: "anthropic" },
+  { label: "Cursor", icon: "cursor" },
+  { label: "Codex", icon: "openai" },
+  { label: "VS Code", icon: "vscode" },
+  { label: "Windsurf", icon: "windsurf" },
+  { label: "Cline", icon: "cline" },
 ];
 
 export function McpInstallPanel() {
@@ -98,9 +99,7 @@ export function McpInstallPanel() {
             key={client.label}
             className="flex h-10 items-center gap-2 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-2.5 text-[12px] text-[var(--ink-soft)]"
           >
-            <span className="grid size-6 shrink-0 place-items-center rounded-[var(--radius-ui)] bg-[var(--bg-card)] font-mono text-[10px] font-semibold text-[var(--ink)] shadow-[0_0_0_1px_var(--border-soft)]">
-              {client.mark}
-            </span>
+            <BrandLogo icon={client.icon} className="size-5 shrink-0" />
             <span className="truncate font-medium">{client.label}</span>
           </div>
         ))}

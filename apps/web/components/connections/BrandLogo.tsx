@@ -44,7 +44,14 @@ export const SLUG_ALIASES: Record<string, string> = {
 };
 
 // Slugs whose symbols live under the #icon-* prefix rather than #brand-*.
-const ICON_PREFIX_SLUGS = new Set(["anthropic", "cursor", "windsurf", "continue"]);
+const ICON_PREFIX_SLUGS = new Set([
+  "anthropic",
+  "cursor",
+  "windsurf",
+  "continue",
+  "vscode",
+  "cline",
+]);
 
 // Slugs that have a registered #brand-* SVG sprite symbol. Anything outside
 // this set falls back to a clean lettered glyph instead of an empty box.

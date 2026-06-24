@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_CLOUD_PUBLIC_API_BASE,
   DEFAULT_PUBLIC_API_BASE,
   getPublicApiBase,
   getPublicApiHost,
+  isCloudDeploy,
 } from "@/lib/api-base";
 
 describe("public API base (UI display)", () => {
@@ -35,6 +37,33 @@ describe("public API base (UI display)", () => {
   });
 });
 
+describe("cloud deploy public API base", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("defaults to the cloud API host when NEXT_PUBLIC_WORKEROS_DEPLOY=cloud", () => {
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "");
+    expect(isCloudDeploy()).toBe(true);
+    expect(getPublicApiBase()).toBe(DEFAULT_CLOUD_PUBLIC_API_BASE);
+    expect(getPublicApiHost()).toBe("workeros-api.floom.dev");
+  });
+
+  it("prefers NEXT_PUBLIC_WORKEROS_API_BASE on cloud when NEXT_PUBLIC_API_BASE is unset", () => {
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_API_BASE", "https://staging-api.example.com");
+    expect(getPublicApiBase()).toBe("https://staging-api.example.com");
+    expect(getPublicApiHost()).toBe("staging-api.example.com");
+  });
+
+  it("still prefers explicit NEXT_PUBLIC_API_BASE on cloud", () => {
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://custom.cloud.example.com");
+    expect(getPublicApiBase()).toBe("https://custom.cloud.example.com");
+  });
+});
+
 // #953 — internal Railway origins must never surface in the UI.
 describe("#953 internal infra hosts are never displayed", () => {
   afterEach(() => {
@@ -45,6 +74,13 @@ describe("#953 internal infra hosts are never displayed", () => {
     vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://api-production-b866.up.railway.app");
     expect(getPublicApiBase()).toBe(DEFAULT_PUBLIC_API_BASE);
     expect(getPublicApiHost()).toBe("localhost:8000");
+  });
+
+  it("remaps a *.up.railway.app base to the cloud default on cloud deploy", () => {
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://api-production-b866.up.railway.app");
+    expect(getPublicApiBase()).toBe(DEFAULT_CLOUD_PUBLIC_API_BASE);
+    expect(getPublicApiHost()).toBe("workeros-api.floom.dev");
   });
 
   it("remaps railway.internal hosts", () => {
