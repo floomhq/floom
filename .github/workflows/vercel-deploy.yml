@@ -36,7 +36,8 @@ jobs:
       VERCEL_LANDING_PROJECT_ID: ${{ secrets.VERCEL_WORKEROS_CLOUD_LANDING_PROJECT_ID }}
       VERCEL_LANDING_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       APEX_DOMAIN: workeros.floom.dev
-      LANDING_ALIASES: floom.dev,workeros.floom.dev
+      LANDING_ALIASES: workeros.floom.dev,floom.dev
+      REQUIRED_LANDING_DOMAINS: workeros.floom.dev
 
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +106,7 @@ jobs:
           for alias in "${aliases[@]}"; do
             args+=(--domain "$alias")
           done
-          bash ops/vercel-ensure-alias.sh "${args[@]}"
+          REQUIRED_DOMAINS="$REQUIRED_LANDING_DOMAINS" bash ops/vercel-ensure-alias.sh "${args[@]}"
 
       - name: Verify apex serves the NEW deploy
         run: |

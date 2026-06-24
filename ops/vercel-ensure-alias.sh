@@ -5,7 +5,8 @@
 #   VERCEL_TOKEN=... ops/vercel-ensure-alias.sh \
 #     --team TEAM_ID --project PROJECT_ID --deploy DEPLOY_ID --domain example.com
 #
-# Exits non-zero if alias fails after verification attempts.
+# Domains listed in REQUIRED_DOMAINS (comma-separated) must succeed or the script exits 1.
+# Other domains are best-effort (alias attempted; verify/add only on failure).
 
 set -euo pipefail
 
@@ -13,6 +14,7 @@ TEAM=""
 PROJECT=""
 DEPLOY=""
 DOMAINS=()
+REQUIRED="${REQUIRED_DOMAINS:-workeros.floom.dev}"
 TOKEN="${VERCEL_TOKEN:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -30,6 +32,16 @@ if [[ -z "$TOKEN" || -z "$TEAM" || -z "$PROJECT" || -z "$DEPLOY" || ${#DOMAINS[@
   exit 2
 fi
 
+is_required() {
+  local domain="$1"
+  local d
+  IFS=',' read -r -a req <<< "$REQUIRED"
+  for d in "${req[@]}"; do
+    [[ "$d" == "$domain" ]] && return 0
+  done
+  return 1
+}
+
 api() {
   curl -sS "$@" -H "Authorization: Bearer $TOKEN"
 }
@@ -38,6 +50,18 @@ domain_verified() {
   local domain="$1"
   api "https://api.vercel.com/v9/projects/${PROJECT}/domains/${domain}?teamId=${TEAM}" \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print("1" if d.get("verified") else "0")'
+}
+
+log_pending_txt() {
+  local domain="$1"
+  api "https://api.vercel.com/v9/projects/${PROJECT}/domains/${domain}?teamId=${TEAM}" \
+    | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for v in d.get("verification") or []:
+    if v.get("type") == "TXT":
+        print(f"::warning::Add TXT {v.get(\"domain\")} = {v.get(\"value\")}", file=sys.stderr)
+'
 }
 
 ensure_domain() {
@@ -66,7 +90,8 @@ ensure_domain() {
     sleep 5
   done
 
-  echo "::error::Domain ${domain} is not verified on team ${TEAM}." >&2
+  log_pending_txt "$domain"
+  echo "::error::Domain ${domain} is not verified on project ${PROJECT}." >&2
   return 1
 }
 
@@ -89,18 +114,31 @@ sys.exit(0 if ok else 1)
 '
 }
 
+alias_domain() {
+  local domain="$1"
+  # Team-verified apex domains (e.g. floom.dev) often alias without a project-domain row.
+  if alias_deploy "$domain"; then
+    return 0
+  fi
+  echo "  direct alias failed for ${domain}; trying project attach + verify..."
+  ensure_domain "$domain"
+  alias_deploy "$domain"
+}
+
+fail=0
 for domain in "${DOMAINS[@]}"; do
-  if ensure_domain "$domain"; then
-    alias_deploy "$domain"
-  else
-    echo "::warning::Skipping alias for ${domain}; complete DNS verification first." >&2
+  if alias_domain "$domain"; then
+    echo "OK: ${domain} -> ${DEPLOY}"
+  elif is_required "$domain"; then
+    echo "::error::Required domain ${domain} could not be aliased." >&2
     fail=1
+  else
+    echo "::warning::Optional domain ${domain} could not be aliased." >&2
   fi
 done
 
-if [[ "${fail:-0}" -ne 0 ]]; then
-  echo "::error::One or more domains could not be verified/aliased." >&2
+if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi
 
-echo "All domains aliased: ${DOMAINS[*]}"
+echo "Landing aliases done: ${DOMAINS[*]}"

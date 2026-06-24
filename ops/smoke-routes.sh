@@ -45,6 +45,9 @@ CLOUD_APP_HOSTS=(
 CLOUD_ROUTES=(
   "/"
   "/login"
+  "/start/slack"
+  "/start/whatsapp"
+  "/start/mcp"
   "/app"
   "/app/login"
   "/app/overview"
