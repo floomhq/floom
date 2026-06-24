@@ -2,7 +2,7 @@
 // SPEC: /root/workeros-design-baseline/SPEC.md (locked 2026-06-22).
 //
 // Shape + COLOR both encode ROLE (two independent visual axes):
-//   - "user"      -> CIRCLE + NEUTRAL GRAPHITE palette. Real provider photo
+//   - "user"      -> SQUIRCLE + NEUTRAL GRAPHITE palette. Real provider photo
 //                    when `src` present, else a chunky 2-tone graphite mark.
 //                    NEVER initials. onError falls back to generated mark.
 //   - "workspace" -> SQUIRCLE + ACCENT BLUE palette. Favicon/logo when `src`
@@ -14,8 +14,8 @@
 //                    disc + two white@55% energy arcs). Gentle arc PULSE when
 //                    `active`, respecting prefers-reduced-motion.
 //
-// A user and any workspace are ALWAYS visually distinguishable: circle vs
-// squircle AND graphite vs blue, so shape alone never carries the burden.
+// A user and any workspace are ALWAYS visually distinguishable: graphite vs
+// blue palette; all roles share the squircle shape per Floom identity spec.
 //
 // No gradients, no faces, no stock glyphs (radar/orbit/star), no letters.
 // Tokens only: --accent (Emily blue), --radius-squircle (squircle radius).
@@ -62,9 +62,9 @@ export interface AvatarProps {
   active?: boolean;
 }
 
-function shapeStyle(role: AvatarRole): { borderRadius: string } {
+function shapeStyle(_role: AvatarRole): { borderRadius: string } {
   return {
-    borderRadius: role === "user" ? "9999px" : "var(--radius-squircle)",
+    borderRadius: "var(--radius-squircle)",
   };
 }
 
@@ -217,7 +217,7 @@ export function Avatar({
     );
   }
 
-  // Generated fallback (user circle / workspace+worker squircle).
+  // Generated fallback (user / workspace / worker squircle).
   // generateMarkForRole applies role-based index offsets so a user and a
   // workspace with the same name/id are mathematically guaranteed to produce
   // different motifIndex values (the offset is coprime to MARK_MOTIF_COUNT).

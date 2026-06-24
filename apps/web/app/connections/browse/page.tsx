@@ -588,7 +588,6 @@ export default function ConnectionsBrowsePage() {
     columns: {
       template: "1.7fr 96px 140px",
       headers: ["App", "Actions", ""],
-      headerTransparent: true,
       statusColumn: false,
       menuColumn: false,
     },

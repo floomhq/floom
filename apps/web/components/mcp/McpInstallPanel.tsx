@@ -27,9 +27,9 @@ import { getPublicApiHost } from "@/lib/api-base";
 import { generateOssToken, readStoredSecret } from "@/lib/oss-token";
 
 const MCP_CLIENTS = [
-  { label: "Claude", icon: "anthropic" },
+  { label: "Claude Code", icon: "claude-code" },
   { label: "Cursor", icon: "cursor" },
-  { label: "Codex", icon: "openai" },
+  { label: "Codex", icon: "codex" },
   { label: "VS Code", icon: "vscode" },
   { label: "Windsurf", icon: "windsurf" },
   { label: "Cline", icon: "cline" },
@@ -86,22 +86,23 @@ export function McpInstallPanel() {
       <div>
         <h2 className="text-sm font-medium text-foreground">Agent install</h2>
         <p className="text-xs text-muted-foreground">
-          Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any
+          Copy this into Claude Code, Cursor, Codex, VS Code, Windsurf, Cline, or any
           MCP client. {hasToken
             ? "Your key is already included."
             : "Create a key below to include it."}
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Supported MCP clients">
+      <div className="flex flex-wrap items-center gap-3.5" aria-label="Supported MCP clients">
         {MCP_CLIENTS.map((client) => (
-          <div
+          <span
             key={client.label}
-            className="flex h-10 items-center gap-2 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-2.5 text-[12px] text-[var(--ink-soft)]"
+            title={client.label}
+            className="inline-flex text-[var(--ink-soft)]"
           >
-            <BrandLogo icon={client.icon} className="size-5 shrink-0" />
-            <span className="truncate font-medium">{client.label}</span>
-          </div>
+            <BrandLogo icon={client.icon} className="size-6 shrink-0" />
+            <span className="sr-only">{client.label}</span>
+          </span>
         ))}
       </div>
 
@@ -110,28 +111,28 @@ export function McpInstallPanel() {
         <button
           type="button"
           onClick={() => void handleCopy()}
-          className="absolute right-2.5 top-2.5 z-10 inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--bg-card)] px-2.5 text-[12px] font-medium text-[var(--ink-soft)] shadow-[0_1px_2px_hsl(0_0%_0%/.06),0_0_0_1px_var(--border-soft)] transition-colors hover:text-ink"
+          className="absolute right-0 top-0 z-10 inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--ink-soft)] transition-colors hover:text-ink"
           aria-label={copied ? "Copied" : "Copy config"}
         >
           {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
           {copied ? "Copied" : "Copy"}
         </button>
-        <pre className="overflow-x-auto rounded-[var(--radius-button)] bg-[var(--bg-2)] px-4 py-4 pr-20 font-mono text-[12.5px] leading-[1.7] text-[var(--ink-soft)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <pre className="overflow-x-auto pr-16 pt-7 font-mono text-[12.5px] leading-[1.7] text-[var(--ink-soft)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <code>{snippet}</code>
         </pre>
       </div>
 
       {/* token state */}
       {!hasToken && (
-        <div className="flex items-center gap-2.5 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2.5">
-          <p className="flex-1 text-[12px] leading-snug text-[var(--ink-mute)]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="text-[12px] leading-snug text-[var(--ink-mute)]">
             No key in this browser yet. Create one to include it in the config above.
           </p>
           <button
             type="button"
             onClick={() => void generateToken()}
             disabled={generating}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-[12px] font-medium text-[var(--primary-text)] transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--ink-soft)] transition-colors hover:text-ink disabled:opacity-50"
           >
             <RefreshCw className={"size-3 " + (generating ? "animate-spin" : "")} />
             {generating ? "Generating" : "Create key"}

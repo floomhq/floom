@@ -34,6 +34,18 @@ function approvalContentTags(a: ApprovalRow, workerTags: Record<string, string[]
   return tags.filter((t) => CURATED_CONTENT_TAG_SET.has(t));
 }
 
+function approvalWorkerTagOptions(items: ApprovalRow[]): TagOption[] {
+  const seen = new Map<string, string>();
+  for (const item of items) {
+    seen.set(item.worker_id, item.worker_name ?? item.worker_id);
+  }
+  return Array.from(seen.entries()).map(([value, label]) => ({
+    value: `worker:${value}`,
+    label,
+    count: items.filter((i) => i.worker_id === value).length,
+  }));
+}
+
 function approvalContentTagOptions(
   items: ApprovalRow[],
   workerTags: Record<string, string[]>,
@@ -122,10 +134,18 @@ export default function ApprovalsCollection() {
     searchOf: (a) => `${a.worker_name ?? ""} ${a.label ?? ""}`,
     tagsOf: (a) => {
       const curated = approvalContentTags(a, workerTags);
-      return (curated.length > 0 ? { content: curated } : {}) as Partial<Record<TagFamilyKey, string[]>>;
+      const worker = [`worker:${a.worker_id}`];
+      return {
+        status: ["pending"],
+        content: [...worker, ...(curated.length > 0 ? curated : [])],
+      } as Partial<Record<TagFamilyKey, string[]>>;
     },
     tags: {
-      content: approvalContentTagOptions(items, workerTags),
+      status: [{ value: "pending", label: "pending", count: items.length }],
+      content: [
+        ...approvalWorkerTagOptions(items),
+        ...approvalContentTagOptions(items, workerTags),
+      ],
     },
     counts: [{ value: items.length, label: "pending" }],
     view: { default: "list", grid: true },

@@ -25,7 +25,7 @@ export function TagBar({ families, active, onToggle, onClear }: TagBarProps) {
   const anyOn = Object.values(active).some((v) => v && v.length > 0);
   const activeCount = Object.values(active).reduce((sum, v) => sum + (v?.length ?? 0), 0);
   const renderedFamilies = TAG_FAMILY_ORDER.filter((f) => (families[f]?.length ?? 0) > 0);
-  if (renderedFamilies.length === 0) return null;
+  const hasFilters = renderedFamilies.length > 0;
 
   // #1709: unified to "Add filter" (singular) for both visible label and aria-label
   return (
@@ -41,7 +41,7 @@ export function TagBar({ families, active, onToggle, onClear }: TagBarProps) {
         Add filter
         {activeCount > 0 && <span className="ct">{activeCount}</span>}
       </button>
-      {open && (
+      {open && hasFilters && (
         <div className="c-tagbar">
           <div className="c-tgroup">
             <button
