@@ -14,7 +14,6 @@ const apiMock = vi.hoisted(() => ({
   membersList: vi.fn(),
 }));
 
-vi.mock("@/components/CliCommandPanel", () => ({ CliCommandPanel: () => <div>CLI panel</div> }));
 vi.mock("@/components/GitWorkspacePanel", () => ({ GitWorkspacePanel: () => <div>Git panel</div> }));
 vi.mock("@/components/assistant/SlackConnect", () => ({ SlackConnect: () => <div>Slack connect</div> }));
 

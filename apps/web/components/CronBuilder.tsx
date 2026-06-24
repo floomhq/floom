@@ -343,8 +343,7 @@ export function CronBuilder({ value, onChange, timezone = "UTC" }: CronBuilderPr
       )}
 
       {/* Validation error (custom expression only). Uses the app's single
-          warning token (--destructive maps to --warning), matching the inline
-          validation pattern used elsewhere (e.g. CliCommandPanel). */}
+          warning token (--destructive maps to --warning). */}
       {cronError && (
         <p className="flex items-center gap-1.5 text-xs text-destructive">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />

@@ -22,9 +22,6 @@ vi.mock("@/components/emily/EmilyChat", () => ({
   EmilyMobileSheet: () => null,
 }));
 
-vi.mock("@/components/overview/AlertsBell", () => ({
-  AlertsBell: () => null,
-}));
 
 vi.mock("@/components/CommandPalette", () => ({
   CommandPalette: () => null,

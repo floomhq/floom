@@ -1170,8 +1170,7 @@ floom run <worker>`;
 
 // API base comes from the same env seam lib/api uses (NEXT_PUBLIC_API_PROXY_BASE
 // → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
-// hardcoded host. Account-scoped PATs authenticate as bearer tokens; the OSS
-// x-floom-secret examples live in CliCommandPanel.
+// hardcoded host. Account-scoped PATs authenticate as bearer tokens.
 const API_CALL_SNIPPET = `# List your workers
 curl -sS ${API_BASE}/workers?shape=list \\
   -H "Authorization: Bearer <your-token>"

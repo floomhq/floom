@@ -8,12 +8,17 @@
 //   3. seed the composer from `&prime=<text>` (the landing→app from-prompt handoff
 //      and the workers empty-state prompt) once it arrives post-mount.
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const { search } = vi.hoisted(() => ({ search: vi.fn(() => "") }));
+const { search, replace, newSession, streamMessages } = vi.hoisted(() => ({
+  search: vi.fn(() => ""),
+  replace: vi.fn(),
+  newSession: vi.fn(),
+  streamMessages: vi.fn(() => []),
+}));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace, prefetch: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/",
   useSearchParams: () => new URLSearchParams(search()),
 }));
@@ -24,13 +29,13 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
   return {
     ...mod,
     useChatStream: () => ({
-      messages: [],
+      messages: streamMessages(),
       conversationId: null,
       isStreaming: false,
       isHydrating: false,
       error: null,
       sendMessage,
-      newSession: vi.fn(),
+      newSession,
       loadConversation: vi.fn(),
     }),
   };
@@ -80,6 +85,10 @@ describe("create flow = the home fullscreen Emily, primed for create", () => {
   beforeEach(() => {
     search.mockReturnValue("");
     sendMessage.mockClear();
+    replace.mockClear();
+    newSession.mockClear();
+    streamMessages.mockReturnValue([]);
+    window.localStorage.clear();
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
@@ -109,6 +118,20 @@ describe("create flow = the home fullscreen Emily, primed for create", () => {
       /Message Emily/i,
     )) as HTMLTextAreaElement;
     expect(composer.value).toBe("Send me a GitHub PR digest at 9am");
+  });
+
+  it("?create=1 confirms before replacing an active Emily chat", async () => {
+    search.mockReturnValue("create=1");
+    streamMessages.mockReturnValue([{ id: "u-existing", role: "user", text: "Existing question" }]);
+    renderDock();
+
+    expect(await screen.findByText("Start a new worker chat?")).toBeInTheDocument();
+    expect(screen.getByText(/saved in Recent chats/i)).toBeInTheDocument();
+    expect(newSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start new worker chat" }));
+
+    await waitFor(() => expect(newSession).toHaveBeenCalledTimes(1));
   });
 
   it("plain home (no ?create=1) shows the home empty state too — same surface as create", async () => {

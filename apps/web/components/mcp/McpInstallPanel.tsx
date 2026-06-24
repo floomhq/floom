@@ -14,8 +14,8 @@
 //
 // The snippet is the ready-to-paste `mcpServers` config from buildMcpJson(),
 // with the user's real OSS secret embedded (+ the active workspace pinned). The
-// token + generate flow are the shared oss-token helpers (same path the
-// CliCommandPanel uses), so a token minted anywhere is reused everywhere.
+// token + generate flow are the shared oss-token helpers, so a token minted
+// anywhere is reused everywhere.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Check, Copy, RefreshCw, ArrowRight } from "lucide-react";

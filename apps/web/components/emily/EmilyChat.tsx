@@ -4,6 +4,7 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize, Minimize, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu,
@@ -36,6 +37,7 @@ import {
   useChatStream,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
+import { readStoredConversationId } from "@/lib/emily-chat-storage";
 import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 import { createWorkerHref } from "@/lib/create-worker-nav";
 // Re-export so the create-mode wiring + its tests share one source of truth.
@@ -958,13 +960,20 @@ export function EmilyDock({ className }: { className?: string }) {
   const coreActionsRef = useRef<ChatCoreActions | null>(null);
   // hasMessages as state so the Export menu item disables correctly (can't read ref in render)
   const [coreHasMessages, setCoreHasMessages] = useState(false);
+  const [coreReady, setCoreReady] = useState(false);
   // Active conversation ID as state for recent-chats active highlight (can't read ref in render)
   const [coreConversationId, setCoreConversationId] = useState<string | null>(null);
+  const [pendingCreatePrime, setPendingCreatePrime] = useState<string | undefined>(undefined);
+  const [confirmReplaceOpen, setConfirmReplaceOpen] = useState(false);
   // Local state for recent chats popover in the header ⋯ menu
   const [recentItems, setRecentItems] = useState<import("@/lib/types").ConversationSummary[] | null>(null);
   // #1363 — detect empty workspace so Emily shows a proactive first-run opener.
   // Uses the existing overview stats endpoint (no new backend call).
   const [isNewWorkspace, setIsNewWorkspace] = useState(false);
+  const handleCoreHasMessagesChange = useCallback((hasMessages: boolean) => {
+    setCoreHasMessages(hasMessages);
+    setCoreReady(true);
+  }, []);
   useEffect(() => {
     let alive = true;
     api.system.overview()
@@ -1015,11 +1024,33 @@ export function EmilyDock({ className }: { className?: string }) {
   // Latch create-mode once consumed so a later route change / param strip does
   // not yank the user out of the create thread mid-conversation.
   const [createLatched, setCreateLatched] = useState(false);
+  const createRequestHandledRef = useRef(false);
   // Primed text is consumed once on enter (so it seeds the create composer) and
   // then cleared — re-renders must not keep re-seeding it.
   const [primeText, setPrimeText] = useState<string | undefined>(undefined);
+  const stripCreateParams = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("create");
+    url.searchParams.delete("prime");
+    router.replace(url.pathname + url.search);
+  }, [router]);
+  const beginCreateFlow = useCallback((prime?: string) => {
+    createRequestHandledRef.current = true;
+    coreActionsRef.current?.newSession();
+    setCreateLatched(true);
+    setPrimeText(prime);
+    stripCreateParams();
+    setMode((m) => (m === "collapsed" ? "rail" : m));
+    setFullscreen(true);
+  }, [setFullscreen, stripCreateParams]);
   useEffect(() => {
-    if (!createParam) return;
+    if (!createParam) {
+      createRequestHandledRef.current = false;
+      return;
+    }
+    if (createRequestHandledRef.current) return;
+    if (!coreReady) return;
     // #1698: the create deep-link (`?create=1`) must open the create flow
     // CONSISTENTLY regardless of the route it lands on. On a NON-home route it
     // would otherwise just sit in the URL doing nothing (a broken first action),
@@ -1030,17 +1061,27 @@ export function EmilyDock({ className }: { className?: string }) {
       router.replace(createWorkerHref(primeParam));
       return;
     }
-    setCreateLatched(true);
-    if (primeParam) setPrimeText(primeParam);
-    // Drop the params from the URL so create-prime is deep-linkable but not
-    // sticky across refresh/back (history.replace, no Next reload).
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("create");
-      url.searchParams.delete("prime");
-      window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    const hasExistingThread =
+      coreHasMessages ||
+      coreConversationId !== null ||
+      readStoredConversationId() !== null;
+    if (hasExistingThread && !createLatched) {
+      setPendingCreatePrime(primeParam);
+      setConfirmReplaceOpen(true);
+      return;
     }
-  }, [createParam, isHomeRoute, primeParam, router]);
+    beginCreateFlow(primeParam);
+  }, [
+    beginCreateFlow,
+    coreConversationId,
+    coreHasMessages,
+    coreReady,
+    createLatched,
+    createParam,
+    isHomeRoute,
+    primeParam,
+    router,
+  ]);
   // Reset the create latch when the user navigates away from the home route so
   // the next visit shows the home greeting (not a stale create hero).
   useEffect(() => {
@@ -1321,7 +1362,7 @@ export function EmilyDock({ className }: { className?: string }) {
           fullPage={isFull}
           hideControls
           actionsRef={coreActionsRef}
-          onHasMessagesChange={setCoreHasMessages}
+          onHasMessagesChange={handleCoreHasMessagesChange}
           onConversationIdChange={setCoreConversationId}
           isNewWorkspace={isNewWorkspace}
           // CREATE renders the SAME consistent Emily empty state as home (greeting
@@ -1332,6 +1373,27 @@ export function EmilyDock({ className }: { className?: string }) {
           homeMode={isHomeRoute && !createMode}
         />
       </div>
+      <ConfirmDialog
+        open={confirmReplaceOpen}
+        onOpenChange={(open) => {
+          setConfirmReplaceOpen(open);
+          if (!open) {
+            createRequestHandledRef.current = true;
+            setPendingCreatePrime(undefined);
+            stripCreateParams();
+          }
+        }}
+        title="Start a new worker chat?"
+        body="Your current Emily conversation will be saved in Recent chats, and this view will switch to a fresh worker-building chat."
+        cancelLabel="Keep current chat"
+        confirmLabel="Start new worker chat"
+        onConfirm={() => {
+          const prime = pendingCreatePrime;
+          setConfirmReplaceOpen(false);
+          setPendingCreatePrime(undefined);
+          beginCreateFlow(prime);
+        }}
+      />
     </div>
   );
 }
