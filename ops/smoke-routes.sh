@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pre/post-deploy live-route smoke gate.
 # Compensating control for GitHub Actions being disabled or blocked.
-# Curls critical OS and Cloud routes and fails on any 4xx, 5xx, 508, or curl failure.
+# Fetches critical OS and Cloud routes and fails on any 4xx, 5xx, 508, or fetch failure.
 #
 # Usage:
 #   bash ops/smoke-routes.sh          # check both OS and Cloud
@@ -14,6 +14,8 @@ set -uo pipefail
 
 TARGET="${1:-all}"
 FAIL=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HTTP_CLIENT="${SMOKE_HTTP_CLIENT:-curl}"
 
 # Portable SHA-256 of a file. GNU coreutils ships `sha256sum`; macOS/BSD ship
 # `shasum`. Without this fallback, `sha256sum` is missing on macOS, `hash` comes
@@ -78,7 +80,11 @@ OS_ROUTES=(
 check() {
   local label="$1" url="$2"
   local code
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$url" 2>/dev/null || echo "000")"
+  if [[ "$HTTP_CLIENT" == "python" ]]; then
+    code="$(python3 "$SCRIPT_DIR/http-client.py" status --url "$url" --timeout 20 2>/dev/null || echo "000")"
+  else
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$url" 2>/dev/null || echo "000")"
+  fi
   if [[ "$code" == "508" ]]; then
     echo "FAIL  $label  $url  -> $code (INFINITE_LOOP)"
     FAIL=1
@@ -96,8 +102,13 @@ chunkset_hash() {
   body="$tmp/body.html"
   assets="$tmp/assets.txt"
 
-  if ! curl -sSL --max-time 30 "$url" -o "$body"; then
-    echo "FAIL  $label  $url  -> curl failed" >&2
+  if [[ "$HTTP_CLIENT" == "python" ]]; then
+    python3 "$SCRIPT_DIR/http-client.py" fetch --url "$url" --output "$body" --timeout 30
+  else
+    curl -sSL --max-time 30 "$url" -o "$body"
+  fi
+  if [[ "$?" -ne 0 ]]; then
+    echo "FAIL  $label  $url  -> fetch failed" >&2
     rm -rf "$tmp"
     return 1
   fi

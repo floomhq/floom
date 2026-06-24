@@ -16,6 +16,7 @@ DEPLOY=""
 DOMAINS=()
 REQUIRED="${REQUIRED_DOMAINS:-workeros.floom.dev}"
 TOKEN="${VERCEL_TOKEN:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -43,7 +44,22 @@ is_required() {
 }
 
 api() {
-  curl -sS "$@" -H "Authorization: Bearer $TOKEN"
+  local method="GET"
+  local data=""
+  local url=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -X) method="$2"; shift 2 ;;
+      -H) shift 2 ;;
+      -d) data="$2"; shift 2 ;;
+      *) url="$1"; shift ;;
+    esac
+  done
+  if [[ -n "$data" ]]; then
+    python3 "$SCRIPT_DIR/http-client.py" vercel-request --method "$method" --url "$url" --data "$data"
+  else
+    python3 "$SCRIPT_DIR/http-client.py" vercel-request --method "$method" --url "$url"
+  fi
 }
 
 domain_verified() {

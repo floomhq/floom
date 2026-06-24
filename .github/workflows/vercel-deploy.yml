@@ -91,10 +91,9 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          DEPLOY_ID="$(curl -sS \
-            "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${VERCEL_LANDING_ORG_ID}" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')"
+          DEPLOY_ID="$(python3 ops/http-client.py vercel-json-get \
+            --url "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${VERCEL_LANDING_ORG_ID}" \
+            --field id)"
           if [ -z "$DEPLOY_ID" ]; then
             echo "::error::Could not resolve deploy id for $DEPLOY_URL."
             exit 1
@@ -118,18 +117,15 @@ jobs:
           # marker /v3/integrations returns 200 (it 404s on any build predating
           # the next.config.ts rewrite).
           for i in $(seq 1 30); do
-            hdr="$(curl -sS -D - -o /dev/null --max-time 20 "https://${APEX_DOMAIN}/v3/integrations" || true)"
-            code="$(printf '%s' "$hdr" | awk 'NR==1{print $2}')"
-            served_id="$(printf '%s' "$hdr" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-vercel-id"{print $2}')"
-            echo "attempt $i: /v3/integrations -> code=$code x-vercel-id=$served_id"
+            code="$(python3 ops/http-client.py status --url "https://${APEX_DOMAIN}/v3/integrations" --timeout 20 || true)"
+            echo "attempt $i: /v3/integrations -> code=$code"
             # x-vercel-id is region::pop-...; the deployment id is not in it, so we
             # gate on the build marker (200) which is unique to this+later builds,
             # then confirm the project's production deploy id equals ours.
             if [ "$code" = "200" ]; then
-              proj_id="$(curl -sS \
-                "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}?teamId=${VERCEL_LANDING_ORG_ID}" \
-                -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
-                | python3 -c 'import sys,json; d=json.load(sys.stdin); print(((d.get("targets") or {}).get("production") or {}).get("id",""))')"
+              proj_id="$(python3 ops/http-client.py vercel-json-get \
+                --url "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}?teamId=${VERCEL_LANDING_ORG_ID}" \
+                --field targets.production.id)"
               echo "project production deploy id: $proj_id (expected ${DEPLOY_ID})"
               if [ "$proj_id" = "$DEPLOY_ID" ]; then
                 echo "Apex serves the new deploy ($DEPLOY_ID) and /v3/integrations is 200."
@@ -153,6 +149,7 @@ jobs:
       # this project's production deploy.
       DASHBOARD_SCOPE: ${{ secrets.VERCEL_ORG_ID }}
       DASHBOARD_PROJECT_NAME: workeros-cloud-dashboard
+      DASHBOARD_PROJECT_ID_FALLBACK: ${{ secrets.VERCEL_WORKEROS_CLOUD_DASHBOARD_PROJECT_ID }}
       DASHBOARD_PROD_ALIAS: r9-detail.floom.dev
 
     steps:
@@ -212,12 +209,16 @@ jobs:
           # Pin the link BEFORE pull so `vercel pull`/`build`/`deploy` target the
           # floomhq workeros-cloud-dashboard project regardless of stale secrets
           # or same-named projects on other teams.
-          dashboard_project_id="$(curl -sS \
-            "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_NAME}?teamId=${DASHBOARD_SCOPE}" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')"
+          dashboard_project_id="$(python3 ops/http-client.py vercel-json-get \
+            --url "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_NAME}?teamId=${DASHBOARD_SCOPE}" \
+            --field id)"
+          if [ -z "$dashboard_project_id" ] && [ -n "${DASHBOARD_PROJECT_ID_FALLBACK:-}" ]; then
+            dashboard_project_id="$(python3 ops/http-client.py vercel-json-get \
+              --url "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_ID_FALLBACK}?teamId=${DASHBOARD_SCOPE}" \
+              --field id)"
+          fi
           if [ -z "$dashboard_project_id" ]; then
-            echo "::error::Could not resolve ${DASHBOARD_PROJECT_NAME} in ${DASHBOARD_SCOPE}."
+            echo "::error::Could not resolve ${DASHBOARD_PROJECT_NAME} by name or project-id fallback."
             exit 1
           fi
           echo "DASHBOARD_PROJECT_ID=$dashboard_project_id" >> "$GITHUB_ENV"
@@ -267,20 +268,18 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          DEPLOY_ID="$(curl -sS \
-            "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${DASHBOARD_SCOPE}" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))')"
+          DEPLOY_ID="$(python3 ops/http-client.py vercel-json-get \
+            --url "https://api.vercel.com/v13/deployments/${DEPLOY_URL#https://}?teamId=${DASHBOARD_SCOPE}" \
+            --field id)"
           if [ -z "$DEPLOY_ID" ]; then
             echo "::error::Could not resolve dashboard deploy id for $DEPLOY_URL."
             exit 1
           fi
           echo "DEPLOY_ID=$DEPLOY_ID" >> "$GITHUB_ENV"
           for i in $(seq 1 60); do
-            state="$(curl -sS \
-              "https://api.vercel.com/v13/deployments/${DEPLOY_ID}?teamId=${DASHBOARD_SCOPE}" \
-              -H "Authorization: Bearer $VERCEL_TOKEN" \
-              | python3 -c 'import sys,json; print(json.load(sys.stdin).get("readyState",""))')"
+            state="$(python3 ops/http-client.py vercel-json-get \
+              --url "https://api.vercel.com/v13/deployments/${DEPLOY_ID}?teamId=${DASHBOARD_SCOPE}" \
+              --field readyState)"
             echo "attempt $i: deploy ${DEPLOY_ID} readyState=${state}"
             if [ "$state" = "READY" ]; then
               break
@@ -292,19 +291,15 @@ jobs:
             sleep 10
           done
           echo "Ensuring $DASHBOARD_PROD_ALIAS aliases $DEPLOY_ID"
-          RESP="$(curl -sS -X POST \
-            "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"alias\":\"${DASHBOARD_PROD_ALIAS}\"}")"
+          RESP="$(python3 ops/http-client.py vercel-request --method POST \
+            --url "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases" \
+            --data "{\"alias\":\"${DASHBOARD_PROD_ALIAS}\"}")"
           echo "$RESP"
           ok="$(echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code")=="not_modified"; print("1" if ok else "0")')"
           if [[ "$ok" != "1" ]]; then
-            RESP="$(curl -sS -X POST \
-              "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${DASHBOARD_SCOPE}" \
-              -H "Authorization: Bearer $VERCEL_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{\"alias\":\"${DASHBOARD_PROD_ALIAS}\"}")"
+            RESP="$(python3 ops/http-client.py vercel-request --method POST \
+              --url "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${DASHBOARD_SCOPE}" \
+              --data "{\"alias\":\"${DASHBOARD_PROD_ALIAS}\"}")"
             echo "fallback (teamId): $RESP"
             echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code")=="not_modified"; sys.exit(0 if ok else 1)' \
               || { echo "::error::Re-alias of ${DASHBOARD_PROD_ALIAS} failed."; exit 1; }
@@ -320,11 +315,10 @@ jobs:
           # the deploy we just shipped, and (2) the public /app/login route serves
           # a login screen without route loops or server errors.
           for i in $(seq 1 30); do
-            proj_id="$(curl -sS \
-              "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_NAME}?teamId=${DASHBOARD_SCOPE}" \
-              -H "Authorization: Bearer $VERCEL_TOKEN" \
-              | python3 -c 'import sys,json; d=json.load(sys.stdin); print(((d.get("targets") or {}).get("production") or {}).get("id",""))')"
-            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://workeros.floom.dev/app/login" || true)"
+            proj_id="$(python3 ops/http-client.py vercel-json-get \
+              --url "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_ID}?teamId=${DASHBOARD_SCOPE}" \
+              --field targets.production.id)"
+            code="$(python3 ops/http-client.py status --url "https://workeros.floom.dev/app/login" --timeout 20 || true)"
             echo "attempt $i: dashboard prod id=$proj_id (expected ${DEPLOY_ID}); /app/login=$code"
             if [ "$proj_id" = "$DEPLOY_ID" ] && [ "$code" = "200" ]; then
               echo "Dashboard /app is fresh: prod == $DEPLOY_ID and /app/login==200."
@@ -343,7 +337,7 @@ jobs:
           # Verify the apex /app rewrite now serves the new dashboard deploy with
           # no 508 route loops / 5xx. Retry to allow the prod alias to propagate.
           for i in $(seq 1 12); do
-            if bash ops/smoke-routes.sh cloud; then
+            if SMOKE_HTTP_CLIENT=python bash ops/smoke-routes.sh cloud; then
               echo "Cloud smoke gate passed."
               exit 0
             fi
