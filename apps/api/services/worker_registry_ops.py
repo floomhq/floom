@@ -387,10 +387,9 @@ def _git_commit_worker(
         logger.warning("git commit failed for worker %s: %s", worker_id, exc)
 
 
-def _embed_files_in_skill_version(worker_id: str, worker_dir: Path) -> None:
-    """Store all text worker files into manifest_json._files so they survive container redeploys."""
-    from db import get_db
-    files: dict = {}
+def _read_embeddable_worker_files(worker_dir: Path) -> dict[str, str]:
+    """Collect the text bundle files under ``worker_dir`` eligible for embedding."""
+    files: dict[str, str] = {}
     for fpath in sorted(worker_dir.rglob("*")):
         if fpath.is_symlink() or not fpath.is_file():
             continue
@@ -401,8 +400,86 @@ def _embed_files_in_skill_version(worker_id: str, worker_dir: Path) -> None:
             files[rel] = fpath.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             pass
+    return files
+
+
+def _embed_files_in_skill_version(
+    worker_id: str,
+    worker_dir: Path,
+    *,
+    repos: "Repositories | None" = None,
+    strict: bool = False,
+) -> None:
+    """Store all text worker files into ``manifest_json._files``.
+
+    The portable bundle (``manifest_json._files``) is what the e2b/agent runners
+    materialize from at run time — and the runner is frequently a *different*
+    machine than the API that created the worker. The write therefore MUST land
+    in the deployment's CANONICAL store, not only the engine's local SQLite
+    sidecar: in cloud (Supabase/Postgres) a SQLite-only write leaves ``_files``
+    empty in Postgres, the runner finds no bundle, and every run fails with
+    "Worker directory not found" (workeros-cloud#717).
+
+    This routes the write through the canonical ``WorkerRepository`` (which every
+    backend implements), so it is correct on SQLite AND Postgres. The raw-SQLite
+    path is kept only as a last-resort fallback for the rare caller without a
+    repos handle (and is itself a no-op on a non-SQLite primary store).
+
+    ``strict=True`` (single-worker create / save) re-raises any write failure and
+    raises ``RuntimeError`` if the worker/skill_version cannot be found — so a
+    broken bundle never silently reaches 'ready'. The default (bulk discovery /
+    background) keeps the prior best-effort behaviour.
+    """
+    files = _read_embeddable_worker_files(worker_dir)
     if not files:
+        if strict:
+            raise RuntimeError(
+                f"no embeddable files found for worker {worker_id!r} at {worker_dir}"
+            )
         return
+
+    if repos is None:
+        try:
+            from db.factory import get_repositories
+
+            repos = get_repositories()
+        except Exception:
+            repos = None
+
+    workers_repo = getattr(repos, "workers", None) if repos is not None else None
+    updater = getattr(workers_repo, "update_manifest_files", None)
+    if callable(updater):
+        try:
+            found = updater(worker_id=worker_id, files=files)
+        except Exception:
+            if strict:
+                raise
+            logger.warning(
+                "Failed to embed files in DB for worker %s", worker_id, exc_info=True
+            )
+            return
+        if not found and strict:
+            raise RuntimeError(
+                f"worker {worker_id!r} has no skill_version row to embed files into"
+            )
+        return
+
+    # A canonical repo is present but predates update_manifest_files. In strict
+    # mode we MUST NOT fall back to the raw-SQLite write below: if that repo is a
+    # non-SQLite (e.g. Postgres/cloud) store, the SQLite write lands in the wrong
+    # place, Postgres ``_files`` stays empty, and the bundle silently ships dead
+    # (workeros-cloud#717). Fail loud instead of recreating the original bug.
+    if strict and workers_repo is not None:
+        raise RuntimeError(
+            f"canonical worker repository {type(workers_repo).__name__} does not "
+            f"implement update_manifest_files; refusing to embed bundle for "
+            f"worker {worker_id!r} into a non-canonical store"
+        )
+
+    # Last-resort fallback: NO canonical repo handle at all (rare). SQLite-only;
+    # a no-op against a non-SQLite primary store, so best-effort by definition.
+    from db import get_db
+
     with get_db() as conn:
         row = conn.execute(
             "SELECT sv.id, sv.manifest_json FROM skill_versions sv "
@@ -410,6 +487,10 @@ def _embed_files_in_skill_version(worker_id: str, worker_dir: Path) -> None:
             (worker_id,),
         ).fetchone()
         if not row:
+            if strict:
+                raise RuntimeError(
+                    f"worker {worker_id!r} has no skill_version row to embed files into"
+                )
             return
         manifest = json.loads(row["manifest_json"] or "{}")
         manifest["_files"] = files
@@ -505,12 +586,67 @@ def _register_worker_from_files(
             invalidate_worker_cache()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    # Single-worker registration (PUT /files branch + worker-author hook): embed
+    # the portable bundle through the canonical repo so it lands in the cloud's
+    # Postgres store, not only SQLite. Fail loud — a bundle that can't be embedded
+    # is unrunnable on the e2b/agent executor (workeros-cloud#717). The target_dir
+    # cleanup on failure mirrors the write-failure path above.
     try:
-        _embed_files_in_skill_version(worker_id, target_dir)
-    except Exception:
-        logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
+        _embed_files_in_skill_version(worker_id, target_dir, repos=repos, strict=True)
+    except Exception as exc:
+        # Embed failed under strict mode: the worker row was already created by
+        # _persist_discovered_workers above. Remove BOTH the directory AND the DB
+        # row so a strict failure leaves no ghost worker (a visible row with no
+        # bundle), mirroring the create path's _cleanup_worker_create_state.
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        _purge_partial_worker(worker_id, user_id=user_id, repos=repos)
+        invalidate_worker_cache()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to persist worker bundle for {worker_id!r}: {exc}",
+        ) from exc
 
     return worker_id
+
+
+def _purge_partial_worker(
+    worker_id: str,
+    *,
+    user_id: str | None,
+    repos: "Repositories | None" = None,
+) -> None:
+    """Best-effort delete of a partially-registered worker's DB state.
+
+    Used when a strict embed fails after the worker row was persisted, so the
+    create/register paths never leave a row pointing at a missing bundle. Routes
+    through the canonical repo first (cloud-aware), then cleans the SQLite
+    sidecar; both are best-effort because this runs inside a failure handler.
+    """
+    workers_repo = getattr(repos, "workers", None) if repos is not None else None
+    if workers_repo is not None:
+        try:
+            workers_repo.delete(user_id=user_id, worker_id=worker_id)
+        except Exception:
+            logger.debug("partial-worker repo delete failed for %s", worker_id, exc_info=True)
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT skill_version_id FROM workers WHERE id = ?", (worker_id,)
+            ).fetchone()
+            skill_version_id = row["skill_version_id"] if row else None
+            conn.execute("DELETE FROM worker_triggers WHERE worker_id = ?", (worker_id,))
+            conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
+            if skill_version_id:
+                conn.execute(
+                    "DELETE FROM skill_versions WHERE id = ? "
+                    "AND NOT EXISTS (SELECT 1 FROM workers WHERE skill_version_id = ?)",
+                    (skill_version_id, skill_version_id),
+                )
+    except Exception:
+        logger.debug("partial-worker sqlite delete failed for %s", worker_id, exc_info=True)
 
 
 def _persist_discovered_workers(
