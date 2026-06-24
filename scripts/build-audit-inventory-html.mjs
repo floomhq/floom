@@ -328,10 +328,11 @@ function esc(s) {
 function shotHtml(row) {
   const key = row.shot;
   if (!key) {
-    return `<div class="shot-empty">Drop <code>screenshots/${esc(row.id)}.png</code></div>`;
+    return `<div class="shot-empty">No screenshot yet — <code>${esc(row.id)}</code></div>`;
   }
   const file = SHOTS[key] || `${row.id}.png`;
-  return `<figure class="shot"><a href="screenshots/${esc(file)}"><img src="screenshots/${esc(file)}" alt="${esc(row.id)}" loading="lazy"/></a><figcaption>${esc(file)}</figcaption></figure>`;
+  const src = `/audit/screenshots/${file}`;
+  return `<figure class="shot"><a href="${esc(src)}"><img src="${esc(src)}" alt="${esc(row.id)}" loading="lazy"/></a><figcaption>${esc(file)}</figcaption></figure>`;
 }
 
 function issueCard(row) {
