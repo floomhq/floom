@@ -185,6 +185,47 @@ def test_approvals_count_pending_is_workspace_scoped():
         assert repo.count_pending(owner_id="user_1") == 1
 
 
+def test_approval_run_key_lookups_are_workspace_scoped():
+    rows = {
+        "approvals": [
+            {
+                "id": "apr_a",
+                "owner_id": "user_1",
+                "workspace_id": "ws_a",
+                "run_id": "run_shared",
+                "follow_up_run_id": "follow_shared",
+                "status": "approved",
+                "created_at": "2026-06-24T00:00:01+00:00",
+            },
+            {
+                "id": "apr_b",
+                "owner_id": "user_1",
+                "workspace_id": "ws_b",
+                "run_id": "run_shared",
+                "follow_up_run_id": "follow_shared",
+                "status": "approved",
+                "created_at": "2026-06-24T00:00:02+00:00",
+            },
+            {
+                "id": "apr_other_owner",
+                "owner_id": "user_2",
+                "workspace_id": "ws_b",
+                "run_id": "run_foreign_owner",
+                "follow_up_run_id": "follow_foreign_owner",
+                "status": "approved",
+                "created_at": "2026-06-24T00:00:03+00:00",
+            },
+        ]
+    }
+    repo = SupabaseApprovalRepository(client=_Client(rows))
+
+    with active_workspace("ws_a"):
+        assert repo.get_by_run_id(run_id="run_shared")["id"] == "apr_a"
+        assert repo.get_by_follow_up_run_id(follow_up_run_id="follow_shared")["id"] == "apr_a"
+        assert repo.get_by_run_id(run_id="run_foreign_owner") is None
+        assert repo.get_by_follow_up_run_id(follow_up_run_id="follow_foreign_owner") is None
+
+
 def test_worker_get_by_id_hides_same_owner_other_workspace():
     repo = SupabaseWorkerRepository(client=_Client(_worker_rows()))
 

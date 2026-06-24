@@ -4456,14 +4456,15 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
 
     def get_by_run_id(self, *, run_id: str) -> dict[str, Any] | None:
         try:
-            response = (
+            builder = (
                 self._client.table(self._TABLE)
                 .select("*")
                 .eq("run_id", run_id)
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
             )
+            workspace_id = get_active_workspace_id()
+            if workspace_id:
+                builder = builder.eq("workspace_id", workspace_id)
+            response = builder.order("created_at", desc=True).limit(1).execute()
             return _first_row(response)
         except Exception as exc:
             if _is_table_not_found(exc):
@@ -4475,14 +4476,15 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         # follow_up_run_id, so a matching approved row proves the engine
         # authorised this run's side effect (cannot be spoofed by inputs).
         try:
-            response = (
+            builder = (
                 self._client.table(self._TABLE)
                 .select("*")
                 .eq("follow_up_run_id", follow_up_run_id)
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
             )
+            workspace_id = get_active_workspace_id()
+            if workspace_id:
+                builder = builder.eq("workspace_id", workspace_id)
+            response = builder.order("created_at", desc=True).limit(1).execute()
             return _first_row(response)
         except Exception as exc:
             if _is_table_not_found(exc):
