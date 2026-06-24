@@ -78,6 +78,23 @@ function safeProxyLocation(location: string | null, req: NextRequest): string | 
     return parsed.toString();
   }
 
+  // Composio connection auth: the branded authorize link
+  // (/connections/authorize/<token>) intentionally 307s to Composio's hosted
+  // OAuth start page (connect.composio.dev). The backend has already signed and
+  // validated that the target is https + *.composio.dev
+  // (_validate_authorize_token / _is_allowed_composio_redirect_url), so forward
+  // that one trusted external origin verbatim. Without this the Location is
+  // stripped and the browser lands on an empty 307 (blank page). Mirrors the
+  // engine proxy's composio allowance (engine/apps/web .../proxy route, #1044).
+  const host = parsed.hostname.toLowerCase();
+  if (
+    req.nextUrl.pathname.includes("/connections/authorize/") &&
+    parsed.protocol === "https:" &&
+    (host === "composio.dev" || host.endsWith(".composio.dev"))
+  ) {
+    return parsed.toString();
+  }
+
   if (parsed.origin !== apiBase.origin) {
     return null;
   }

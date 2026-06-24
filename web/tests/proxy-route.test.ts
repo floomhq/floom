@@ -145,6 +145,48 @@ describe("api proxy route", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
+  it("forwards the composio connection-authorize redirect verbatim", async () => {
+    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
+    cookieState.value = sessionCookie();
+    const composioLocation = "https://connect.composio.dev/link/lk_bPWzlbr6shhp";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, {
+        status: 307,
+        headers: { location: composioLocation },
+      }),
+    );
+    const { GET } = await loadRoute();
+
+    const res = await GET(
+      new NextRequest(
+        "https://workeros.floom.dev/app/api/proxy/connections/authorize/abc.def",
+      ),
+      { params: Promise.resolve({ path: ["connections", "authorize", "abc.def"] }) },
+    );
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(composioLocation);
+  });
+
+  it("still strips a composio redirect on a non-authorize path", async () => {
+    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
+    cookieState.value = sessionCookie();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, {
+        status: 307,
+        headers: { location: "https://connect.composio.dev/link/lk_evil" },
+      }),
+    );
+    const { GET } = await loadRoute();
+
+    const res = await GET(
+      new NextRequest("https://workeros.floom.dev/app/api/proxy/workers"),
+      { params: Promise.resolve({ path: ["workers"] }) },
+    );
+
+    expect(res.headers.get("location")).toBeNull();
+  });
+
   it("passes the configured Supabase OAuth redirect through unchanged (fresh login)", async () => {
     process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     process.env.WORKEROS_CLOUD_SUPABASE_URL = "https://sgizlsyygvlqosgwdimb.supabase.co";

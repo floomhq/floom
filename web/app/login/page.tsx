@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { safeAppNext } from "@/lib/safe-next";
 
 export const metadata = {
-  title: "Sign in · Floom",
+  title: "Sign in · Floom Workers",
 };
 
 // Same-origin proxy keeps PKCE + session cookies on the dashboard host
@@ -181,7 +181,7 @@ export default async function LoginPage({
           >
             <div className="mb-8 space-y-2">
               <h1 id="login-heading" className="text-[28px] font-semibold leading-tight">
-                Sign in to Floom
+                Welcome back
               </h1>
               <p className="text-[14px] leading-6" style={{ color: "var(--muted-text)" }}>
                 {install ? `Install ${install} after signing in.` : "Use OAuth or a magic link to enter your workspace."}
