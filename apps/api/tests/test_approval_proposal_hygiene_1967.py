@@ -14,7 +14,19 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 
-def test_infra_error_decision_required_fails_run_without_approval():
+def _purge_run_modules() -> None:
+    for name in list(sys.modules):
+        if name in {"run_service", "worker_registry", "db"} or name.startswith("db."):
+            sys.modules.pop(name, None)
+
+
+def test_infra_error_decision_required_fails_run_without_approval(monkeypatch, tmp_path):
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    _purge_run_modules()
     import run_service
 
     created_approvals: list[dict] = []
@@ -45,21 +57,24 @@ def test_infra_error_decision_required_fails_run_without_approval():
         ),
     }
 
-    run_service._pause_run_for_required_approval(
-        run_id="run_1967",
-        worker_id="content-pub-cp2",
-        owner_id="owner_1967",
-        config=object(),
-        effective_inputs={},
-        decision_required=decision_required,
-        outputs={},
-        repos_obj=Repos(),
-        log_fn=lambda message, level="info": logs.append((message, level)),
-    )
+    try:
+        run_service._pause_run_for_required_approval(
+            run_id="run_1967",
+            worker_id="content-pub-cp2",
+            owner_id="owner_1967",
+            config=object(),
+            effective_inputs={},
+            decision_required=decision_required,
+            outputs={},
+            repos_obj=Repos(),
+            log_fn=lambda message, level="info": logs.append((message, level)),
+        )
 
-    assert created_approvals == []
-    assert status_updates
-    assert status_updates[-1]["status"] == run_service.RunStatus.FAILED.value
-    assert status_updates[-1]["error_code"] == "approval_proposal_config_error"
-    assert "configuration error" in status_updates[-1]["error"]
-    assert any(level == "error" and "configuration error" in message for message, level in logs)
+        assert created_approvals == []
+        assert status_updates
+        assert status_updates[-1]["status"] == run_service.RunStatus.FAILED.value
+        assert status_updates[-1]["error_code"] == "approval_proposal_config_error"
+        assert "configuration error" in status_updates[-1]["error"]
+        assert any(level == "error" and "configuration error" in message for message, level in logs)
+    finally:
+        _purge_run_modules()

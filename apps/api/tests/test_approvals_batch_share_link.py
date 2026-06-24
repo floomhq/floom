@@ -6,6 +6,7 @@ Run:
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import sys
 from pathlib import Path
@@ -194,6 +195,92 @@ def test_batch_share_link_is_idempotent_and_uses_top_level_standalone_url(client
     assert first.json()["url"] == f"https://floom.dev/s/{first.json()['token']}"
     assert "/app/s/" not in first.json()["url"]
     assert client.get(f"/approvals/public-batch/{first.json()['token']}").status_code == 200
+
+
+def test_batch_share_link_stores_hash_only_token(client_and_main):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_hash_only", run_id="run_hash_only", worker_id="w_hash_only")
+
+    token = _batch_token(client)
+
+    db = importlib.import_module("db")
+    with db.get_db() as conn:
+        columns = [row["name"] for row in conn.execute("PRAGMA table_info(approval_batch_share_links)").fetchall()]
+        row = conn.execute("SELECT * FROM approval_batch_share_links").fetchone()
+
+    assert "token_hash" in columns
+    assert "token" not in columns
+    assert row is not None
+    stored = dict(row)
+    assert stored["token_hash"] == hashlib.sha256(token.encode("utf-8")).hexdigest()
+    assert token not in repr(stored)
+
+
+def test_public_batch_token_is_scoped_to_minted_pending_approval_snapshot(client_and_main):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_original", run_id="run_original", worker_id="w_original")
+    token = _batch_token(client)
+    _seed_approval(main, approval_id="apr_later", run_id="run_later", worker_id="w_later")
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    batch = anon.get(f"/approvals/public-batch/{token}")
+    assert batch.status_code == 200, batch.text
+    assert [item["id"] for item in batch.json()["approvals"]] == ["apr_original"]
+
+    denied = anon.post(
+        f"/approvals/public-batch/{token}/items/apr_later/decision",
+        json={"decision": "rejected"},
+    )
+    assert denied.status_code == 404
+    row = main.get_repositories().approvals.get(owner_id=OWNER, approval_id="apr_later")
+    assert row["status"] == "pending"
+
+
+def test_public_batch_legacy_raw_token_table_migrates_and_freezes_scope(client_and_main):
+    client, main = client_and_main
+    legacy_token = "fls_legacy123456"
+    _seed_approval(main, approval_id="apr_legacy", run_id="run_legacy", worker_id="w_legacy")
+
+    db = importlib.import_module("db")
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE approval_batch_share_links (
+                token TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(workspace_id, owner_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO approval_batch_share_links (token, workspace_id, owner_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (legacy_token, "local-default", OWNER, "2026-06-24T00:00:00Z"),
+        )
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    response = anon.get(f"/approvals/public-batch/{legacy_token}")
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["approvals"]] == ["apr_legacy"]
+
+    with db.get_db() as conn:
+        columns = [row["name"] for row in conn.execute("PRAGMA table_info(approval_batch_share_links)").fetchall()]
+        row = conn.execute("SELECT * FROM approval_batch_share_links").fetchone()
+
+    assert "token_hash" in columns
+    assert "token" not in columns
+    stored = dict(row)
+    assert stored["token_hash"] == hashlib.sha256(legacy_token.encode("utf-8")).hexdigest()
+    assert stored["approval_ids_json"] == '["apr_legacy"]'
+    assert legacy_token not in repr(stored)
 
 
 def test_public_batch_allows_floom_preflight_for_decision(client_and_main):
