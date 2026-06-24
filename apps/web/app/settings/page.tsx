@@ -505,8 +505,10 @@ function SettingsContent() {
     typeof window !== "undefined" ? window.location.search : ""
   );
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+  // SETTINGS-01: Settings defaults to LIST view (not gallery grid) — matches the
+  // Workers/Library/Connections collections and reads as a scannable section list.
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
-    ...emptyState("grid"),
+    ...emptyState("list"),
     sel: null,
   }));
 
@@ -776,7 +778,7 @@ function SettingsContent() {
         { value: settingsGroup("workspace").length, label: "workspace" },
         { value: settingsGroup("account").length, label: "account" },
       ],
-      view: { default: "grid", grid: true },
+      view: { default: "list", grid: true },
       group: (item) =>
         item.scope === "workspace"
           ? groupLabel("workspace", workspaceName)

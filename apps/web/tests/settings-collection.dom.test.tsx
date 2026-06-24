@@ -131,7 +131,8 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
-    expect(await screen.findByRole("button", { name: "Grid view", pressed: true })).toBeInTheDocument();
+    // SETTINGS-01: Settings now defaults to LIST view (not gallery grid).
+    expect(await screen.findByRole("button", { name: "List view", pressed: true })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "List view" }));
     await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
