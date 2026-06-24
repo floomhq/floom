@@ -4,11 +4,7 @@
  * The AppShell removes the dock and content padding for this route.
  * EmilyChatPage renders its own header + full-height message thread.
  *
- * Create flow (Federico 2026-06-19): creating a worker is NO LONGER a separate
- * full-page surface. "New worker" / the legacy `?mode=create` open the SAME
- * fullscreen Emily as the home (the dock-fullscreen surface), primed for create
- * — `/?create=1` (with `&prime=<text>` seeding the composer). Old `?mode=create`
- * links redirect there so nothing breaks.
+ * Create flow: legacy `?mode=create` links redirect to /workers/new.
  */
 import { redirect } from "next/navigation";
 import { EmilyChatPage } from "@/components/emily/EmilyChat";

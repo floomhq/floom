@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
-import type { AttachedFile, CardStatus, ChatMessage } from "./emily-chat-types";
+import type { AttachedFile, ChatMessage } from "./emily-chat-types";
 import {
   CONVERSATION_STORAGE_KEY,
   readStoredConversationId,

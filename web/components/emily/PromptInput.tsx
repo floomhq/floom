@@ -33,6 +33,8 @@ export function PromptInput({
   variant = "default",
   large = false,
   autoFocus = false,
+  /** Bumps on each fresh ?create=1 entry so autoFocus re-runs on repeat clicks. */
+  focusKey,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -74,6 +76,7 @@ export function PromptInput({
    * the composer) from ANY route — never a dead click with no change.
    */
   autoFocus?: boolean;
+  focusKey?: number;
 }) {
   const isLanding = variant === "landing";
   const textareaLabel = placeholder ?? "Describe the job you want done";
@@ -107,7 +110,7 @@ export function PromptInput({
     if (autoFocus && !disabled) {
       textareaRef.current?.focus();
     }
-  }, [autoFocus, disabled]);
+  }, [autoFocus, disabled, focusKey]);
 
   useEffect(() => {
     if (textareaRef.current) {

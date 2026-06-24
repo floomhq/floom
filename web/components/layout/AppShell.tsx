@@ -9,6 +9,7 @@ import { IconSprite } from "@/components/IconSprite";
 import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/layout/sidebar";
 import { DeepLinkRouter } from "@/components/layout/DeepLinkRouter";
+import { CreateWorkerLegacyRedirect } from "@/components/layout/CreateWorkerLegacyRedirect";
 import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { BootSplash } from "@/components/layout/BootSplash";
@@ -28,8 +29,7 @@ import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login", "/run", "/preview", "/cli-auth"];
 
 // The full-page /chat route renders its own Emily header; no dock needed there.
-// /workers/new is the hero hire flow — it needs full-width, no dock cramping it.
-const noDockPrefixes = ["/chat", "/workers/new"];
+const noDockPrefixes = ["/chat"];
 
 // Collection pages manage their own internal layout (header + split detail that
 // must reach the bottom of the viewport). They render inside the standard
@@ -82,6 +82,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         <IconSprite />
         <Ambient />
         <DeepLinkRouter />
+        <CreateWorkerLegacyRedirect />
         <Sidebar />
         <main className="relative z-10 flex-1 min-w-0 min-h-screen">
           {children}
@@ -99,6 +100,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         <IconSprite />
         <Ambient />
         <DeepLinkRouter />
+        <CreateWorkerLegacyRedirect />
         <Sidebar />
         <StandardShellBody fullBleed={fullBleed} isDesktop={isDesktop}>
           {children}
