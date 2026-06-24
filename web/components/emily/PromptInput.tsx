@@ -161,25 +161,18 @@ export function PromptInput({
           follow-up. */}
       {!isLanding && <PromptChips prompt={value} className="px-1" />}
 
-      {/* E10 (Federico 2026-06-17): flat #FBFBFC composer (bg-app), NOT the grey
-          --bg-2 panel that read as an unwanted "white box" appearing on type/focus.
-          default: a single subtle divider outline keeps it discoverable.
-          landing (#1557/P1-10): fully FLAT, no box border at all, to match the
-          marketing landing prompt box; compact padding (py-2) keeps it short. */}
       {/* Two-row composer: textarea on top, action toolbar below (attach left,
           send right): the prompt-kit/ChatGPT/Cursor layout (Federico 2026-06-21).
-          Flat Floom system: bg fill, NO border, NO shadow. The a11y focus ring
-          (#1711) stays as the visible focus affordance. The bg-2 fill (non-landing)
-          gives the box resting discoverability without a border, replacing the
-          E10 divider outline, per Federico's approval. No "Tools" affordance. */}
+          Flat Floom system: bg-2 fill, NO border, NO shadow. The a11y focus ring
+          (#1711) stays as the visible focus affordance. Both default and landing
+          variants use bg-2 so the composer is discoverable against the bg-app page;
+          landing (#1557/P1-10) differs only in the labeled "Hire" CTA and no Uses
+          row. No "Tools" affordance. */}
       <div
         className={cn(
-          "rounded-xl p-1.5 transition-colors",
+          "rounded-xl bg-[var(--bg-2)] p-1.5 transition-colors",
           "focus-within:ring-2 focus-within:ring-[var(--ring)] focus-within:ring-offset-0",
           large && "p-2",
-          // landing keeps the fully-flat marketing look (#1557); the Emily
-          // composer uses a bg-2 fill so it's discoverable without a border.
-          isLanding ? "bg-[var(--bg-app)]" : "bg-[var(--bg-2)]",
         )}
       >
         <textarea

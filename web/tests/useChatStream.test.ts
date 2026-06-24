@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatMessage, ChatSSEEvent } from "@/lib/emily-chat-types";
 import {
   getAutoOpenRunDetailsHref,
+  getStreamingActivity,
   getToolCardTitle,
   isInternalToolName,
   normalizeToolName,
@@ -449,5 +450,61 @@ describe("Emily chat tool cards", () => {
 
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(shouldAutoOpenRunDetails(card)).toBe(false);
+  });
+});
+
+describe("Emily streaming activity", () => {
+  it("shows thinking before the assistant message exists", () => {
+    expect(getStreamingActivity([], true)).toEqual({ kind: "thinking" });
+    expect(getStreamingActivity([], false)).toEqual({ kind: "idle" });
+  });
+
+  it("hides the footer while a tool card is in flight so the open card shows status", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-call",
+        callId: "call_workers",
+        toolName: "workers.list_all",
+        args: {},
+      },
+      "assistant_1"
+    );
+    expect(getStreamingActivity(messages, true)).toEqual({ kind: "idle" });
+  });
+
+  it("shows writing while assistant text is streaming", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "assistant_1",
+        role: "assistant",
+        parts: [{ type: "text", text: "You have", streaming: true }],
+      },
+    ];
+    expect(getStreamingActivity(messages, true)).toEqual({ kind: "writing" });
+  });
+
+  it("shows thinking after a tool completes but before reply text starts", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-call",
+        callId: "call_workers",
+        toolName: "workers.list_all",
+        args: {},
+      },
+      "assistant_1"
+    );
+    const completed = reduceSSEEvent(
+      messages,
+      {
+        type: "tool-result",
+        callId: "call_workers",
+        isError: false,
+        result: { ok: true, workers: [] },
+      },
+      "assistant_1"
+    );
+    expect(getStreamingActivity(completed, true)).toEqual({ kind: "thinking" });
   });
 });

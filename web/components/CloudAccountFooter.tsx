@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { CurrentUser } from "@/lib/types";
+import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import { identifyPostHogUser, resetPostHogUser } from "@/lib/posthog";
 import { cn } from "@/lib/utils";
 
@@ -105,9 +106,16 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
       // Cookie clearing is best effort; navigate regardless.
     }
     _cachedCloudUser = null;
+    clearClientLogoutState();
+    // Backend clears workeros_active_workspace on logout; mirror it client-side
+    // so a re-login does not inherit the prior user's workspace selection.
+    if (typeof document !== "undefined") {
+      const secure = window.location.protocol === "https:" ? "; Secure" : "";
+      document.cookie = `workeros_active_workspace=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+    }
     resetPostHogUser();
     onNavigate?.();
-    window.location.replace("/app/login?next=/app");
+    window.location.replace("/app/login?next=/app&switch=1");
   }
 
   return (

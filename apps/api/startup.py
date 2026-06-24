@@ -1318,6 +1318,60 @@ def _override_git_commit_context_for_cloud() -> None:
     logger.info("Registered cloud _git_commit_context override (#319: sensitive→Storage)")
 
 
+def _override_memory_context_persistence_for_cloud() -> None:
+    """Back up worker memory packs to Supabase Storage on materialization.
+
+    Memory packs are sensitive contexts created by ``ensure_memory_context_pack``
+    during worker create and first run. They skip git (#319) and, unlike API
+    context creates, never flowed through ``_cloud_backup_context_metadata`` or
+    ``upload_context_background``. On ephemeral cloud containers the pack lived
+    only on disk until restart — ``GET /contexts`` (Library) then looked empty
+    even though workers still existed in Supabase.
+    """
+    try:
+        memory_context = import_engine_module("runner_sandbox.memory_context")
+    except Exception:
+        return
+    orig = getattr(memory_context, "ensure_memory_context_pack", None)
+    if orig is None or getattr(orig, "_workeros_cloud_patched", False):
+        return
+
+    def _cloud_ensure_memory_context_pack(**kwargs):
+        name = orig(**kwargs)
+        if not name:
+            return name
+        workspace_id = get_active_workspace_id()
+        if not workspace_id:
+            return name
+        try:
+            cdir = engine_contexts.context_dir(name)
+            from apps.api.cloud_contexts import upload_context_background, upload_context_metadata
+
+            upload_context_background(workspace_id, name, cdir)
+            upload_context_metadata(workspace_id, engine_contexts.current_contexts_root())
+        except Exception:
+            logger.warning(
+                "memory pack Storage backup failed for %s in workspace %s",
+                name,
+                workspace_id,
+                exc_info=True,
+            )
+        return name
+
+    _cloud_ensure_memory_context_pack._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    memory_context.ensure_memory_context_pack = _cloud_ensure_memory_context_pack
+    for modname in ("runner_sandbox.e2b_driver", "runner_sandbox.agent_capabilities"):
+        try:
+            mod = import_engine_module(modname)
+            if hasattr(mod, "ensure_memory_context_pack"):
+                mod.ensure_memory_context_pack = _cloud_ensure_memory_context_pack
+        except Exception:
+            logger.warning(
+                "memory-context persistence rebind failed for %s", modname, exc_info=True
+            )
+    logger.info("Registered cloud memory-context Storage backup on materialization")
+
+
 def _register_git_workspace_resolver() -> None:
     """Tell the engine's git_ops to scope the workspace git root per-request.
 
@@ -1576,6 +1630,7 @@ def register_cloud_components() -> None:
     _register_git_workspace_resolver()
     _override_workers_git_prefix_for_cloud()
     _override_git_commit_context_for_cloud()
+    _override_memory_context_persistence_for_cloud()
     _override_git_cfg_for_cloud()
     _override_git_ops_for_cloud()
     _override_git_rollback_for_cloud()

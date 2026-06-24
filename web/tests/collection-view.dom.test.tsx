@@ -89,6 +89,15 @@ describe("CollectionView — list & grid (§8e)", () => {
     expect(screen.queryByText("Worker")).not.toBeInTheDocument(); // no list header in grid
   });
 
+  it("shows list toggle left of grid toggle (list left, gallery right)", () => {
+    render(<Harness config={makeConfig()} />);
+    const group = screen.getByRole("group", { name: "View mode" });
+    const buttons = group.querySelectorAll("button");
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toHaveAccessibleName("List view");
+    expect(buttons[1]).toHaveAccessibleName("Grid view");
+  });
+
   it("emptyState() defaults view to list when no preference is stored", () => {
     const state = emptyState();
     expect(state.view).toBe("list");

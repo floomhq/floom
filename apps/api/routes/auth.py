@@ -706,6 +706,11 @@ def login(
         options: dict[str, Any] = {"redirect_to": callback_url}
         if normalized_provider == "github":
             options["scopes"] = "read:user user:email"
+        # Google SSO survives Workeros logout — without prompt=select_account the
+        # provider silently re-auths the last Google account and account switching
+        # feels broken after Sign out.
+        if normalized_provider == "google":
+            options["queryParams"] = {"prompt": "select_account"}
         oauth = client.auth.sign_in_with_oauth(
             {
                 "provider": normalized_provider,
