@@ -240,6 +240,11 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          dashboard_build_sha="$(git -C engine rev-parse HEAD)"
+          echo "DASHBOARD_BUILD_SHA=$dashboard_build_sha" >> "$GITHUB_ENV"
+          export NEXT_PUBLIC_BUILD_SHA="$dashboard_build_sha"
+          export NEXT_PUBLIC_BUILD_REF="main"
+          export NEXT_PUBLIC_BUILD_SOURCE="github-actions"
           # `vercel build` (run from root, rootDir=web) runs web/'s build script:
           # re-syncs (no-op, detects pre-synced tree) then `next build` with the
           # engine seams baked into web/package.json. Engine source is present on
@@ -301,8 +306,11 @@ jobs:
               --url "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${DASHBOARD_SCOPE}" \
               --data "{\"alias\":\"${DASHBOARD_PROD_ALIAS}\"}")"
             echo "fallback (teamId): $RESP"
-            echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code")=="not_modified"; sys.exit(0 if ok else 1)' \
+            echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code") in {"not_modified","domain_not_verified"}; sys.exit(0 if ok else 1)' \
               || { echo "::error::Re-alias of ${DASHBOARD_PROD_ALIAS} failed."; exit 1; }
+            if echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if (d.get("error") or {}).get("code")=="domain_not_verified" else 1)'; then
+              echo "::warning::${DASHBOARD_PROD_ALIAS} is not verified for explicit team alias assignment; continuing because the freshness gate verifies the live /app route."
+            fi
           fi
 
       - name: Verify dashboard freshness gate
@@ -311,21 +319,28 @@ jobs:
         run: |
           set -uo pipefail
           # A green deploy is NOT proof the public /app routes advanced. Poll
-          # until BOTH hold: (1) the dashboard project's production deploy id is
-          # the deploy we just shipped, and (2) the public /app/login route serves
-          # a login screen without route loops or server errors.
+          # until all hold: (1) the dashboard project's production deploy id is
+          # the deploy we just shipped, (2) the public /app/login route serves
+          # a login screen without route loops or server errors, and (3) the
+          # dashboard alias serves the build SHA stamped during this run.
           for i in $(seq 1 30); do
             proj_id="$(python3 ops/http-client.py vercel-json-get \
               --url "https://api.vercel.com/v9/projects/${DASHBOARD_PROJECT_ID}?teamId=${DASHBOARD_SCOPE}" \
               --field targets.production.id)"
             code="$(python3 ops/http-client.py status --url "https://workeros.floom.dev/app/login" --timeout 20 || true)"
-            echo "attempt $i: dashboard prod id=$proj_id (expected ${DEPLOY_ID}); /app/login=$code"
-            if [ "$proj_id" = "$DEPLOY_ID" ] && [ "$code" = "200" ]; then
-              echo "Dashboard /app is fresh: prod == $DEPLOY_ID and /app/login==200."
+            alias_sha=""
+            tmp="$(mktemp)"
+            if python3 ops/http-client.py fetch --url "https://${DASHBOARD_PROD_ALIAS}/app/version" --output "$tmp" --timeout 20; then
+              alias_sha="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1], encoding="utf-8")).get("build_sha") or "").strip())' "$tmp")"
+            fi
+            rm -f "$tmp"
+            echo "attempt $i: dashboard prod id=$proj_id (expected ${DEPLOY_ID}); /app/login=$code; ${DASHBOARD_PROD_ALIAS}/app/version build_sha=$alias_sha (expected ${DASHBOARD_BUILD_SHA})"
+            if [ "$proj_id" = "$DEPLOY_ID" ] && [ "$code" = "200" ] && [ "$alias_sha" = "$DASHBOARD_BUILD_SHA" ]; then
+              echo "Dashboard /app is fresh: prod == $DEPLOY_ID, /app/login==200, and ${DASHBOARD_PROD_ALIAS}/app/version reports ${DASHBOARD_BUILD_SHA}."
               break
             fi
             if [ "$i" = "30" ]; then
-              echo "::error::Dashboard did not converge: prod ($proj_id) != $DEPLOY_ID or /app/login != 200."
+              echo "::error::Dashboard did not converge: prod ($proj_id) != $DEPLOY_ID, /app/login != 200, or ${DASHBOARD_PROD_ALIAS}/app/version did not report ${DASHBOARD_BUILD_SHA}."
               exit 1
             fi
             sleep 10
