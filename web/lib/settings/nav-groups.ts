@@ -1,6 +1,6 @@
 // Settings nav, grouped per APP-UI-V4-SPEC §4: TWO labeled groups —
-//   Workspace · {name}  and  Account · {user}
-// with a counts strip like "7 workspace · 4 account".
+//   Account · {user}  and  Workspace · {name}
+// with a counts strip like "2 account · 6 workspace".
 //
 // Scope is communicated by WHERE a thing lives (the group it sits in) plus a
 // scope chip in each detail pane. This is the core of the token-confusion fix
@@ -12,9 +12,8 @@
 // Each token pane carries a scope chip + a cross-link to the other so the
 // "is this mine or the workspace's?" question is answered in-place.
 //
-// "Connect & automate" (account scope) holds the developer reference snippets
-// (REST API, MCP install, CLI, Git sync) — no token CRUD, those moved to the
-// two token panes above.
+// "Developer" (workspace scope) combines the workspace token with the existing
+// developer reference snippets (REST API, MCP install, CLI, Git sync).
 
 export type SettingsScope = "workspace" | "account";
 
@@ -24,12 +23,9 @@ export interface SettingsNavItem {
     | "channels"
     | "assistant"
     | "members"
-    | "workspace_token"
-    | "versions"
-    | "danger"
+    | "developer"
+    | "data"
     | "personal_tokens"
-    | "connect"
-    | "appearance"
     | "profile";
   label: string;
   scope: SettingsScope;
@@ -37,30 +33,27 @@ export interface SettingsNavItem {
 }
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
+  // Account · {user} — per-user controls.
+  { key: "profile", label: "Profile", scope: "account", description: "Display name, avatar & theme" },
+  { key: "personal_tokens", label: "Personal access tokens", scope: "account", description: "Yours; work across every workspace" },
   // Workspace · {name} — shared/admin controls.
   { key: "system", label: "General", scope: "workspace", description: "Workspace defaults" },
   { key: "members", label: "Members", scope: "workspace", description: "People & roles" },
   { key: "channels", label: "Channels", scope: "workspace", description: "Slack, email & WhatsApp" },
   { key: "assistant", label: "Assistant", scope: "workspace", description: "Configure Emily" },
-  { key: "workspace_token", label: "Workspace token", scope: "workspace", description: "Shared token for this workspace's CLI & CI" },
-  { key: "versions", label: "Backups & history", scope: "workspace", description: "Restore points, download a copy, and undo" },
-  { key: "danger", label: "Danger zone", scope: "workspace", description: "Irreversible actions" },
-  // Account · {user} — per-user controls.
-  { key: "profile", label: "Profile", scope: "account", description: "Display name & avatar" },
-  { key: "personal_tokens", label: "Personal access tokens", scope: "account", description: "Yours; work across every workspace" },
-  { key: "connect", label: "Connect & automate", scope: "account", description: "REST API, MCP, CLI & Git" },
-  { key: "appearance", label: "Appearance", scope: "account", description: "Theme (light, dark, system)" },
+  { key: "developer", label: "Developer", scope: "workspace", description: "Workspace token, REST API, MCP, CLI & Git" },
+  { key: "data", label: "Data & lifecycle", scope: "workspace", description: "Restore points, download a copy, and irreversible actions" },
 ];
 
 export function settingsGroup(scope: SettingsScope): SettingsNavItem[] {
   return SETTINGS_NAV.filter((i) => i.scope === scope);
 }
 
-/** Count strip, e.g. "7 workspace · 4 account". */
+/** Count strip, e.g. "2 account · 6 workspace". */
 export function settingsCounts(): string {
   const ws = settingsGroup("workspace").length;
   const acct = settingsGroup("account").length;
-  return `${ws} workspace · ${acct} account`;
+  return `${acct} account · ${ws} workspace`;
 }
 
 export function groupLabel(scope: SettingsScope, name?: string | null): string {

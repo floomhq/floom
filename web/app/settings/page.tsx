@@ -76,12 +76,10 @@ import {
   KeyRound,
   Mail,
   MessageSquare,
-  Palette,
   QrCode,
   RotateCcw,
   Save,
   Settings,
-  ShieldAlert,
   Trash2,
   UserPlus,
   UserRound,
@@ -480,16 +478,16 @@ function isValidSection(value: string | null): value is SectionKey {
 function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
     // Legacy aliases kept for back-compat with old deep-links.
-    value === "api" ? "connect" :
+    value === "api" ? "developer" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
-    value === "git" ? "connect" :
-    // The "developer" section was split into two token panes + a connect pane.
-    // Old ?sel=developer links land on the API/MCP/CLI/Git reference.
-    value === "developer" ? "connect" :
-    // workspace_tokens was a standalone nav item, then briefly a Developer
-    // sub-tab; it is now its own workspace-scoped pane again.
-    value === "workspace_tokens" ? "workspace_token" :
+    value === "git" ? "developer" :
+    value === "connect" ? "developer" :
+    value === "workspace_token" ? "developer" :
+    value === "workspace_tokens" ? "developer" :
+    value === "versions" ? "data" :
+    value === "danger" ? "data" :
+    value === "appearance" ? "profile" :
     // Personal tokens used to live under Developer > Tokens.
     value === "tokens" ? "personal_tokens" :
     value;
@@ -773,8 +771,8 @@ function SettingsContent() {
         ],
       },
       counts: [
-        { value: settingsGroup("workspace").length, label: "workspace" },
         { value: settingsGroup("account").length, label: "account" },
+        { value: settingsGroup("workspace").length, label: "workspace" },
       ],
       view: { default: "list", grid: true },
       group: (item) =>
@@ -877,29 +875,32 @@ function SettingsContent() {
         return <AssistantSettingsPanel canManageWorkspace={isAdmin} />;
       case "members":
         return <MembersSettingsPanel />;
-      case "versions":
-        return <VersionHistorySettingsPanel canManageWorkspace={isAdmin} />;
-      case "danger":
+      case "developer":
         return (
-          <DangerSection
-            canEdit={isAdmin}
-            clearConfirmText={clearConfirmText}
-            setClearConfirmText={setClearConfirmText}
-            clearing={clearing}
-            onClearRuns={handleClearRuns}
-          />
+          <div className="space-y-6">
+            <WorkspaceTokenSection workspaceName={workspaceName} />
+            <ConnectSection />
+          </div>
         );
-      case "workspace_token":
-        return <WorkspaceTokenSection workspaceName={workspaceName} />;
+      case "data":
+        return (
+          <div className="space-y-6">
+            <VersionHistorySettingsPanel canManageWorkspace={isAdmin} />
+            <DangerSection
+              canEdit={isAdmin}
+              clearConfirmText={clearConfirmText}
+              setClearConfirmText={setClearConfirmText}
+              clearing={clearing}
+              onClearRuns={handleClearRuns}
+            />
+          </div>
+        );
       case "personal_tokens":
         return <PersonalTokensSection accountName={accountName} workspaceName={workspaceName} />;
-      case "connect":
-        return <ConnectSection />;
-      case "appearance":
-        return <AppearanceSection />;
       case "profile":
         return <ProfileSection currentUser={currentUser} onUpdated={(u) => setCurrentUser(u)} />;
     }
+    return assertNever(key);
   }
 
   return (
@@ -990,21 +991,20 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return Bot;
     case "members":
       return Users;
-    case "versions":
+    case "data":
       return History;
-    case "danger":
-      return ShieldAlert;
-    case "workspace_token":
-      return KeyRound;
+    case "developer":
+      return Code2;
     case "personal_tokens":
       return KeyRound;
-    case "connect":
-      return Code2;
-    case "appearance":
-      return Palette;
     case "profile":
       return UserRound;
   }
+  return assertNever(key);
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled settings section: ${String(value)}`);
 }
 
 function SettingsIcon({ icon: Icon }: { icon: SettingsIconType }) {
@@ -1253,17 +1253,14 @@ function PersonalTokensSection({ accountName, workspaceName }: { accountName?: s
         title="These are yours, not the workspace's."
         body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
         linkLabel={`Workspace · ${workspaceName} → Access key`}
-        targetSel="workspace_token"
+        targetSel="developer"
       />
     </div>
   );
 }
 
-// ConnectSection (account scope) — the developer reference snippets that used to
-// share the Developer page with token CRUD: REST API, MCP install, CLI, and Git
-// sync. No token management here anymore (it moved to the two token panes); this
-// is read-only reference plus the Git workspace panel. (#616 GitWorkspacePanel
-// preserved.)
+// ConnectSection — the existing developer reference snippets: REST API, MCP
+// install, CLI, and Git sync. (#616 GitWorkspacePanel preserved.)
 function ConnectSection() {
   return (
     <Tabs defaultValue="api">
@@ -1348,18 +1345,6 @@ function ConnectSection() {
   );
 }
 
-function AppearanceSection() {
-  return (
-    <div className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
-      <p className="text-sm text-muted-foreground">
-        Choose how Floom looks. System follows your operating system.
-      </p>
-      <ThemeModeToggleGroup />
-    </div>
-  );
-}
-
 function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser | null; onUpdated: (u: CurrentUser) => void }) {
   const [displayName, setDisplayName] = useState(currentUser?.display_name ?? "");
   const [saving, setSaving] = useState(false);
@@ -1428,6 +1413,11 @@ function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser |
         <p className="text-xs text-muted-foreground">
           Your display name is shown in the sidebar and in activity logs.
         </p>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
+        <ThemeModeToggleGroup />
       </section>
     </div>
   );
@@ -2510,7 +2500,7 @@ function MembersSettingsPanel() {
 // "Backups & history": download a workspace copy, browse the unified git
 // timeline (workers, library, notes), undo recent workspace-note/persona edits,
 // and surface GitHub sync status when connected. Git SHA/branch vocabulary stays
-// out of the UI; connect/setup lives under Account · Connect & automate.
+// out of the UI; connect/setup lives under Developer.
 type UndoScope = "instructions" | "base";
 
 function changelogScopeLabel(assetType: string, assetName: string): string {
@@ -2624,7 +2614,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
           Every save to workers, library folders, and workspace notes appears here.
           {gitStatus?.connected
             ? " Connected repos receive these commits when Floom pushes to GitHub."
-            : " To back up to GitHub, connect a repo under Account · Connect & automate."}
+            : " To back up to GitHub, connect a repo under Developer."}
         </p>
         {gitStatus?.connected && gitStatus.repo_url ? (
           <p className="text-xs text-muted-foreground">
@@ -2648,7 +2638,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
             <button
               type="button"
               className="font-medium text-[var(--accent)] hover:underline"
-              onClick={() => navigateSettingsSelection("connect")}
+              onClick={() => navigateSettingsSelection("developer")}
             >
               Connect GitHub
             </button>
