@@ -2138,6 +2138,57 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             lambda: self._client.table("skill_versions").delete().eq("id", skill_version_id)
         )
 
+    def update_manifest_files(self, *, worker_id: str, files: dict[str, str]) -> bool:
+        """Merge ``files`` into the worker's skill_version ``manifest_json._files``.
+
+        Postgres-backed implementation of the engine's portable-bundle write
+        (db.interface.WorkerRepository). The e2b/agent runners materialize the
+        worker bundle from ``manifest_json._files`` on a (frequently different)
+        executor machine, so the engine's create/register/rollback paths route
+        the embed through this method to land ``_files`` in Supabase rather than
+        only the engine's local SQLite sidecar (workeros-cloud#717).
+
+        Resolves the worker's skill_version, sets ``_files`` (replacing any prior
+        value), and updates the row. Returns ``False`` when the worker or its
+        skill_version row is absent (caller decides if that is fatal). A real
+        write failure propagates from ``.execute()`` so a broken bundle never
+        silently reaches 'ready'.
+
+        NOTE (#717, P2): this is a whole-``manifest_json`` read-modify-write
+        (SELECT -> set ``_files`` -> UPDATE). Intentional and safe for the
+        single-shot create/register/save paths that are its only callers today
+        (no concurrent writer to the same skill_version mid-create). Before
+        reusing in any concurrent/bulk path, switch to a ``_files``-scoped
+        ``jsonb_set`` RPC so a concurrent manifest edit between the SELECT and the
+        UPDATE cannot be lost.
+        """
+        row = self.get_any(worker_id=worker_id)
+        if not row:
+            return False
+        skill_version_id = str(row.get("skill_version_id") or "").strip()
+        if not skill_version_id:
+            return False
+
+        resp = self._execute_skill_versions_scoped(
+            lambda: self._client.table("skill_versions")
+            .select("manifest_json")
+            .eq("id", skill_version_id)
+            .limit(1)
+        )
+        sv_rows = resp.data or []
+        if not sv_rows:
+            return False
+        manifest = _json_load(sv_rows[0].get("manifest_json"), {})
+        if not isinstance(manifest, dict):
+            manifest = {}
+        manifest["_files"] = files
+        self._execute_skill_versions_scoped(
+            lambda: self._client.table("skill_versions")
+            .update({"manifest_json": manifest})
+            .eq("id", skill_version_id)
+        )
+        return True
+
     def get_recipe(
         self,
         *,

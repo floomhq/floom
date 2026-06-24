@@ -364,6 +364,64 @@ def test_worker_get_exposes_archive_fields_from_manifest_json():
     assert result["archive_reason"] == "No longer needed"
 
 
+def test_update_manifest_files_writes_files_into_skill_version_manifest():
+    """workeros-cloud#717: the engine create/register/rollback paths embed the
+    portable bundle through repos.workers.update_manifest_files; on the cloud it
+    MUST land in Supabase skill_versions.manifest_json._files (not only the
+    engine's SQLite sidecar) or the e2b runner finds an empty bundle and every
+    run fails with 'Worker directory not found'."""
+    now_iso = _now_iso()
+    worker_id = "embed-target-worker"
+    skill_version_id = "sv_embed_target"
+    manifest = _manifest(worker_id, "Embed Target Worker")
+    rows = {
+        "workers": [
+            {
+                "id": worker_id,
+                "user_id": "user_fede",
+                "workspace_id": "ws_fede_production",
+                "skill_version_id": skill_version_id,
+                "name": "Embed Target Worker",
+                "trigger_type": "manual",
+                "grants_json": {},
+                "input_values_json": {},
+                "triggers_json": [],
+                "enabled": True,
+                "created_at": now_iso,
+            }
+        ],
+        "skill_versions": [
+            {
+                "id": skill_version_id,
+                "user_id": "user_fede",
+                "name": worker_id,
+                "version": "0.1.0",
+                "manifest_json": manifest,
+                "bundle_path": f"workers/{worker_id}",
+                "created_at": now_iso,
+            }
+        ],
+    }
+    repo = SupabaseWorkerRepository(client=_FakeClient(rows))
+
+    files = {
+        "worker.yml": "id: embed-target-worker\n",
+        "run.py": "print('hi')\n",
+    }
+    found = repo.update_manifest_files(worker_id=worker_id, files=files)
+
+    assert found is True
+    stored = rows["skill_versions"][0]["manifest_json"]
+    assert stored["_files"] == files
+    # Existing manifest fields are preserved (only _files is set).
+    assert stored["id"] == worker_id
+
+
+def test_update_manifest_files_returns_false_for_missing_worker():
+    repo = SupabaseWorkerRepository(client=_FakeClient({"workers": [], "skill_versions": []}))
+    assert repo.update_manifest_files(worker_id="nope", files={"run.py": "x"}) is False
+
+
 def test_secret_resolve_batches_vault_reads_and_last_used_updates():
     vault_a = str(uuid4())
     vault_b = str(uuid4())
