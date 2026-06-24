@@ -43,7 +43,6 @@ vi.mock("@/components/emily/EmilyChat", async () => {
   return { EmilyDock: FakeDock, EmilyMobileSheet: () => null };
 });
 
-vi.mock("@/components/overview/AlertsBell", () => ({ AlertsBell: () => null }));
 vi.mock("@/components/CommandPalette", () => ({ CommandPalette: () => null }));
 vi.mock("@/components/Ambient", () => ({ Ambient: () => null }));
 vi.mock("@/components/IconSprite", () => ({ IconSprite: () => null }));

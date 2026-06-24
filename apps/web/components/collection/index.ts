@@ -5,7 +5,6 @@ export { CollectionGrid } from "./CollectionGrid";
 export { DetailPane } from "./DetailSplit";
 export { TagBar } from "./TagBar";
 export { StatusPill } from "./StatusPill";
-export { Avatar } from "./Avatar";
 export {
   ListEmpty,
   ListLoading,
