@@ -773,7 +773,6 @@ export default function ConnectionsCollection({
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
       headers: ["Connects to", "Type", "Detail", "Status", ""],
-      headerTransparent: true,
     },
     row: (i) => ({
       leading: <Logo item={i} />,

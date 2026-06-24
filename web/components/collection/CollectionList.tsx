@@ -42,22 +42,23 @@ function RowMenu({ items }: { items: RowMenuItem[] }) {
 function Row<T>({
   item,
   spec,
-  template,
+  gridTemplate,
+  showStatus,
+  showMenu,
   selected,
   onSelect,
   compact,
 }: {
   item: T;
   spec: ListRowSpec;
-  template: string;
+  gridTemplate: string;
+  showStatus: boolean;
+  showMenu: boolean;
   selected: boolean;
   onSelect: () => void;
   compact?: boolean;
 }) {
   void item;
-  const showStatus = template.includes("__status__");
-  const showMenu = template.includes("__menu__");
-  const gridTemplate = template.replace("__status__", "").replace("__menu__", "").trim();
   return (
     <div
       role="button"
@@ -102,7 +103,10 @@ export function CollectionList<T>({
   group,
   compact,
 }: CollectionListProps<T>) {
-  const template = `${columns.template} ${columns.statusColumn === false ? "" : "__status__"} ${columns.menuColumn === false ? "" : "__menu__"}`;
+  const rowTemplate = `${columns.template}${columns.statusColumn === false ? "" : " __status__"}${columns.menuColumn === false ? "" : " __menu__"}`.trim();
+  const gridTemplate = rowTemplate.replace(/__status__|__menu__/g, "").replace(/\s+/g, " ").trim();
+  const showStatus = columns.statusColumn !== false && rowTemplate.includes("__status__");
+  const showMenu = columns.menuColumn !== false && rowTemplate.includes("__menu__");
   const rows = items.map((item) => {
     const id = idOf(item);
     return (
@@ -110,7 +114,9 @@ export function CollectionList<T>({
         key={id}
         item={item}
         spec={row(item)}
-        template={template}
+        gridTemplate={gridTemplate}
+        showStatus={showStatus}
+        showMenu={showMenu}
         selected={id === selectedId}
         onSelect={() => onSelect(id)}
         compact={compact}
@@ -127,8 +133,7 @@ export function CollectionList<T>({
       <div
         className="c-lhead"
         style={{
-          gridTemplateColumns: columns.template,
-          ...(columns.headerTransparent ? { background: "transparent" } : {}),
+          gridTemplateColumns: gridTemplate,
         }}
       >
         {columns.headers.map((h, i) => (
