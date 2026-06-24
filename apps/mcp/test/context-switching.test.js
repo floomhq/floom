@@ -8,7 +8,7 @@ import test from "node:test";
 
 import { readCredentials, writeCredentials } from "../dist/lib/credentials.js";
 import { FloomApiClient } from "../dist/lib/api.js";
-import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
+import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand, workspacesShowCommand } from "../dist/commands/workspaces.js";
 import { connectionsAddCommand, connectionsListCommand } from "../dist/commands/connections.js";
 import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
 
@@ -202,6 +202,28 @@ test("workspace list marks the active workspace and shows auth status", async ()
       assert.ok(activeLine, "active row is marked with *");
       assert.match(activeLine, /Team A/);
       assert.match(activeLine, /authenticated/);
+    });
+  });
+});
+
+test("workspace show resolves the active workspace name instead of printing the id as the name", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeOssCreds(base, { workspace_id: "ws_0123456789abcd" });
+      const captured = captureStdout();
+      let code;
+      try {
+        code = await workspacesShowCommand({});
+      } finally {
+        captured.restore();
+      }
+      assert.equal(code, 0);
+      const out = captured.text();
+      assert.match(out, /Name\s+Team A/);
+      assert.match(out, /Id\s+ws_0123456789abcd/);
+      assert.doesNotMatch(out, /Name\s+ws_0123456789abcd/);
+      const creds = await readCredentials();
+      assert.equal(creds.workspace_name, "Team A");
     });
   });
 });

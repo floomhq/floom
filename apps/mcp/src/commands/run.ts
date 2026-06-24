@@ -76,6 +76,10 @@ function printPrettyRun(run: RunDetail, savedPaths: string[]): void {
   const output = effectiveRunOutput(run);
   log.heading(`Run ${run.id}`);
   log.kv("Status", run.status);
+  if (run.status === "pending_approval") {
+    log.info("Run is awaiting approval.");
+    log.info(`Review it in the app or use: ${getCommandName()} runs approve ${run.id}`);
+  }
   if (run.error) {
     log.err(run.error);
   }
@@ -175,7 +179,7 @@ export async function runWorkerCommand(
   log.step(`Run started: ${runId}`);
   let latest: RunDetail | null = null;
   let lastStatus = "";
-  const terminal = new Set(["completed", "failed", "error", "approved", "rejected"]);
+  const terminal = new Set(["completed", "failed", "error", "approved", "rejected", "pending_approval"]);
   while (true) {
     latest = (await client.requestJson("GET", `/runs/${encodeURIComponent(runId)}`)) as RunDetail;
     if (latest.status !== lastStatus) {
@@ -217,6 +221,11 @@ export async function runWorkerCommand(
     printPrettyRun(latest, savedPaths);
   }
 
-  const success = latest.status === "completed" || latest.status === "approved" || latest.status === "success";
+  const success = (
+    latest.status === "completed" ||
+    latest.status === "approved" ||
+    latest.status === "success" ||
+    latest.status === "pending_approval"
+  );
   return success ? 0 : 1;
 }

@@ -7753,6 +7753,8 @@ async def _mcp_handle_request(
         if not isinstance(arguments, dict):
             return _mcp_err(rpc_id, -32602, "Invalid params")
         default_tool = _mcp_default_tool(tool_name)
+        if default_tool is None and not repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name):
+            return _mcp_err(rpc_id, -32601, f"Tool not found: {tool_name!r}")
         invalid_args = (
             _mcp_validate_arguments_against_schema([default_tool], tool_name, arguments)
             if default_tool is not None

@@ -66,12 +66,18 @@ function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
 }
 
-export function credentialsPath(): string {
+function resolveConfigDir(): string {
+  const xdg = (process.env.XDG_CONFIG_HOME || "").trim();
+  if (xdg) return xdg;
   const home = resolveHomeDir();
   if (!home) {
     throw new Error("HOME is required to read CLI credentials");
   }
-  return join(home, ".config", "floom", "credentials.json");
+  return join(home, ".config");
+}
+
+export function credentialsPath(): string {
+  return join(resolveConfigDir(), "floom", "credentials.json");
 }
 
 function legacyCredentialsPath(): string {

@@ -102,10 +102,24 @@ export async function workspacesCreateCommand(name: string, options: { json?: bo
 
 export async function workspacesShowCommand(options: { json?: boolean }): Promise<number> {
   try {
-    const { credentials } = await createAuthenticatedClient();
+    const { client, credentials } = await createAuthenticatedClient();
+    const workspaceId = credentials.workspace_id || "";
+    let workspaceName = credentials.workspace_name || "";
+    if (workspaceId && !workspaceName) {
+      try {
+        const data = await fetchWorkspaces(client);
+        const match = (data.workspaces || []).find((row) => row.id === workspaceId);
+        workspaceName = match?.name || "";
+        if (workspaceName) {
+          await updateCredentials({ workspace_name: workspaceName });
+        }
+      } catch {
+        workspaceName = "";
+      }
+    }
     const payload = {
-      id: credentials.workspace_id || null,
-      name: credentials.workspace_name || null,
+      id: workspaceId || null,
+      name: workspaceName || null,
       api_base: credentials.api_base,
     };
     if (options.json) {
@@ -117,7 +131,7 @@ export async function workspacesShowCommand(options: { json?: boolean }): Promis
       return 0;
     }
     log.heading("Active workspace");
-    log.kv("Name", payload.name || payload.id);
+    log.kv("Name", payload.name || "Unknown");
     log.kv("Id", payload.id);
     log.kv("API base", payload.api_base);
     return 0;

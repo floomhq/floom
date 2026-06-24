@@ -285,6 +285,18 @@ def test_m06_mcp_serve_rejects_non_object_tool_arguments(monkeypatch, tmp_path):
     assert body["error"]["message"] == "Invalid params"
 
 
+def test_m06_mcp_serve_unknown_tool_returns_json_rpc_method_not_found(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = _rpc("tools/call", params={"name": "not.a.real.tool", "arguments": {}})
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32601
+    assert "not.a.real.tool" in body["error"]["message"]
+
+
 def test_m06_mcp_serve_rejects_non_object_json_rpc_payload(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     with TestClient(main.app) as client:

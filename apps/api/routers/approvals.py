@@ -1273,12 +1273,13 @@ def reject_run(
     )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
-    # state so it is not stuck forever (zombie approval). The rejection itself
-    # is recorded in the approvals table (status='rejected' + reason).
+    # state so it is not stuck forever (zombie approval). Persist the rejection
+    # on the run itself too, so later GET /runs/{id} agrees with the approval
+    # decision instead of reporting a rejected run as completed.
     repos.runs.update_status(
         user_id=auth.user_id,
         run_id=run_id,
-        status=RunStatus.COMPLETED.value,
+        status="rejected",
     )
 
     _sse_publish(run_id, {
