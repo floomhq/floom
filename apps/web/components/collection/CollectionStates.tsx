@@ -80,14 +80,14 @@ export function CollectionSkeleton({ rows = 6 }: { rows?: number }) {
         </div>
       </div>
 
-      {/* Toolbar: search-bar-shaped placeholder + view toggle + add button */}
-      <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>
-        <Skeleton
-          className="h-9 w-full rounded-[var(--radius-button)]"
-          style={{ flex: 1, maxWidth: 480 }}
-        />
-        <Skeleton className="h-9 w-16 rounded-[var(--radius-button)]" />
-        <Skeleton className="h-9 w-24 rounded-[var(--radius-button)]" style={{ marginLeft: "auto" }} />
+      {/* Control strip: search + filters + actions on grey bar */}
+      <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
+        <div className="c-controlstrip-inner">
+          <Skeleton className="h-9 flex-1 rounded-[var(--radius-button)]" style={{ minWidth: 220 }} />
+          <Skeleton className="h-7 w-24 rounded-[var(--radius-pill)]" />
+          <Skeleton className="h-9 w-16 rounded-[var(--radius-button)]" />
+          <Skeleton className="h-9 w-24 rounded-[var(--radius-button)]" />
+        </div>
       </div>
 
       {/* List: bordered table whose rows match the real `.c-lrow` footprint */}

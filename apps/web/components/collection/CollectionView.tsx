@@ -450,34 +450,22 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       {!isOpen && !creating && (
         <>
           {!collectionEmpty && (
-            <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>
-              <div
-                style={{
-                  ...restingFrameStyle,
-                  display: "flex",
-                  gap: 10,
-                  alignItems: "center",
-                  minWidth: 0,
-                }}
-              >
+            <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
+              <div className="c-controlstrip-inner" style={restingFrameStyle}>
                 {searchBox()}
-                {viewToggle}
-                <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+                {config.tags ? (
+                  <TagBar
+                    families={config.tags}
+                    active={state.tags}
+                    onToggle={toggleTagValue}
+                    onClear={clearTags}
+                  />
+                ) : null}
+                <div className="c-toolbar-actions">
+                  {viewToggle}
                   {config.toolbarActions}
                   {addButton}
                 </div>
-              </div>
-            </div>
-          )}
-          {config.tags && !collectionEmpty && (
-            <div className="c-tagbar-wrap" style={{ padding: `12px ${PAGE_X}px 2px` }}>
-              <div style={restingFrameStyle}>
-                <TagBar
-                  families={config.tags}
-                  active={state.tags}
-                  onToggle={toggleTagValue}
-                  onClear={clearTags}
-                />
               </div>
             </div>
           )}

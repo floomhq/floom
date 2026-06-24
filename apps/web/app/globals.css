@@ -773,6 +773,32 @@ html.dark .grain {
 .c-counts .ct:last-child { border-right:0; }
 .c-counts .ct b { color:var(--ink); font-weight:600; font-size:14px; }
 
+.c-controlstrip {
+  background: var(--bg-2);
+  border-bottom: var(--bd-div);
+  padding: 12px 0;
+}
+.c-controlstrip-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.c-controlstrip-inner .c-srch { flex: 1 1 220px; max-width: none; }
+.c-controlstrip-inner .c-filterbar { flex: 1 1 auto; min-width: 0; }
+.c-controlstrip-inner .c-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+@media (max-width: 640px) {
+  .c-controlstrip-inner .c-srch { flex: 1 0 100%; }
+  .c-controlstrip-inner .c-filterbar { flex: 1 0 100%; }
+  .c-controlstrip-inner .c-toolbar-actions { margin-left: 0; width: 100%; justify-content: flex-end; }
+}
+
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
 .c-srch { flex:1; min-width:0; display:flex; align-items:center; gap:9px; border:var(--bd-input); border-radius:var(--radius-button); padding:9px 12px; color:var(--muted-foreground); background:var(--bg-2); max-width:480px; }

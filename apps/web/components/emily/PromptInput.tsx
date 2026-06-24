@@ -245,7 +245,7 @@ export function PromptInput({
           ) : (
             <Button
               size="sm"
-              className="size-8 p-0 shrink-0"
+              className="size-8 shrink-0 rounded-[var(--radius-squircle)] p-0"
               onClick={onSubmit}
               disabled={!canSend}
               style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
