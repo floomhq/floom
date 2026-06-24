@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
-from contextlib import contextmanager
-from pathlib import Path
+import pytest
 
 from services.worker_registry_ops import _embed_files_in_skill_version
 from services.worker_serialize import (
@@ -63,7 +60,7 @@ def test_is_secret_bearing_export_path_credential_patterns_1681():
     assert not _is_secret_bearing_export_path("tsconfig.json")
 
 
-def test_embed_files_skips_bak_files_and_preserves_canonical_files(monkeypatch, tmp_path):
+def test_embed_files_skips_bak_files_and_preserves_canonical_files(tmp_path):
     worker_dir = tmp_path / "workers" / "partial-worker"
     (worker_dir / "lib").mkdir(parents=True)
     (worker_dir / "worker.yml").write_text("name: partial-worker\n", encoding="utf-8")
@@ -72,32 +69,63 @@ def test_embed_files_skips_bak_files_and_preserves_canonical_files(monkeypatch, 
     (worker_dir / "lib" / "search.py").write_text("def search(): pass\n", encoding="utf-8")
     (worker_dir / "lib" / "search.py.bak1").write_text("def old(): pass\n", encoding="utf-8")
 
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.executescript(
-        """
-        CREATE TABLE workers (id TEXT PRIMARY KEY, skill_version_id TEXT NOT NULL);
-        CREATE TABLE skill_versions (id TEXT PRIMARY KEY, manifest_json TEXT NOT NULL);
-        INSERT INTO workers (id, skill_version_id) VALUES ('partial-worker', 'sv1');
-        INSERT INTO skill_versions (id, manifest_json) VALUES ('sv1', '{"name":"partial-worker"}');
-        """
-    )
+    # The embed now routes through the canonical WorkerRepository so it lands in
+    # the deployment's primary store (cloud Postgres, not only SQLite —
+    # workeros-cloud#717). Capture the repo write to assert bak-file filtering and
+    # the canonical file set.
+    captured: dict[str, object] = {}
 
-    @contextmanager
-    def fake_get_db():
-        yield conn
+    class _FakeWorkersRepo:
+        def update_manifest_files(self, *, worker_id: str, files: dict[str, str]) -> bool:
+            captured["worker_id"] = worker_id
+            captured["files"] = files
+            return True
 
-    import db
+    class _FakeRepos:
+        workers = _FakeWorkersRepo()
 
-    monkeypatch.setattr(db, "get_db", fake_get_db)
+    _embed_files_in_skill_version("partial-worker", worker_dir, repos=_FakeRepos())
 
-    _embed_files_in_skill_version("partial-worker", worker_dir)
-
-    row = conn.execute("SELECT manifest_json FROM skill_versions WHERE id = 'sv1'").fetchone()
-    files = json.loads(row["manifest_json"])["_files"]
+    assert captured["worker_id"] == "partial-worker"
+    files = captured["files"]
     assert files == {
         "worker.yml": "name: partial-worker\n",
         "run.py": "print('canonical')\n",
         "lib/search.py": "def search(): pass\n",
     }
     assert not any(".bak" in path for path in files)
+
+
+def test_embed_strict_raises_when_skill_version_missing(tmp_path):
+    """#717: a single-worker create/save must fail LOUD when the bundle can't be
+    embedded — never silently ship a worker with empty manifest._files."""
+    worker_dir = tmp_path / "workers" / "ghost-worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "worker.yml").write_text("name: ghost-worker\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text("print('hi')\n", encoding="utf-8")
+
+    class _MissingWorkersRepo:
+        def update_manifest_files(self, *, worker_id: str, files: dict[str, str]) -> bool:
+            return False  # no skill_version row for this worker
+
+    class _Repos:
+        workers = _MissingWorkersRepo()
+
+    with pytest.raises(RuntimeError):
+        _embed_files_in_skill_version(
+            "ghost-worker", worker_dir, repos=_Repos(), strict=True
+        )
+
+
+def test_embed_strict_raises_on_empty_bundle(tmp_path):
+    """No embeddable files in strict mode is a hard error (broken bundle)."""
+    worker_dir = tmp_path / "workers" / "empty-worker"
+    worker_dir.mkdir(parents=True)
+
+    class _Repos:
+        workers = object()
+
+    with pytest.raises(RuntimeError):
+        _embed_files_in_skill_version(
+            "empty-worker", worker_dir, repos=_Repos(), strict=True
+        )

@@ -292,10 +292,15 @@ def _create_worker_from_parsed_payload(
             _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
             os.replace(staging_dir, target_dir)
             target_committed = True
-            try:
-                _embed_files_in_skill_version(worker_id, target_dir)
-            except Exception:
-                logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
+            # Single-worker create: the portable bundle (manifest_json._files) is
+            # what the runner materializes from on a (possibly different) executor
+            # machine. If this fails, the worker is dead-on-arrival ("Worker
+            # directory not found", workeros-cloud#717), so fail LOUD and let the
+            # finally-block cleanup roll back the half-created worker rather than
+            # shipping a broken bundle to 'ready'.
+            _embed_files_in_skill_version(
+                worker_id, target_dir, repos=repos, strict=True
+            )
             _ensure_worker_memory_pack(config, auth.user_id)
             invalidate_worker_cache()
             detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
