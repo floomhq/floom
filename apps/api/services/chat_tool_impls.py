@@ -418,43 +418,42 @@ def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 
 def _tool_runs_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    from db import get_db as _get_db
+    # Read runs through the repository abstraction, NOT a raw get_db() SQLite
+    # query. On the hosted cloud the primary datastore is Supabase/Postgres and
+    # the local SQLite `runs` table is only an empty schema sidecar, so the old
+    # direct-SQLite query always returned 0 rows there — the workspace agent
+    # reported "no runs" even when the dashboard/API had plenty. repos.runs.list
+    # resolves to the active backend (SQLite for OSS single-tenant, Supabase for
+    # cloud) and is the same path the /runs API + dashboard use. This mirrors
+    # _tool_runs_get below, which already uses get_repositories().
+    from db import get_repositories
+    from core.utils import row_to_dict
+
     worker_id = args.get("worker_id")
     status = args.get("status")
     limit = min(int(args.get("limit") or 20), 100)
-    where = ["w.owner_id = ?"]
-    params: list = [user_id]
-    if worker_id:
-        where.append("r.worker_id = ?")
-        params.append(worker_id)
-    if status:
-        where.append("r.status = ?")
-        params.append(status)
-    where_sql = " AND ".join(where)
-    with _get_db() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT r.id, r.worker_id, w.name AS worker_name,
-                   r.status, r.created_at, r.completed_at, r.error, r.duration_ms
-            FROM runs r
-            JOIN workers w ON w.id = r.worker_id
-            WHERE {where_sql}
-            ORDER BY r.created_at DESC
-            LIMIT ?
-            """,
-            (*params, limit),
-        ).fetchall()
+
+    repos = get_repositories()
+    rows, _total = repos.runs.list(
+        user_id=user_id,
+        worker_id=worker_id or None,
+        statuses=[status] if status else None,
+        limit=limit,
+        offset=0,
+        include_total=False,
+    )
     result = []
-    for r in rows:
+    for row in rows:
+        r = row_to_dict(row)
         result.append({
-            "id": r["id"],
-            "worker_id": r["worker_id"],
-            "worker_name": r["worker_name"],
-            "status": r["status"],
-            "created_at": r["created_at"],
-            "completed_at": r["completed_at"],
-            "duration_ms": r["duration_ms"],
-            "error": r["error"],
+            "id": r.get("id"),
+            "worker_id": r.get("worker_id"),
+            "worker_name": r.get("worker_name"),
+            "status": r.get("status"),
+            "created_at": r.get("created_at"),
+            "completed_at": r.get("completed_at"),
+            "duration_ms": r.get("duration_ms"),
+            "error": r.get("error"),
         })
     return {"ok": True, "runs": result, "count": len(result)}
 

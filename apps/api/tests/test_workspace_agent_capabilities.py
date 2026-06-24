@@ -415,3 +415,55 @@ def test_tool_metadata_includes_brain_and_composio(chat_env):
     assert "brain__list" in names
     assert "brain__read" in names
     assert "composio__gmail__execute" in names
+
+
+def test_runs_list_reads_via_repository_not_raw_sqlite(chat_env, monkeypatch):
+    """Regression: ``_tool_runs_list`` must read runs through
+    ``get_repositories()`` — the active datastore (Supabase on cloud) — and NOT
+    a raw ``get_db()`` SQLite query.
+
+    On the hosted cloud the primary datastore is Supabase/Postgres and the local
+    SQLite ``runs`` table is only an empty schema sidecar, so the old direct
+    SQLite query made the workspace agent (Emily) report "no runs" even when the
+    dashboard/API listed plenty. Patching the repo with a sentinel run proves the
+    tool consults the repository abstraction; a revert to raw ``get_db()`` would
+    not see the sentinel and this test would fail.
+    """
+    db = chat_env["db"]
+    from services import chat_tool_impls
+
+    sentinel = {
+        "id": "run_sentinel", "worker_id": "w1", "worker_name": "Worker One",
+        "status": "completed", "created_at": "2026-06-24T00:00:00+00:00",
+        "completed_at": "2026-06-24T00:01:00+00:00", "duration_ms": 60000,
+        "error": None,
+    }
+    captured: dict = {}
+
+    class _FakeRunRepo:
+        def list(self, **kwargs):
+            captured.update(kwargs)
+            return [sentinel], 1
+
+    class _FakeRepos:
+        runs = _FakeRunRepo()
+
+    # _tool_runs_list does `from db import get_repositories` at call time, so
+    # patching db.get_repositories swaps the backend it reads from. The stub
+    # carries a no-op cache_clear() because the chat_env fixture teardown calls
+    # db.get_repositories.cache_clear() before monkeypatch restores the original.
+    fake_get_repositories = lambda: _FakeRepos()
+    fake_get_repositories.cache_clear = lambda: None
+    monkeypatch.setattr(db, "get_repositories", fake_get_repositories)
+
+    out = chat_tool_impls._tool_runs_list({"limit": 5, "status": "completed"}, "local-user")
+
+    assert out["ok"] is True
+    assert out["count"] == 1
+    assert out["runs"][0]["id"] == "run_sentinel"
+    assert out["runs"][0]["worker_name"] == "Worker One"
+    assert out["runs"][0]["status"] == "completed"
+    # caller scope + filters are threaded through to the repository.
+    assert captured["user_id"] == "local-user"
+    assert captured["limit"] == 5
+    assert captured["statuses"] == ["completed"]
