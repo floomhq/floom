@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: vercel-workeros-cloud-production
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -293,13 +293,22 @@ jobs:
           done
           echo "Ensuring $DASHBOARD_PROD_ALIAS aliases $DEPLOY_ID"
           RESP="$(curl -sS -X POST \
-            "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${DASHBOARD_SCOPE}" \
+            "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"alias\":\"${DASHBOARD_PROD_ALIAS}\"}")"
           echo "$RESP"
-          echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code")=="not_modified"; sys.exit(0 if ok else 1)' \
-            || { echo "::error::Re-alias of ${DASHBOARD_PROD_ALIAS} failed."; exit 1; }
+          ok="$(echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code")=="not_modified"; print("1" if ok else "0")')"
+          if [[ "$ok" != "1" ]]; then
+            RESP="$(curl -sS -X POST \
+              "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${DASHBOARD_SCOPE}" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"alias\":\"${DASHBOARD_PROD_ALIAS}\"}")"
+            echo "fallback (teamId): $RESP"
+            echo "$RESP" | python3 -c 'import sys,json; d=json.load(sys.stdin); err=d.get("error") or {}; ok=bool(d.get("uid")) or err.get("code")=="not_modified"; sys.exit(0 if ok else 1)' \
+              || { echo "::error::Re-alias of ${DASHBOARD_PROD_ALIAS} failed."; exit 1; }
+          fi
 
       - name: Verify dashboard freshness gate
         env:
