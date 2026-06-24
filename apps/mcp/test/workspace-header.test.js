@@ -60,7 +60,7 @@ test("#1455 MCP sends x-workeros-workspace on worker writes in hosted mode", asy
   const home = await mkdtemp(join(tmpdir(), "wos-wsh-"));
   // Clean env: hosted mode via PAT + workspace id, NO api secret, isolated HOME so
   // no real credentials.json interferes.
-  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, ".config") };
   delete env.WORKEROS_API_SECRET;
   delete env.FLOOM_API_SECRET;
   env.WORKEROS_API_BASE = mock.baseUrl;
@@ -92,7 +92,7 @@ test("#1455 MCP sends x-workeros-workspace on worker writes in hosted mode", asy
 test("#1455 reads also carry the workspace header (consistency)", async () => {
   const mock = await startMock();
   const home = await mkdtemp(join(tmpdir(), "wos-wsh-"));
-  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, ".config") };
   delete env.WORKEROS_API_SECRET;
   delete env.FLOOM_API_SECRET;
   env.WORKEROS_API_BASE = mock.baseUrl;

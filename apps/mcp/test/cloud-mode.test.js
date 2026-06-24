@@ -51,8 +51,10 @@ test("login lock blocks concurrent local login flows", async () => {
   const home = await mkdtemp(join(tmpdir(), "workeros-login-lock-"));
   const originalHome = process.env.HOME;
   const originalUserProfile = process.env.USERPROFILE;
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  process.env.XDG_CONFIG_HOME = join(home, ".config");
   const release = await acquireLoginLock();
   try {
     await assert.rejects(
@@ -63,6 +65,8 @@ test("login lock blocks concurrent local login flows", async () => {
     await release();
     process.env.HOME = originalHome;
     process.env.USERPROFILE = originalUserProfile;
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
   }
 });
 
@@ -96,15 +100,19 @@ test("cloud login can persist api_token credentials from cli-exchange", () => {
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-cloud-"));
   const originalHome = process.env.HOME;
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
   const originalToken = process.env.WORKEROS_API_TOKEN;
   const originalBase = process.env.WORKEROS_API_BASE;
   const originalWorkspace = process.env.WORKEROS_WORKSPACE_ID;
   const originalCloud = process.env.WORKEROS_CLOUD;
   process.env.HOME = home;
+  process.env.XDG_CONFIG_HOME = join(home, ".config");
   try {
     return await fn(home);
   } finally {
     process.env.HOME = originalHome;
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
     if (originalToken === undefined) delete process.env.WORKEROS_API_TOKEN;
     else process.env.WORKEROS_API_TOKEN = originalToken;
     if (originalBase === undefined) delete process.env.WORKEROS_API_BASE;

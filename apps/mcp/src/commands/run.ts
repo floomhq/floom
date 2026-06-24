@@ -18,6 +18,9 @@ type RunDetail = {
   output_schema?: Array<{ name?: string; value?: unknown }>;
   error?: string | null;
   artifacts?: Array<{ id: string; name?: string }>;
+  approval_trail?: { id?: string; link?: string | null; status?: string | null } | null;
+  approval_id?: string;
+  approval_link?: string | null;
 };
 
 function apiErrorDetail(error: FloomApiError): string {
@@ -76,6 +79,12 @@ function printPrettyRun(run: RunDetail, savedPaths: string[]): void {
   const output = effectiveRunOutput(run);
   log.heading(`Run ${run.id}`);
   log.kv("Status", run.status);
+  const approvalId = run.approval_trail?.id || run.approval_id;
+  const approvalLink = run.approval_trail?.link || run.approval_link;
+  if (run.status === "pending_approval") {
+    if (approvalId) log.kv("Approval", approvalId);
+    if (approvalLink) log.kv("Review/approve at", approvalLink);
+  }
   if (run.error) {
     log.err(run.error);
   }
@@ -177,7 +186,7 @@ export async function runWorkerCommand(
   }
   let latest: RunDetail | null = null;
   let lastStatus = "";
-  const terminal = new Set(["completed", "failed", "error", "approved", "rejected"]);
+  const terminal = new Set(["completed", "failed", "error", "approved", "rejected", "pending_approval"]);
   while (true) {
     latest = (await client.requestJson("GET", `/runs/${encodeURIComponent(runId)}`)) as RunDetail;
     if (latest.status !== lastStatus) {
@@ -221,6 +230,9 @@ export async function runWorkerCommand(
     printPrettyRun(latest, savedPaths);
   }
 
-  const success = latest.status === "completed" || latest.status === "approved" || latest.status === "success";
+  const success = latest.status === "completed" ||
+    latest.status === "approved" ||
+    latest.status === "success" ||
+    latest.status === "pending_approval";
   return success ? 0 : 1;
 }

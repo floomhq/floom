@@ -7478,8 +7478,8 @@ async def _mcp_dispatch(
             run_data, s = await _api_call("GET", f"/runs/{_enc(run_id)}", request)
             if s >= 400:
                 return _mcp_api_result(run_data, s)
-            if run_data.get("status") in ("completed", "failed", "cancelled"):
-                return _mcp_content(_mcp_text(run_data), run_data.get("status") == "failed")
+            if run_data.get("status") in ("completed", "failed", "cancelled", "rejected"):
+                return _mcp_content(_mcp_text(run_data), run_data.get("status") in ("failed", "rejected"))
         return _mcp_content(f"Run {run_id!r} did not complete within {timeout:.0f}s", is_error=True)
 
     # --- secrets ---
@@ -7716,9 +7716,9 @@ async def _mcp_dispatch(
             if run_status_code >= 400:
                 return _mcp_api_result(run_data, run_status_code)
             run = run_data if isinstance(run_data, dict) else {}
-            if run and run.get("status") in ("completed", "failed", "cancelled"):
+            if run and run.get("status") in ("completed", "failed", "cancelled", "rejected"):
                 break
-        if not run or run.get("status") not in ("completed", "failed", "cancelled"):
+        if not run or run.get("status") not in ("completed", "failed", "cancelled", "rejected"):
             return _mcp_call_result(
                 {
                     "status": "running",
@@ -7726,7 +7726,7 @@ async def _mcp_dispatch(
                     "detail": "Run still in progress. Poll runs.get or runs.watch with this run_id for the result.",
                 }
             )
-        if run.get("status") in ("failed", "cancelled"):
+        if run.get("status") in ("failed", "cancelled", "rejected"):
             result = _mcp_call_result(
                 {
                     "status": run.get("status"),

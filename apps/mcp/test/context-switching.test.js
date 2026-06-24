@@ -23,6 +23,7 @@ import { authLogoutCommand, authSwitchCommand } from "../dist/commands/auth.js";
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-ctx-"));
   const originalHome = process.env.HOME;
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
   const saved = {};
   for (const key of [
     "WORKEROS_API_TOKEN",
@@ -37,10 +38,13 @@ async function withTempHome(fn) {
     delete process.env[key];
   }
   process.env.HOME = home;
+  process.env.XDG_CONFIG_HOME = join(home, ".config");
   try {
     return await fn(home);
   } finally {
     process.env.HOME = originalHome;
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

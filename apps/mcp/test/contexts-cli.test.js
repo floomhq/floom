@@ -27,6 +27,7 @@ async function withTempHome(fn) {
   for (const key of [
     "HOME",
     "USERPROFILE",
+    "XDG_CONFIG_HOME",
     "WORKEROS_API_TOKEN",
     "WORKEROS_API_SECRET",
     "FLOOM_API_SECRET",
@@ -41,6 +42,7 @@ async function withTempHome(fn) {
   }
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  process.env.XDG_CONFIG_HOME = join(home, ".config");
   try {
     return await fn(home);
   } finally {

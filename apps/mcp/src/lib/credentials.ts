@@ -69,12 +69,20 @@ function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
 }
 
-export function credentialsPath(): string {
+function resolveConfigDir(): string {
+  const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
+  if (xdgConfigHome) {
+    return xdgConfigHome;
+  }
   const home = resolveHomeDir();
   if (!home) {
     throw new Error("HOME is required to read CLI credentials");
   }
-  return join(home, ".config", "floom", "credentials.json");
+  return join(home, ".config");
+}
+
+export function credentialsPath(): string {
+  return join(resolveConfigDir(), "floom", "credentials.json");
 }
 
 export function credentialsAccountsDir(): string {
@@ -86,11 +94,7 @@ export function activeAccountPath(): string {
 }
 
 function legacyCredentialsPath(): string {
-  const home = resolveHomeDir();
-  if (!home) {
-    throw new Error("HOME is required to read CLI credentials");
-  }
-  return join(home, ".config", "workeros", "credentials.json");
+  return join(resolveConfigDir(), "workeros", "credentials.json");
 }
 
 export async function readCredentials(): Promise<StoredCredentials | null> {

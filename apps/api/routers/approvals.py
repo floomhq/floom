@@ -417,7 +417,8 @@ def _publish_approval_terminal_status(
 ) -> None:
     """Publish a terminal `status` SSE event for an approve/reject decision.
 
-    The original run has just transitioned off PENDING_APPROVAL to COMPLETED.
+    The original run has just transitioned off PENDING_APPROVAL to a terminal
+    approval-decision status.
     Live SSE consumers (the run page) track `type:"status"` events; the
     `approval_decided` event alone does not move their status, so without this
     the UI would never observe the run leaving pending_approval.
@@ -971,12 +972,13 @@ def reject_run(
     )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
-    # state so it is not stuck forever (zombie approval). The rejection itself
-    # is recorded in the approvals table (status='rejected' + reason).
+    # rejected state so it is not stuck forever and GET /runs/{id} reflects the
+    # operator's decision. The approval row also records status='rejected' +
+    # reason/annotations.
     repos.runs.update_status(
         user_id=auth.user_id,
         run_id=run_id,
-        status=RunStatus.COMPLETED.value,
+        status=RunStatus.REJECTED.value,
     )
 
     _sse_publish(run_id, {

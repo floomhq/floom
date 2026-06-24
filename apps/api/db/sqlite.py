@@ -2551,7 +2551,12 @@ class SqliteRunRepository:
                     updates["duration_ms"] = int((ended - started).total_seconds() * 1000)
                 except Exception:
                     pass
-        if status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}:
+        if status in {
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+            RunStatus.REJECTED.value,
+        }:
             completed_at = now_iso()
             updates["completed_at"] = completed_at
             started_at = run.get("started_at")

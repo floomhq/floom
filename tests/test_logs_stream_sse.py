@@ -148,6 +148,26 @@ def test_logs_stream_replays_existing_logs_for_terminal_run(monkeypatch, tmp_pat
     assert done_events[0]["status"] == "completed"
 
 
+def test_logs_stream_treats_rejected_as_terminal(monkeypatch, tmp_path):
+    """For a rejected run all log rows are replayed and a done event is emitted."""
+    main = _load_api(monkeypatch, tmp_path)
+    run_id = "run-ls-rejected"
+    _insert_worker_and_run(main, run_id, status="rejected")
+
+    client = TestClient(main.app)
+    with client.stream("GET", f"/runs/{run_id}/logs/stream", headers=AUTH) as resp:
+        assert resp.status_code == 200, resp.text
+        body = "".join(resp.iter_text())
+
+    events = _parse_sse_events(body)
+    log_events = [e for e in events if e.get("type") == "log"]
+    done_events = [e for e in events if e.get("type") == "done"]
+
+    assert len(log_events) == 2, f"expected 2 log events, got {log_events}"
+    assert len(done_events) == 1, f"expected 1 done event, got {done_events}"
+    assert done_events[0]["status"] == "rejected"
+
+
 def test_logs_stream_returns_404_for_unknown_run(monkeypatch, tmp_path):
     """404 for a run_id that does not exist."""
     main = _load_api(monkeypatch, tmp_path)
