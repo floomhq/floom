@@ -15,6 +15,7 @@ import { TEMPLATES } from "@/components/landing-ref/data";
 import { V3Shell } from "../../V3Shell";
 import { V3TemplateCard, MARKS, toolLabel } from "../../V3TemplateCard";
 import { V3OutputPreview } from "../../V3OutputPreview";
+import { V3HireButton } from "../../V3HireButton";
 import "../../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -65,13 +66,7 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
             transition={{ duration: 0.45, delay: 0.16, ease: EASE }}
             className="mt-6 flex flex-nowrap items-center gap-3"
           >
-            <Link
-              href="/login"
-              className="inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-[10px] px-4 text-[13.5px] font-medium text-white"
-              style={{ background: "var(--v3-accent)" }}
-            >
-              Hire this worker
-            </Link>
+            <V3HireButton label="Hire this worker" returnPath={`/templates/${t.slug}`} />
             <span className="flex shrink-0 items-center gap-2">
               {t.tools.slice(0, 4).map((tool) => {
                 const mark = MARKS[tool.toLowerCase()];
