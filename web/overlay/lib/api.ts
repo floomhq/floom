@@ -8,6 +8,7 @@ import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-st
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+const IS_CLOUD_DEPLOY = process.env.NEXT_PUBLIC_WORKEROS_DEPLOY === "cloud";
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 const ACTIVE_WORKSPACE_COOKIE_KEY = "workeros.activeWorkspaceId";
 const APP_API_BASE = API_BASE.endsWith("/api/proxy")
@@ -23,6 +24,7 @@ function activeWorkspaceCookieAttrs(): string {
 export function getActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
   const value = safeStorageGet("local", ACTIVE_WORKSPACE_STORAGE_KEY);
+  if (IS_CLOUD_DEPLOY && (!value || value === "local-default")) return null;
   return value || "local-default";
 }
 
