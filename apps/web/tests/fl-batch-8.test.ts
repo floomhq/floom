@@ -97,11 +97,11 @@ function test556TypesUpdated(): void {
 // ---------------------------------------------------------------------------
 
 function test556WorkerDetailShowsSecretNames(): void {
-  const s = src("components/overview/AlertsBell.tsx");
-  assert(s.includes('type === "setup_incomplete"') || s.includes('type === \\"setup_incomplete\\"'),
-    "Setup alerts must render setup_incomplete items from the overview flow");
-  assert(s.includes("/connections/secrets"),
-    "Missing secret links must route to the secrets manager");
+  const s = src("app/workers/WorkersCollection.tsx");
+  assert(s.includes("missing_secrets: d.missing_secrets"),
+    "Worker detail projection must carry missing_secrets into the list/card model");
+  assert(s.includes("missing_connections: d.missing_connections"),
+    "Worker detail projection must carry missing_connections into the list/card model");
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ const tests: [string, () => void][] = [
   ["#556 worker list endpoint computes and passes missing fields", test556MainComputesMissingInList],
   ["#556 worker detail builder computes and passes missing fields", test556MainComputesMissingInDetail],
   ["#556 TypeScript types updated for both interfaces", test556TypesUpdated],
-  ["#556 worker detail page renders specific secret names with prefill links", test556WorkerDetailShowsSecretNames],
+  ["#556 worker detail projection carries missing setup fields", test556WorkerDetailShowsSecretNames],
   ["#556 connections page keeps setup affordance inline", test556ConnectionsSetupInlineOnly],
 ];
 

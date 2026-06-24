@@ -113,7 +113,30 @@ class WorkerRepository(Protocol):
 
     def delete_skill_version(self, *, skill_version_id: str) -> None: ...
 
-    def get_recipe(self, *, worker_id: str, user_id: str | None = None) -> RowDict | None: ...
+    def update_manifest_files(self, *, worker_id: str, files: dict[str, str]) -> bool:
+        """Merge ``files`` into the worker's skill_version ``manifest_json._files``.
+
+        This is the portable, backend-agnostic write that makes a worker bundle
+        survive container redeploys and run on a *different* executor machine than
+        the API that created it (the e2b/agent runners materialize the bundle from
+        ``manifest_json._files``). Every backend MUST persist into ITS canonical
+        store — SQLite for single-tenant, Supabase/Postgres for cloud — so the
+        create path no longer depends on a backend-specific shim.
+
+        Returns ``True`` when the worker's skill_version row was found and updated,
+        ``False`` when no such worker/skill_version exists (caller decides whether
+        a miss is fatal). Implementations MUST raise on a real write failure rather
+        than swallowing it, so a broken bundle never silently reaches 'ready'.
+        """
+        ...
+
+    def get_recipe(
+        self,
+        *,
+        worker_id: str,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> RowDict | None: ...
 
     def upsert_webhook_secret_hash(
         self,

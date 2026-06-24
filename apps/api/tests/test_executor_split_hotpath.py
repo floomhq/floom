@@ -11,7 +11,13 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 
-def _worker_config(worker_id: str, *, name: str = "Worker", secrets: list[str] | None = None):
+def _worker_config(
+    worker_id: str,
+    *,
+    name: str = "Worker",
+    secrets: list[str] | None = None,
+    inputs: list[object] | None = None,
+):
     from models import WorkerConfig, WorkerRuntime, WorkerTrigger
 
     return WorkerConfig(
@@ -19,6 +25,7 @@ def _worker_config(worker_id: str, *, name: str = "Worker", secrets: list[str] |
         name=name,
         trigger=WorkerTrigger(type="manual"),
         runtime=WorkerRuntime(type="python", runner="e2b", entrypoint="run.py"),
+        inputs=inputs or [],
         secrets=secrets or [],
     )
 
@@ -74,6 +81,118 @@ def test_worker_recipe_cache_hits_and_invalidates(monkeypatch):
 
     assert calls["count"] == 2
     assert third[1].name == "Worker 2"
+
+
+def test_worker_recipe_cache_is_scoped_by_run_owner_and_workspace(monkeypatch):
+    run_service = _fresh_run_service(monkeypatch)
+    calls = []
+
+    class Workers:
+        def get_recipe(self, *, worker_id, user_id=None, workspace_id=None):
+            calls.append((user_id, workspace_id))
+            if user_id != "owner-1" or workspace_id != "ws-716":
+                return None
+            return {
+                "owner_id": "owner-1",
+                "config": _worker_config(worker_id, name="Scoped Worker"),
+                "grants": {},
+                "input_values": {},
+                "enabled": True,
+            }
+
+        def get_owner(self, *, worker_id):
+            return "owner-1"
+
+    repos = types.SimpleNamespace(workers=Workers())
+
+    unscoped = run_service._load_worker_recipe("schedule-worker", repos=repos)
+    scoped = run_service._load_worker_recipe(
+        "schedule-worker",
+        repos=repos,
+        user_id="owner-1",
+        workspace_id="ws-716",
+    )
+
+    assert unscoped is None
+    assert scoped is not None
+    assert scoped[1].name == "Scoped Worker"
+    assert calls == [(None, None), ("owner-1", "ws-716")]
+
+
+def test_scheduled_execute_run_uses_run_workspace_for_recipe_without_request_context(monkeypatch):
+    run_service = _fresh_run_service(monkeypatch)
+    from models import WorkerInput
+
+    statuses = []
+
+    class Workers:
+        def get_recipe(self, *, worker_id, user_id=None, workspace_id=None):
+            if user_id != "owner-1" or workspace_id != "ws-716":
+                return None
+            return {
+                "owner_id": "owner-1",
+                "config": _worker_config(
+                    worker_id,
+                    inputs=[
+                        WorkerInput(
+                            name="required_text",
+                            label="Required text",
+                            type="text",
+                            required=True,
+                        )
+                    ],
+                ),
+                "grants": {},
+                "input_values": {},
+                "enabled": True,
+            }
+
+        def get_owner(self, *, worker_id):
+            return "owner-1"
+
+    class Runs:
+        def get_any(self, *, run_id):
+            return {
+                "id": run_id,
+                "worker_id": "schedule-worker",
+                "user_id": "owner-1",
+                "workspace_id": "ws-716",
+                "status": "queued",
+            }
+
+    repos = types.SimpleNamespace(workers=Workers(), runs=Runs())
+
+    monkeypatch.setattr(run_service, "add_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run_service, "publish_run_part", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run_service, "_mark_active_run_stage", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        run_service,
+        "update_run_status",
+        lambda run_id, status, **kwargs: statuses.append(
+            {
+                "run_id": run_id,
+                "status": status,
+                "error": kwargs.get("error"),
+                "error_code": kwargs.get("error_code"),
+            }
+        ),
+    )
+
+    run_service.execute_run(
+        "run-scheduled",
+        "schedule-worker",
+        {},
+        user_id=None,
+        repos=repos,
+    )
+
+    assert statuses[-1] == {
+        "run_id": "run-scheduled",
+        "status": "failed",
+        "error": "Missing required input: required_text",
+        "error_code": "missing_required_input",
+    }
+    assert all(item["error"] != "Worker config not found" for item in statuses)
 
 
 def test_secret_cache_hits_and_invalidates(monkeypatch):

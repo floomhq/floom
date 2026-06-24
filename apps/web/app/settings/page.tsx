@@ -505,8 +505,10 @@ function SettingsContent() {
     typeof window !== "undefined" ? window.location.search : ""
   );
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+  // SETTINGS-01: Settings defaults to LIST view (not gallery grid) — matches the
+  // Workers/Library/Connections collections and reads as a scannable section list.
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
-    ...emptyState("grid"),
+    ...emptyState("list"),
     sel: null,
   }));
 
@@ -701,15 +703,24 @@ function SettingsContent() {
       const raw = window.location.hash.replace(/^#/, "");
       const fromHash = sectionFromCandidate(raw);
       const nextSel = fromQuery || fromHash;
-      if (nextSel) {
-        // Restore a valid sub-tab when ?sel & ?tab both name a real pair;
-        // otherwise reset to the section's default tab.
-        const tabParam = selParam ? params.get("tab") : null;
-        const nextTab = isValidSubTab(nextSel, tabParam) ? tabParam : null;
-        setCollectionState((prev) =>
-          prev.sel === nextSel && prev.tab === nextTab ? prev : { ...prev, sel: nextSel, tab: nextTab },
-        );
-      }
+      // SETTINGS-01: restore the list/grid toggle from ?view= (list is the
+      // default) so deep-links + back/forward keep the chosen view, matching the
+      // Workers/Library/Connections collections.
+      const nextView = params.get("view") === "grid" ? "grid" : "list";
+      setCollectionState((prev) => {
+        let next = prev;
+        if (nextSel) {
+          // Restore a valid sub-tab when ?sel & ?tab both name a real pair;
+          // otherwise reset to the section's default tab.
+          const tabParam = selParam ? params.get("tab") : null;
+          const nextTab = isValidSubTab(nextSel, tabParam) ? tabParam : null;
+          if (prev.sel !== nextSel || prev.tab !== nextTab) {
+            next = { ...next, sel: nextSel, tab: nextTab };
+          }
+        }
+        if (next.view !== nextView) next = { ...next, view: nextView };
+        return next;
+      });
       setSearch(window.location.search);
     }
     syncFromLocation();
@@ -776,7 +787,7 @@ function SettingsContent() {
         { value: settingsGroup("workspace").length, label: "workspace" },
         { value: settingsGroup("account").length, label: "account" },
       ],
-      view: { default: "grid", grid: true },
+      view: { default: "list", grid: true },
       group: (item) =>
         item.scope === "workspace"
           ? groupLabel("workspace", workspaceName)
@@ -852,6 +863,10 @@ function SettingsContent() {
     // section's single "settings" tab is implicit and must not leak to the URL.
     if (isValidSubTab(nextSel, next.tab)) params.set("tab", next.tab as string);
     else params.delete("tab");
+    // SETTINGS-01: persist the view toggle. List is the default → omit it for
+    // clean URLs; only grid is written so ?view=grid round-trips.
+    if (next.view === "grid") params.set("view", "grid");
+    else params.delete("view");
     const qs = params.size ? `?${params.toString()}` : "";
     window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
     setSearch(window.location.search);
