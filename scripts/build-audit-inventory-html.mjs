@@ -21,193 +21,304 @@ const SHOTS = {
 
 const STATUS = {
   live: { label: "✓ LIVE", cls: "live" },
+  partial: { label: "◐ PARTIAL", cls: "disk" },
   disk: { label: "~ DISK", cls: "disk" },
   open: { label: "! OPEN", cls: "open" },
   manual: { label: "? MANUAL", cls: "manual" },
   track: { label: "— TRACK", cls: "track" },
 };
 
+/** Deduped inventory — merged overlapping A/C/L/D rows (2026-06-24). */
 const ISSUES = [
-  { id:"A-01", sev:"P1", area:"Landing", issue:"/start/slack + /start/whatsapp return 404", detail:"CHANNELS dict lost slack/whatsapp; code restored, prod not deployed", status:"open", owner:"cloud", shot:"",
-    ascii:`  /start/slack  ──▶  workeros.floom.dev
-                           │
-                           ▼
-                    ┌──────────────┐
-                    │  404 Nothing │  ◀── CHANNELS = { mcp only }
-                    │     here     │
-                    └──────────────┘
-  FIX: restore slack+whatsapp in app/start/[channel]/page.tsx` },
-  { id:"A-02", sev:"P1", area:"Login", issue:"Dashboard /app/login — old UI not landing #665", detail:"Overlay sync restored old split-panel after every npm run sync", status:"live", owner:"cloud", shot:"C-01",
-    ascii:`  OLD (overlay)              NEW (landing #665)
-  ┌─────────────────┐        ┌─────────────────┐
-  │ Floom Cloud     │        │ Hire AI workers.│
-  │ Recent runs LR  │        │ Today + squircles│
-  │ Welcome back L  │        │ Welcome back C  │
-  └─────────────────┘        └─────────────────┘` },
-  { id:"A-03", sev:"P2", area:"CI", issue:"smoke-routes.sh false-pass on macOS", detail:"sha256sum missing → empty hash always matched", status:"live", owner:"cloud", shot:"",
-    ascii:`  macOS: sha256sum ──X──▶ (missing)
-              │
-              ▼
-         hash=""  ==  hash=""  ──▶ FALSE PASS ✓
-  FIX: sha256_of() → shasum -a 256 fallback` },
-  { id:"A-04", sev:"P2", area:"Tests", issue:"Web vitest 25 failures (#436)", detail:"Many Next 16 cookies() outside request scope in harness", status:"track", owner:"cloud+engine", shot:"",
-    ascii:`  vitest ──▶ 760 pass / 25 fail
-              │
-              ├─ proxy-location (7)   cookies() harness
-              ├─ login-magic-link (4) async RSC jsdom
-              └─ overlay parity (2)   env drift` },
-  { id:"A-05", sev:"P2", area:"Tests", issue:"Landing start-channel-819 failures", detail:"Fixed with A-01 — now 16/16", status:"live", owner:"cloud", shot:"",
-    ascii:`  start-channel-819.dom.test.tsx
-  slack ✓  whatsapp ✓  mcp ✓  (was 8 fail → 0)` },
-  { id:"A-06", sev:"P2", area:"CLI", issue:"workers push stale bundle (#637)", status:"track", owner:"engine", shot:"",
-    ascii:`  local edit ──▶ push ──▶ cloud API
-                              │
-                              ▼
-                         OLD bundle cached` },
-  { id:"A-07", sev:"P2", area:"CLI", issue:"Device-approval dead-end (#588)", status:"track", owner:"cloud", shot:"",
-    ascii:`  cli-auth page ──▶ no session ──▶ dead end
-  (should redirect to login with next=)` },
-  { id:"A-08", sev:"P3", area:"E2E", issue:"Playwright blocked — no E2E token", status:"track", owner:"cloud", shot:"",
-    ascii:`  playwright ──X── WORKEROS_E2E_ADMIN_TOKEN unset` },
-  { id:"A-09", sev:"P3", area:"Tests", issue:"Pytest blocked on audit machine", status:"track", owner:"infra", shot:"",
-    ascii:`  pytest ──X── disk full + py3.14 litellm conflict
-  (repo wants py3.12)` },
-  { id:"A-10", sev:"P3", area:"Workers", issue:"ASCII diagram worker node accent blue", status:"disk", owner:"engine", shot:"",
-    ascii:`  [trigger]──▶[WORKER]──▶[output]
-                  │
-              was BLUE (--accent)
-              fix: --ink (neutral)` },
-  { id:"A-11", sev:"P2", area:"Connections", issue:"Composio spinner + rogue nav + provider name", status:"disk", owner:"engine", shot:"",
-    ascii:`  connect ──▶ poll ──▶ user navigates away
-                    │
-                    └──▶ stale tick ──▶ router.replace(back!)  ✗
-  FIX: cancelledRef + timeout phase + displayName map` },
-  { id:"A-12", sev:"P1", area:"Library", issue:"Library tab ~30s load", status:"disk", owner:"engine", shot:"",
-    ascii:`  GET /contexts ──▶ for EACH pack:
-                         download ALL files from Storage
-                         just for file_count  ──▶ ~30s
-  FIX: hydrate=False when cached summary exists` },
-  { id:"A-13", sev:"P1", area:"Workers", issue:"Memory scope toggle silent no-op", status:"disk", owner:"engine", shot:"",
-    ascii:`  UI: Read ◀──toggle──▶ Read&write
-           │
-           ▼ PUT /workers/files
-  engine validator force-pins writeable:True
-           │
-           ▼ toast "Brain updated" (lie)` },
-  { id:"A-14", sev:"P2", area:"Workers", issue:"Tab Brain vs nav Library", status:"disk", owner:"engine", shot:"",
-    ascii:`  left nav: Library    worker tab: Brain  ✗
-  FIX: WORKER_DETAIL_TAB_LABEL Brain→Library` },
-  { id:"A-15", sev:"P1", area:"Connections", issue:"Authorize proxy route blank page", status:"disk", owner:"cloud", shot:"",
-    ascii:`  /app/api/proxy/connections/authorize/JWT
-           │
-           ▼ should 302 ──▶ connect.composio.dev
-           │
-           ▼ was: blank white page` },
+  {
+    id: "A-01",
+    sev: "P1",
+    area: "Landing",
+    issue: "Slack + WhatsApp should be OFF — landing still exposes them",
+    detail:
+      "Not a “restore /start routes” bug. Channels are not prod-ready; hero + /start/slack|whatsapp should respect a kill-switch. Code on disk has routes; prod 404 may be correct until flag + deploy. Hide Add to Slack / WhatsApp on landing until enabled.",
+    status: "open",
+    owner: "cloud",
+    shot: "",
+    ascii: `  INTENDED (now):              ACTUAL (landing):
+  showSlack=false              [Add to Slack]  ← still visible
+  showWhatsApp=false           [WhatsApp QR]   ← still visible
+  /start/slack ──▶ 404 OK?     user clicks ──▶ 404 (confusing)
 
-  { id:"C-01", sev:"P1", area:"Login", issue:"Landing-aligned login on /app/login", status:"live", owner:"cloud", shot:"C-01",
-    ascii:`  localhost:3000/app/login
-  ┌──────────────┬──────────────┐
-  │ Hire AI      │ Welcome back │
-  │ workers.     │ OAuth + magic│
-  │ Today card   │ link panel   │
-  └──────────────┴──────────────┘` },
-  { id:"C-02", sev:"P2", area:"Settings", issue:"MCP install panel — 6 client icons", status:"manual", owner:"engine", shot:"C-02",
-    ascii:`  Settings → Connect → MCP
-  [Claude][Cursor][Cline][Codex][Windsurf][Gemini]
-       6 icons in a row` },
-  { id:"C-03", sev:"P2", area:"Settings", issue:"MCP config API host", status:"manual", owner:"engine", shot:"C-02",
-    ascii:`  MCP JSON config:
-  "url": "https://workeros-api.floom.dev/..."
-  (not localhost:8000 on prod)` },
-  { id:"C-04", sev:"P2", area:"Emily", issue:"Home empty — real PromptInput", status:"disk", owner:"engine", shot:"",
-    ascii:`  /app/assistant empty state
-  ┌─────────────────────────────┐
-  │  real composer (not stub)   │
-  │  [Uses: tool chips]  [send] │
-  └─────────────────────────────┘` },
-  { id:"C-05", sev:"P2", area:"Workers", issue:"Collection control strip", status:"manual", owner:"engine", shot:"C-05",
-    ascii:`  Workers
-  [🔍 search] [≡ list|⊞ grid] [+ Add] [New worker]
-  ─────────────────────────────────────────────` },
-  { id:"C-06", sev:"P2", area:"Settings", issue:"List view default NOT gallery", status:"disk", owner:"engine", shot:"C-06",
-    ascii:`  WRONG (was):          RIGHT (fix):
+  FIX: NEXT_PUBLIC_CHANNELS slack/wa flag + hide ChannelActions`,
+  },
+  {
+    id: "LOGIN-01",
+    sev: "P1",
+    area: "Login",
+    issue: "/app/login ≠ landing /login — Hire pill + full #665 parity",
+    detail:
+      "Supersedes A-02, C-01, D-06. Overlay sync was restoring old split-panel; layout closer now but Hire was blue TEXT only (landing uses .v3-hl blue background pill). Fix on disk in web/overlay/app/login/page.tsx — NOT verified LIVE.",
+    status: "partial",
+    owner: "cloud",
+    shot: "C-01",
+    ascii: `  landing /login                 /app/login (was)
+  ┌──────────────────┐          ┌──────────────────┐
+  │ [Hire] AI workers│          │ Hire AI workers  │
+  │  ^blue pill      │          │  ^blue text only │
+  │ V3Shell + Today  │          │ no V3Shell theme │
+  └──────────────────┘          └──────────────────┘`,
+  },
+  {
+    id: "MCP-01",
+    sev: "P2",
+    area: "MCP",
+    issue: "6 real brand logos — icon-only row (sidebar popup + Settings)",
+    detail:
+      "Supersedes C-02, C-03, L-03, L-04, L-05. ONE component: McpInstallPanel (McpInstallModal wraps it). Want Claude Code, Cursor, Codex, VS Code, Windsurf, Cline as real logos — NOT grey boxes with letters “C”, “CX”. Same panel in left sidebar popup and Settings → Connect & automate → MCP.",
+    status: "manual",
+    owner: "engine",
+    shot: "C-02",
+    ascii: `  WANT (icon row):          NOT this (prod screenshot):
+  [🟠claude][◻cursor][◻codex]   [C][CX][C][VS][W][CL]
+  [◻vscode][◻surf][◻cline]       grey squares + initials
+
+  Surfaces: sidebar MCP popup ═══ Settings MCP tab
+            (same McpInstallPanel.tsx)`,
+  },
+  {
+    id: "SETTINGS-01",
+    sev: "P2",
+    area: "Settings",
+    issue: "List view default — not gallery grid",
+    detail: "Supersedes C-06, L-12. emptyState('grid') + view default grid in settings/page.tsx.",
+    status: "disk",
+    owner: "engine",
+    shot: "C-06",
+    ascii: `  WRONG (was):          RIGHT (fix):
   [⊞ grid pressed]      [≡ list pressed]
   ┌───┐ ┌───┐           │ General      │
   │   │ │   │           │ Slack & WA   │
-  └───┘ └───┘           │ People       │` },
-  { id:"C-07", sev:"P2", area:"Connections", issue:"Collection + humanized names", status:"disk", owner:"engine", shot:"C-07",
-    ascii:`  Connections list
-  [GitHub]  octocat     active
-  [Google Calendar]  ✓  (not Googlecalendar)` },
-  { id:"C-08", sev:"P2", area:"Connections", issue:"Redirect — no stale router.replace", status:"live", owner:"engine", shot:"",
-    ascii:`  poll tick ──▶ unmount ──▶ cancelledRef=true
-                         └──▶ bail (no navigate back)` },
-  { id:"C-09", sev:"P2", area:"Connections", issue:"Redirect — Still waiting terminal", status:"manual", owner:"engine", shot:"",
-    ascii:`  spinner ──▶ 2min ──▶ [Still waiting for Google Calendar]
-              [Check again] [Go to connections]` },
-  { id:"C-10", sev:"P2", area:"UI", issue:"Avatar squircle not circle", status:"disk", owner:"engine", shot:"",
-    ascii:`  was (○) circle     want (▢) squircle
-       federico@          federico@` },
-  { id:"C-11", sev:"P2", area:"Emily", issue:"Send button squircle", status:"disk", owner:"engine", shot:"",
-    ascii:`  composer [············ (○) ]  →  [············ (▢) ]` },
-  { id:"C-12", sev:"P2", area:"Auth", issue:"Localhost Gmail OAuth callback", status:"live", owner:"cloud", shot:"",
-    ascii:`  dev:local ──▶ callback:
-  localhost:3000/app/api/proxy/auth/callback
-  COOKIE_DOMAIN=none` },
-  { id:"C-13", sev:"P1", area:"Landing", issue:"/start/slack + whatsapp on prod", status:"open", owner:"cloud", shot:"",
-    ascii:`  same as A-01 — code on main, landing deploy pending` },
+  └───┘ └───┘           │ People       │`,
+  },
+  {
+    id: "CONN-01",
+    sev: "P1",
+    area: "Connections",
+    issue: "OAuth redirect loop + blank authorize + humanized names",
+    detail: "Supersedes A-11, A-15, C-07, C-08, C-09, L-11. cancelledRef on unmount; Still waiting terminal; authorize proxy 302; Googlecalendar → Google Calendar.",
+    status: "disk",
+    owner: "engine+cloud",
+    shot: "C-07",
+    ascii: `  connect ──▶ poll ──▶ navigate away
+                    │
+                    └──▶ stale tick ──▶ router.replace ✗
 
-  { id:"L-01", sev:"P2", area:"Emily", issue:"Grey bg on empty state", status:"disk", owner:"engine", shot:"",
-    ascii:`  --bg-app (warm)  vs  grey #eee leak on Emily home` },
-  { id:"L-02", sev:"P3", area:"Emily", issue:"Greeting typography", status:"manual", owner:"engine", shot:"",
-    ascii:`  "Good morning" — size/weight off spec` },
-  { id:"L-03", sev:"P2", area:"MCP", issue:"Client logos IconSprite", status:"disk", owner:"engine", shot:"C-02",
-    ascii:`  icon-claude  icon-codex  icon-cline … in IconSprite.tsx` },
-  { id:"L-04", sev:"P2", area:"MCP", issue:"Create key flow", status:"manual", owner:"engine", shot:"",
-    ascii:`  [Create access key] ──▶ PAT panel ──▶ copy/reveal` },
-  { id:"L-05", sev:"P2", area:"MCP", issue:"localhost:8000 in prod copy", status:"manual", owner:"engine", shot:"",
-    ascii:`  MCP install snippet must show workeros-api.floom.dev` },
-  { id:"L-06", sev:"P1", area:"Library", issue:"Empty / slow load", status:"disk", owner:"engine", shot:"",
-    ascii:`  same as A-12 — Storage hydration on list` },
-  { id:"L-07", sev:"P2", area:"Auth", issue:"Session switch Google picker", status:"disk", owner:"cloud", shot:"",
-    ascii:`  /app/login?switch=1 ──▶ Google account chooser` },
-  { id:"L-08", sev:"P3", area:"Collections", issue:"List toggle left of grid", status:"live", owner:"engine", shot:"",
-    ascii:`  view bar:  [ ≡ list ] [ ⊞ grid ]
-              ^left       ^right` },
-  { id:"L-09", sev:"P2", area:"Approvals", issue:"Proposed output layout", status:"disk", owner:"engine", shot:"",
-    ascii:`  approval detail ──▶ proposed output container queries` },
-  { id:"L-10", sev:"P2", area:"Emily", issue:"Tool-call in-progress UX", status:"disk", owner:"engine", shot:"",
-    ascii:`  Emily: "Searching connections…" status line during tool` },
-  { id:"L-11", sev:"P1", area:"Connections", issue:"Blank authorize page", status:"disk", owner:"cloud", shot:"",
-    ascii:`  same as A-15` },
-  { id:"L-12", sev:"P2", area:"Settings", issue:"Gallery default", status:"disk", owner:"engine", shot:"C-06",
-    ascii:`  same as C-06 — emptyState("grid") bug` },
-  { id:"L-13", sev:"P2", area:"Settings", issue:"Backups / version history", status:"manual", owner:"engine", shot:"",
-    ascii:`  Settings → Backups → restore points list` },
-  { id:"L-14", sev:"P2", area:"Runs", issue:"?shape=run lightweight load", status:"disk", owner:"engine", shot:"",
-    ascii:`  /app/run/id?shape=run ──▶ skip heavy payload` },
-  { id:"L-15", sev:"P2", area:"Emily", issue:"Inline tool tokens Uses:", status:"disk", owner:"engine", shot:"",
-    ascii:`  prompt: "Uses: [Gmail] [Calendar] [GitHub]" inline chips` },
+  /api/proxy/connections/authorize ──▶ was blank (need 302)
 
-  { id:"D-01", sev:"P2", area:"Dev", issue:"Localhost OAuth + prod .env.local", status:"live", owner:"cloud", shot:"",
-    ascii:`  web/.env.local ──▶ prod API ──▶ Domain=.floom.dev cookies ✗
-  USE: npm run dev:local + ops/dev-local-api.sh` },
-  { id:"D-02", sev:"P2", area:"Process", issue:"Fake audit screenshots", status:"live", owner:"cloud", shot:"",
-    ascii:`  audit-preview PNGs recycled as "verified" ──▶ rejected` },
-  { id:"D-03", sev:"P2", area:"Process", issue:"Corrupt login screenshot", status:"live", owner:"cloud", shot:"C-01",
-    ascii:`  01.png was black "Pretty print" screen ──▶ replaced` },
-  { id:"D-04", sev:"P1", area:"Deploy", issue:"Vercel CI failures", status:"open", owner:"cloud", shot:"",
-    ascii:`  dashboard: build fail (listWorkspaceChangelog)
-  landing: apex /v3/integrations 404 after alias` },
-  { id:"D-05", sev:"P1", area:"Deploy", issue:"listWorkspaceChangelog missing", status:"live", owner:"cloud", shot:"",
-    ascii:`  overlay/lib/api.ts ──▶ add listWorkspaceChangelog()` },
-  { id:"D-06", sev:"P1", area:"Deploy", issue:"Login overlay sync bug", status:"live", owner:"cloud", shot:"C-01",
-    ascii:`  #665 ──▶ web/app/login ✓
-  sync ──▶ overlay/login overwrites ✗` },
-  { id:"D-07", sev:"P2", area:"Process", issue:"Engine local edits diverge", status:"track", owner:"process", shot:"",
-    ascii:`  hand-edit engine/ ──▶ next bump wipes ──▶ PR floom first` },
-  { id:"D-08", sev:"P2", area:"Deploy", issue:"Railway smoke gate", status:"manual", owner:"cloud", shot:"",
-    ascii:`  push main ──▶ railway up ──▶ ops/smoke-routes.sh` },
+  [Googlecalendar] ──▶ [Google Calendar]`,
+  },
+  {
+    id: "LIB-01",
+    sev: "P1",
+    area: "Library",
+    issue: "Library tab empty / ~30s load",
+    detail: "Supersedes A-12, L-06. hydrate=False when cached summary exists.",
+    status: "disk",
+    owner: "engine",
+    shot: "",
+    ascii: `  GET /contexts ──▶ for EACH pack:
+                         download ALL files from Storage
+                         just for file_count  ──▶ ~30s`,
+  },
+  {
+    id: "A-03",
+    sev: "P2",
+    area: "CI",
+    issue: "smoke-routes.sh false-pass on macOS",
+    detail: "sha256sum missing → empty hash always matched",
+    status: "live",
+    owner: "cloud",
+    shot: "",
+    ascii: `  macOS: sha256sum ──X──▶ (missing)
+         hash="" == hash="" ──▶ FALSE PASS ✓
+  FIX: shasum -a 256 fallback`,
+  },
+  {
+    id: "A-04",
+    sev: "P2",
+    area: "Tests",
+    issue: "Web vitest harness failures (#436)",
+    status: "track",
+    owner: "cloud+engine",
+    shot: "",
+    ascii: `  vitest ──▶ 760 pass / 25 fail
+  proxy-location (7) · login-magic-link (4) · overlay (2)`,
+  },
+  {
+    id: "A-06",
+    sev: "P2",
+    area: "CLI",
+    issue: "workers push stale bundle (#637)",
+    status: "track",
+    owner: "engine",
+    shot: "",
+    ascii: `  local edit ──▶ push ──▶ cloud API ──▶ OLD bundle cached`,
+  },
+  {
+    id: "A-07",
+    sev: "P2",
+    area: "CLI",
+    issue: "Device-approval dead-end (#588)",
+    status: "track",
+    owner: "cloud",
+    shot: "",
+    ascii: `  cli-auth ──▶ no session ──▶ dead end (need login?next=)`,
+  },
+  {
+    id: "A-10",
+    sev: "P3",
+    area: "Workers",
+    issue: "ASCII diagram worker node accent blue",
+    status: "disk",
+    owner: "engine",
+    shot: "",
+    ascii: `  [trigger]──▶[WORKER]──▶[output]  was BLUE → fix --ink`,
+  },
+  {
+    id: "A-13",
+    sev: "P1",
+    area: "Workers",
+    issue: "Memory scope toggle silent no-op",
+    status: "disk",
+    owner: "engine",
+    shot: "",
+    ascii: `  Read ◀──toggle──▶ Read&write
+  PUT /workers/files ──▶ validator force writeable:True
+  toast "Brain updated" (lie)`,
+  },
+  {
+    id: "A-14",
+    sev: "P2",
+    area: "Workers",
+    issue: "Tab Brain vs nav Library label mismatch",
+    status: "disk",
+    owner: "engine",
+    shot: "",
+    ascii: `  left nav: Library    worker tab: Brain  ✗`,
+  },
+  {
+    id: "EMILY-01",
+    sev: "P2",
+    area: "Emily",
+    issue: "Home empty state — composer, grey bg, tool UX, inline chips",
+    detail: "Supersedes C-04, L-01, L-02, L-10, L-15.",
+    status: "disk",
+    owner: "engine",
+    shot: "",
+    ascii: `  /app/assistant
+  ┌─────────────────────────────┐
+  │ real PromptInput + chips    │
+  │ Uses: [Gmail][Calendar]     │
+  │ warm --bg-app (not grey)    │
+  │ "Searching connections…"    │
+  └─────────────────────────────┘`,
+  },
+  {
+    id: "UI-01",
+    sev: "P2",
+    area: "UI",
+    issue: "Squircle avatars + send button + collection control strip",
+    detail: "Supersedes C-05, C-10, C-11.",
+    status: "manual",
+    owner: "engine",
+    shot: "C-05",
+    ascii: `  Workers: [🔍][≡|⊞][+ Add][New worker]
+  avatar (○) → (▢)   composer send (○) → (▢)`,
+  },
+  {
+    id: "AUTH-01",
+    sev: "P2",
+    area: "Auth",
+    issue: "Localhost OAuth recipe + session switch",
+    detail: "Supersedes C-12, L-07, D-01.",
+    status: "live",
+    owner: "cloud",
+    shot: "",
+    ascii: `  npm run dev:local + ops/dev-local-api.sh
+  callback: localhost:3000/app/api/proxy/auth/callback
+  /app/login?switch=1 ──▶ Google account chooser`,
+  },
+  {
+    id: "L-09",
+    sev: "P2",
+    area: "Approvals",
+    issue: "Proposed output layout",
+    status: "disk",
+    owner: "engine",
+    shot: "",
+    ascii: `  approval detail ──▶ proposed output container queries`,
+  },
+  {
+    id: "L-13",
+    sev: "P2",
+    area: "Settings",
+    issue: "Backups / version history",
+    status: "manual",
+    owner: "engine",
+    shot: "",
+    ascii: `  Settings → Backups → restore points list`,
+  },
+  {
+    id: "L-14",
+    sev: "P2",
+    area: "Runs",
+    issue: "?shape=run lightweight load",
+    status: "disk",
+    owner: "engine",
+    shot: "",
+    ascii: `  /app/run/id?shape=run ──▶ skip heavy payload`,
+  },
+  {
+    id: "D-04",
+    sev: "P1",
+    area: "Deploy",
+    issue: "Vercel CI + /audit permanent URL",
+    detail: "Dashboard build fixes landed; landing apex /v3/integrations 404 blocks alias; workeros.floom.dev/audit still pending.",
+    status: "open",
+    owner: "cloud",
+    shot: "",
+    ascii: `  vercel deploy ──▶ landing job
+  /v3/integrations 404 ──▶ alias blocked
+  /audit ──▶ 404 until landing ships public/audit`,
+  },
+  {
+    id: "D-07",
+    sev: "P2",
+    area: "Process",
+    issue: "Engine local edits diverge from floomhq/floom",
+    status: "track",
+    owner: "process",
+    shot: "",
+    ascii: `  hand-edit engine/ ──▶ next bump wipes ──▶ PR floom first`,
+  },
+  {
+    id: "D-08",
+    sev: "P2",
+    area: "Deploy",
+    issue: "Railway smoke gate after push main",
+    status: "manual",
+    owner: "cloud",
+    shot: "",
+    ascii: `  push main ──▶ railway up ──▶ ops/smoke-routes.sh`,
+  },
+  {
+    id: "INFRA-01",
+    sev: "P3",
+    area: "Tests",
+    issue: "E2E + pytest blocked on audit machine",
+    detail: "Supersedes A-08, A-09.",
+    status: "track",
+    owner: "infra",
+    shot: "",
+    ascii: `  playwright: WORKEROS_E2E_ADMIN_TOKEN unset
+  pytest: disk full + py3.14 litellm (repo wants py3.12)`,
+  },
 ];
 
 function esc(s) {
@@ -240,7 +351,7 @@ function issueCard(row) {
 </article>`;
 }
 
-const counts = { live:0, disk:0, open:0, manual:0, track:0 };
+const counts = { live:0, partial:0, disk:0, open:0, manual:0, track:0 };
 ISSUES.forEach(i => counts[i.status]++);
 
 const html = `<!DOCTYPE html>
@@ -290,16 +401,17 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
 <body>
 <header class="top">
   <h1>WorkerOS Cloud — Issue inventory</h1>
-  <p class="meta">47 items · cloud main · engine a990795d · 2026-06-24 · for Vivek</p>
+  <p class="meta">${ISSUES.length} items (deduped from 47) · cloud main · 2026-06-24 · for Vivek</p>
+  <p class="meta" style="margin-top:.35rem">Merged duplicates: LOGIN-01 ← A-02/C-01/D-06 · MCP-01 ← C-02/C-03/L-03 · CONN-01 ← A-11/A-15/C-07–09 · SETTINGS-01 ← C-06/L-12 · LIB-01 ← A-12/L-06 · EMILY-01 ← C-04/L-01/L-10/L-15</p>
   <div class="perm"><strong>Permanent URL:</strong> <a href="${PERMANENT_URL}">${PERMANENT_URL}</a></div>
   <div class="stats">
-    <span>✓ LIVE ${counts.live}</span><span>~ DISK ${counts.disk}</span><span>! OPEN ${counts.open}</span>
+    <span>✓ LIVE ${counts.live}</span><span>◐ PARTIAL ${counts.partial}</span><span>~ DISK ${counts.disk}</span><span>! OPEN ${counts.open}</span>
     <span>? MANUAL ${counts.manual}</span><span>— TRACK ${counts.track}</span>
   </div>
 </header>
 <div class="toolbar">
   <label>Search <input type="search" id="q" placeholder="id, area, issue…"/></label>
-  <label>Status <select id="sf"><option value="">All</option><option value="live">LIVE</option><option value="disk">DISK</option><option value="open">OPEN</option><option value="manual">MANUAL</option><option value="track">TRACK</option></select></label>
+  <label>Status <select id="sf"><option value="">All</option><option value="live">LIVE</option><option value="partial">PARTIAL</option><option value="disk">DISK</option><option value="open">OPEN</option><option value="manual">MANUAL</option><option value="track">TRACK</option></select></label>
   <label>Sev <select id="vf"><option value="">All</option><option>P1</option><option>P2</option><option>P3</option></select></label>
   <span id="cnt" style="margin-left:auto;font-size:.8rem;color:var(--muted)"></span>
 </div>

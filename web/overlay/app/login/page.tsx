@@ -90,7 +90,7 @@ export default async function LoginPage({
             className="text-[40px] font-semibold leading-[1.04] tracking-[-0.034em]"
             style={{ color: "var(--text-primary)" }}
           >
-            <span style={{ color: "var(--accent)" }}>Hire</span> AI workers.
+            <span className="login-hl">Hire</span> AI workers.
           </h2>
           <p
             className="mt-4 max-w-[380px] text-[14px] leading-relaxed"
@@ -247,6 +247,14 @@ export default async function LoginPage({
       </section>
 
       <style>{`
+        /* Landing /login uses V3Shell .v3-hl — mirror the blue selection pill here */
+        .login-hl {
+          background: color-mix(in srgb, var(--accent) 14%, transparent);
+          color: var(--accent);
+          border-radius: 4px;
+          padding: 0 3px;
+          font-weight: 500;
+        }
         .auth-btn {
           display: flex;
           align-items: center;

@@ -45,20 +45,21 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
 <body>
 <header class="top">
   <h1>WorkerOS Cloud — Issue inventory</h1>
-  <p class="meta">47 items · cloud main · engine a990795d · 2026-06-24 · for Vivek</p>
+  <p class="meta">23 items (deduped from 47) · cloud main · 2026-06-24 · for Vivek</p>
+  <p class="meta" style="margin-top:.35rem">Merged duplicates: LOGIN-01 ← A-02/C-01/D-06 · MCP-01 ← C-02/C-03/L-03 · CONN-01 ← A-11/A-15/C-07–09 · SETTINGS-01 ← C-06/L-12 · LIB-01 ← A-12/L-06 · EMILY-01 ← C-04/L-01/L-10/L-15</p>
   <div class="perm"><strong>Permanent URL:</strong> <a href="https://workeros.floom.dev/audit">https://workeros.floom.dev/audit</a></div>
   <div class="stats">
-    <span>✓ LIVE 12</span><span>~ DISK 21</span><span>! OPEN 3</span>
-    <span>? MANUAL 9</span><span>— TRACK 6</span>
+    <span>✓ LIVE 2</span><span>◐ PARTIAL 1</span><span>~ DISK 9</span><span>! OPEN 2</span>
+    <span>? MANUAL 4</span><span>— TRACK 5</span>
   </div>
 </header>
 <div class="toolbar">
   <label>Search <input type="search" id="q" placeholder="id, area, issue…"/></label>
-  <label>Status <select id="sf"><option value="">All</option><option value="live">LIVE</option><option value="disk">DISK</option><option value="open">OPEN</option><option value="manual">MANUAL</option><option value="track">TRACK</option></select></label>
+  <label>Status <select id="sf"><option value="">All</option><option value="live">LIVE</option><option value="partial">PARTIAL</option><option value="disk">DISK</option><option value="open">OPEN</option><option value="manual">MANUAL</option><option value="track">TRACK</option></select></label>
   <label>Sev <select id="vf"><option value="">All</option><option>P1</option><option>P2</option><option>P3</option></select></label>
   <span id="cnt" style="margin-left:auto;font-size:.8rem;color:var(--muted)"></span>
 </div>
-<nav class="toc"><a href="#A-01">A-01</a><a href="#A-02">A-02</a><a href="#A-03">A-03</a><a href="#A-04">A-04</a><a href="#A-05">A-05</a><a href="#A-06">A-06</a><a href="#A-07">A-07</a><a href="#A-08">A-08</a><a href="#A-09">A-09</a><a href="#A-10">A-10</a><a href="#A-11">A-11</a><a href="#A-12">A-12</a><a href="#A-13">A-13</a><a href="#A-14">A-14</a><a href="#A-15">A-15</a><a href="#C-01">C-01</a><a href="#C-02">C-02</a><a href="#C-03">C-03</a><a href="#C-04">C-04</a><a href="#C-05">C-05</a><a href="#C-06">C-06</a><a href="#C-07">C-07</a><a href="#C-08">C-08</a><a href="#C-09">C-09</a><a href="#C-10">C-10</a><a href="#C-11">C-11</a><a href="#C-12">C-12</a><a href="#C-13">C-13</a><a href="#L-01">L-01</a><a href="#L-02">L-02</a><a href="#L-03">L-03</a><a href="#L-04">L-04</a><a href="#L-05">L-05</a><a href="#L-06">L-06</a><a href="#L-07">L-07</a><a href="#L-08">L-08</a><a href="#L-09">L-09</a><a href="#L-10">L-10</a><a href="#L-11">L-11</a><a href="#L-12">L-12</a><a href="#L-13">L-13</a><a href="#L-14">L-14</a><a href="#L-15">L-15</a><a href="#D-01">D-01</a><a href="#D-02">D-02</a><a href="#D-03">D-03</a><a href="#D-04">D-04</a><a href="#D-05">D-05</a><a href="#D-06">D-06</a><a href="#D-07">D-07</a><a href="#D-08">D-08</a></nav>
+<nav class="toc"><a href="#A-01">A-01</a><a href="#LOGIN-01">LOGIN-01</a><a href="#MCP-01">MCP-01</a><a href="#SETTINGS-01">SETTINGS-01</a><a href="#CONN-01">CONN-01</a><a href="#LIB-01">LIB-01</a><a href="#A-03">A-03</a><a href="#A-04">A-04</a><a href="#A-06">A-06</a><a href="#A-07">A-07</a><a href="#A-10">A-10</a><a href="#A-13">A-13</a><a href="#A-14">A-14</a><a href="#EMILY-01">EMILY-01</a><a href="#UI-01">UI-01</a><a href="#AUTH-01">AUTH-01</a><a href="#L-09">L-09</a><a href="#L-13">L-13</a><a href="#L-14">L-14</a><a href="#D-04">D-04</a><a href="#D-07">D-07</a><a href="#D-08">D-08</a><a href="#INFRA-01">INFRA-01</a></nav>
 <main id="main">
 <article class="issue" id="A-01" data-status="open" data-sev="P1">
   <header class="issue-head">
@@ -68,35 +69,102 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
     <span class="area">Landing</span>
     <span class="owner">cloud</span>
   </header>
-  <h2>/start/slack + /start/whatsapp return 404</h2>
-  <p class="detail">CHANNELS dict lost slack/whatsapp; code restored, prod not deployed</p>
-  <pre class="ascii">  /start/slack  ──▶  workeros.floom.dev
-                           │
-                           ▼
-                    ┌──────────────┐
-                    │  404 Nothing │  ◀── CHANNELS = { mcp only }
-                    │     here     │
-                    └──────────────┘
-  FIX: restore slack+whatsapp in app/start/[channel]/page.tsx</pre>
+  <h2>Slack + WhatsApp should be OFF — landing still exposes them</h2>
+  <p class="detail">Not a “restore /start routes” bug. Channels are not prod-ready; hero + /start/slack|whatsapp should respect a kill-switch. Code on disk has routes; prod 404 may be correct until flag + deploy. Hide Add to Slack / WhatsApp on landing until enabled.</p>
+  <pre class="ascii">  INTENDED (now):              ACTUAL (landing):
+  showSlack=false              [Add to Slack]  ← still visible
+  showWhatsApp=false           [WhatsApp QR]   ← still visible
+  /start/slack ──▶ 404 OK?     user clicks ──▶ 404 (confusing)
+
+  FIX: NEXT_PUBLIC_CHANNELS slack/wa flag + hide ChannelActions</pre>
   <div class="shot-empty">Drop <code>screenshots/A-01.png</code></div>
 </article>
-<article class="issue" id="A-02" data-status="live" data-sev="P1">
+<article class="issue" id="LOGIN-01" data-status="partial" data-sev="P1">
   <header class="issue-head">
-    <span class="id">A-02</span>
+    <span class="id">LOGIN-01</span>
     <span class="badge p1">P1</span>
-    <span class="badge live">✓ LIVE</span>
+    <span class="badge disk">◐ PARTIAL</span>
     <span class="area">Login</span>
     <span class="owner">cloud</span>
   </header>
-  <h2>Dashboard /app/login — old UI not landing #665</h2>
-  <p class="detail">Overlay sync restored old split-panel after every npm run sync</p>
-  <pre class="ascii">  OLD (overlay)              NEW (landing #665)
-  ┌─────────────────┐        ┌─────────────────┐
-  │ Floom Cloud     │        │ Hire AI workers.│
-  │ Recent runs LR  │        │ Today + squircles│
-  │ Welcome back L  │        │ Welcome back C  │
-  └─────────────────┘        └─────────────────┘</pre>
-  <figure class="shot"><a href="screenshots/01-localhost-login-welcome-back.png"><img src="screenshots/01-localhost-login-welcome-back.png" alt="A-02" loading="lazy"/></a><figcaption>01-localhost-login-welcome-back.png</figcaption></figure>
+  <h2>/app/login ≠ landing /login — Hire pill + full #665 parity</h2>
+  <p class="detail">Supersedes A-02, C-01, D-06. Overlay sync was restoring old split-panel; layout closer now but Hire was blue TEXT only (landing uses .v3-hl blue background pill). Fix on disk in web/overlay/app/login/page.tsx — NOT verified LIVE.</p>
+  <pre class="ascii">  landing /login                 /app/login (was)
+  ┌──────────────────┐          ┌──────────────────┐
+  │ [Hire] AI workers│          │ Hire AI workers  │
+  │  ^blue pill      │          │  ^blue text only │
+  │ V3Shell + Today  │          │ no V3Shell theme │
+  └──────────────────┘          └──────────────────┘</pre>
+  <figure class="shot"><a href="screenshots/01-localhost-login-welcome-back.png"><img src="screenshots/01-localhost-login-welcome-back.png" alt="LOGIN-01" loading="lazy"/></a><figcaption>01-localhost-login-welcome-back.png</figcaption></figure>
+</article>
+<article class="issue" id="MCP-01" data-status="manual" data-sev="P2">
+  <header class="issue-head">
+    <span class="id">MCP-01</span>
+    <span class="badge p2">P2</span>
+    <span class="badge manual">? MANUAL</span>
+    <span class="area">MCP</span>
+    <span class="owner">engine</span>
+  </header>
+  <h2>6 real brand logos — icon-only row (sidebar popup + Settings)</h2>
+  <p class="detail">Supersedes C-02, C-03, L-03, L-04, L-05. ONE component: McpInstallPanel (McpInstallModal wraps it). Want Claude Code, Cursor, Codex, VS Code, Windsurf, Cline as real logos — NOT grey boxes with letters “C”, “CX”. Same panel in left sidebar popup and Settings → Connect &amp; automate → MCP.</p>
+  <pre class="ascii">  WANT (icon row):          NOT this (prod screenshot):
+  [🟠claude][◻cursor][◻codex]   [C][CX][C][VS][W][CL]
+  [◻vscode][◻surf][◻cline]       grey squares + initials
+
+  Surfaces: sidebar MCP popup ═══ Settings MCP tab
+            (same McpInstallPanel.tsx)</pre>
+  <figure class="shot"><a href="screenshots/05-prod-mcp-install-panel.png"><img src="screenshots/05-prod-mcp-install-panel.png" alt="MCP-01" loading="lazy"/></a><figcaption>05-prod-mcp-install-panel.png</figcaption></figure>
+</article>
+<article class="issue" id="SETTINGS-01" data-status="disk" data-sev="P2">
+  <header class="issue-head">
+    <span class="id">SETTINGS-01</span>
+    <span class="badge p2">P2</span>
+    <span class="badge disk">~ DISK</span>
+    <span class="area">Settings</span>
+    <span class="owner">engine</span>
+  </header>
+  <h2>List view default — not gallery grid</h2>
+  <p class="detail">Supersedes C-06, L-12. emptyState('grid') + view default grid in settings/page.tsx.</p>
+  <pre class="ascii">  WRONG (was):          RIGHT (fix):
+  [⊞ grid pressed]      [≡ list pressed]
+  ┌───┐ ┌───┐           │ General      │
+  │   │ │   │           │ Slack &amp; WA   │
+  └───┘ └───┘           │ People       │</pre>
+  <figure class="shot"><a href="screenshots/04-prod-settings-collection.png"><img src="screenshots/04-prod-settings-collection.png" alt="SETTINGS-01" loading="lazy"/></a><figcaption>04-prod-settings-collection.png</figcaption></figure>
+</article>
+<article class="issue" id="CONN-01" data-status="disk" data-sev="P1">
+  <header class="issue-head">
+    <span class="id">CONN-01</span>
+    <span class="badge p1">P1</span>
+    <span class="badge disk">~ DISK</span>
+    <span class="area">Connections</span>
+    <span class="owner">engine+cloud</span>
+  </header>
+  <h2>OAuth redirect loop + blank authorize + humanized names</h2>
+  <p class="detail">Supersedes A-11, A-15, C-07, C-08, C-09, L-11. cancelledRef on unmount; Still waiting terminal; authorize proxy 302; Googlecalendar → Google Calendar.</p>
+  <pre class="ascii">  connect ──▶ poll ──▶ navigate away
+                    │
+                    └──▶ stale tick ──▶ router.replace ✗
+
+  /api/proxy/connections/authorize ──▶ was blank (need 302)
+
+  [Googlecalendar] ──▶ [Google Calendar]</pre>
+  <figure class="shot"><a href="screenshots/06-prod-connections-collection.png"><img src="screenshots/06-prod-connections-collection.png" alt="CONN-01" loading="lazy"/></a><figcaption>06-prod-connections-collection.png</figcaption></figure>
+</article>
+<article class="issue" id="LIB-01" data-status="disk" data-sev="P1">
+  <header class="issue-head">
+    <span class="id">LIB-01</span>
+    <span class="badge p1">P1</span>
+    <span class="badge disk">~ DISK</span>
+    <span class="area">Library</span>
+    <span class="owner">engine</span>
+  </header>
+  <h2>Library tab empty / ~30s load</h2>
+  <p class="detail">Supersedes A-12, L-06. hydrate=False when cached summary exists.</p>
+  <pre class="ascii">  GET /contexts ──▶ for EACH pack:
+                         download ALL files from Storage
+                         just for file_count  ──▶ ~30s</pre>
+  <div class="shot-empty">Drop <code>screenshots/LIB-01.png</code></div>
 </article>
 <article class="issue" id="A-03" data-status="live" data-sev="P2">
   <header class="issue-head">
@@ -109,10 +177,8 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <h2>smoke-routes.sh false-pass on macOS</h2>
   <p class="detail">sha256sum missing → empty hash always matched</p>
   <pre class="ascii">  macOS: sha256sum ──X──▶ (missing)
-              │
-              ▼
-         hash=&quot;&quot;  ==  hash=&quot;&quot;  ──▶ FALSE PASS ✓
-  FIX: sha256_of() → shasum -a 256 fallback</pre>
+         hash=&quot;&quot; == hash=&quot;&quot; ──▶ FALSE PASS ✓
+  FIX: shasum -a 256 fallback</pre>
   <div class="shot-empty">Drop <code>screenshots/A-03.png</code></div>
 </article>
 <article class="issue" id="A-04" data-status="track" data-sev="P2">
@@ -123,28 +189,11 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
     <span class="area">Tests</span>
     <span class="owner">cloud+engine</span>
   </header>
-  <h2>Web vitest 25 failures (#436)</h2>
-  <p class="detail">Many Next 16 cookies() outside request scope in harness</p>
+  <h2>Web vitest harness failures (#436)</h2>
+  
   <pre class="ascii">  vitest ──▶ 760 pass / 25 fail
-              │
-              ├─ proxy-location (7)   cookies() harness
-              ├─ login-magic-link (4) async RSC jsdom
-              └─ overlay parity (2)   env drift</pre>
+  proxy-location (7) · login-magic-link (4) · overlay (2)</pre>
   <div class="shot-empty">Drop <code>screenshots/A-04.png</code></div>
-</article>
-<article class="issue" id="A-05" data-status="live" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">A-05</span>
-    <span class="badge p2">P2</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Tests</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Landing start-channel-819 failures</h2>
-  <p class="detail">Fixed with A-01 — now 16/16</p>
-  <pre class="ascii">  start-channel-819.dom.test.tsx
-  slack ✓  whatsapp ✓  mcp ✓  (was 8 fail → 0)</pre>
-  <div class="shot-empty">Drop <code>screenshots/A-05.png</code></div>
 </article>
 <article class="issue" id="A-06" data-status="track" data-sev="P2">
   <header class="issue-head">
@@ -156,10 +205,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   </header>
   <h2>workers push stale bundle (#637)</h2>
   
-  <pre class="ascii">  local edit ──▶ push ──▶ cloud API
-                              │
-                              ▼
-                         OLD bundle cached</pre>
+  <pre class="ascii">  local edit ──▶ push ──▶ cloud API ──▶ OLD bundle cached</pre>
   <div class="shot-empty">Drop <code>screenshots/A-06.png</code></div>
 </article>
 <article class="issue" id="A-07" data-status="track" data-sev="P2">
@@ -172,36 +218,8 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   </header>
   <h2>Device-approval dead-end (#588)</h2>
   
-  <pre class="ascii">  cli-auth page ──▶ no session ──▶ dead end
-  (should redirect to login with next=)</pre>
+  <pre class="ascii">  cli-auth ──▶ no session ──▶ dead end (need login?next=)</pre>
   <div class="shot-empty">Drop <code>screenshots/A-07.png</code></div>
-</article>
-<article class="issue" id="A-08" data-status="track" data-sev="P3">
-  <header class="issue-head">
-    <span class="id">A-08</span>
-    <span class="badge p3">P3</span>
-    <span class="badge track">— TRACK</span>
-    <span class="area">E2E</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Playwright blocked — no E2E token</h2>
-  
-  <pre class="ascii">  playwright ──X── WORKEROS_E2E_ADMIN_TOKEN unset</pre>
-  <div class="shot-empty">Drop <code>screenshots/A-08.png</code></div>
-</article>
-<article class="issue" id="A-09" data-status="track" data-sev="P3">
-  <header class="issue-head">
-    <span class="id">A-09</span>
-    <span class="badge p3">P3</span>
-    <span class="badge track">— TRACK</span>
-    <span class="area">Tests</span>
-    <span class="owner">infra</span>
-  </header>
-  <h2>Pytest blocked on audit machine</h2>
-  
-  <pre class="ascii">  pytest ──X── disk full + py3.14 litellm conflict
-  (repo wants py3.12)</pre>
-  <div class="shot-empty">Drop <code>screenshots/A-09.png</code></div>
 </article>
 <article class="issue" id="A-10" data-status="disk" data-sev="P3">
   <header class="issue-head">
@@ -213,43 +231,8 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   </header>
   <h2>ASCII diagram worker node accent blue</h2>
   
-  <pre class="ascii">  [trigger]──▶[WORKER]──▶[output]
-                  │
-              was BLUE (--accent)
-              fix: --ink (neutral)</pre>
+  <pre class="ascii">  [trigger]──▶[WORKER]──▶[output]  was BLUE → fix --ink</pre>
   <div class="shot-empty">Drop <code>screenshots/A-10.png</code></div>
-</article>
-<article class="issue" id="A-11" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">A-11</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Connections</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Composio spinner + rogue nav + provider name</h2>
-  
-  <pre class="ascii">  connect ──▶ poll ──▶ user navigates away
-                    │
-                    └──▶ stale tick ──▶ router.replace(back!)  ✗
-  FIX: cancelledRef + timeout phase + displayName map</pre>
-  <div class="shot-empty">Drop <code>screenshots/A-11.png</code></div>
-</article>
-<article class="issue" id="A-12" data-status="disk" data-sev="P1">
-  <header class="issue-head">
-    <span class="id">A-12</span>
-    <span class="badge p1">P1</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Library</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Library tab ~30s load</h2>
-  
-  <pre class="ascii">  GET /contexts ──▶ for EACH pack:
-                         download ALL files from Storage
-                         just for file_count  ──▶ ~30s
-  FIX: hydrate=False when cached summary exists</pre>
-  <div class="shot-empty">Drop <code>screenshots/A-12.png</code></div>
 </article>
 <article class="issue" id="A-13" data-status="disk" data-sev="P1">
   <header class="issue-head">
@@ -261,12 +244,9 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   </header>
   <h2>Memory scope toggle silent no-op</h2>
   
-  <pre class="ascii">  UI: Read ◀──toggle──▶ Read&amp;write
-           │
-           ▼ PUT /workers/files
-  engine validator force-pins writeable:True
-           │
-           ▼ toast &quot;Brain updated&quot; (lie)</pre>
+  <pre class="ascii">  Read ◀──toggle──▶ Read&amp;write
+  PUT /workers/files ──▶ validator force writeable:True
+  toast &quot;Brain updated&quot; (lie)</pre>
   <div class="shot-empty">Drop <code>screenshots/A-13.png</code></div>
 </article>
 <article class="issue" id="A-14" data-status="disk" data-sev="P2">
@@ -277,328 +257,58 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
     <span class="area">Workers</span>
     <span class="owner">engine</span>
   </header>
-  <h2>Tab Brain vs nav Library</h2>
+  <h2>Tab Brain vs nav Library label mismatch</h2>
   
-  <pre class="ascii">  left nav: Library    worker tab: Brain  ✗
-  FIX: WORKER_DETAIL_TAB_LABEL Brain→Library</pre>
+  <pre class="ascii">  left nav: Library    worker tab: Brain  ✗</pre>
   <div class="shot-empty">Drop <code>screenshots/A-14.png</code></div>
 </article>
-<article class="issue" id="A-15" data-status="disk" data-sev="P1">
+<article class="issue" id="EMILY-01" data-status="disk" data-sev="P2">
   <header class="issue-head">
-    <span class="id">A-15</span>
-    <span class="badge p1">P1</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Connections</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Authorize proxy route blank page</h2>
-  
-  <pre class="ascii">  /app/api/proxy/connections/authorize/JWT
-           │
-           ▼ should 302 ──▶ connect.composio.dev
-           │
-           ▼ was: blank white page</pre>
-  <div class="shot-empty">Drop <code>screenshots/A-15.png</code></div>
-</article>
-<article class="issue" id="C-01" data-status="live" data-sev="P1">
-  <header class="issue-head">
-    <span class="id">C-01</span>
-    <span class="badge p1">P1</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Login</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Landing-aligned login on /app/login</h2>
-  
-  <pre class="ascii">  localhost:3000/app/login
-  ┌──────────────┬──────────────┐
-  │ Hire AI      │ Welcome back │
-  │ workers.     │ OAuth + magic│
-  │ Today card   │ link panel   │
-  └──────────────┴──────────────┘</pre>
-  <figure class="shot"><a href="screenshots/01-localhost-login-welcome-back.png"><img src="screenshots/01-localhost-login-welcome-back.png" alt="C-01" loading="lazy"/></a><figcaption>01-localhost-login-welcome-back.png</figcaption></figure>
-</article>
-<article class="issue" id="C-02" data-status="manual" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-02</span>
-    <span class="badge p2">P2</span>
-    <span class="badge manual">? MANUAL</span>
-    <span class="area">Settings</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>MCP install panel — 6 client icons</h2>
-  
-  <pre class="ascii">  Settings → Connect → MCP
-  [Claude][Cursor][Cline][Codex][Windsurf][Gemini]
-       6 icons in a row</pre>
-  <figure class="shot"><a href="screenshots/05-prod-mcp-install-panel.png"><img src="screenshots/05-prod-mcp-install-panel.png" alt="C-02" loading="lazy"/></a><figcaption>05-prod-mcp-install-panel.png</figcaption></figure>
-</article>
-<article class="issue" id="C-03" data-status="manual" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-03</span>
-    <span class="badge p2">P2</span>
-    <span class="badge manual">? MANUAL</span>
-    <span class="area">Settings</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>MCP config API host</h2>
-  
-  <pre class="ascii">  MCP JSON config:
-  &quot;url&quot;: &quot;https://workeros-api.floom.dev/...&quot;
-  (not localhost:8000 on prod)</pre>
-  <figure class="shot"><a href="screenshots/05-prod-mcp-install-panel.png"><img src="screenshots/05-prod-mcp-install-panel.png" alt="C-03" loading="lazy"/></a><figcaption>05-prod-mcp-install-panel.png</figcaption></figure>
-</article>
-<article class="issue" id="C-04" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-04</span>
+    <span class="id">EMILY-01</span>
     <span class="badge p2">P2</span>
     <span class="badge disk">~ DISK</span>
     <span class="area">Emily</span>
     <span class="owner">engine</span>
   </header>
-  <h2>Home empty — real PromptInput</h2>
-  
-  <pre class="ascii">  /app/assistant empty state
+  <h2>Home empty state — composer, grey bg, tool UX, inline chips</h2>
+  <p class="detail">Supersedes C-04, L-01, L-02, L-10, L-15.</p>
+  <pre class="ascii">  /app/assistant
   ┌─────────────────────────────┐
-  │  real composer (not stub)   │
-  │  [Uses: tool chips]  [send] │
+  │ real PromptInput + chips    │
+  │ Uses: [Gmail][Calendar]     │
+  │ warm --bg-app (not grey)    │
+  │ &quot;Searching connections…&quot;    │
   └─────────────────────────────┘</pre>
-  <div class="shot-empty">Drop <code>screenshots/C-04.png</code></div>
+  <div class="shot-empty">Drop <code>screenshots/EMILY-01.png</code></div>
 </article>
-<article class="issue" id="C-05" data-status="manual" data-sev="P2">
+<article class="issue" id="UI-01" data-status="manual" data-sev="P2">
   <header class="issue-head">
-    <span class="id">C-05</span>
+    <span class="id">UI-01</span>
     <span class="badge p2">P2</span>
     <span class="badge manual">? MANUAL</span>
-    <span class="area">Workers</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Collection control strip</h2>
-  
-  <pre class="ascii">  Workers
-  [🔍 search] [≡ list|⊞ grid] [+ Add] [New worker]
-  ─────────────────────────────────────────────</pre>
-  <figure class="shot"><a href="screenshots/03-prod-workers-collection.png"><img src="screenshots/03-prod-workers-collection.png" alt="C-05" loading="lazy"/></a><figcaption>03-prod-workers-collection.png</figcaption></figure>
-</article>
-<article class="issue" id="C-06" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-06</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Settings</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>List view default NOT gallery</h2>
-  
-  <pre class="ascii">  WRONG (was):          RIGHT (fix):
-  [⊞ grid pressed]      [≡ list pressed]
-  ┌───┐ ┌───┐           │ General      │
-  │   │ │   │           │ Slack &amp; WA   │
-  └───┘ └───┘           │ People       │</pre>
-  <figure class="shot"><a href="screenshots/04-prod-settings-collection.png"><img src="screenshots/04-prod-settings-collection.png" alt="C-06" loading="lazy"/></a><figcaption>04-prod-settings-collection.png</figcaption></figure>
-</article>
-<article class="issue" id="C-07" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-07</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Connections</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Collection + humanized names</h2>
-  
-  <pre class="ascii">  Connections list
-  [GitHub]  octocat     active
-  [Google Calendar]  ✓  (not Googlecalendar)</pre>
-  <figure class="shot"><a href="screenshots/06-prod-connections-collection.png"><img src="screenshots/06-prod-connections-collection.png" alt="C-07" loading="lazy"/></a><figcaption>06-prod-connections-collection.png</figcaption></figure>
-</article>
-<article class="issue" id="C-08" data-status="live" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-08</span>
-    <span class="badge p2">P2</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Connections</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Redirect — no stale router.replace</h2>
-  
-  <pre class="ascii">  poll tick ──▶ unmount ──▶ cancelledRef=true
-                         └──▶ bail (no navigate back)</pre>
-  <div class="shot-empty">Drop <code>screenshots/C-08.png</code></div>
-</article>
-<article class="issue" id="C-09" data-status="manual" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-09</span>
-    <span class="badge p2">P2</span>
-    <span class="badge manual">? MANUAL</span>
-    <span class="area">Connections</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Redirect — Still waiting terminal</h2>
-  
-  <pre class="ascii">  spinner ──▶ 2min ──▶ [Still waiting for Google Calendar]
-              [Check again] [Go to connections]</pre>
-  <div class="shot-empty">Drop <code>screenshots/C-09.png</code></div>
-</article>
-<article class="issue" id="C-10" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-10</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
     <span class="area">UI</span>
     <span class="owner">engine</span>
   </header>
-  <h2>Avatar squircle not circle</h2>
-  
-  <pre class="ascii">  was (○) circle     want (▢) squircle
-       federico@          federico@</pre>
-  <div class="shot-empty">Drop <code>screenshots/C-10.png</code></div>
+  <h2>Squircle avatars + send button + collection control strip</h2>
+  <p class="detail">Supersedes C-05, C-10, C-11.</p>
+  <pre class="ascii">  Workers: [🔍][≡|⊞][+ Add][New worker]
+  avatar (○) → (▢)   composer send (○) → (▢)</pre>
+  <figure class="shot"><a href="screenshots/03-prod-workers-collection.png"><img src="screenshots/03-prod-workers-collection.png" alt="UI-01" loading="lazy"/></a><figcaption>03-prod-workers-collection.png</figcaption></figure>
 </article>
-<article class="issue" id="C-11" data-status="disk" data-sev="P2">
+<article class="issue" id="AUTH-01" data-status="live" data-sev="P2">
   <header class="issue-head">
-    <span class="id">C-11</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Emily</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Send button squircle</h2>
-  
-  <pre class="ascii">  composer [············ (○) ]  →  [············ (▢) ]</pre>
-  <div class="shot-empty">Drop <code>screenshots/C-11.png</code></div>
-</article>
-<article class="issue" id="C-12" data-status="live" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">C-12</span>
+    <span class="id">AUTH-01</span>
     <span class="badge p2">P2</span>
     <span class="badge live">✓ LIVE</span>
     <span class="area">Auth</span>
     <span class="owner">cloud</span>
   </header>
-  <h2>Localhost Gmail OAuth callback</h2>
-  
-  <pre class="ascii">  dev:local ──▶ callback:
-  localhost:3000/app/api/proxy/auth/callback
-  COOKIE_DOMAIN=none</pre>
-  <div class="shot-empty">Drop <code>screenshots/C-12.png</code></div>
-</article>
-<article class="issue" id="C-13" data-status="open" data-sev="P1">
-  <header class="issue-head">
-    <span class="id">C-13</span>
-    <span class="badge p1">P1</span>
-    <span class="badge open">! OPEN</span>
-    <span class="area">Landing</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>/start/slack + whatsapp on prod</h2>
-  
-  <pre class="ascii">  same as A-01 — code on main, landing deploy pending</pre>
-  <div class="shot-empty">Drop <code>screenshots/C-13.png</code></div>
-</article>
-<article class="issue" id="L-01" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">L-01</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Emily</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Grey bg on empty state</h2>
-  
-  <pre class="ascii">  --bg-app (warm)  vs  grey #eee leak on Emily home</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-01.png</code></div>
-</article>
-<article class="issue" id="L-02" data-status="manual" data-sev="P3">
-  <header class="issue-head">
-    <span class="id">L-02</span>
-    <span class="badge p3">P3</span>
-    <span class="badge manual">? MANUAL</span>
-    <span class="area">Emily</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Greeting typography</h2>
-  
-  <pre class="ascii">  &quot;Good morning&quot; — size/weight off spec</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-02.png</code></div>
-</article>
-<article class="issue" id="L-03" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">L-03</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">MCP</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Client logos IconSprite</h2>
-  
-  <pre class="ascii">  icon-claude  icon-codex  icon-cline … in IconSprite.tsx</pre>
-  <figure class="shot"><a href="screenshots/05-prod-mcp-install-panel.png"><img src="screenshots/05-prod-mcp-install-panel.png" alt="L-03" loading="lazy"/></a><figcaption>05-prod-mcp-install-panel.png</figcaption></figure>
-</article>
-<article class="issue" id="L-04" data-status="manual" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">L-04</span>
-    <span class="badge p2">P2</span>
-    <span class="badge manual">? MANUAL</span>
-    <span class="area">MCP</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Create key flow</h2>
-  
-  <pre class="ascii">  [Create access key] ──▶ PAT panel ──▶ copy/reveal</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-04.png</code></div>
-</article>
-<article class="issue" id="L-05" data-status="manual" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">L-05</span>
-    <span class="badge p2">P2</span>
-    <span class="badge manual">? MANUAL</span>
-    <span class="area">MCP</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>localhost:8000 in prod copy</h2>
-  
-  <pre class="ascii">  MCP install snippet must show workeros-api.floom.dev</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-05.png</code></div>
-</article>
-<article class="issue" id="L-06" data-status="disk" data-sev="P1">
-  <header class="issue-head">
-    <span class="id">L-06</span>
-    <span class="badge p1">P1</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Library</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Empty / slow load</h2>
-  
-  <pre class="ascii">  same as A-12 — Storage hydration on list</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-06.png</code></div>
-</article>
-<article class="issue" id="L-07" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">L-07</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Auth</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Session switch Google picker</h2>
-  
-  <pre class="ascii">  /app/login?switch=1 ──▶ Google account chooser</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-07.png</code></div>
-</article>
-<article class="issue" id="L-08" data-status="live" data-sev="P3">
-  <header class="issue-head">
-    <span class="id">L-08</span>
-    <span class="badge p3">P3</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Collections</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>List toggle left of grid</h2>
-  
-  <pre class="ascii">  view bar:  [ ≡ list ] [ ⊞ grid ]
-              ^left       ^right</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-08.png</code></div>
+  <h2>Localhost OAuth recipe + session switch</h2>
+  <p class="detail">Supersedes C-12, L-07, D-01.</p>
+  <pre class="ascii">  npm run dev:local + ops/dev-local-api.sh
+  callback: localhost:3000/app/api/proxy/auth/callback
+  /app/login?switch=1 ──▶ Google account chooser</pre>
+  <div class="shot-empty">Drop <code>screenshots/AUTH-01.png</code></div>
 </article>
 <article class="issue" id="L-09" data-status="disk" data-sev="P2">
   <header class="issue-head">
@@ -612,45 +322,6 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   
   <pre class="ascii">  approval detail ──▶ proposed output container queries</pre>
   <div class="shot-empty">Drop <code>screenshots/L-09.png</code></div>
-</article>
-<article class="issue" id="L-10" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">L-10</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Emily</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Tool-call in-progress UX</h2>
-  
-  <pre class="ascii">  Emily: &quot;Searching connections…&quot; status line during tool</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-10.png</code></div>
-</article>
-<article class="issue" id="L-11" data-status="disk" data-sev="P1">
-  <header class="issue-head">
-    <span class="id">L-11</span>
-    <span class="badge p1">P1</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Connections</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Blank authorize page</h2>
-  
-  <pre class="ascii">  same as A-15</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-11.png</code></div>
-</article>
-<article class="issue" id="L-12" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">L-12</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Settings</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Gallery default</h2>
-  
-  <pre class="ascii">  same as C-06 — emptyState(&quot;grid&quot;) bug</pre>
-  <figure class="shot"><a href="screenshots/04-prod-settings-collection.png"><img src="screenshots/04-prod-settings-collection.png" alt="L-12" loading="lazy"/></a><figcaption>04-prod-settings-collection.png</figcaption></figure>
 </article>
 <article class="issue" id="L-13" data-status="manual" data-sev="P2">
   <header class="issue-head">
@@ -678,59 +349,6 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
   <pre class="ascii">  /app/run/id?shape=run ──▶ skip heavy payload</pre>
   <div class="shot-empty">Drop <code>screenshots/L-14.png</code></div>
 </article>
-<article class="issue" id="L-15" data-status="disk" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">L-15</span>
-    <span class="badge p2">P2</span>
-    <span class="badge disk">~ DISK</span>
-    <span class="area">Emily</span>
-    <span class="owner">engine</span>
-  </header>
-  <h2>Inline tool tokens Uses:</h2>
-  
-  <pre class="ascii">  prompt: &quot;Uses: [Gmail] [Calendar] [GitHub]&quot; inline chips</pre>
-  <div class="shot-empty">Drop <code>screenshots/L-15.png</code></div>
-</article>
-<article class="issue" id="D-01" data-status="live" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">D-01</span>
-    <span class="badge p2">P2</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Dev</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Localhost OAuth + prod .env.local</h2>
-  
-  <pre class="ascii">  web/.env.local ──▶ prod API ──▶ Domain=.floom.dev cookies ✗
-  USE: npm run dev:local + ops/dev-local-api.sh</pre>
-  <div class="shot-empty">Drop <code>screenshots/D-01.png</code></div>
-</article>
-<article class="issue" id="D-02" data-status="live" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">D-02</span>
-    <span class="badge p2">P2</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Process</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Fake audit screenshots</h2>
-  
-  <pre class="ascii">  audit-preview PNGs recycled as &quot;verified&quot; ──▶ rejected</pre>
-  <div class="shot-empty">Drop <code>screenshots/D-02.png</code></div>
-</article>
-<article class="issue" id="D-03" data-status="live" data-sev="P2">
-  <header class="issue-head">
-    <span class="id">D-03</span>
-    <span class="badge p2">P2</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Process</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Corrupt login screenshot</h2>
-  
-  <pre class="ascii">  01.png was black &quot;Pretty print&quot; screen ──▶ replaced</pre>
-  <figure class="shot"><a href="screenshots/01-localhost-login-welcome-back.png"><img src="screenshots/01-localhost-login-welcome-back.png" alt="D-03" loading="lazy"/></a><figcaption>01-localhost-login-welcome-back.png</figcaption></figure>
-</article>
 <article class="issue" id="D-04" data-status="open" data-sev="P1">
   <header class="issue-head">
     <span class="id">D-04</span>
@@ -739,38 +357,12 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
     <span class="area">Deploy</span>
     <span class="owner">cloud</span>
   </header>
-  <h2>Vercel CI failures</h2>
-  
-  <pre class="ascii">  dashboard: build fail (listWorkspaceChangelog)
-  landing: apex /v3/integrations 404 after alias</pre>
+  <h2>Vercel CI + /audit permanent URL</h2>
+  <p class="detail">Dashboard build fixes landed; landing apex /v3/integrations 404 blocks alias; workeros.floom.dev/audit still pending.</p>
+  <pre class="ascii">  vercel deploy ──▶ landing job
+  /v3/integrations 404 ──▶ alias blocked
+  /audit ──▶ 404 until landing ships public/audit</pre>
   <div class="shot-empty">Drop <code>screenshots/D-04.png</code></div>
-</article>
-<article class="issue" id="D-05" data-status="live" data-sev="P1">
-  <header class="issue-head">
-    <span class="id">D-05</span>
-    <span class="badge p1">P1</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Deploy</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>listWorkspaceChangelog missing</h2>
-  
-  <pre class="ascii">  overlay/lib/api.ts ──▶ add listWorkspaceChangelog()</pre>
-  <div class="shot-empty">Drop <code>screenshots/D-05.png</code></div>
-</article>
-<article class="issue" id="D-06" data-status="live" data-sev="P1">
-  <header class="issue-head">
-    <span class="id">D-06</span>
-    <span class="badge p1">P1</span>
-    <span class="badge live">✓ LIVE</span>
-    <span class="area">Deploy</span>
-    <span class="owner">cloud</span>
-  </header>
-  <h2>Login overlay sync bug</h2>
-  
-  <pre class="ascii">  #665 ──▶ web/app/login ✓
-  sync ──▶ overlay/login overwrites ✗</pre>
-  <figure class="shot"><a href="screenshots/01-localhost-login-welcome-back.png"><img src="screenshots/01-localhost-login-welcome-back.png" alt="D-06" loading="lazy"/></a><figcaption>01-localhost-login-welcome-back.png</figcaption></figure>
 </article>
 <article class="issue" id="D-07" data-status="track" data-sev="P2">
   <header class="issue-head">
@@ -780,7 +372,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
     <span class="area">Process</span>
     <span class="owner">process</span>
   </header>
-  <h2>Engine local edits diverge</h2>
+  <h2>Engine local edits diverge from floomhq/floom</h2>
   
   <pre class="ascii">  hand-edit engine/ ──▶ next bump wipes ──▶ PR floom first</pre>
   <div class="shot-empty">Drop <code>screenshots/D-07.png</code></div>
@@ -793,10 +385,24 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
     <span class="area">Deploy</span>
     <span class="owner">cloud</span>
   </header>
-  <h2>Railway smoke gate</h2>
+  <h2>Railway smoke gate after push main</h2>
   
   <pre class="ascii">  push main ──▶ railway up ──▶ ops/smoke-routes.sh</pre>
   <div class="shot-empty">Drop <code>screenshots/D-08.png</code></div>
+</article>
+<article class="issue" id="INFRA-01" data-status="track" data-sev="P3">
+  <header class="issue-head">
+    <span class="id">INFRA-01</span>
+    <span class="badge p3">P3</span>
+    <span class="badge track">— TRACK</span>
+    <span class="area">Tests</span>
+    <span class="owner">infra</span>
+  </header>
+  <h2>E2E + pytest blocked on audit machine</h2>
+  <p class="detail">Supersedes A-08, A-09.</p>
+  <pre class="ascii">  playwright: WORKEROS_E2E_ADMIN_TOKEN unset
+  pytest: disk full + py3.14 litellm (repo wants py3.12)</pre>
+  <div class="shot-empty">Drop <code>screenshots/INFRA-01.png</code></div>
 </article>
 </main>
 <div class="lightbox" id="lb"><img alt=""/></div>
@@ -808,7 +414,7 @@ footer{text-align:center;color:var(--muted);font-size:.8rem;padding:2rem}
     const t=(q.value||"").toLowerCase(),s=sf.value,v=vf.value;let n=0;
     issues.forEach(el=>{const ok=(!t||el.textContent.toLowerCase().includes(t))&&(!s||el.dataset.status===s)&&(!v||el.dataset.sev===v);
       el.classList.toggle("hidden",!ok);if(ok)n++;});
-    cnt.textContent=n+" / 51 shown";
+    cnt.textContent=n+" / 23 shown";
   }
   q.oninput=sf.onchange=vf.onchange=filt;filt();
   const lb=document.getElementById("lb"),img=lb.querySelector("img");
