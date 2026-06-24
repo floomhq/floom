@@ -6,6 +6,16 @@ export { DetailPane } from "./DetailSplit";
 export { TagBar } from "./TagBar";
 export { StatusPill } from "./StatusPill";
 export {
+  DetailSummary,
+  DetailGroup,
+  DetailRow,
+  DetailPair,
+  DetailChips,
+  DetailEmpty,
+  DetailNote,
+  DetailActions,
+} from "./DetailKit";
+export {
   ListEmpty,
   ListLoading,
   ListError,
