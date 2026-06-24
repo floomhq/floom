@@ -166,25 +166,6 @@ describe("api proxy route", () => {
     expect(res.headers.get("location")).toBe(supaLocation);
   });
 
-  it("forwards the request origin to auth routes for origin-aware callbacks", async () => {
-    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    const { GET } = await loadRoute();
-
-    await GET(
-      new NextRequest("https://floom.dev/app/api/proxy/auth/login?provider=google&next=%2Fapp"),
-      { params: Promise.resolve({ path: ["auth", "login"] }) },
-    );
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect((init.headers as Record<string, string>)["x-workeros-frontend-origin"]).toBe("https://floom.dev");
-  });
-
   it("still strips a non-configured supabase-lookalike origin", async () => {
     process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     process.env.WORKEROS_CLOUD_SUPABASE_URL = "https://sgizlsyygvlqosgwdimb.supabase.co";

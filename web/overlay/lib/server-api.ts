@@ -66,8 +66,10 @@ export async function serverFetch<T>(
   return res.json() as Promise<T>;
 }
 
-export async function fetchWorkerList() {
-  return serverFetch<WorkerSummary[]>("/workers?shape=list", {
+export async function fetchWorkerList(opts?: { include_archived?: boolean }) {
+  const qs = new URLSearchParams({ shape: "list" });
+  if (opts?.include_archived) qs.set("include_archived", "true");
+  return serverFetch<WorkerSummary[]>(`/workers?${qs.toString()}`, {
     next: { revalidate: 30 },
   });
 }

@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function CloudWorkersPage() {
   let initialWorkers: import("@/lib/types").WorkerSummary[] = [];
   try {
-    initialWorkers = await fetchWorkerList();
+    initialWorkers = await fetchWorkerList({ include_archived: true });
   } catch {
     // Fall through — WorkersCollection will fetch on the client side.
   }

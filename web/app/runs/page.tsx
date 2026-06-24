@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function RunsPage() {
   let initialRuns: import("@/lib/types").RunSummary[] = [];
   try {
-    initialRuns = await fetchRuns({ limit: 200, offset: 0 });
+    initialRuns = await fetchRuns({ limit: 50, offset: 0 });
   } catch {
     // Fall through — RunsCollection will fetch on the client side
   }
