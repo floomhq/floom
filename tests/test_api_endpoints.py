@@ -237,6 +237,9 @@ class TestMcpRunContract(unittest.TestCase):
         self.assertEqual(result.output, {"proof": "persisted"})
         self.assertEqual(result.outputs, {"proof": "persisted"})
 
+    def test_rejected_status_filter_is_valid(self):
+        self.assertEqual(app_module._resolve_run_status_filters("rejected"), ["rejected"])
+
 
 # ===========================================================================
 # Auth gate tests (Deliverable 4)
@@ -751,6 +754,20 @@ class TestRunEventsSSE(unittest.TestCase):
         types = [e.get("type") for e in lines]
         self.assertIn("status", types)
 
+    def test_sse_already_rejected_run_returns_final_state_and_closes(self):
+        run_id = self._insert_run(status="rejected")
+        lines = []
+        with client.stream("GET", f"/runs/{run_id}/events") as r:
+            self.assertEqual(r.status_code, 200)
+            for line in r.iter_lines():
+                if line.startswith("data:"):
+                    lines.append(json.loads(line[5:].strip()))
+                if len(lines) >= 2:
+                    break
+
+        self.assertEqual(lines[0]["status"], "rejected")
+        self.assertEqual(lines[1]["type"], "close")
+
     def test_sse_publishes_status_update(self):
         """Publishing an SSE event via _sse_publish must reach a connected consumer."""
         run_id = self._insert_run(status="running")
@@ -787,6 +804,40 @@ class TestRunEventsSSE(unittest.TestCase):
 
         statuses = [e.get("status") for e in received_events]
         self.assertIn("completed", statuses)
+
+    def test_sse_rejected_status_update_closes_stream(self):
+        """A live rejected status event is terminal and closes the consumer."""
+        run_id = self._insert_run(status="running")
+        received_events = []
+        done = threading.Event()
+
+        def stream_consumer():
+            with client.stream("GET", f"/runs/{run_id}/events") as r:
+                for line in r.iter_lines():
+                    if line.startswith("data:"):
+                        evt = json.loads(line[5:].strip())
+                        received_events.append(evt)
+                        if evt.get("type") == "close" or evt.get("status") == "rejected":
+                            break
+                    if done.is_set():
+                        break
+
+        t = threading.Thread(target=stream_consumer, daemon=True)
+        t.start()
+        time.sleep(0.3)
+
+        app_module._sse_publish(run_id, {
+            "type": "status",
+            "run_id": run_id,
+            "status": "rejected",
+            "error": None,
+        })
+
+        t.join(timeout=5.0)
+        done.set()
+
+        statuses = [e.get("status") for e in received_events]
+        self.assertIn("rejected", statuses)
 
     def test_sse_queue_cleaned_up_after_disconnect(self):
         """After a run reaches terminal state, queues are cleaned up by the generator finally block.

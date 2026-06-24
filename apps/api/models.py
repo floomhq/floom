@@ -467,6 +467,7 @@ class RunStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     PENDING_APPROVAL = "pending_approval"
+    REJECTED = "rejected"
 
 
 class LogLevel(str, Enum):

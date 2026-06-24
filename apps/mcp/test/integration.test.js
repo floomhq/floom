@@ -811,6 +811,51 @@ test("credentials migrate from legacy workeros path and logout clears both paths
   }
 });
 
+test("credentials honor XDG_CONFIG_HOME before HOME config", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-home-"));
+  const xdg = await mkdtemp(join(tmpdir(), "workeros-mcp-xdg-"));
+  try {
+    const homeDir = join(home, ".config", "workeros");
+    const xdgDir = join(xdg, "workeros");
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(xdgDir, { recursive: true });
+    await writeFile(join(homeDir, "credentials.json"), JSON.stringify({
+      api_base: "http://home.example.test",
+      api_secret: "home-secret",
+      authed_at: "2026-01-01T00:00:00.000Z",
+    }));
+    await writeFile(join(xdgDir, "credentials.json"), JSON.stringify({
+      api_base: "http://xdg.example.test",
+      mode: "oss",
+      api_secret: "xdg-secret",
+      authed_at: "2026-01-01T00:00:00.000Z",
+    }));
+
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousXdg = process.env.XDG_CONFIG_HOME;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.XDG_CONFIG_HOME = xdg;
+    try {
+      const { readCredentials } = await import("../dist/lib/credentials.js");
+      const credentials = await readCredentials();
+      assert.equal(credentials.api_base, "http://xdg.example.test");
+      assert.equal(credentials.api_secret, "xdg-secret");
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousXdg;
+    }
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(xdg, { recursive: true, force: true });
+  }
+});
+
 test("mcp add patches agent config", async () => {
   const home = await mkdtemp(join(tmpdir(), "workeros-mcp-add-home-"));
   try {

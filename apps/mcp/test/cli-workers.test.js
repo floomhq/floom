@@ -763,6 +763,35 @@ test("workers run --json surfaces output_schema values when output is empty", as
   assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs", "GET /runs/run_1"]);
 });
 
+test("run --json treats pending_approval as terminal and surfaces approval link", async (t) => {
+  const mock = await startMockApi({
+    existing: true,
+    runDetail: {
+      id: "run_1",
+      status: "pending_approval",
+      output: {},
+      outputs: {},
+      approval_trail: {
+        id: "approval_1",
+        status: "pending",
+        link: "https://floom.dev/approvals/review?id=approval_1&token=abc",
+      },
+      artifacts: [],
+    },
+  });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["run", "cli-test-worker", "--json"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.status, "pending_approval");
+  assert.equal(body.approval_trail.id, "approval_1");
+  assert.match(body.approval_trail.link, /approval_1/);
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs", "GET /runs/run_1"]);
+});
+
 test("workers push renders structured backend validation details and exits cleanly", async (t) => {
   const mock = await startMockApi({
     existing: true,

@@ -38,6 +38,7 @@ def _resolve_run_status_filters(raw_status: Optional[str]) -> List[str]:
         "failed": ["failed"],
         "queued": ["queued"],
         "pending_approval": ["pending_approval"],
+        "rejected": ["rejected"],
     }
     statuses: List[str] = []
     for token in raw_status.split(","):
@@ -228,7 +229,7 @@ def _effective_run_status(row: Dict[str, Any]) -> str:
         "approved": RunStatus.COMPLETED.value,
         "success": RunStatus.COMPLETED.value,
         "succeeded": RunStatus.COMPLETED.value,
-        "rejected": RunStatus.FAILED.value,
+        "rejected": RunStatus.REJECTED.value,
         "error": RunStatus.FAILED.value,
         "timeout": RunStatus.FAILED.value,
         "cancelled": RunStatus.FAILED.value,

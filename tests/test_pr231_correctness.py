@@ -97,7 +97,10 @@ def test_reject_transitions_original_run_off_pending_approval(monkeypatch, tmp_p
     r = client.post(f"/runs/{run_id}/reject", headers=_headers(), json={"reason": "Not ready"})
     assert r.status_code == 200, r.text
 
-    assert _run_status(main, run_id) == "completed"
+    assert _run_status(main, run_id) == "rejected"
+    detail = client.get(f"/runs/{run_id}", headers=_headers())
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["status"] == "rejected"
     assert client.get("/approvals/count", headers=_headers()).json()["pending"] == 0
     # Rejection recorded in approvals.
     from db import get_db
@@ -136,7 +139,10 @@ def test_signed_standalone_approval_link_can_review_and_reject_without_secret(mo
         json={"reason": "Needs changes"},
     )
     assert rejected.status_code == 200, rejected.text
-    assert _run_status(main, run_id) == "completed"
+    assert _run_status(main, run_id) == "rejected"
+    detail = client.get(f"/runs/{run_id}", headers=_headers())
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["status"] == "rejected"
 
     recorded = _approval_for_run(run_id)
     assert recorded["status"] == "rejected"

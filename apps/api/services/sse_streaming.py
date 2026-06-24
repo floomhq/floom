@@ -47,6 +47,7 @@ _RUN_PART_TTL_SECONDS = 300
 _TERMINAL_STATUSES = frozenset({
     RunStatus.COMPLETED.value,
     RunStatus.FAILED.value,
+    RunStatus.REJECTED.value,
 })
 _sse_user_stream_counts: Dict[str, int] = {}
 _sse_stream_count_lock = threading.Lock()
@@ -242,6 +243,8 @@ def _finish_part_from_run_row(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
         if row["error"]:
             part["error"] = _redact_public_log_message(str(row["error"]))
         return part
+    if status == RunStatus.REJECTED.value:
+        return {"type": "finish", "status": "rejected"}
     return None
 
 

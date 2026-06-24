@@ -528,7 +528,7 @@ def clear_runs(
     }
 
 
-_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled", "rejected"})
 
 
 @runs_router.post("/runs/{run_id}/cancel", response_model=ActionResponse)
@@ -1176,7 +1176,7 @@ def get_run(
         pass
 
     # #561: replay is available for terminal statuses.
-    _terminal_statuses = {RunStatus.COMPLETED.value, RunStatus.FAILED.value}
+    _terminal_statuses = {RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.REJECTED.value}
     _can_replay = effective_status in _terminal_statuses
 
     return RunDetail(
