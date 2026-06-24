@@ -3907,7 +3907,7 @@ class SqliteApprovalRepository:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
-    def list_pending_for_workspace(self, *, workspace_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def list_pending_for_workspace(self, *, workspace_id: str, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = _bounded_positive_int(limit, default=100, maximum=200)
         safe_workspace_id = (workspace_id or "local-default").strip() or "local-default"
         with get_db() as conn:
@@ -3917,11 +3917,12 @@ class SqliteApprovalRepository:
                 FROM approvals a
                 LEFT JOIN workers w ON w.id = a.worker_id
                 WHERE a.status = 'pending'
+                  AND a.owner_id = ?
                   AND COALESCE(w.workspace_id, 'local-default') = ?
                 ORDER BY a.created_at ASC
                 LIMIT ?
                 """,
-                (safe_workspace_id, bounded_limit),
+                (owner_id, safe_workspace_id, bounded_limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 

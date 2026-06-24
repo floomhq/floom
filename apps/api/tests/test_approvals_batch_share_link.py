@@ -85,6 +85,7 @@ def _seed_approval(
     approval_id: str,
     run_id: str,
     worker_id: str,
+    owner_id: str = OWNER,
     workspace_id: str = "local-default",
     status: str = "pending",
     run_status: str | None = None,
@@ -95,7 +96,7 @@ def _seed_approval(
 ) -> dict:
     repos = main.get_repositories()
     repos.workers.create(
-        user_id=OWNER,
+        user_id=owner_id,
         worker_id=worker_id,
         name=f"Worker {worker_id}",
         manifest_json=_manifest(worker_id),
@@ -103,7 +104,7 @@ def _seed_approval(
         workspace_id=workspace_id,
     )
     repos.runs.create(
-        user_id=OWNER,
+        user_id=owner_id,
         run_id=run_id,
         worker_id=worker_id,
         status=run_status or main.RunStatus.PENDING_APPROVAL.value,
@@ -113,7 +114,7 @@ def _seed_approval(
         output_json={"draft": approval_id},
     )
     return repos.approvals.create(
-        owner_id=OWNER,
+        owner_id=owner_id,
         id=approval_id,
         run_id=run_id,
         worker_id=worker_id,
@@ -407,3 +408,32 @@ def test_public_batch_rejects_wrong_workspace_item_and_bad_token(client_and_main
 
     bad_token = anon.get("/approvals/public-batch/fls_badbadbad")
     assert bad_token.status_code == 404
+
+
+def test_public_batch_rejects_same_workspace_different_owner_item(client_and_main):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_owner", run_id="run_owner", worker_id="w_owner")
+    _seed_approval(
+        main,
+        approval_id="apr_other_owner",
+        run_id="run_other_owner",
+        worker_id="w_other_owner",
+        owner_id="other-user",
+        workspace_id="local-default",
+    )
+    token = _batch_token(client)
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    batch = anon.get(f"/approvals/public-batch/{token}")
+    assert batch.status_code == 200, batch.text
+    assert [item["id"] for item in batch.json()["approvals"]] == ["apr_owner"]
+
+    denied = anon.post(
+        f"/approvals/public-batch/{token}/items/apr_other_owner/decision",
+        json={"decision": "rejected"},
+    )
+    assert denied.status_code == 404
+    row = main.get_repositories().approvals.get(owner_id="other-user", approval_id="apr_other_owner")
+    assert row["status"] == "pending"
