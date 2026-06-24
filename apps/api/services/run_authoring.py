@@ -840,7 +840,7 @@ def _smoke_and_repair_generated_worker(
     )
     started_at = time.perf_counter()
     repos_obj = _repos(repos)
-    loaded = _load_worker_recipe(worker_id, repos_obj)
+    loaded = _load_worker_recipe(worker_id, repos=repos_obj, user_id=user_id)
     if not loaded:
         return {"status": "skipped", "reason": "worker recipe not found"}
     config = loaded[1]
@@ -1114,7 +1114,7 @@ def _smoke_and_repair_generated_worker(
                 }
             # Re-load the recipe so the re-smoke runs against the refreshed
             # manifest/config (run.py itself is re-read from disk by the driver).
-            loaded = _load_worker_recipe(worker_id, repos_obj) or loaded
+            loaded = _load_worker_recipe(worker_id, repos=repos_obj, user_id=user_id) or loaded
             config = loaded[1]
             repairs += 1
             log_fn(f"Smoke repair {repairs}/{_MAX_SMOKE_REPAIRS} applied; re-running", level="info")
