@@ -260,7 +260,7 @@ export function EmilyHomeEmpty({
         </div>
       ) : (
         <div className="pb-[22px] text-center">
-          <div className="text-[15px] font-medium tracking-[-0.01em] text-ink">
+          <div className="text-[21px] font-semibold tracking-[-0.02em] text-ink">
             {greeting}
             {firstName ? `, ${firstName}` : ""}
           </div>

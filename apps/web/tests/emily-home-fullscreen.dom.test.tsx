@@ -109,6 +109,11 @@ describe("HOME = existing Emily, fullscreen, stuff in empty state", () => {
     // Needs-attention affordance from the single attention item.
     expect(screen.getByText(/need attention/i)).toBeInTheDocument();
 
+    // Greeting is the primary heading — H1-scale, visually above the pulse line.
+    const greeting = screen.getByText(/Good (morning|afternoon|evening)/i);
+    expect(greeting.className).toContain("text-[21px]");
+    expect(greeting.className).toContain("font-semibold");
+
     // Exactly ONE Emily composer (the real EmilyChatCore one) — no clone.
     const composers = screen.getAllByPlaceholderText(/Message Emily/i);
     expect(composers).toHaveLength(1);

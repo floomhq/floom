@@ -8,6 +8,16 @@
  */
 
 export const DEFAULT_PUBLIC_API_BASE = "http://localhost:8000";
+export const DEFAULT_CLOUD_PUBLIC_API_BASE = "https://workeros-api.floom.dev";
+
+/** True when the dashboard is the managed Cloud wrapper (not self-hosted OSS). */
+export function isCloudDeploy(): boolean {
+  return process.env.NEXT_PUBLIC_WORKEROS_DEPLOY === "cloud";
+}
+
+function defaultPublicApiBase(): string {
+  return isCloudDeploy() ? DEFAULT_CLOUD_PUBLIC_API_BASE : DEFAULT_PUBLIC_API_BASE;
+}
 
 // #953 — platform-internal deployment hostnames are infrastructure identity,
 // never the public API surface. The managed deploy is fronted by the stable
@@ -26,10 +36,14 @@ export function isInternalInfraHost(host: string): boolean {
 
 /** Absolute API base URL, no trailing slash. */
 export function getPublicApiBase(): string {
-  const configured = (process.env.NEXT_PUBLIC_API_BASE ?? "").trim();
-  const base = configured || DEFAULT_PUBLIC_API_BASE;
+  const configured = (
+    process.env.NEXT_PUBLIC_API_BASE ??
+    (isCloudDeploy() ? process.env.NEXT_PUBLIC_WORKEROS_API_BASE : undefined) ??
+    ""
+  ).trim();
+  const base = configured || defaultPublicApiBase();
   try {
-    if (isInternalInfraHost(new URL(base).host)) return DEFAULT_PUBLIC_API_BASE;
+    if (isInternalInfraHost(new URL(base).host)) return defaultPublicApiBase();
   } catch {
     // unparseable configured value: keep legacy behavior (string cleanup below)
   }

@@ -33,4 +33,13 @@ describe("MCP server config (Settings → API tab)", () => {
     expect(parsed.mcpServers.floom.url).toBe("https://api.acme.internal/mcp-tools/serve");
     expect(parsed.mcpServers.floom.headers["x-workeros-workspace"]).toBe("ws_x");
   });
+
+  it("uses the cloud API host in MCP config when NEXT_PUBLIC_WORKEROS_DEPLOY=cloud", () => {
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
+    vi.stubEnv("NEXT_PUBLIC_API_BASE", "");
+    const cfg = buildMcpServerConfig("wos_cloud_pat");
+    expect(cfg.mcpServers.floom.url).toBe("https://workeros-api.floom.dev/mcp/<YOUR_WORKSPACE_ID>");
+    expect(cfg.mcpServers.floom.headers.Authorization).toBe("Bearer wos_cloud_pat");
+    expect(cfg.mcpServers.floom.headers).not.toHaveProperty("x-floom-secret");
+  });
 });
