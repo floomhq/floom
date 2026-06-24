@@ -159,7 +159,7 @@ describe("api proxy route", () => {
 
     const res = await GET(
       new NextRequest(
-        "https://workeros.floom.dev/app/api/proxy/connections/authorize/abc.def",
+        "https://floom.dev/app/api/proxy/connections/authorize/abc.def",
       ),
       { params: Promise.resolve({ path: ["connections", "authorize", "abc.def"] }) },
     );
@@ -180,7 +180,7 @@ describe("api proxy route", () => {
     const { GET } = await loadRoute();
 
     const res = await GET(
-      new NextRequest("https://workeros.floom.dev/app/api/proxy/workers"),
+      new NextRequest("https://floom.dev/app/api/proxy/workers"),
       { params: Promise.resolve({ path: ["workers"] }) },
     );
 

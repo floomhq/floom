@@ -5,7 +5,7 @@
 // pane (<main display:none>) so the dock fills the main area, while the left
 // sidebar stays mounted; closing restores the pane. Without the
 // EmilyFullscreenProvider wrap + emilyFull hide that this test guards, the
-// expand control was inert on workeros.floom.dev/app.
+// expand control was inert on floom.dev/app.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

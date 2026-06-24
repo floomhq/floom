@@ -131,7 +131,12 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
+    // SETTINGS-01: Settings now defaults to LIST view (not gallery grid); grid
+    // stays available as a toggle.
     expect(await screen.findByRole("button", { name: "List view", pressed: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Grid view" }));
+    expect(await screen.findByRole("button", { name: "Grid view", pressed: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "List view" }));
     await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
     expect(screen.getByText("Slack, email & WhatsApp")).toBeInTheDocument();
@@ -166,6 +171,7 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
+    await user.click(screen.getByRole("button", { name: "List view" }));
     await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
     await user.click(screen.getByText("General"));
 
@@ -227,6 +233,7 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
+    await user.click(screen.getByRole("button", { name: "List view" }));
     expect(await screen.findByText("Workspace · My workspace", {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByText(/9b1a5065-3ab9-493a-8220-b6c139d9c1b7/i)).not.toBeInTheDocument();
     expect(screen.getAllByText("Settings")).toHaveLength(1);

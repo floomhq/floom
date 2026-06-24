@@ -25,7 +25,7 @@ function normalizeNextPath(value: string): string {
   let next = value || "/app";
   for (let depth = 0; depth < 3; depth += 1) {
     try {
-      const url = new URL(next, "https://workeros.floom.dev");
+      const url = new URL(next, "https://floom.dev");
       if (url.pathname !== "/login" && url.pathname !== "/app/login") {
         return `${url.pathname}${url.search}${url.hash}`;
       }

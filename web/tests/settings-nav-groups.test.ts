@@ -9,41 +9,44 @@ import {
 // §4 two-group settings nav — this model is what app/settings/page.tsx renders
 // its left rail / Collection from, so these assertions guard the live strip.
 //
-// Workspace vs Account token split:
-//   - "Developer" is a WORKSPACE-scoped nav item that renders the shared token
-//     plus REST API, MCP, CLI, and Git.
+// Workspace vs Account token split (mockup settings-mockup/index.html):
+//   - "Workspace token" is a WORKSPACE-scoped nav item (shared fl_wt_ token).
 //   - "Personal access tokens" is an ACCOUNT-scoped nav item (yours, fl_pat_).
 // They are deliberately in different groups so scope is communicated by WHERE
-// each lives.
+// each lives. The old consolidated "Developer" item is gone; its API/MCP/CLI/Git
+// reference now lives under "Connect & automate".
 
 describe("Settings nav groups (§4)", () => {
-  it("Account group: Profile·Personal access tokens", () => {
-    expect(settingsGroup("account").map((i) => i.label)).toEqual([
-      "Profile",
-      "Personal access tokens",
-    ]);
-  });
-
-  it("Workspace group: General·Members·Channels·Assistant·Developer·Data & lifecycle", () => {
+  it("Workspace group: General·Members·Channels·Assistant·Workspace token·Backups & history·Danger zone", () => {
     expect(settingsGroup("workspace").map((i) => i.label)).toEqual([
       "General",
       "Members",
       "Channels",
       "Assistant",
-      "Developer",
-      "Data & lifecycle",
+      "Workspace token",
+      "Backups & history",
+      "Danger zone",
     ]);
   });
 
-  it("Developer is workspace-scoped, Personal access tokens is account-scoped", () => {
-    const developer = SETTINGS_NAV.find((i) => i.key === "developer");
+  it("Account group: Profile·Personal access tokens·Connect & automate·Appearance", () => {
+    expect(settingsGroup("account").map((i) => i.label)).toEqual([
+      "Profile",
+      "Personal access tokens",
+      "Connect & automate",
+      "Appearance",
+    ]);
+  });
+
+  it("Workspace token is workspace-scoped, Personal access tokens is account-scoped", () => {
+    const ws = SETTINGS_NAV.find((i) => i.key === "workspace_token");
     const acct = SETTINGS_NAV.find((i) => i.key === "personal_tokens");
-    expect(developer?.scope).toBe("workspace");
+    expect(ws?.scope).toBe("workspace");
     expect(acct?.scope).toBe("account");
   });
 
   it("count strip reflects the live groups", () => {
-    expect(settingsCounts()).toBe("2 account · 6 workspace");
+    expect(settingsCounts()).toBe("7 workspace · 4 account");
   });
 
   it("group labels carry the name when known", () => {

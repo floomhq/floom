@@ -76,10 +76,12 @@ import {
   KeyRound,
   Mail,
   MessageSquare,
+  Palette,
   QrCode,
   RotateCcw,
   Save,
   Settings,
+  ShieldAlert,
   Trash2,
   UserPlus,
   UserRound,
@@ -478,16 +480,16 @@ function isValidSection(value: string | null): value is SectionKey {
 function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
     // Legacy aliases kept for back-compat with old deep-links.
-    value === "api" ? "developer" :
+    value === "api" ? "connect" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
-    value === "git" ? "developer" :
-    value === "connect" ? "developer" :
-    value === "workspace_token" ? "developer" :
-    value === "workspace_tokens" ? "developer" :
-    value === "versions" ? "data" :
-    value === "danger" ? "data" :
-    value === "appearance" ? "profile" :
+    value === "git" ? "connect" :
+    // The "developer" section was split into two token panes + a connect pane.
+    // Old ?sel=developer links land on the API/MCP/CLI/Git reference.
+    value === "developer" ? "connect" :
+    // workspace_tokens was a standalone nav item, then briefly a Developer
+    // sub-tab; it is now its own workspace-scoped pane again.
+    value === "workspace_tokens" ? "workspace_token" :
     // Personal tokens used to live under Developer > Tokens.
     value === "tokens" ? "personal_tokens" :
     value;
@@ -503,6 +505,8 @@ function SettingsContent() {
     typeof window !== "undefined" ? window.location.search : ""
   );
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+  // SETTINGS-01: Settings defaults to LIST view (not gallery grid) — matches the
+  // Workers/Library/Connections collections and reads as a scannable section list.
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
     ...emptyState("list"),
     sel: null,
@@ -699,15 +703,24 @@ function SettingsContent() {
       const raw = window.location.hash.replace(/^#/, "");
       const fromHash = sectionFromCandidate(raw);
       const nextSel = fromQuery || fromHash;
-      if (nextSel) {
-        // Restore a valid sub-tab when ?sel & ?tab both name a real pair;
-        // otherwise reset to the section's default tab.
-        const tabParam = selParam ? params.get("tab") : null;
-        const nextTab = isValidSubTab(nextSel, tabParam) ? tabParam : null;
-        setCollectionState((prev) =>
-          prev.sel === nextSel && prev.tab === nextTab ? prev : { ...prev, sel: nextSel, tab: nextTab },
-        );
-      }
+      // SETTINGS-01: restore the list/grid toggle from ?view= (list is the
+      // default) so deep-links + back/forward keep the chosen view, matching the
+      // Workers/Library/Connections collections.
+      const nextView = params.get("view") === "grid" ? "grid" : "list";
+      setCollectionState((prev) => {
+        let next = prev;
+        if (nextSel) {
+          // Restore a valid sub-tab when ?sel & ?tab both name a real pair;
+          // otherwise reset to the section's default tab.
+          const tabParam = selParam ? params.get("tab") : null;
+          const nextTab = isValidSubTab(nextSel, tabParam) ? tabParam : null;
+          if (prev.sel !== nextSel || prev.tab !== nextTab) {
+            next = { ...next, sel: nextSel, tab: nextTab };
+          }
+        }
+        if (next.view !== nextView) next = { ...next, view: nextView };
+        return next;
+      });
       setSearch(window.location.search);
     }
     syncFromLocation();
@@ -771,8 +784,8 @@ function SettingsContent() {
         ],
       },
       counts: [
-        { value: settingsGroup("account").length, label: "account" },
         { value: settingsGroup("workspace").length, label: "workspace" },
+        { value: settingsGroup("account").length, label: "account" },
       ],
       view: { default: "list", grid: true },
       group: (item) =>
@@ -850,6 +863,10 @@ function SettingsContent() {
     // section's single "settings" tab is implicit and must not leak to the URL.
     if (isValidSubTab(nextSel, next.tab)) params.set("tab", next.tab as string);
     else params.delete("tab");
+    // SETTINGS-01: persist the view toggle. List is the default → omit it for
+    // clean URLs; only grid is written so ?view=grid round-trips.
+    if (next.view === "grid") params.set("view", "grid");
+    else params.delete("view");
     const qs = params.size ? `?${params.toString()}` : "";
     window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
     setSearch(window.location.search);
@@ -875,32 +892,29 @@ function SettingsContent() {
         return <AssistantSettingsPanel canManageWorkspace={isAdmin} />;
       case "members":
         return <MembersSettingsPanel />;
-      case "developer":
+      case "versions":
+        return <VersionHistorySettingsPanel canManageWorkspace={isAdmin} />;
+      case "danger":
         return (
-          <div className="space-y-6">
-            <WorkspaceTokenSection workspaceName={workspaceName} />
-            <ConnectSection />
-          </div>
+          <DangerSection
+            canEdit={isAdmin}
+            clearConfirmText={clearConfirmText}
+            setClearConfirmText={setClearConfirmText}
+            clearing={clearing}
+            onClearRuns={handleClearRuns}
+          />
         );
-      case "data":
-        return (
-          <div className="space-y-6">
-            <VersionHistorySettingsPanel canManageWorkspace={isAdmin} />
-            <DangerSection
-              canEdit={isAdmin}
-              clearConfirmText={clearConfirmText}
-              setClearConfirmText={setClearConfirmText}
-              clearing={clearing}
-              onClearRuns={handleClearRuns}
-            />
-          </div>
-        );
+      case "workspace_token":
+        return <WorkspaceTokenSection workspaceName={workspaceName} />;
       case "personal_tokens":
         return <PersonalTokensSection accountName={accountName} workspaceName={workspaceName} />;
+      case "connect":
+        return <ConnectSection />;
+      case "appearance":
+        return <AppearanceSection />;
       case "profile":
         return <ProfileSection currentUser={currentUser} onUpdated={(u) => setCurrentUser(u)} />;
     }
-    return assertNever(key);
   }
 
   return (
@@ -991,20 +1005,21 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return Bot;
     case "members":
       return Users;
-    case "data":
+    case "versions":
       return History;
-    case "developer":
-      return Code2;
+    case "danger":
+      return ShieldAlert;
+    case "workspace_token":
+      return KeyRound;
     case "personal_tokens":
       return KeyRound;
+    case "connect":
+      return Code2;
+    case "appearance":
+      return Palette;
     case "profile":
       return UserRound;
   }
-  return assertNever(key);
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled settings section: ${String(value)}`);
 }
 
 function SettingsIcon({ icon: Icon }: { icon: SettingsIconType }) {
@@ -1253,14 +1268,17 @@ function PersonalTokensSection({ accountName, workspaceName }: { accountName?: s
         title="These are yours, not the workspace's."
         body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
         linkLabel={`Workspace · ${workspaceName} → Access key`}
-        targetSel="developer"
+        targetSel="workspace_token"
       />
     </div>
   );
 }
 
-// ConnectSection — the existing developer reference snippets: REST API, MCP
-// install, CLI, and Git sync. (#616 GitWorkspacePanel preserved.)
+// ConnectSection (account scope) — the developer reference snippets that used to
+// share the Developer page with token CRUD: REST API, MCP install, CLI, and Git
+// sync. No token management here anymore (it moved to the two token panes); this
+// is read-only reference plus the Git workspace panel. (#616 GitWorkspacePanel
+// preserved.)
 function ConnectSection() {
   return (
     <Tabs defaultValue="api">
@@ -1345,6 +1363,18 @@ function ConnectSection() {
   );
 }
 
+function AppearanceSection() {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
+      <p className="text-sm text-muted-foreground">
+        Choose how Floom looks. System follows your operating system.
+      </p>
+      <ThemeModeToggleGroup />
+    </div>
+  );
+}
+
 function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser | null; onUpdated: (u: CurrentUser) => void }) {
   const [displayName, setDisplayName] = useState(currentUser?.display_name ?? "");
   const [saving, setSaving] = useState(false);
@@ -1413,11 +1443,6 @@ function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser |
         <p className="text-xs text-muted-foreground">
           Your display name is shown in the sidebar and in activity logs.
         </p>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
-        <ThemeModeToggleGroup />
       </section>
     </div>
   );
@@ -2500,7 +2525,7 @@ function MembersSettingsPanel() {
 // "Backups & history": download a workspace copy, browse the unified git
 // timeline (workers, library, notes), undo recent workspace-note/persona edits,
 // and surface GitHub sync status when connected. Git SHA/branch vocabulary stays
-// out of the UI; connect/setup lives under Developer.
+// out of the UI; connect/setup lives under Account · Connect & automate.
 type UndoScope = "instructions" | "base";
 
 function changelogScopeLabel(assetType: string, assetName: string): string {
@@ -2614,7 +2639,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
           Every save to workers, library folders, and workspace notes appears here.
           {gitStatus?.connected
             ? " Connected repos receive these commits when Floom pushes to GitHub."
-            : " To back up to GitHub, connect a repo under Developer."}
+            : " To back up to GitHub, connect a repo under Account · Connect & automate."}
         </p>
         {gitStatus?.connected && gitStatus.repo_url ? (
           <p className="text-xs text-muted-foreground">
@@ -2638,7 +2663,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
             <button
               type="button"
               className="font-medium text-[var(--accent)] hover:underline"
-              onClick={() => navigateSettingsSelection("developer")}
+              onClick={() => navigateSettingsSelection("connect")}
             >
               Connect GitHub
             </button>

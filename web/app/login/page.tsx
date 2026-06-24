@@ -9,7 +9,7 @@ export const metadata = {
 };
 
 // Same-origin proxy keeps PKCE + session cookies on the dashboard host
-// (workeros.floom.dev/app), not the Railway API subdomain.
+// (floom.dev/app), not the Railway API subdomain.
 const PROXY_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/app/api/proxy";
 
 const oauthLoginUrl = (provider: "google" | "github", next = "/app", switchAccount = false) => {
@@ -90,7 +90,7 @@ export default async function LoginPage({
             className="text-[40px] font-semibold leading-[1.04] tracking-[-0.034em]"
             style={{ color: "var(--text-primary)" }}
           >
-            <span style={{ color: "var(--accent)" }}>Hire</span> AI workers.
+            <span className="login-hl">Hire</span> AI workers.
           </h2>
           <p
             className="mt-4 max-w-[380px] text-[14px] leading-relaxed"
@@ -247,6 +247,14 @@ export default async function LoginPage({
       </section>
 
       <style>{`
+        /* Landing /login uses V3Shell .v3-hl — mirror the blue selection pill here */
+        .login-hl {
+          background: color-mix(in srgb, var(--accent) 14%, transparent);
+          color: var(--accent);
+          border-radius: 4px;
+          padding: 0 3px;
+          font-weight: 500;
+        }
         .auth-btn {
           display: flex;
           align-items: center;

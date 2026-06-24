@@ -60,7 +60,7 @@ export interface TriggerSpec {
     filters?: Record<string, unknown>;
   };
 }
-export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "pending_approval";
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "rejected" | "pending_approval";
 export type LogLevel = "debug" | "info" | "warning" | "error" | "critical";
 export type SecretStatus = "set" | "missing";
 
@@ -214,7 +214,7 @@ export type RunPart =
   | { type: "step-start"; stepNumber: number }
   // Backend (run_service.py) also emits a "pending_approval" finish status when
   // a HITL run parks for approval — it is a parked state, not a failure (G5 P3).
-  | { type: "finish"; status: "completed" | "failed" | "cancelled" | "timeout" | "pending_approval"; error?: string };
+  | { type: "finish"; status: "completed" | "failed" | "cancelled" | "rejected" | "timeout" | "pending_approval"; error?: string };
 
 export interface OutputField {
   name: string;
