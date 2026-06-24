@@ -4,7 +4,7 @@ import {
   formatVersionRow,
   formatVersionRows,
 } from "@/lib/workers/versions";
-import { WORKER_DETAIL_TABS } from "@/lib/workers/tabs";
+import { WORKER_DETAIL_TABS, WORKER_DETAIL_TAB_LABEL } from "@/lib/workers/tabs";
 import type { VersionSummary } from "@/lib/types";
 
 const NOW = Date.parse("2026-06-10T12:00:00Z");
@@ -79,5 +79,16 @@ describe("WORKER_DETAIL_TABS (§4 contract)", () => {
       "Brain",
       "Tools",
     ]);
+  });
+
+  it("surfaces the internal 'Brain' tab to operators as 'Library' (matches the left-nav label)", () => {
+    // The id stays "Brain" (stable route/pin key); only the visible label moved
+    // to the standardized "Library" term.
+    expect(WORKER_DETAIL_TAB_LABEL.Brain).toBe("Library");
+    // Every other tab's label equals its id.
+    for (const tab of WORKER_DETAIL_TABS) {
+      if (tab === "Brain") continue;
+      expect(WORKER_DETAIL_TAB_LABEL[tab]).toBe(tab);
+    }
   });
 });

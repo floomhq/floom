@@ -2,7 +2,14 @@ engine/
 apps/
 supabase/
 tests/
-web/
 *.py
 *.pdf
 data/
+app/
+ops/
+docs/
+node_modules
+.next
+.vercel
+web/node_modules
+web/.next

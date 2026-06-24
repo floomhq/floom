@@ -15,7 +15,7 @@ import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
 import { ShareModal } from "@/components/sharing/ShareModal";
-import { useRuns, RUNS_FIRST_PAGE_QUERY_PARAMS } from "@/lib/query/hooks";
+import { useRuns, useStreamedInitialData, qk, RUNS_FIRST_PAGE_QUERY_PARAMS } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
@@ -400,7 +400,15 @@ const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => Reac
 
 const PAGE_SIZE = 50;
 
-export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
+export default function RunsCollection({
+  initialRuns = [],
+  initialRunsPromise,
+}: {
+  initialRuns?: RunSummary[];
+  // perf: streamed first-load fetch (see runs/page.tsx + useStreamedInitialData).
+  initialRunsPromise?: Promise<RunSummary[]>;
+}) {
+  useStreamedInitialData(qk.runs(RUNS_FIRST_PAGE_QUERY_PARAMS), initialRunsPromise);
   // Cache-first first page (TanStack Query): /runs renders instantly from cache
   // on return; a slow or failed refetch keeps the cached rows instead of going
   // blank or flashing an error. Pagination (loadMore) and the bell refresh stay local.

@@ -41,7 +41,7 @@ describe("pre-auth /start/<channel> pages (#819)", () => {
     render(await StartChannelPage({ params: Promise.resolve({ channel: "mcp" }) }));
     fireEvent.click(screen.getByText("MCP config"));
     expect(screen.getByText("Copy config")).toBeTruthy();
-    expect(screen.getAllByText(/@floomhq\/workeros/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/@floomhq\/floom/).length).toBeGreaterThan(0);
     expect(screen.queryByText("Read the MCP setup")).toBeNull();
   });
 

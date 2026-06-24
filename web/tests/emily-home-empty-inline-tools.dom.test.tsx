@@ -138,4 +138,38 @@ describe("Emily home composer - bigger, borderless, no Uses row", () => {
     // The default composer still surfaces the detected tools as the "Uses" row.
     expect(container.textContent).toContain("Uses");
   });
+
+  // Regression: the "Uses" chip must render the SAME inline "[logo] Name"
+  // treatment as the landing/home (faint --bg-3 token + real BrandLogo), NOT a
+  // divergent bordered --bg-2 pill. Federico (2026-06-23): "should show stripe +
+  // logo inline, like on landing page. not different on this chatbox."
+  it("Uses chip renders the unified inline token treatment (matches landing)", () => {
+    const { container } = render(
+      <PromptInput
+        value="Create a Stripe alert worker"
+        onChange={() => {}}
+        onSubmit={() => {}}
+        onFilesChange={() => {}}
+        attachedFiles={[]}
+        variant="default"
+      />,
+    );
+    expect(screen.getByText(/^Uses$/)).toBeInTheDocument();
+
+    // The Stripe brand logo is shown inline via the BrandLogo sprite.
+    const brandUses = Array.from(container.querySelectorAll("use"))
+      .map((u) => u.getAttribute("href") || "")
+      .filter((h) => h.startsWith("#brand-"));
+    expect(brandUses).toContain("#brand-stripe");
+
+    // The chip is the shared inline token: faint --bg-3 highlight, NOT the old
+    // bordered --bg-2 pill (the divergent treatment we removed).
+    const token = container.querySelector("span.bg-\\[var\\(--bg-3\\)\\]");
+    expect(token).not.toBeNull();
+    expect(token!.textContent).toContain("Stripe");
+    const borderedPill = container.querySelector(
+      "span.\\[border\\:var\\(--bd-card\\)\\]",
+    );
+    expect(borderedPill).toBeNull();
+  });
 });

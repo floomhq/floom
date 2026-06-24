@@ -35,7 +35,11 @@ import { cn } from "@/lib/utils";
 // surface, --line hairline), and themed with design-system colors:
 //   • input / output node text  → --ink
 //   • connector rules / buses    → --ink-faint
-//   • the worker node + trigger  → --accent
+//   • the worker node + trigger  → --ink (neutral; matches the monochrome
+//     diagram. A saturated --accent blue here read as off-palette emphasis —
+//     the design system reserves blue for interactive/selection states, not a
+//     static decorative highlight. The worker node stays the focal point via
+//     its taller box, name/rule/trigger stack, and identity glyph.)
 //   • a type glyph (lucide) is overlaid on the LEADING cell of every input /
 //     output / worker node (text→Type, file→FileText, person→User, web→Globe…)
 //     so the diagram visually CARRIES the type icons, like the reference.
@@ -392,7 +396,7 @@ export function WorkerAsciiDiagram({
       rows.push([
         { text: leftCol[r], tone: "ink" },
         { text: leftConn[r], tone: "faint" },
-        { text: workerCol[r], tone: "accent" },
+        { text: workerCol[r], tone: "ink" },
         { text: rightConn[r], tone: "faint" },
         { text: rightCol[r], tone: "ink" },
       ]);
@@ -438,7 +442,7 @@ export function WorkerAsciiDiagram({
       col: workerColStart + ICON_COL_OFFSET,
       row: centerRow - 1,
       Icon: workerGlyph,
-      tone: "accent",
+      tone: "ink",
     });
 
     const headerCell = (text: string, width: number): string => {

@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Terminal, X } from "lucide-react";
-import { ClaudeLogo, CodexLogo, CursorLogo } from "@/components/landing-icons";
+import Link from "next/link";
+import { Check, Copy, ExternalLink, Slack, Terminal, X } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { ClaudeLogo, CodexLogo, CursorLogo, WhatsAppLogo } from "@/components/landing-icons";
 
 const MCP_CLIENTS: { name: string; logo: React.ReactNode }[] = [
   { name: "Claude Code", logo: <ClaudeLogo /> },
@@ -10,8 +12,8 @@ const MCP_CLIENTS: { name: string; logo: React.ReactNode }[] = [
   { name: "Cursor", logo: <CursorLogo /> },
 ];
 
-type Channel = "mcp";
-type Modal = "mcp" | null;
+type Channel = "slack" | "whatsapp" | "mcp";
+type Modal = "whatsapp" | "mcp" | null;
 
 const MCP_CONFIG = `{
   "mcpServers": {
@@ -21,6 +23,10 @@ const MCP_CONFIG = `{
     }
   }
 }`;
+
+const WORKEROS_API_BASE = (process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://workeros-api.floom.dev").replace(/\/$/, "");
+const SLACK_INSTALL_URL = `${WORKEROS_API_BASE}/slack/install/start`;
+const WHATSAPP_CHAT_URL = "https://wa.me/16503999709";
 
 function ModalShell({
   title,
@@ -60,8 +66,27 @@ function ModalShell({
   );
 }
 
-/* The MCP config popover content, reused by the header MCP affordance and any
-   other caller. Self-contained: own open/close state. */
+function McpCopyButton() {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        await navigator.clipboard?.writeText(MCP_CONFIG);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1600);
+      }}
+      className="mt-3 inline-flex h-9 items-center gap-2 rounded-[10px] bg-foreground px-3.5 text-[12.5px] font-medium text-background"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? "Copied" : "Copy config"}
+    </button>
+  );
+}
+
+/* The MCP config popover content, reused by the header MCP affordance and the
+   /start/mcp install row. Self-contained: own open/close state is owned by the
+   caller. */
 export function McpConfigModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
@@ -111,47 +136,79 @@ export function McpHeaderButton() {
   );
 }
 
-function McpCopyButton() {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={async () => {
-        await navigator.clipboard?.writeText(MCP_CONFIG);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1600);
-      }}
-      className="mt-3 inline-flex h-9 items-center gap-2 rounded-[10px] bg-foreground px-3.5 text-[12.5px] font-medium text-background"
-    >
-      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-      {copied ? "Copied" : "Copy config"}
-    </button>
-  );
-}
-
 export function ChannelActions({ compact = false, only }: { compact?: boolean; only?: Channel }) {
   const [modal, setModal] = useState<Modal>(null);
-  // On the landing hero the MCP affordance now lives in the top-right header
-  // (McpHeaderButton), so the default (no `only`) ChannelActions row renders
-  // nothing. The explicit MCP caller (/start/mcp) passes `only="mcp"` to surface
-  // the install CTA. Slack/WhatsApp channels were removed (never shipped).
-  const showMcp = only === "mcp";
-
-  // Nothing to render in the default landing case: hide the row entirely.
-  if (!showMcp) return null;
+  const showSlack = !only || only === "slack";
+  const showWhatsApp = !only || only === "whatsapp";
+  const showMcp = !only || only === "mcp";
 
   return (
     <>
       <span className={`inline-flex flex-wrap items-center justify-center gap-2 ${compact ? "" : "mt-4"}`}>
-        <button
-          type="button"
-          onClick={() => setModal("mcp")}
-          className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
-        >
-          <Terminal className="h-3.5 w-3.5" />
-          MCP config
-        </button>
+        {showSlack ? (
+          <Link
+            href={SLACK_INSTALL_URL}
+            className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
+          >
+            <Slack className="h-3.5 w-3.5" />
+            Add to Slack
+          </Link>
+        ) : null}
+        {showWhatsApp ? (
+          <button
+            type="button"
+            onClick={() => setModal("whatsapp")}
+            className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
+          >
+            <span className="flex h-3.5 w-3.5 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
+              <WhatsAppLogo />
+            </span>
+            WhatsApp QR
+          </button>
+        ) : null}
+        {showMcp ? (
+          <button
+            type="button"
+            onClick={() => setModal("mcp")}
+            className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
+          >
+            <Terminal className="h-3.5 w-3.5" />
+            MCP config
+          </button>
+        ) : null}
       </span>
+
+      {modal === "whatsapp" ? (
+        <ModalShell title="Connect WhatsApp" onClose={() => setModal(null)}>
+          <div className="mt-5 flex flex-col items-center gap-4">
+            <div className="rounded-[18px] bg-card p-4">
+              <QRCodeSVG
+                value={WHATSAPP_CHAT_URL}
+                size={144}
+                marginSize={1}
+                bgColor="transparent"
+                fgColor="currentColor"
+                level="M"
+                className="text-foreground"
+                data-testid="whatsapp-qr"
+              />
+            </div>
+            <p className="max-w-[300px] text-center text-[13px] leading-relaxed text-muted-foreground">
+              Scan to message Emily on WhatsApp. No dashboard sign-in needed.
+            </p>
+            <a
+              href={WHATSAPP_CHAT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-10 items-center gap-2 rounded-[10px] px-4 text-[13px] font-medium text-white"
+              style={{ background: "var(--v3-accent)" }}
+            >
+              Message Emily
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </div>
+        </ModalShell>
+      ) : null}
 
       {modal === "mcp" ? <McpConfigModal open onClose={() => setModal(null)} /> : null}
     </>

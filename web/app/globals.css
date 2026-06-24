@@ -1062,6 +1062,10 @@ html.dark .grain {
 .c-appr-meta b { color:var(--ink-soft); font-weight:600; }
 
 /* Two-column grid: input LEFT, proposed output RIGHT, hairline divider between. */
+/* Container so the LEFT/RIGHT split + the proposed-output key/value grid react
+   to the pane width, not the viewport — a wide viewport with a narrow detail
+   pane (the approval-review side-pane) must still stack. */
+.c-appr-root { container-type:inline-size; }
 .c-appr-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0; }
 .c-appr-grid .col-left { padding-right:28px; }
 .c-appr-grid .col-right { padding-left:28px; border-left:var(--bd-div); }
@@ -1087,6 +1091,14 @@ html.dark .grain {
 
 .c-appr-foot { font-size:11.5px; color:var(--muted-foreground); margin:22px 0 0; padding:16px 0 0; border-top:var(--bd-div); }
 
+@container (max-width:760px) {
+  .c-appr-grid { grid-template-columns:1fr; }
+  .c-appr-grid .col-left { padding-right:0; padding-bottom:22px; margin-bottom:22px; border-bottom:var(--bd-div); }
+  .c-appr-grid .col-right { padding-left:0; border-left:0; }
+}
+/* Fallback for the rare case the container ancestor is absent (e.g. legacy
+   embeds): keep the original viewport collapse so the split never stays 50/50
+   on a small screen. */
 @media (max-width:760px) {
   .c-appr-grid { grid-template-columns:1fr; }
   .c-appr-grid .col-left { padding-right:0; padding-bottom:22px; margin-bottom:22px; border-bottom:var(--bd-div); }

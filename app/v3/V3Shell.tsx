@@ -25,8 +25,14 @@ const MODE_LABELS: Record<ThemeMode, string> = { system: "System", day: "Light",
 
 function readMode(): ThemeMode {
   if (typeof window === "undefined") return "system";
-  const stored = window.localStorage.getItem(THEME_KEY);
-  return stored === "day" || stored === "night" || stored === "system" ? stored : "system";
+  // localStorage can be absent (private mode, sandboxed test env) and throws on
+  // access in some browsers — never let theme restore break the page.
+  try {
+    const stored = window.localStorage?.getItem(THEME_KEY);
+    return stored === "day" || stored === "night" || stored === "system" ? stored : "system";
+  } catch {
+    return "system";
+  }
 }
 
 export function Hl({ children }: { children: React.ReactNode }) {
@@ -77,7 +83,11 @@ export function V3Shell({
   function cycleMode() {
     const next = MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length];
     setMode(next);
-    window.localStorage.setItem(THEME_KEY, next);
+    try {
+      window.localStorage?.setItem(THEME_KEY, next);
+    } catch {
+      /* storage unavailable (private mode / sandbox) — theme still applies for the session */
+    }
     document.documentElement.classList.toggle("floom-night", next === "night");
     document.documentElement.classList.toggle("floom-day", next === "day");
   }

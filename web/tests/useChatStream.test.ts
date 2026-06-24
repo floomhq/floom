@@ -508,3 +508,4 @@ describe("Emily streaming activity", () => {
     expect(getStreamingActivity(completed, true)).toEqual({ kind: "thinking" });
   });
 });
+

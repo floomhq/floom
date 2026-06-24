@@ -262,6 +262,14 @@ export const api = {
       return fetchJson<import("@/lib/types").WorkerSummary[]>(`/workers?${qs.toString()}`);
     },
     get: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}`),
+    // Lightweight worker detail for the standalone /run/{id} run-form page.
+    // shape=run skips the heavy detail-only assembly (recent runs, latest-run
+    // output, stats batch, recipe, secret/connection availability, on-disk
+    // bundle incl. the manifest), which on Cloud is ~6-8s warm and tens of
+    // seconds cold. The run form only renders identity + config.inputs/
+    // connections/trigger, so the trimmed payload is all it needs.
+    getRunMeta: (id: string) =>
+      fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}?shape=run`),
     duplicate: (id: string) =>
       fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),

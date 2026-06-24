@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
 import { AuthButton } from "@/components/AuthButton";
+import { cn } from "@/lib/utils";
 import { safeAppNext } from "@/lib/safe-next";
 
 export const metadata = {
@@ -36,12 +36,11 @@ const ACTIVITY_ROWS: {
   result: string;
   status: "done" | "running";
   time: string;
-  icon: ReactNode;
 }[] = [
-  { name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago", icon: <UsersIcon /> },
-  { name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago", icon: <MailIcon /> },
-  { name: "Pipeline report", result: "Gathering data", status: "running", time: "now", icon: <FileTextIcon /> },
-  { name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago", icon: <GitHubIcon /> },
+  { name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago" },
+  { name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago" },
+  { name: "Pipeline report", result: "Gathering data", status: "running", time: "now" },
+  { name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago" },
 ];
 
 export default async function LoginPage({
@@ -70,89 +69,100 @@ export default async function LoginPage({
         }
       `}</style>
 
-      <header className="mx-auto flex h-[64px] w-full max-w-[1000px] items-center px-7">
+      <header className="mx-auto flex w-full max-w-[1040px] px-6 py-6">
         <Link
           href="/"
-          className="login-focus inline-flex items-center gap-2.5 rounded-[var(--radius-button)] text-[14px] font-semibold transition-opacity hover:opacity-80"
+          className="login-focus inline-flex items-center gap-2 rounded-[var(--radius-button)] text-[15px] font-semibold transition-opacity hover:opacity-80"
           style={{ color: "var(--ink)" }}
         >
           <FloomMark size={22} />
-          Floom
+          Floom{" "}
+          <span style={{ color: "var(--muted-text)", fontWeight: 450, marginLeft: 2 }}>/ workeros</span>
         </Link>
       </header>
 
       <section
-        className="mx-auto grid w-full max-w-[900px] items-center gap-12 px-7 pb-20 pt-12 md:grid-cols-[1fr_360px] md:pt-20"
+        className="mx-auto grid w-full max-w-[1040px] items-start gap-14 px-6 pb-24 pt-10 md:grid-cols-[minmax(0,1fr)_400px] md:gap-20 md:pt-20"
         aria-labelledby="login-heading"
       >
-        <div className="hidden max-w-[460px] md:block">
-          <h2
-            className="text-[40px] font-semibold leading-[1.04] tracking-[-0.034em]"
-            style={{ color: "var(--text-primary)" }}
+        <div className="hidden max-w-[480px] md:block">
+          <p
+            className="font-mono text-[11px] font-medium uppercase leading-none tracking-[0.12em]"
+            style={{ color: "var(--accent)" }}
           >
-            <span style={{ color: "var(--accent)" }}>Hire</span> AI workers.
+            Floom Cloud
+          </p>
+          <h2
+            className="mt-5 text-[44px] font-semibold leading-[1.02]"
+            style={{ color: "var(--ink)", letterSpacing: 0 }}
+          >
+            Hire AI workers for your company.
           </h2>
           <p
-            className="mt-4 max-w-[380px] text-[14px] leading-relaxed"
-            style={{ color: "var(--text-muted)" }}
+            className="mt-5 max-w-[390px] text-[15px] leading-7"
+            style={{ color: "var(--muted-text)" }}
           >
             {install
               ? `Sign in to install ${install} and put it to work.`
-              : "Describe the job, review the draft, and keep every worker run on the record."}
+              : "Jobs that run on a schedule, from a message, or on demand. You get the output, not the mechanics."}
           </p>
 
           <div
-            className="mt-7"
+            className="mt-10 overflow-hidden"
             style={{
               background: "var(--bg-card)",
-              borderRadius: 18,
-              padding: 8,
+              borderRadius: "var(--radius-card)",
+              border: "1px solid var(--border-default)",
             }}
           >
             <div
               className="flex items-center justify-between"
-              style={{ padding: "10px 12px 11px" }}
+              style={{
+                padding: "14px 18px 13px",
+                borderBottom: "var(--bd-div)",
+              }}
             >
               <span
-                className="text-[11px] font-medium uppercase tracking-[0.06em]"
-                style={{ color: "var(--text-muted)" }}
+                className="font-mono text-[11px] font-medium uppercase tracking-[0.08em]"
+                style={{ color: "var(--muted-text)" }}
               >
-                Today
+                Recent worker runs
               </span>
-              <StatusPill status="done" label="6 active" />
+              <CPill tone="ok" label="6 active" />
             </div>
 
             {ACTIVITY_ROWS.map((row, i) => (
               <div
                 key={row.name}
-                className="flex min-h-[52px] items-center gap-3"
+                className="flex items-center gap-3.5"
                 style={{
-                  padding: 12,
-                  borderTop: i > 0 ? "1px solid rgba(16,17,20,.055)" : undefined,
+                  minHeight: 64,
+                  padding: "0 18px",
+                  borderTop: i > 0 ? "var(--bd-div)" : undefined,
                 }}
               >
-                <WorkerRowIcon icon={row.icon} />
+                <WorkerAvatar name={row.name} seed={row.name} size="size-10" />
 
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 py-3">
                   <div
-                    className="truncate text-sm font-medium"
-                    style={{ color: "var(--text-primary)" }}
+                    className="truncate text-[14.5px] font-semibold"
+                    style={{ color: "var(--ink)" }}
                   >
                     {row.name}
                   </div>
                   <div
-                    className="mt-0.5 text-xs"
-                    style={{ color: "var(--text-muted)" }}
+                    className="mt-0.5 truncate text-[12.5px]"
+                    style={{ color: "var(--muted-text)" }}
                   >
                     {row.result}
                   </div>
                 </div>
 
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <StatusPill status={row.status} />
+                  <CPill tone={row.status === "done" ? "ok" : "run"} />
                   <span
-                    className="text-[11px]"
-                    style={{ color: "var(--text-muted)" }}
+                    className="text-[11px] tabular-nums"
+                    style={{ color: "var(--ink-faint)" }}
                   >
                     {row.time}
                   </span>
@@ -160,80 +170,55 @@ export default async function LoginPage({
               </div>
             ))}
           </div>
-
-          <div
-            className="mt-4 flex items-center gap-2 text-[13px]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            142 runs today
-            <span
-              style={{
-                width: 3,
-                height: 3,
-                borderRadius: "50%",
-                background: "#cfc8ba",
-                display: "inline-block",
-              }}
-            />
-            0 need attention
-            <span
-              style={{
-                width: 3,
-                height: 3,
-                borderRadius: "50%",
-                background: "#cfc8ba",
-                display: "inline-block",
-              }}
-            />
-            avg 38s
-          </div>
         </div>
 
-        <div className="w-full">
+        <div className="w-full md:max-w-[380px] md:justify-self-end">
           <div
-            className="rounded-[18px] bg-card p-6"
+            className="rounded-[var(--radius-card)] p-7 sm:p-8 md:p-9"
             style={{
               background: "var(--bg-card)",
             }}
           >
-            <div className="mb-6 text-center">
-              <h1 id="login-heading" className="text-[21px] font-semibold tracking-[-0.02em]">
+            <div className="mb-8 space-y-2">
+              <h1 id="login-heading" className="text-[28px] font-semibold leading-tight">
                 Welcome back
               </h1>
-              <p className="mt-1 text-[12.5px] text-muted-foreground">
-                {install ? `Install ${install} after signing in.` : "Magic link, password, or OAuth."}
+              <p className="text-[14px] leading-6" style={{ color: "var(--muted-text)" }}>
+                {install ? `Install ${install} after signing in.` : "Use OAuth or a magic link to enter your workspace."}
               </p>
             </div>
 
-            <div className="space-y-2.5">
-              <AuthButton method="google" href={oauthLoginUrl("google", next, switchAccount)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-foreground px-4 text-[14px] font-medium text-background">
+            <div className="space-y-2">
+              <AuthButton method="google" href={oauthLoginUrl("google", next, switchAccount)} className="auth-btn auth-btn-primary">
                 <GoogleIcon />
                 <span>Continue with Google</span>
               </AuthButton>
-              <AuthButton method="github" href={oauthLoginUrl("github", next, switchAccount)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-secondary px-4 text-[14px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]">
+              <AuthButton method="github" href={oauthLoginUrl("github", next, switchAccount)} className="auth-btn auth-btn-secondary">
                 <GitHubIcon />
                 <span>Continue with GitHub</span>
               </AuthButton>
             </div>
 
-            <div className="my-5 text-center">
-              <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            <div className="my-5 flex items-center gap-3">
+              <span className="h-px flex-1" style={{ background: "var(--line)" }} />
+              <span className="font-mono text-[11px] font-medium uppercase tracking-[0.08em]" style={{ color: "var(--ink-mute)" }}>
                 or
               </span>
+              <span className="h-px flex-1" style={{ background: "var(--line)" }} />
             </div>
 
             <LoginEmailPanel next={next} initialMode={initialMode} />
 
-            <p className="mt-6 text-center text-[11.5px] leading-[1.6] text-muted-foreground">
+            <p className="mt-6 text-center text-[11.5px] leading-[1.6]" style={{ color: "var(--ink-mute)" }}>
               By signing in you agree to the{" "}
-              <Link href="/terms" className="login-focus underline-offset-4 hover:text-foreground hover:underline">
+              <Link href="/terms" className="login-focus rounded-[4px] underline underline-offset-2 transition-colors hover:text-[var(--ink)]">
                 Terms
               </Link>{" "}
               and{" "}
-              <Link href="/privacy" className="login-focus underline-offset-4 hover:text-foreground hover:underline">
+              <Link href="/privacy" className="login-focus rounded-[4px] underline underline-offset-2 transition-colors hover:text-[var(--ink)]">
                 Privacy Policy
               </Link>
-              .
+              . We&apos;ll create your workspace automatically on first sign-in.
             </p>
           </div>
 
@@ -266,6 +251,11 @@ export default async function LoginPage({
           outline: none;
           box-shadow: var(--focus);
         }
+        .auth-btn-primary {
+          background: var(--ink);
+          color: var(--bg-card);
+        }
+        .auth-btn-primary:hover { background: var(--solid-2); }
         .auth-btn-secondary {
           background: var(--bg-2);
           color: var(--ink);
@@ -275,6 +265,18 @@ export default async function LoginPage({
         }
       `}</style>
     </main>
+  );
+}
+
+function CPill({ tone, label }: { tone: "ok" | "run"; label?: string }) {
+  return (
+    <span className={`c-pill ${tone}`} style={{ fontSize: 11, padding: "3px 9px" }}>
+      <span
+        className="dot"
+        style={tone === "run" ? { animation: "login-pulse 1.5s ease-in-out infinite" } : undefined}
+      />
+      {label ?? (tone === "ok" ? "Done" : "Running")}
+    </span>
   );
 }
 
@@ -297,89 +299,44 @@ function FloomMark({ size = 20 }: { size?: number }) {
   );
 }
 
-function WorkerRowIcon({ icon }: { icon: ReactNode }) {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center [&_svg]:h-[13px] [&_svg]:w-[13px]"
-      style={{
-        width: 20,
-        height: 20,
-        borderRadius: "var(--radius-squircle)",
-        background: "var(--accent-soft)",
-        color: "var(--text-primary)",
-        border: "1px solid color-mix(in srgb, var(--text-primary) 14%, transparent)",
-      }}
-      aria-hidden="true"
-    >
-      {icon}
-    </span>
-  );
+// Inlined cloud-overlay avatar primitive. The engine's redesign branch dropped
+// the shared @/components/WorkerAvatar (moved to DiceBear-based marks), but this
+// pre-auth activity-proof panel wants the original muted-squircle + initials
+// treatment. Local copy of the old engine WorkerAvatar (single mono register,
+// rounded-[--radius-button] bg-muted) so the overlay has no dependency on the
+// removed engine component.
+function workerInitials(name: string): string {
+  const cleaned = name.replace(/[_-]+/g, " ").trim();
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.[0] ?? "";
+  const second = parts.length > 1 ? parts[parts.length - 1][0] : (parts[0]?.[1] ?? "");
+  return (first + second).toUpperCase();
 }
 
-function StatusPill({
-  status,
-  label,
+function WorkerAvatar({
+  seed,
+  name,
+  className,
+  size = "size-9",
 }: {
-  status: "done" | "running";
-  label?: string;
+  seed?: string;
+  name?: string;
+  className?: string;
+  size?: string;
 }) {
-  const isDone = status === "done";
+  const display = name || seed || "?";
   return (
-    <span
-      className="inline-flex items-center gap-1.5 text-[11px] font-medium"
-      style={{
-        borderRadius: 9999,
-        padding: "4px 10px",
-        background: isDone ? "rgba(47,143,91,.12)" : "#eef3fe",
-        color: isDone ? "#2f8f5b" : "#3e6fe0",
-      }}
+    <div
+      className={cn(
+        "shrink-0 rounded-[var(--radius-button)] grid place-items-center font-medium tracking-tight bg-muted text-foreground",
+        size,
+        className,
+      )}
+      aria-label={`${display} avatar`}
     >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: isDone ? "#2f8f5b" : "#3e6fe0",
-          display: "inline-block",
-          ...(isDone
-            ? {}
-            : {
-                animation: "login-pulse 1.5s ease-in-out infinite",
-              }),
-        }}
-      />
-      {label ?? (isDone ? "Done" : "Running")}
-    </span>
-  );
-}
-
-function UsersIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function MailIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-      <path d="m22 7-10 5L2 7" />
-    </svg>
-  );
-}
-
-function FileTextIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="9" x2="15" y1="13" y2="13" />
-      <line x1="9" x2="15" y1="17" y2="17" />
-    </svg>
+      <span className="text-[11px] leading-none">{workerInitials(display)}</span>
+    </div>
   );
 }
 

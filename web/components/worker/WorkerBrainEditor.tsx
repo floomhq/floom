@@ -27,6 +27,15 @@ interface WorkerBrainEditorProps {
   memoryFolderName?: string;
   /** Creates the memory folder if missing and attaches it (read & write). */
   onAttachMemory?: () => void | Promise<void>;
+  /**
+   * True when `memoryFolderName` is the worker's OWN memory context AND memory
+   * is enabled. The engine force-pins that context to writeable and re-mounts it
+   * on every save (models._normalize_memory_contexts), so a Read/Read-&-write
+   * toggle or a detach on it is a silent no-op that still fires a success toast.
+   * When set, that one row renders a locked "Read & write" state instead of the
+   * misleading interactive controls. Disable the worker's memory to remove it.
+   */
+  memoryPinned?: boolean;
 }
 
 /**
@@ -42,6 +51,7 @@ export function WorkerBrainEditor({
   onChange,
   memoryFolderName,
   onAttachMemory,
+  memoryPinned,
 }: WorkerBrainEditorProps) {
   const [attach, setAttach] = useState("");
   const [open, setOpen] = useState(false);
@@ -103,6 +113,9 @@ export function WorkerBrainEditor({
         {contexts.map((spec) => {
           const name = contextSpecName(spec);
           const writeable = contextSpecWritable(spec);
+          // The worker's own memory folder is pinned writeable + non-detachable
+          // by the engine; show a locked state rather than controls that revert.
+          const isPinnedMemory = Boolean(memoryPinned && memoryFolderName && name === memoryFolderName);
           return (
             <div key={name} className="c-lrow" style={{ gridTemplateColumns: "1fr auto auto", gap: 12 }}>
               <button
@@ -119,7 +132,14 @@ export function WorkerBrainEditor({
                   <div className="nm" style={{ textDecoration: "underline", textUnderlineOffset: 2, textDecorationColor: "var(--border)" }}>{name}</div>
                 </div>
               </button>
-              {editable ? (
+              {isPinnedMemory ? (
+                <span
+                  className="c-vpill"
+                  title="This worker's memory is always read & write. Disable the worker's memory to remove it."
+                >
+                  Read &amp; write
+                </span>
+              ) : editable ? (
                 <div className="c-vtog" role="group" aria-label={`${name} access`}>
                   <button
                     type="button"
@@ -141,7 +161,7 @@ export function WorkerBrainEditor({
               ) : (
                 <span className="c-vpill">{writeable ? "Read & write" : "Read only"}</span>
               )}
-              {editable && (
+              {editable && !isPinnedMemory ? (
                 <button
                   type="button"
                   aria-label={`Remove ${name}`}
@@ -151,6 +171,8 @@ export function WorkerBrainEditor({
                 >
                   <X size={15} />
                 </button>
+              ) : (
+                isPinnedMemory && <span aria-hidden="true" />
               )}
             </div>
           );

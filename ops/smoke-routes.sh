@@ -15,6 +15,20 @@ set -uo pipefail
 TARGET="${1:-all}"
 FAIL=0
 
+# Portable SHA-256 of a file. GNU coreutils ships `sha256sum`; macOS/BSD ship
+# `shasum`. Without this fallback, `sha256sum` is missing on macOS, `hash` comes
+# back empty, and the chunkset comparison silently matches empty-vs-empty —
+# a false pass (workeros-cloud#662).
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 127
+  fi
+}
+
 OS_HOST="https://workers.floom.dev"
 OS_API="https://workers-api.floom.dev"
 CLOUD_HOST="https://workeros.floom.dev"
@@ -86,7 +100,11 @@ chunkset_hash() {
     return 1
   fi
 
-  hash="$(sha256sum "$assets" | awk '{print $1}')"
+  if ! hash="$(sha256_of "$assets")" || [[ -z "$hash" ]]; then
+    echo "FAIL  $label  $url  -> no sha256 tool (need sha256sum or shasum)" >&2
+    rm -rf "$tmp"
+    return 1
+  fi
   echo "$hash $count"
   rm -rf "$tmp"
 }

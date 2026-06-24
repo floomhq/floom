@@ -1139,7 +1139,7 @@ function SecretWarningBanner({
           This file looks like it contains a live API key or secret.
         </p>
         <p className="text-muted-foreground">
-          Brain folders are readable by anyone with workspace access. Move secrets
+          Library folders are readable by anyone with workspace access. Move secrets
           to{" "}
           <Link href="/connections/secrets" className="underline underline-offset-2">
             Secrets
