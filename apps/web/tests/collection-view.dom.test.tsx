@@ -3,7 +3,7 @@ import { useState } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CollectionView } from "@/components/collection/CollectionView";
-import { Avatar } from "@/components/collection/Avatar";
+import { Avatar } from "@/components/ui/Avatar";
 import { emptyState } from "@/lib/collection/url-state";
 import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
 
@@ -41,20 +41,20 @@ function makeConfig(over: Partial<CollectionConfig<Item>> = {}): CollectionConfi
     view: { default: "list", grid: true },
     columns: { template: "1fr 120px 40px", headers: ["Worker", "Status", ""] },
     row: (i) => ({
-      leading: <Avatar name={i.name} />,
+      leading: <Avatar role="workspace" name={i.name} />,
       primary: i.name,
       secondary: "a worker",
       status: { tone: "ok", label: "Active" },
       menu: [{ label: "Delete", onSelect: () => {}, danger: true }],
     }),
     card: (i) => ({
-      leading: <Avatar name={i.name} />,
+      leading: <Avatar role="workspace" name={i.name} />,
       name: i.name,
       description: "a worker",
       status: { tone: "ok", label: "Active" },
     }),
     detail: (i) => ({
-      header: { leading: <Avatar name={i.name} />, title: i.name },
+      header: { leading: <Avatar role="workspace" name={i.name} />, title: i.name },
       tabs: [
         { key: "About", label: "About", render: () => <div>About {i.name}</div> },
         { key: "Runs", label: "Runs", render: () => <div>Runs body</div> },
