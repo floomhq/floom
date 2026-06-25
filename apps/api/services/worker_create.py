@@ -40,11 +40,76 @@ if TYPE_CHECKING:
     from models import WorkerConfig, WorkerCreateRequest, WorkerDetail
 
 import logging
+import time
 
 logger = logging.getLogger("floom.api")
 
 _worker_create_locks_guard = threading.Lock()
 _worker_create_locks: Dict[str, threading.Lock] = {}
+
+# Read-after-write retry budget for the post-persist worker detail read.
+# On the hosted (Supabase REST) backend the worker rows are committed by
+# _persist_discovered_workers, but the immediate SELECT that _build_worker_detail
+# issues can transiently return zero rows: PostgREST pools its Postgres
+# connections and a just-committed INSERT is not always visible on the very next
+# pooled read (read-after-write consistency lag, made worse by the pooled
+# connection churn that also surfaces as RemoteProtocolError "Server
+# disconnected"). When that happens _build_worker_detail raises
+# HTTPException(404, "Worker not found"), the create route re-raises it, and the
+# finally-block rollback DELETES the worker we just wrote — leaving an orphan
+# skill_version and a 404 for a worker that was, momentarily, fully created
+# (workeros-cloud#735). On the strict-persist callers (raise_on_skip=True) the
+# row is known to exist, so a 404 here is provably a transient read miss; on the
+# non-strict callers a short bounded retry is still safe and idempotent — a real
+# missing row simply exhausts the budget and the 404 propagates unchanged.
+_READ_AFTER_WRITE_RETRIES = 4
+_READ_AFTER_WRITE_BACKOFF_SECONDS = 0.25
+
+
+def _build_worker_detail_after_write(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: "Repositories",
+) -> "WorkerDetail":
+    """_build_worker_detail for a worker we JUST persisted, tolerant of a
+    transient read-after-write miss.
+
+    On strict-persist callers the row is known to exist, so a 404 from the detail
+    read can only be a not-yet-visible commit on a pooled REST connection. Retry a
+    bounded number of times with a short backoff before giving up; any non-404
+    error (or a 404 that survives every retry) propagates unchanged so a
+    genuinely-broken create still fails loud and rolls back. On non-strict callers
+    the same bounded retry is safe: a truly missing row just exhausts the budget
+    and the 404 propagates as before — never masked indefinitely.
+    """
+    last_exc: Optional[HTTPException] = None
+    for attempt in range(_READ_AFTER_WRITE_RETRIES + 1):
+        try:
+            return _build_worker_detail(worker_id, user_id=user_id, repos=repos)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            last_exc = exc
+            if attempt < _READ_AFTER_WRITE_RETRIES:
+                logger.warning(
+                    "worker %s persisted but read-after-write detail read returned "
+                    "404 (attempt %d/%d); retrying after %.2fs (transient pooled "
+                    "read-after-write miss)",
+                    worker_id,
+                    attempt + 1,
+                    _READ_AFTER_WRITE_RETRIES,
+                    _READ_AFTER_WRITE_BACKOFF_SECONDS,
+                )
+                time.sleep(_READ_AFTER_WRITE_BACKOFF_SECONDS)
+    assert last_exc is not None  # loop always sets it before exhausting
+    logger.error(
+        "worker %s persisted but detail read still 404 after %d retries; "
+        "create will roll back",
+        worker_id,
+        _READ_AFTER_WRITE_RETRIES,
+    )
+    raise last_exc
 
 
 def _emit_worker_created(*, worker_id: str, owner_id: str, config: Any) -> None:
@@ -289,7 +354,7 @@ def _create_worker_from_parsed_payload(
             with get_db() as conn:
                 # Single-worker create: surface a persist failure (don't silently skip).
                 _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id, raise_on_skip=True)
-            _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+            _build_worker_detail_after_write(worker_id, user_id=auth.user_id, repos=repos)
             os.replace(staging_dir, target_dir)
             target_committed = True
             # Single-worker create: the portable bundle (manifest_json._files) is
@@ -303,7 +368,7 @@ def _create_worker_from_parsed_payload(
             )
             _ensure_worker_memory_pack(config, auth.user_id)
             invalidate_worker_cache()
-            detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+            detail = _build_worker_detail_after_write(worker_id, user_id=auth.user_id, repos=repos)
             # Commit new worker files to the workspace git repo.
             author_name, author_email = _git_author(auth)
             worker_name = (config.name if config else None) or worker_id
