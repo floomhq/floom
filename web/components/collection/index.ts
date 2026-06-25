@@ -10,7 +10,6 @@ export {
   ListEmpty,
   ListLoading,
   ListError,
-  CollectionSkeleton,
   EmptyState,
   LoadingState,
   ErrorState,

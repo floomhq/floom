@@ -60,9 +60,16 @@ describe("Workers/Runs first-load server fetches", () => {
       new URL("../app/runs/page.tsx", import.meta.url),
       "utf8",
     );
+    const libraryPage = readFileSync(
+      new URL("../app/library/page.tsx", import.meta.url),
+      "utf8",
+    );
 
     expect(workersPage).toContain("fetchWorkerList({ include_archived: true })");
     expect(runsPage).toContain("fetchRuns({ limit: 50, offset: 0 })");
     expect(runsPage).not.toContain("limit: 200");
+    expect(libraryPage).toContain("const initialFoldersPromise = fetchBrainFolders().catch");
+    expect(libraryPage).not.toContain("await fetchBrainFolders()");
+    expect(libraryPage).toContain("<BrainCollection initialFoldersPromise={initialFoldersPromise} />");
   });
 });

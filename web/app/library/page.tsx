@@ -8,12 +8,9 @@ const BrainCollection = nextDynamic(() => import("@/app/brain/BrainCollection"))
 // shell shared across requests.
 export const dynamic = "force-dynamic";
 
-export default async function LibraryPage() {
-  let initialFolders: import("@/lib/types").ContextSummary[] = [];
-  try {
-    initialFolders = await fetchBrainFolders();
-  } catch {
-    // Fall through — BrainCollection will fetch on the client side
-  }
-  return <BrainCollection initialFolders={initialFolders} />;
+export default function LibraryPage() {
+  const initialFoldersPromise = fetchBrainFolders().catch(
+    () => [] as import("@/lib/types").ContextSummary[],
+  );
+  return <BrainCollection initialFoldersPromise={initialFoldersPromise} />;
 }
