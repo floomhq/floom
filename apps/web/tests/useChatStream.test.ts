@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, ChatSSEEvent } from "@/lib/emily-chat-types";
 import {
+  decideRunAutoOpen,
   getAutoOpenRunDetailsHref,
   getStreamingActivity,
   getToolCardTitle,
@@ -281,6 +282,55 @@ describe("Emily chat tool cards", () => {
     expect(card.toolName).toBe("runs.get");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
     expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_123&tab=Logs");
+  });
+
+  // #1992: creating + running a worker from Emily must not yank the user across
+  // tabs to /runs. decideRunAutoOpen("suppress") keeps the run handled but the
+  // app stays put while createMode is active; outside create it navigates.
+  describe("decideRunAutoOpen — no tab-jump during the Emily create/run flow", () => {
+    function runCard() {
+      const call: ChatSSEEvent = {
+        type: "tool-call",
+        callId: "call_run_details",
+        toolName: "runs.get",
+        args: { id: "run_123" },
+        args_preview: { id: "run_123" },
+      };
+      const result: ChatSSEEvent = {
+        type: "tool-result",
+        callId: "call_run_details",
+        toolName: "runs.get",
+        isError: false,
+        result: { ok: true, run_id: "run_123" },
+        card: { kind: "run", status: "completed", title: "Opened run details" },
+        resource: { kind: "run", run_id: "run_123", worker_id: "research_brief" },
+      };
+      const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+      const card = toolCards(messages)[0]?.card;
+      if (card?.kind !== "run") throw new Error("expected run card");
+      return card;
+    }
+
+    it("navigates to the run detail when NOT in create mode (Emily ran a worker on its own)", () => {
+      expect(decideRunAutoOpen(runCard(), false)).toEqual({
+        action: "navigate",
+        runId: "run_123",
+        href: "/runs?sel=run_123&tab=Logs",
+      });
+    });
+
+    it("suppresses the cross-tab nav while in create mode, but still reports the runId so it can be marked handled", () => {
+      expect(decideRunAutoOpen(runCard(), true)).toEqual({
+        action: "suppress",
+        runId: "run_123",
+      });
+    });
+
+    it("skips a non-run / ineligible card regardless of create mode", () => {
+      const notARun = { kind: "worker-list", status: "completed" } as never;
+      expect(decideRunAutoOpen(notARun, false)).toEqual({ action: "skip" });
+      expect(decideRunAutoOpen(notARun, true)).toEqual({ action: "skip" });
+    });
   });
 
   it("recovers View run from the live nested runs.get result shape", () => {
