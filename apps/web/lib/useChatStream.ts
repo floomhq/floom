@@ -1154,6 +1154,32 @@ export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
     : null;
 }
 
+// #1992: the auto-open-run-details decision, factored out of EmilyChatCore's
+// effect so it's unit-testable independent of the component's refs/gating.
+//   - "navigate": open the run's detail page — Emily started a run on its own.
+//   - "suppress": the card IS an eligible run, but we're inside an Emily
+//     create/run flow (createMode). Auto-navigating to /runs here yanked the
+//     user across tabs mid-build (Workers→Runs→Workers→Runs), so we STAY PUT.
+//     The caller still marks the run handled (so it can't fire late once create
+//     mode ends); the run card remains in the chat and stays clickable.
+//   - "skip": not an eligible run card.
+export type RunAutoOpenDecision =
+  | { action: "navigate"; runId: string; href: string }
+  | { action: "suppress"; runId: string }
+  | { action: "skip" };
+
+export function decideRunAutoOpen(
+  card: ToolCard,
+  createMode: boolean,
+): RunAutoOpenDecision {
+  if (!shouldAutoOpenRunDetails(card)) return { action: "skip" };
+  const href = getAutoOpenRunDetailsHref(card);
+  const runId = card.runId;
+  if (!href || !runId) return { action: "skip" };
+  if (createMode) return { action: "suppress", runId };
+  return { action: "navigate", runId, href };
+}
+
 // #825: Emily's answers link to app pages as REAL router hrefs (no DOM access /
 // page driving — links only). Generalizes getAutoOpenRunDetailsHref across every
 // card kind to its in-app route, or null when there's nothing concrete to open.

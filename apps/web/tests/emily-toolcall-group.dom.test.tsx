@@ -31,6 +31,9 @@ vi.mock("@/lib/useChatStream", () => ({
   getAutoOpenRunDetailsHref: vi.fn(),
   getStreamingActivity: vi.fn(() => ({ kind: "idle" })),
   shouldAutoOpenRunDetails: vi.fn(() => false),
+  // #1992: EmilyChat now imports decideRunAutoOpen; this full mock must export it
+  // (skip = no auto-open, matching shouldAutoOpenRunDetails → false above).
+  decideRunAutoOpen: vi.fn(() => ({ action: "skip" })),
   getCardHref: vi.fn(() => null),
   getToolCardTitle: vi.fn((name: string) => name),
   useChatStream: () => ({

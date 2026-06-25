@@ -32,9 +32,8 @@ import {
 } from "@/components/ai-elements/message";
 import { Task } from "@/components/ai-elements/task";
 import {
-  getAutoOpenRunDetailsHref,
+  decideRunAutoOpen,
   getStreamingActivity,
-  shouldAutoOpenRunDetails,
   useChatStream,
   type StreamingActivity,
 } from "@/lib/useChatStream";
@@ -656,20 +655,22 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
       if (msg.role !== "assistant" || !msg.parts) continue;
       for (const part of msg.parts) {
         if (part.type !== "tool-card") continue;
-        const card = part.card;
-        if (!shouldAutoOpenRunDetails(card)) continue;
-        const href = getAutoOpenRunDetailsHref(card);
-        if (!href) continue;
-        const runId = card.runId;
-        if (!runId) continue;
-        if (openedRunDetailsRef.current.has(runId)) continue;
-        openedRunDetailsRef.current.add(runId);
+        // #1992: decide once whether this run card should auto-open. During an
+        // Emily create/run flow the decision is "suppress" — we mark the run
+        // handled (so it can't fire late once create mode ends) but DON'T
+        // router.push, which used to yank the user across tabs mid-build
+        // (Workers→Runs→Workers→Runs). The run card stays in the chat, clickable.
+        const decision = decideRunAutoOpen(part.card, createMode);
+        if (decision.action === "skip") continue;
+        if (openedRunDetailsRef.current.has(decision.runId)) continue;
+        openedRunDetailsRef.current.add(decision.runId);
+        if (decision.action === "suppress") continue;
         onOpenRunDetails?.();
-        router.push(href);
+        router.push(decision.href);
         return;
       }
     }
-  }, [messages, router, fullPage, isHydrating, onOpenRunDetails]);
+  }, [messages, router, fullPage, isHydrating, onOpenRunDetails, createMode]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
