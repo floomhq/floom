@@ -91,8 +91,8 @@ describe("Emily home empty — first-worker zero-state polish", () => {
   });
 });
 
-describe("Emily home composer - bigger, borderless, no Uses row", () => {
-  it("hero composer (landing + large) is borderless and has no 'Uses' chip row", () => {
+describe("Emily home composer - bigger, borderless, inline logos", () => {
+  it("hero composer (landing + large) mirrors inline brand logos with no 'Uses' chip row", () => {
     const { container } = render(
       <PromptInput
         value="Summarise my Granola meetings → HubSpot"
@@ -105,7 +105,7 @@ describe("Emily home composer - bigger, borderless, no Uses row", () => {
       />,
     );
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
-    const wrapper = textarea.parentElement as HTMLElement;
+    const wrapper = textarea.parentElement?.parentElement as HTMLElement;
     // Borderless (landing): no divider outline; grey bg-2 fill for discoverability.
     expect(wrapper.className).not.toContain("[border:var(--bd-div)]");
     expect(wrapper.className).toContain("bg-[var(--bg-2)]");
@@ -114,10 +114,15 @@ describe("Emily home composer - bigger, borderless, no Uses row", () => {
     // conversation composer.
     expect(textarea.className).toContain("min-h-[60px]");
     expect(textarea.className).toContain("text-[15px]");
-    // No "Uses" / "Will use" PromptChips row in the landing composer even though
-    // the prompt clearly references Granola + HubSpot.
+    // No "Uses" / "Will use" PromptChips row in the landing composer; the same
+    // real brand logos are inline in the mirrored composer text instead.
     expect(container.textContent).not.toContain("Uses");
     expect(container.textContent).not.toContain("Will use");
+    const brandUses = Array.from(container.querySelectorAll("use"))
+      .map((u) => u.getAttribute("href") || "")
+      .filter((h) => h.startsWith("#brand-"));
+    expect(brandUses).toContain("#brand-granola");
+    expect(brandUses).toContain("#brand-hubspot");
   });
 
   it("default conversation composer keeps the Uses chip row", () => {
@@ -132,7 +137,7 @@ describe("Emily home composer - bigger, borderless, no Uses row", () => {
       />,
     );
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
-    const wrapper = textarea.parentElement as HTMLElement;
+    const wrapper = textarea.parentElement?.parentElement as HTMLElement;
     expect(wrapper.className).toContain("bg-[var(--bg-2)]");
     expect(wrapper.className).not.toContain("[border:var(--bd-div)]");
     // The default composer still surfaces the detected tools as the "Uses" row.
