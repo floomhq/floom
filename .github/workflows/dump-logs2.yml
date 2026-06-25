@@ -1,15 +1,18 @@
 name: Dump worker logs 2
-on: { workflow_dispatch: {} }
-concurrency: { group: railway-deploy-main, cancel-in-progress: false }
+on:
+  workflow_dispatch: {}
+concurrency:
+  group: railway-deploy-main
+  cancel-in-progress: false
 jobs:
   logs:
     runs-on: [self-hosted, linux, x64, workeros-ci]
     steps:
-      - run: { }
       - name: dump
-        env: { RAILWAY_TOKEN: "${{ secrets.RAILWAY_TOKEN }}" }
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           command -v railway >/dev/null 2>&1 || npm i -g @railway/cli
           timeout 25 railway logs --service workeros-cloud-worker > /tmp/wl.txt 2>&1 || true
-          echo "=== scheduler-relevant ==="
-          grep -iE "scheduler|advisory|start_scheduler|Traceback|Error|Exception|tick" /tmp/wl.txt | tail -50 || echo none
+          echo "=== scheduler lines ==="
+          grep -iE "scheduler|advisory|start_scheduler|Traceback|Error|Exception|tick|acquire" /tmp/wl.txt | tail -60 || echo none
