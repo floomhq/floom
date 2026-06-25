@@ -823,6 +823,7 @@ export default function ConnectionsCollection({
       const header = {
         leading: <Logo item={i} />,
         title: i.name,
+        status: STATUS_PILL[i.statusKey],
         actions,
         sub: (
           <>
@@ -849,18 +850,25 @@ export default function ConnectionsCollection({
             // DetailKit), identical content to the prior KV grid.
             key: "Overview",
             label: "Overview",
+            summary: [
+              { key: "scopes", label: "Scopes", value: String(c.scopes?.length ?? 0) },
+              { key: "last-used", label: "Last used", value: formatLastUsed(c) },
+            ],
             sections: [
               {
-                key: "overview",
-                label: "Overview",
+                key: "access",
+                label: "Access",
                 rows: [
                   { key: "app", label: "App", value: humaniseAppName(c.app_name) },
                   { key: "account", label: "Account", value: i.account },
                   { key: "auth", label: "Auth", value: "OAuth · managed token (rotates on reconnect)" },
-                  { key: "status", label: "Status", value: <StatusPill spec={STATUS_PILL[i.statusKey]} /> },
-                  { key: "scopes", label: "Scopes", value: String(c.scopes?.length ?? 0) },
+                ],
+              },
+              {
+                key: "activity",
+                label: "Activity",
+                rows: [
                   { key: "connected", label: "Connected", value: new Date(c.created_at).toLocaleDateString() },
-                  { key: "last-used", label: "Last used", value: formatLastUsed(c) },
                   { key: "owner", label: "Owner", value: resolveOwner(c.owner_id, members) },
                 ],
               },
@@ -926,18 +934,24 @@ export default function ConnectionsCollection({
             // prior KV grid. Mono fields use the row `mono` flag.
             key: "Overview",
             label: "Overview",
+            summary: [
+              { key: "tools", label: "Tools", value: String(c.mcp_allowed_tools?.length ?? 0) },
+              { key: "last-used", label: "Last used", value: formatLastUsed(c) },
+            ],
             sections: [
               {
-                key: "overview",
-                label: "Overview",
+                key: "server",
+                label: "Server",
                 rows: [
-                  { key: "server", label: "Server", value: c.mcp_label || c.app_name },
                   { key: "endpoint", label: "Endpoint", value: c.mcp_url || c.mcp_command || "—", mono: true },
                   { key: "transport", label: "Transport", value: c.mcp_transport || "—" },
+                ],
+              },
+              {
+                key: "auth",
+                label: "Auth",
+                rows: [
                   { key: "secret-name", label: "Secret name", value: c.mcp_auth_secret || "None", mono: c.mcp_auth_secret != null },
-                  { key: "status", label: "Status", value: <StatusPill spec={STATUS_PILL[i.statusKey]} /> },
-                  { key: "tools", label: "Tools", value: String(c.mcp_allowed_tools?.length ?? 0) },
-                  { key: "last-used", label: "Last used", value: formatLastUsed(c) },
                 ],
               },
             ],
@@ -1010,26 +1024,17 @@ export default function ConnectionsCollection({
             // inside the row `value` (ReactNode).
             key: "Overview",
             label: "Overview",
+            summary: [
+              { key: "state", label: "State", value: s.status === "set" ? "Set" : "Not set" },
+              { key: "used-by-count", label: "Used by", value: String(usedByCount) },
+            ],
             sections: [
               {
-                key: "overview",
-                label: "Overview",
+                key: "secret",
+                label: "Secret",
                 rows: [
                   { key: "name", label: "Name", value: s.name, mono: true },
                   { key: "value", label: "Value", value: <SecretValueField name={s.name} /> },
-                  {
-                    key: "status",
-                    label: "Status",
-                    value: (
-                      <StatusPill
-                        spec={
-                          s.status === "set"
-                            ? { tone: "ok", label: "Set" }
-                            : { tone: "err", label: "Not set" }
-                        }
-                      />
-                    ),
-                  },
                   {
                     key: "used-by",
                     label: "Used by",
