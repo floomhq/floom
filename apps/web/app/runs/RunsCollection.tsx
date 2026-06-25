@@ -19,7 +19,7 @@ import { useRuns, useStreamedInitialData, qk, RUNS_FIRST_PAGE_QUERY_PARAMS } fro
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
-import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
+import type { CollectionConfig, CustomTabReason, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineFile } from "@/components/file-viewer/InlineFileOpen";
@@ -398,6 +398,14 @@ const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => Reac
   Inputs: InputsTab,
 };
 
+// Run tabs are bespoke async viewers (output artifacts + metrics, log stream,
+// raw input JSON) — each names its accurate custom reason.
+const RUN_TAB_REASON: Record<RunDetailTab, CustomTabReason> = {
+  Output: "run-output",
+  Logs: "run-logs",
+  Inputs: "run-inputs",
+};
+
 const PAGE_SIZE = 50;
 
 export default function RunsCollection({
@@ -755,7 +763,7 @@ export default function RunsCollection({
       // the live tab set.
       tabs: RUN_DETAIL_TABS.map((key) => {
         const Tab = RUN_TAB_COMPONENT[key];
-        return { key, label: key, custom: "unmigrated" as const, render: () => <Tab r={r} /> };
+        return { key, label: key, custom: RUN_TAB_REASON[key], render: () => <Tab r={r} /> };
       }),
     }),
     states: {
