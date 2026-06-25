@@ -20,7 +20,6 @@ import type {
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import {
-  WORKER_DETAIL_TABS,
   WORKER_DETAIL_TAB_LABEL,
   type WorkerDetailTab,
   SETUP_SUBTABS,
@@ -43,7 +42,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ActionMenu } from "@/components/ui/action-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
+import type { CollectionConfig, CustomTabReason, TagFamilyKey } from "@/lib/collection/types";
 import {
   Collection,
   DetailChips,
@@ -1768,6 +1767,19 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
   Tools: ToolsTab,
 };
 
+// Each worker tab opts out of the structured register for an accurate reason:
+// these are bespoke components (graph, nested editors, file/version viewers,
+// run list, async tool allowlist), not synchronous key/value panes.
+const WORKER_TAB_REASON: Record<WorkerDetailTab, CustomTabReason> = {
+  Overview: "worker-flow",
+  Runs: "worker-runs",
+  Setup: "worker-setup",
+  Source: "file-viewer",
+  Versions: "version-history",
+  Brain: "brain-editor",
+  Tools: "tool-list",
+};
+
 /**
  * Inline "Developer" disclosure button — sits directly after the operator tabs
  * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Brain, Tools).
@@ -2418,6 +2430,10 @@ export default function WorkersCollection({
             return {
               key,
               label: WORKER_DETAIL_TAB_LABEL[key],
+              // Each worker tab is a bespoke component (flow graph, nested setup
+              // editor, file/version/brain editors, run list, tool allowlist) that
+              // loads its own data and owns its own state — not a synchronous
+              // key/value pane — so each names an accurate custom reason.
               // #1251 / #1679: badge matches the count listed in the Runs tab.
               // Both read the SAME worker-scoped runs cache (api.runs.list) so the
               // badge can no longer disagree with the tab body or flip 0↔1: until
@@ -2427,7 +2443,7 @@ export default function WorkersCollection({
                 ? (workerRunsCache.get(w.id)?.length
                     ?? (w.last_run ? 1 : undefined))
                 : undefined,
-              custom: "unmigrated" as const,
+              custom: WORKER_TAB_REASON[key],
               render: () => key === "Setup"
                 ? <SetupTab w={w} onOpenSource={() => openAdvancedAndSelectWorkerTab(w.id, "Source")} />
                 : <Tab w={w} />,
@@ -2445,7 +2461,7 @@ export default function WorkersCollection({
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
     add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) },
     states: {
-      // #1364 — improved help text + action CTA linking to /workers/new
+      // #1364 — improved help text + action CTA driving the in-Emily create flow
       empty: {
         title: "No workers yet",
         help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",

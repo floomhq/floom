@@ -138,18 +138,26 @@ export interface DetailSection {
 /**
  * Reasons a tab may opt OUT of the structured register (the escape hatch).
  * Every custom tab must name one — that keeps bespoke UI explicit and
- * review-visible. `unmigrated` is transitional debt: a surface not yet ported
- * to the structured register (lint warns, burned down per follow-up PR).
+ * review-visible. Structured-by-default: only non-tabular / async-loaded /
+ * stateful-editor UI earns a reason here. Anything that is a synchronous
+ * key/value or form pane stays structured (summary/sections).
  */
 export type CustomTabReason =
-  | "worker-flow"
-  | "version-history"
-  | "brain-editor"
-  | "file-viewer"
-  | "approval-review"
-  | "run-output"
-  | "run-logs"
-  | "unmigrated";
+  | "worker-flow" // worker Overview: the flow graph + about body (WorkerFlow canvas)
+  | "worker-runs" // embedded run-history list (summary + recent-run links)
+  | "worker-setup" // nested second-row tab editor (Inputs/Triggers/Limits/Alerts)
+  | "version-history" // git-log style version list with diff/restore row actions
+  | "brain-editor" // attached-folder editor (WorkerBrainEditor)
+  | "file-viewer" // file/code/JSON viewers (FilesEditor, InlineFileOpen, raw JSON blocks)
+  | "tool-list" // async-loaded tool/action allowlist panels (search + segmented controls)
+  | "used-by" // async reverse-index "which workers use this" list panels
+  | "activity-feed" // async run-activity / email-peek feed panels
+  | "secret-form" // interactive secret add/replace/delete editor
+  | "settings-form" // bespoke settings section forms (channels, members, tokens, danger…)
+  | "approval-review" // input-left / proposed-output-right approval review UI
+  | "run-output" // run Output viewer (artifacts + metrics strip)
+  | "run-inputs" // raw run input JSON viewer
+  | "run-logs"; // run Logs stream
 
 interface DetailTabBase {
   key: string;

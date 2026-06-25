@@ -687,7 +687,7 @@ export default function ConnectionsBrowsePage() {
             key: "Actions",
             label: "Actions",
             count: i.tools_count || undefined,
-            custom: "unmigrated",
+            custom: "tool-list",
             render: () => <CatalogToolsPanel item={i} />,
           },
         ],
