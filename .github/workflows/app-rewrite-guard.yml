@@ -2,9 +2,9 @@ name: Landing app-route guard
 
 # Durable guard against re-introducing landing /app fall-through regressions.
 #
-# The landing project must proxy /app/* to the canonical fedes-projects
-# dashboard production domain. Re-introducing the old dashboard-three alias
-# freezes floom.dev/app on a stale build outside this token's Vercel team.
+# The landing project must proxy /app/* to the verified dashboard production
+# hostname owned by the floomhq dashboard project. Pointing at a dashboard
+# hostname that this Vercel team cannot alias freezes /app on stale builds.
 
 on:
   pull_request:
@@ -30,15 +30,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Assert landing app routes use canonical dashboard
+      - name: Assert landing app routes use verified dashboard
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, pathlib, sys
 
-          canonical = "https://r9-detail.floom.dev"
+          canonical = "https://workeros-cloud-dashboard-three.vercel.app"
           stale_fragments = [
-              "workeros-cloud-dashboard-" + "three.vercel.app",
+              "workeros-cloud-dashboard.vercel.app",
+              "r9-detail.floom.dev",
               "web-iota-five-" + "12.vercel.app",
           ]
 
@@ -87,5 +88,5 @@ jobs:
                   print(f"::error::  - {e}")
               sys.exit(1)
 
-          print("OK: landing app routes proxy to the canonical dashboard production domain")
+          print("OK: landing app routes proxy to the verified dashboard production hostname")
           PY

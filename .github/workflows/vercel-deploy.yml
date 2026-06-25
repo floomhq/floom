@@ -112,29 +112,22 @@ jobs:
           set -uo pipefail
           # Bare root==2xx is NOT proof: the stale build also served 200, which is
           # exactly how a frozen apex passed before. Assert TWO things until they
-          # hold: (1) the apex deployment id matches the deploy we just shipped
-          # (via the x-vercel-id header / deployment id), and (2) the FW-03 build
-          # marker /v3/integrations returns 200 (it 404s on any build predating
-          # the next.config.ts rewrite).
+          # hold: (1) the landing project's production deploy id matches the deploy
+          # we just shipped, and (2) the public /app/login rewrite serves without a
+          # route loop or server error.
           for i in $(seq 1 30); do
-            code="$(python3 ops/http-client.py status --url "https://${APEX_DOMAIN}/v3/integrations" --timeout 20 || true)"
-            echo "attempt $i: /v3/integrations -> code=$code"
-            # x-vercel-id is region::pop-...; the deployment id is not in it, so we
-            # gate on the build marker (200) which is unique to this+later builds,
-            # then confirm the project's production deploy id equals ours.
-            if [ "$code" = "200" ]; then
-              proj_id="$(python3 ops/http-client.py vercel-json-get \
-                --url "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}?teamId=${VERCEL_LANDING_ORG_ID}" \
-                --field targets.production.id)"
-              echo "project production deploy id: $proj_id (expected ${DEPLOY_ID})"
-              if [ "$proj_id" = "$DEPLOY_ID" ]; then
-                echo "Apex serves the new deploy ($DEPLOY_ID) and /v3/integrations is 200."
-                exit 0
-              fi
+            code="$(python3 ops/http-client.py status --url "https://${APEX_DOMAIN}/app/login" --timeout 20 || true)"
+            proj_id="$(python3 ops/http-client.py vercel-json-get \
+              --url "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}?teamId=${VERCEL_LANDING_ORG_ID}" \
+              --field targets.production.id)"
+            echo "attempt $i: project production deploy id=$proj_id (expected ${DEPLOY_ID}); /app/login -> code=$code"
+            if [ "$proj_id" = "$DEPLOY_ID" ] && [ "$code" = "200" ]; then
+              echo "Apex serves the new deploy ($DEPLOY_ID) and /app/login is 200."
+              exit 0
             fi
             sleep 10
           done
-          echo "::error::${APEX_DOMAIN} did not converge to the new deploy (${DEPLOY_ID}) with /v3/integrations==200."
+          echo "::error::${APEX_DOMAIN} did not converge to the new deploy (${DEPLOY_ID}) with /app/login==200."
           exit 1
 
   deploy-dashboard:
@@ -145,12 +138,12 @@ jobs:
 
     env:
       # Dashboard lives on the floomhq Vercel team (same org as landing). The
-      # landing rewrite points /app/* at r9-detail.floom.dev, which must track
-      # this project's production deploy.
+      # landing rewrite points /app/* at the dashboard-owned production hostname,
+      # which must track this project's production deploy.
       DASHBOARD_SCOPE: ${{ secrets.VERCEL_ORG_ID }}
       DASHBOARD_PROJECT_NAME: workeros-cloud-dashboard
       DASHBOARD_PROJECT_ID_FALLBACK: ${{ secrets.VERCEL_WORKEROS_CLOUD_DASHBOARD_PROJECT_ID }}
-      DASHBOARD_PROD_ALIAS: r9-detail.floom.dev
+      DASHBOARD_PROD_ALIAS: workeros-cloud-dashboard-three.vercel.app
 
     steps:
       # The private engine submodule is cloned with the self-hosted runner's

@@ -37,7 +37,7 @@ OS_API="https://workers-api.floom.dev"
 CLOUD_HOST="https://floom.dev"
 CLOUD_LANDING_HOST="https://floom.dev"
 CLOUD_API="https://workeros-api.floom.dev"
-CLOUD_DASHBOARD_HOST="${CLOUD_DASHBOARD_HOST:-https://r9-detail.floom.dev}"
+CLOUD_DASHBOARD_HOST="${CLOUD_DASHBOARD_HOST:-https://workeros-cloud-dashboard-three.vercel.app}"
 CLOUD_APP_HOSTS=(
   "https://floom.dev"
   "$CLOUD_HOST"
