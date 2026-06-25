@@ -2147,6 +2147,37 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _approval_batch_share_token_for_link_id(link_id: str) -> str | None:
+    secret = (
+        os.environ.get("WORKEROS_APPROVAL_SIGNING_SECRET")
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("WORKEROS_CLOUD_SUPABASE_SERVICE_ROLE_KEY")
+        or _cloud_floom_secret
+        or ""
+    ).strip()
+    if not secret:
+        return None
+    import base64 as _base64
+    import hmac as _hmac
+
+    digest = _hmac.new(
+        secret.encode("utf-8"),
+        f"workeros-approval-batch-share-link:{link_id}".encode("utf-8"),
+        _hashlib.sha256,
+    ).digest()
+    return "fls_" + _base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def _approval_batch_share_response_for_row(row: dict[str, Any], *, token: str) -> dict[str, str]:
+    if str(row.get("token_hash") or "") != _engine_share_links._hash_share_token(token):
+        raise HTTPException(status_code=409, detail="Existing share link cannot be reissued")
+    return {
+        "token": token,
+        "url": _engine_share_links._standalone_share_url(token),
+        "entity_type": "approvals_batch",
+    }
+
+
 def _load_approvals_batch_share(token: str, repos: Any) -> dict[str, Any]:
     repo = _share_links_repo(repos)
     if repo is not None:
@@ -2285,19 +2316,25 @@ def create_approvals_batch_share_link(
     workspace_id = _active_workspace_id_for_batch(request, auth)
     repo = _share_links_repo(repos)
     if repo is not None:
+        import uuid as _uuid
+
         for _ in range(8):
-            token = _engine_share_links._mint_standalone_share_token()
+            link_id = f"sl_{_uuid.uuid4().hex}"
+            token = _approval_batch_share_token_for_link_id(link_id)
+            if token is None:
+                token = _engine_share_links._mint_standalone_share_token()
             try:
-                repo.create_approvals_batch_share(
+                row = repo.create_approvals_batch_share(
                     workspace_id=workspace_id,
                     owner_id=auth.user_id,
                     token_hash=_engine_share_links._hash_share_token(token),
+                    link_id=link_id,
                 )
-                return {
-                    "token": token,
-                    "url": _engine_share_links._standalone_share_url(token),
-                    "entity_type": "approvals_batch",
-                }
+                row_id = str(row.get("id") or "")
+                existing_token = _approval_batch_share_token_for_link_id(row_id) if row_id else None
+                return _approval_batch_share_response_for_row(row, token=existing_token or token)
+            except HTTPException:
+                raise
             except Exception:
                 # Token hash collisions are vanishingly rare; retry exactly like
                 # the engine's SQLite helper. Other repository failures surface

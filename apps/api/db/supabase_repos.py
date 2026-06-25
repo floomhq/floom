@@ -5100,6 +5100,32 @@ class SupabaseShareLinkRepository(_BaseSupabaseRepository):
 
     _TABLE = "share_links"
 
+    def _get_active_approvals_batch_share(
+        self,
+        *,
+        workspace_id: str,
+        owner_id: str,
+        now_iso_str: str,
+    ) -> dict[str, Any] | None:
+        response = (
+            self._client.table(self._TABLE)
+            .select("*")
+            .eq("entity_type", "approvals_batch")
+            .eq("entity_id", workspace_id)
+            .eq("workspace_id", workspace_id)
+            .eq("owner_id", owner_id)
+            .is_("revoked_at", "null")
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        if row is None:
+            return None
+        if self._is_expired(row.get("expires_at"), now_iso_str):
+            self._client.table(self._TABLE).update({"revoked_at": now_iso_str}).eq("id", row["id"]).execute()
+            return None
+        return row
+
     def create_approvals_batch_share(
         self,
         *,
@@ -5107,12 +5133,21 @@ class SupabaseShareLinkRepository(_BaseSupabaseRepository):
         owner_id: str,
         token_hash: str,
         expires_at: str | None = None,
+        link_id: str | None = None,
     ) -> dict[str, Any]:
         import uuid as _uuid
 
         now = datetime.now(timezone.utc).isoformat()
+        existing = self._get_active_approvals_batch_share(
+            workspace_id=workspace_id,
+            owner_id=owner_id,
+            now_iso_str=now,
+        )
+        if existing is not None:
+            return existing
+
         row = {
-            "id": f"sl_{_uuid.uuid4().hex}",
+            "id": link_id or f"sl_{_uuid.uuid4().hex}",
             "entity_type": "approvals_batch",
             "entity_id": workspace_id,
             "file_path": "",
@@ -5123,7 +5158,17 @@ class SupabaseShareLinkRepository(_BaseSupabaseRepository):
             "expires_at": expires_at,
             "revoked_at": None,
         }
-        response = self._client.table(self._TABLE).insert(row).execute()
+        try:
+            response = self._client.table(self._TABLE).insert(row).execute()
+        except Exception:
+            existing = self._get_active_approvals_batch_share(
+                workspace_id=workspace_id,
+                owner_id=owner_id,
+                now_iso_str=now,
+            )
+            if existing is not None:
+                return existing
+            raise
         return _first_row(response) or row
 
     @staticmethod

@@ -330,6 +330,77 @@ def test_share_link_repo_create_resolve_and_revoke_approval_batch_share():
     ) is None
 
 
+def test_share_link_repo_reuses_active_batch_share_until_revoked():
+    rows = {"share_links": []}
+    repo = SupabaseShareLinkRepository(client=_FakeClient(rows))
+
+    first = repo.create_approvals_batch_share(
+        workspace_id="ws_1",
+        owner_id="user_1",
+        token_hash="hash_first",
+        expires_at="2999-01-01T00:00:00+00:00",
+    )
+    second = repo.create_approvals_batch_share(
+        workspace_id="ws_1",
+        owner_id="user_1",
+        token_hash="hash_second",
+        expires_at="2999-01-01T00:00:00+00:00",
+    )
+
+    assert second["id"] == first["id"]
+    assert second["token_hash"] == "hash_first"
+    assert len(rows["share_links"]) == 1
+
+    assert repo.revoke_approvals_batch_share(
+        token_hash="hash_first",
+        owner_id="user_1",
+        revoked_at="2026-06-25T00:01:00+00:00",
+    ) is True
+
+    third = repo.create_approvals_batch_share(
+        workspace_id="ws_1",
+        owner_id="user_1",
+        token_hash="hash_third",
+        expires_at="2999-01-01T00:00:00+00:00",
+    )
+
+    assert third["id"] != first["id"]
+    assert third["token_hash"] == "hash_third"
+    assert len(rows["share_links"]) == 2
+
+
+def test_approval_batch_share_route_reuses_token_until_revoked(monkeypatch):
+    from apps.api import main as cloud_main
+
+    rows = {"share_links": []}
+    repo = SupabaseShareLinkRepository(client=_FakeClient(rows))
+    repos = SimpleNamespace(share_links=repo)
+    request = SimpleNamespace(headers={})
+    auth = SimpleNamespace(user_id="user_1")
+
+    monkeypatch.setenv("WORKEROS_APPROVAL_SIGNING_SECRET", "stable-route-secret")
+
+    with active_workspace("ws_1"):
+        first = cloud_main.create_approvals_batch_share_link(request, auth=auth, repos=repos)
+        second = cloud_main.create_approvals_batch_share_link(request, auth=auth, repos=repos)
+
+    assert second["token"] == first["token"]
+    assert second["url"] == first["url"]
+    assert len(rows["share_links"]) == 1
+
+    assert repo.revoke_approvals_batch_share(
+        token_hash=cloud_main._engine_share_links._hash_share_token(first["token"]),
+        owner_id="user_1",
+        revoked_at="2026-06-25T00:01:00+00:00",
+    ) is True
+
+    with active_workspace("ws_1"):
+        third = cloud_main.create_approvals_batch_share_link(request, auth=auth, repos=repos)
+
+    assert third["token"] != first["token"]
+    assert len(rows["share_links"]) == 2
+
+
 def test_share_link_repo_rejects_missing_revoked_and_expired_batch_links():
     rows = {
         "share_links": [

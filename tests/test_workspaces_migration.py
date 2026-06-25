@@ -133,6 +133,9 @@ def test_approval_batch_share_links_migration_hashes_tokens_and_enforces_rls():
     assert "token text" not in text
     assert "share_links_token_hash_idx" in text
     assert "share_links_approvals_batch_scope_idx" in text
+    assert "share_links_active_scope_unique_idx" in text
+    assert "on public.share_links (entity_type, entity_id, workspace_id, owner_id)" in text
+    assert "where revoked_at is null" in text
     assert "alter table public.share_links enable row level security" in text
     assert "alter table public.share_links force row level security" in text
     assert "workspaces.owner_user_id = auth.uid()" in text

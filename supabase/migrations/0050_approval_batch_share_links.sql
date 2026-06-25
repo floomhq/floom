@@ -35,6 +35,10 @@ create unique index if not exists share_links_token_hash_idx
 create index if not exists share_links_approvals_batch_scope_idx
     on public.share_links (entity_type, workspace_id, owner_id, revoked_at);
 
+create unique index if not exists share_links_active_scope_unique_idx
+    on public.share_links (entity_type, entity_id, workspace_id, owner_id)
+    where revoked_at is null;
+
 alter table public.share_links enable row level security;
 alter table public.share_links force row level security;
 
