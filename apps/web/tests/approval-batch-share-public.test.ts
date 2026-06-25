@@ -139,11 +139,16 @@ describe("public approval batch share route", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps minted /s links top-level when the hosted app uses basePath /app", () => {
+  it("does NOT self-rewrite /s/* in the dashboard config (apex handles it)", () => {
+    // A dashboard self-rewrite of top-level /s/* into the basePath is rejected by
+    // Next.js ("rewrites urls outside of the basePath") and broke hosted
+    // (basePath="/app") builds. It was also ineffective: the hosted /s/* URL
+    // reaches the landing apex, not this dashboard, so the apex rewrites
+    // /s/* -> /app/s/* (mirroring /app/*). OSS (no basePath) serves /s/[token]
+    // directly. So next.config must NOT contain the /s/ rewrite.
     const config = readFileSync(join(process.cwd(), "next.config.ts"), "utf-8");
-    expect(config).toContain('source: "/s/:path*"');
-    expect(config).toContain("destination: `${APP_BASE_PATH}/s/:path*`");
-    expect(config).toContain("basePath: false");
+    expect(config).not.toContain('source: "/s/:path*"');
+    expect(config).not.toContain("destination: `${APP_BASE_PATH}/s/:path*`");
   });
 
   it("does not call API_BASE directly from the logged-out share card", () => {
