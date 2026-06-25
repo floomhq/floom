@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import re
+import secrets as pysecrets
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -64,8 +65,7 @@ from services.uploads import _store_uploaded_blob
 from services.worker_access import _delete_worker_impl
 from services.product_events import emit_approval_decided
 from services.share_links import (
-    _create_or_get_standalone_share_link,
-    _load_standalone_share_row,
+    _standalone_share_url,
 )
 
 logger = logging.getLogger("floom.api")
@@ -78,6 +78,104 @@ _PUBLIC_BATCH_RATE_BUCKETS: dict[str, list[float]] = {}
 _PUBLIC_BATCH_RATE_WINDOW_SECONDS = 60.0
 _PUBLIC_BATCH_READ_LIMIT = 120
 _PUBLIC_BATCH_ACTION_LIMIT = 30
+_APPROVAL_LEAK_PATTERNS = (
+    "token source per account",
+    '"http_error"',
+    "http_error",
+    "rate_limit_exceeded",
+    "rate limit exceeded",
+    "not connected",
+)
+def _new_approval_batch_token() -> str:
+    return f"fls_{pysecrets.token_urlsafe(32)}"
+
+
+def _approval_batch_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _create_approvals_batch_share_link(
+    *,
+    repos: Repositories,
+    workspace_id: str,
+    owner_id: str,
+) -> Dict[str, str]:
+    workspace_id = _safe_workspace_id(workspace_id) or ""
+    if not workspace_id or not owner_id:
+        raise HTTPException(status_code=409, detail="Approval batch cannot be shared")
+    share_repo = getattr(repos, "share_links", None)
+    if share_repo is None or not callable(getattr(share_repo, "create_approvals_batch_share", None)):
+        raise HTTPException(status_code=503, detail="Share-link repository does not support approval batches")
+    for _attempt in range(5):
+        token = _new_approval_batch_token()
+        try:
+            share_repo.create_approvals_batch_share(
+                workspace_id=workspace_id,
+                owner_id=owner_id,
+                token_hash=_approval_batch_token_hash(token),
+                expires_at=None,
+            )
+            return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+        except Exception:
+            logger.warning("approval batch share-link create failed", exc_info=True)
+    raise HTTPException(status_code=503, detail="Could not create approval batch share link")
+
+
+def _load_approval_batch_share_row(token: str, repos: Repositories) -> Dict[str, Any] | None:
+    if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    share_repo = getattr(repos, "share_links", None)
+    if share_repo is None or not callable(getattr(share_repo, "resolve_approvals_batch_share", None)):
+        raise HTTPException(status_code=503, detail="Share-link repository does not support approval batches")
+    from db import now_iso
+
+    row = share_repo.resolve_approvals_batch_share(
+        token_hash=_approval_batch_token_hash(token),
+        now_iso_str=now_iso(),
+    )
+    return dict(row) if row else None
+
+
+def _revoke_approvals_batch_share_link(*, repos: Repositories, token: str, owner_id: str) -> Dict[str, str]:
+    if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    share_repo = getattr(repos, "share_links", None)
+    if share_repo is None or not callable(getattr(share_repo, "revoke_approvals_batch_share", None)):
+        raise HTTPException(status_code=503, detail="Share-link repository does not support approval batches")
+    from db import now_iso
+
+    revoked = share_repo.revoke_approvals_batch_share(
+        token_hash=_approval_batch_token_hash(token),
+        owner_id=owner_id,
+        revoked_at=now_iso(),
+    )
+    if not revoked:
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    return {"status": "revoked", "entity_type": "approvals_batch"}
+
+
+def _revoke_all_approvals_batch_share_links_for_workspace(
+    *,
+    repos: Repositories,
+    workspace_id: str,
+    owner_id: str,
+) -> Dict[str, Any]:
+    workspace_id = _safe_workspace_id(workspace_id) or ""
+    if not workspace_id or not owner_id:
+        raise HTTPException(status_code=409, detail="Approval batch links cannot be revoked")
+    share_repo = getattr(repos, "share_links", None)
+    if share_repo is None or not callable(getattr(share_repo, "revoke_all_for_workspace", None)):
+        raise HTTPException(status_code=503, detail="Share-link repository does not support approval batches")
+    from db import now_iso
+
+    revoked = share_repo.revoke_all_for_workspace(
+        workspace_id=workspace_id,
+        owner_id=owner_id,
+        revoked_at=now_iso(),
+    )
+    return {"status": "revoked", "entity_type": "approvals_batch", "revoked": int(revoked)}
+
+
 _BATCH_SENSITIVE_KEYS = {
     "authorization",
     "bearer",
@@ -274,9 +372,9 @@ def _active_workspace_id_for_batch(request: Request, auth: AuthContext) -> str:
     header_workspace_id = _safe_workspace_id(header_value)
     active_workspace_id: str | None = None
     try:
-        import git_ops as _git_ops
+        from git_ops import get_active_workspace_id
 
-        active_workspace_id = _safe_workspace_id(_git_ops.get_active_workspace_id())
+        active_workspace_id = _safe_workspace_id(get_active_workspace_id())
     except Exception:
         active_workspace_id = None
     if active_workspace_id:
@@ -359,26 +457,180 @@ def _approval_kind(approval: Dict[str, Any]) -> str:
     return kind if kind in {"run", "agent_tool", "destructive_delete"} else "run"
 
 
+def _parsed_decision_input(approval: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        parsed = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        parsed = {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _looks_like_worker_slug(value: str, worker_id: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return True
+    if worker_id and text == worker_id:
+        return True
+    return bool(re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+){1,5}", text))
+
+
+def _contains_public_approval_leak(value: Any) -> bool:
+    try:
+        text = json.dumps(value, default=str).lower() if not isinstance(value, str) else value.lower()
+    except Exception:
+        text = str(value).lower()
+    return any(pattern in text for pattern in _APPROVAL_LEAK_PATTERNS)
+
+
+def _walk_strings(value: Any, *, depth: int = 0) -> list[str]:
+    if depth > 6:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, dict):
+        out: list[str] = []
+        for item in value.values():
+            out.extend(_walk_strings(item, depth=depth + 1))
+        return out
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value[:50]:
+            out.extend(_walk_strings(item, depth=depth + 1))
+        return out
+    return []
+
+
+def _extract_public_batch_channels(*values: Any) -> list[str]:
+    candidates: list[str] = []
+    channel_keys = {"channel", "channels", "platform", "platforms", "destination", "destinations", "target", "targets"}
+
+    def visit(value: Any, key_hint: str = "", depth: int = 0) -> None:
+        if depth > 6:
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                visit(item, str(key).lower(), depth + 1)
+            return
+        if isinstance(value, list):
+            for item in value[:20]:
+                visit(item, key_hint, depth + 1)
+            return
+        if isinstance(value, str) and (key_hint in channel_keys or value.lower() in {"youtube", "linkedin", "x", "twitter", "instagram", "tiktok"}):
+            candidates.append(value)
+
+    for value in values:
+        visit(value)
+
+    cleaned: list[str] = []
+    aliases = {"x": "X", "twitter": "X", "youtube": "YouTube", "linkedin": "LinkedIn"}
+    for raw in candidates:
+        for piece in re.split(r"[,/+&]", raw):
+            value = piece.strip().strip("'\"")
+            if not value:
+                continue
+            lower = value.lower()
+            label = aliases.get(lower) or value.replace("_", " ").replace("-", " ").title()
+            if label not in cleaned:
+                cleaned.append(label)
+    return cleaned[:4]
+
+
+def _extract_public_batch_caption(*values: Any) -> str | None:
+    keys = ("caption", "post", "text", "body", "message", "title", "topic", "subject")
+    for value in values:
+        if isinstance(value, dict):
+            for key in keys:
+                item = value.get(key)
+                if isinstance(item, str) and item.strip():
+                    return item.strip()
+        for item in _walk_strings(value):
+            if len(item.split()) >= 2 and not _contains_public_approval_leak(item):
+                return item
+    return None
+
+
+def _caption_snippet(text: str | None) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    quoted = re.search(r"['\"]([^'\"]{2,60})['\"]", cleaned)
+    if quoted:
+        return quoted.group(1).strip()
+    words = cleaned.split()
+    return " ".join(words[:6]).strip(".,;:")[:60]
+
+
+def _public_batch_human_label(
+    approval: Dict[str, Any],
+    decision_input: Dict[str, Any],
+    preview_payload: Any,
+) -> str:
+    worker_id = str(approval.get("worker_id") or "")
+    existing = str(approval.get("label") or "").strip()
+    channels = _extract_public_batch_channels(decision_input, preview_payload, approval.get("preview"))
+    caption = _caption_snippet(_extract_public_batch_caption(decision_input, preview_payload, approval.get("preview")))
+    if channels and caption:
+        return f"Publish '{caption}' to {' + '.join(channels)}"
+    if channels:
+        return f"Publish to {' + '.join(channels)}"
+    if existing and not _looks_like_worker_slug(existing, worker_id) and not _contains_public_approval_leak(existing):
+        return existing[:160]
+    return "Review proposed action"
+
+
+def _public_batch_clean_preview(
+    approval: Dict[str, Any],
+    decision_input: Dict[str, Any],
+    preview_payload: Any,
+) -> str:
+    raw = str(approval.get("preview") or "").strip()
+    if raw and not _contains_public_approval_leak(raw):
+        lines = [
+            line.strip()
+            for line in raw.splitlines()
+            if line.strip() and not _contains_public_approval_leak(line)
+        ]
+        if lines:
+            return "\n".join(lines)[:2000]
+    channels = _extract_public_batch_channels(decision_input, preview_payload, raw)
+    caption = _extract_public_batch_caption(decision_input, preview_payload)
+    parts: list[str] = []
+    if channels:
+        parts.append(f"Channels: {' + '.join(channels)}")
+    if caption:
+        parts.append(f"Caption: {caption[:1000]}")
+    return "\n".join(parts) if parts else "Review the proposed action details before deciding."
+
+
 def _public_batch_approval_item(approval: Dict[str, Any], repos: Repositories) -> Dict[str, Any]:
     public = _public_approval_response(approval, repos)
+    decision_input = _parsed_decision_input(approval)
     public.pop("decision_input_json", None)
     public.pop("edited_output_json", None)
     public.pop("follow_up_run_id", None)
     public.pop("workspace_id", None)
     public["preview_payload"] = _scrub_public_batch_value(public.get("preview_payload"))
+    public["label"] = _public_batch_human_label(approval, decision_input, public.get("preview_payload"))
+    public["preview"] = _public_batch_clean_preview(approval, decision_input, public.get("preview_payload"))
     public["kind"] = _approval_kind(approval)
-    public["action_token"] = try_approval_public_token(dict(approval))
     return public
 
 
-def _load_approvals_batch_share(token: str) -> Dict[str, Any]:
-    row = _load_standalone_share_row(token)
-    if not row or str(row.get("entity_type") or "") != "approvals_batch":
-        raise HTTPException(status_code=404, detail="Approval batch link not found")
-    workspace_id = _safe_workspace_id(str(row.get("entity_id") or ""))
-    if not workspace_id:
-        raise HTTPException(status_code=404, detail="Approval batch link not found")
-    return dict(row)
+def _load_approvals_batch_share(token: str, repos: Repositories) -> Dict[str, Any]:
+    row = _load_approval_batch_share_row(token, repos)
+    if row:
+        workspace_id = _safe_workspace_id(str(row.get("workspace_id") or ""))
+        if not workspace_id:
+            raise HTTPException(status_code=404, detail="Approval batch link not found")
+        return {
+            "entity_type": "approvals_batch",
+            "entity_id": workspace_id,
+            "owner_id": str(row.get("owner_id") or ""),
+            "created_at": row.get("created_at"),
+        }
+
+    raise HTTPException(status_code=404, detail="Approval batch link not found")
 
 
 def _list_pending_approvals_for_workspace(
@@ -390,13 +642,16 @@ def _list_pending_approvals_for_workspace(
 ) -> list[Dict[str, Any]]:
     bounded_limit = max(1, min(int(limit or 200), 200))
     list_for_workspace = getattr(repos.approvals, "list_pending_for_workspace", None)
-    if callable(list_for_workspace):
-        rows = list_for_workspace(workspace_id=workspace_id, limit=bounded_limit)
-    else:
-        rows = repos.approvals.list_pending(owner_id=owner_id, limit=bounded_limit)
+    if not callable(list_for_workspace):
+        raise HTTPException(
+            status_code=503,
+            detail="Approval repository does not support workspace-scoped pending approvals",
+        )
+    rows = list_for_workspace(workspace_id=workspace_id, owner_id=owner_id, limit=bounded_limit)
     return [
         dict(row) for row in rows
         if _approval_workspace_id(dict(row), repos) == workspace_id
+        and str(dict(row).get("owner_id") or "") == owner_id
     ]
 
 
@@ -780,13 +1035,44 @@ def create_approvals_batch_share_link(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
-    """Mint or rotate one public actionable link for pending approvals in a workspace."""
+    """Create a new public actionable link for pending approvals in a workspace."""
     workspace_id = _active_workspace_id_for_batch(request, auth)
-    return _create_or_get_standalone_share_link(
-        entity_type="approvals_batch",
-        entity_id=workspace_id,
+    _list_pending_approvals_for_workspace(
+        repos,
+        workspace_id=workspace_id,
+        owner_id=auth.user_id,
+        limit=200,
+    )
+    return _create_approvals_batch_share_link(
+        repos=repos,
+        workspace_id=workspace_id,
         owner_id=auth.user_id,
     )
+
+
+@approvals_router.post("/approvals/batch-share-link/revoke-all")
+def revoke_all_approvals_batch_share_links_for_workspace(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Revoke every active approval batch public link for the active workspace."""
+    workspace_id = _active_workspace_id_for_batch(request, auth)
+    return _revoke_all_approvals_batch_share_links_for_workspace(
+        repos=repos,
+        workspace_id=workspace_id,
+        owner_id=auth.user_id,
+    )
+
+
+@approvals_router.post("/approvals/batch-share-link/{token}/revoke")
+def revoke_approvals_batch_share_link(
+    token: str = Path(..., min_length=10),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    """Revoke one approval batch public link without rotating sibling links."""
+    return _revoke_approvals_batch_share_link(repos=repos, token=token, owner_id=auth.user_id)
 
 
 def _public_approvals_batch_payload(
@@ -797,7 +1083,7 @@ def _public_approvals_batch_payload(
 ) -> Dict[str, Any]:
     if request is not None:
         _enforce_public_batch_rate_limit(request, token, action=False)
-    share = _load_approvals_batch_share(token)
+    share = _load_approvals_batch_share(token, repos)
     workspace_id = str(share["entity_id"])
     owner_id = str(share["owner_id"])
     rows = _list_pending_approvals_for_workspace(
@@ -846,12 +1132,24 @@ def decide_public_approvals_batch_item(
     if body.decision not in {"approved", "rejected"}:
         raise HTTPException(status_code=422, detail="decision must be approved or rejected")
     _enforce_public_batch_rate_limit(request, token, action=True)
-    share = _load_approvals_batch_share(token)
+    share = _load_approvals_batch_share(token, repos)
     workspace_id = str(share["entity_id"])
+    owner_id = str(share["owner_id"])
+    rows = _list_pending_approvals_for_workspace(
+        repos,
+        workspace_id=workspace_id,
+        owner_id=owner_id,
+        limit=200,
+    )
+    scope_ids = {str(row.get("id") or "") for row in rows if row.get("id")}
+    if approval_id not in scope_ids:
+        raise HTTPException(status_code=404, detail="Approval not found")
     approval = repos.approvals.get_public(approval_id=approval_id)
     if approval is None:
         raise HTTPException(status_code=404, detail="Approval not found")
     approval = dict(approval)
+    if str(approval.get("owner_id") or "") != owner_id:
+        raise HTTPException(status_code=404, detail="Approval not found")
     if _approval_workspace_id(approval, repos) != workspace_id:
         raise HTTPException(status_code=404, detail="Approval not found")
     if _is_row_past_expiry(approval):

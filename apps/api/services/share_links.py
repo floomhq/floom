@@ -22,7 +22,13 @@ from fastapi import HTTPException
 from core.urls import _frontend_base_url, _short_link_base_url
 
 def _standalone_share_url(token: str) -> str:
-    return f"{_frontend_base_url()}/s/{urllib.parse.quote(token, safe='')}"
+    base = _frontend_base_url()
+    # Cloud hosts the dashboard under /app, but public standalone shares must be
+    # top-level, no-auth URLs. The web app rewrites /s/* back to the basePath
+    # route internally, so the URL we hand to reviewers can stay clean.
+    if base.endswith("/app"):
+        base = base[:-len("/app")]
+    return f"{base}/s/{urllib.parse.quote(token, safe='')}"
 
 
 def _urlsafe_alnum(length: int) -> str:
@@ -139,7 +145,7 @@ def _create_or_get_standalone_share_link(
 
 def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
     from db import get_db
-    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
+    if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
         raise HTTPException(status_code=404, detail="Share link not found")
     _ensure_standalone_share_links_table()
     with get_db() as conn:

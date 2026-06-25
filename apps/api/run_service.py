@@ -2646,6 +2646,28 @@ _APPROVAL_OUTPUT_KEY = "approved_output"
 # How far we walk the retry_of_run_id chain when resolving the approval root.
 # A bounded walk prevents a malformed/cyclic chain from looping forever.
 _APPROVAL_RETRY_CHAIN_MAX = 20
+_APPROVAL_PROPOSAL_INFRA_PATTERNS = (
+    "token source per account",
+    '"http_error"',
+    "http_error",
+    "rate_limit_exceeded",
+    "rate limit exceeded",
+    "not connected",
+)
+_APPROVAL_PROPOSAL_INFRA_ERROR_KEYS = {
+    "code",
+    "details",
+    "error",
+    "error_code",
+    "error_detail",
+    "error_details",
+    "error_kind",
+    "error_message",
+    "failure",
+    "message",
+    "msg",
+    "raw_error",
+}
 
 
 def _is_engine_approved_execution_run(run_id: str, repos: Repositories) -> bool:
@@ -2719,6 +2741,46 @@ def _apply_approval_phase_inputs(
     return out
 
 
+def _approval_proposal_error_text(value: Any) -> str:
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key, child in value.items():
+            if str(key).strip().lower() in _APPROVAL_PROPOSAL_INFRA_ERROR_KEYS:
+                parts.append(_approval_proposal_error_text(child))
+        return "\n".join(part for part in parts if part)
+    if isinstance(value, list):
+        return "\n".join(_approval_proposal_error_text(item) for item in value)
+    return str(value)
+
+
+def _decision_required_has_infra_error(decision_required: Dict[str, Any]) -> bool:
+    text = _approval_proposal_error_text(decision_required).lower()
+    return bool(text) and any(pattern in text for pattern in _APPROVAL_PROPOSAL_INFRA_PATTERNS)
+
+
+def _fail_invalid_approval_proposal(
+    *,
+    run_id: str,
+    owner_id: str,
+    repos_obj: Repositories,
+    log_fn: Callable[[str, str], None],
+) -> None:
+    message = (
+        "Approval proposal could not be prepared because a connected account or "
+        "publishing service returned a configuration error."
+    )
+    update_run_status(
+        run_id,
+        RunStatus.FAILED.value,
+        error=message,
+        error_code="approval_proposal_config_error",
+        user_id=owner_id,
+        repos=repos_obj,
+    )
+    publish_run_part(run_id, {"type": "finish", "status": "failed", "error": message})
+    log_fn(f"Run failed: {message}", level="error")
+
+
 def _pause_run_for_required_approval(
     *,
     run_id: str,
@@ -2731,6 +2793,14 @@ def _pause_run_for_required_approval(
     repos_obj: Repositories,
     log_fn: Callable[[str, str], None],
 ) -> None:
+    if _decision_required_has_infra_error(decision_required):
+        _fail_invalid_approval_proposal(
+            run_id=run_id,
+            owner_id=owner_id,
+            repos_obj=repos_obj,
+            log_fn=log_fn,
+        )
+        return
     approval_id = f"apr_{uuid.uuid4().hex[:12]}"
     label = decision_required.get("label") or (
         config.approvals.label if config and config.approvals else "Approve action"
@@ -3277,6 +3347,14 @@ def execute_run(
         # would spawn a second approval + follow-up and fire the side effect
         # twice. The execute run is already authorised; let it complete once.
         if decision_required and worker_needs_approval and not approval_follow_up and result.status not in _non_approval_terminal:
+            if _decision_required_has_infra_error(decision_required):
+                _fail_invalid_approval_proposal(
+                    run_id=run_id,
+                    owner_id=owner_id,
+                    repos_obj=repos_obj,
+                    log_fn=log_fn,
+                )
+                return
             approval_id = f"apr_{uuid.uuid4().hex[:12]}"
             label = decision_required.get("label") or (config.approvals.label if config and config.approvals else "Approve action")
             preview = decision_required.get("preview") or ""

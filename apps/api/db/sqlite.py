@@ -3913,7 +3913,7 @@ class SqliteApprovalRepository:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
-    def list_pending_for_workspace(self, *, workspace_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def list_pending_for_workspace(self, *, workspace_id: str, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = _bounded_positive_int(limit, default=100, maximum=200)
         safe_workspace_id = (workspace_id or "local-default").strip() or "local-default"
         with get_db() as conn:
@@ -3923,11 +3923,12 @@ class SqliteApprovalRepository:
                 FROM approvals a
                 LEFT JOIN workers w ON w.id = a.worker_id
                 WHERE a.status = 'pending'
+                  AND a.owner_id = ?
                   AND COALESCE(w.workspace_id, 'local-default') = ?
                 ORDER BY a.created_at ASC
                 LIMIT ?
                 """,
-                (safe_workspace_id, bounded_limit),
+                (owner_id, safe_workspace_id, bounded_limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -4046,6 +4047,167 @@ class SqliteApprovalRepository:
         if approval_id is not None:
             return self.get(owner_id=owner_id, approval_id=approval_id)
         return self.get_by_run_id(run_id=run_id)
+
+
+_SHARE_LINKS_SQL = """
+    CREATE TABLE IF NOT EXISTS share_links (
+        id          TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id   TEXT NOT NULL DEFAULT '',
+        file_path   TEXT NOT NULL DEFAULT '',
+        workspace_id TEXT,
+        owner_id    TEXT NOT NULL,
+        token_hash  TEXT NOT NULL UNIQUE,
+        created_at  TEXT NOT NULL,
+        expires_at  TEXT,
+        revoked_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_share_links_token_hash
+        ON share_links(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_share_links_approvals_batch_scope
+        ON share_links(entity_type, workspace_id, owner_id, revoked_at);
+"""
+
+
+class SqliteShareLinkRepository:
+    """SQLite-backed public share-link repository."""
+
+    def _ensure_table(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(_SHARE_LINKS_SQL)
+        legacy = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'approval_batch_share_links'"
+        ).fetchone()
+        if not legacy:
+            return
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(approval_batch_share_links)").fetchall()
+        }
+        if "token_hash" in columns:
+            rows = conn.execute("SELECT * FROM approval_batch_share_links").fetchall()
+            for row in rows:
+                stored = dict(row)
+                token_hash = str(stored.get("token_hash") or "")
+                workspace_id = str(stored.get("workspace_id") or "").strip()
+                owner_id = str(stored.get("owner_id") or "")
+                if not token_hash or not workspace_id or not owner_id:
+                    continue
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO share_links
+                        (id, entity_type, entity_id, file_path, workspace_id, owner_id,
+                         token_hash, created_at, expires_at, revoked_at)
+                    VALUES (?, 'approvals_batch', ?, '', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"sl_{uuid.uuid4().hex}",
+                        workspace_id,
+                        workspace_id,
+                        owner_id,
+                        token_hash,
+                        str(stored.get("created_at") or now_iso()),
+                        stored.get("expires_at") if "expires_at" in columns else None,
+                        stored.get("revoked_at") if "revoked_at" in columns else None,
+                    ),
+                )
+        conn.execute("DROP TABLE approval_batch_share_links")
+
+    def create_approvals_batch_share(
+        self,
+        *,
+        workspace_id: str,
+        owner_id: str,
+        token_hash: str,
+        expires_at: str | None = None,
+    ) -> dict[str, Any]:
+        created_at = now_iso()
+        link_id = f"sl_{uuid.uuid4().hex}"
+        with get_db() as conn:
+            self._ensure_table(conn)
+            conn.execute(
+                """
+                INSERT INTO share_links
+                    (id, entity_type, entity_id, file_path, workspace_id, owner_id,
+                     token_hash, created_at, expires_at, revoked_at)
+                VALUES (?, 'approvals_batch', ?, '', ?, ?, ?, ?, ?, NULL)
+                """,
+                (link_id, workspace_id, workspace_id, owner_id, token_hash, created_at, expires_at),
+            )
+            row = conn.execute(
+                "SELECT * FROM share_links WHERE id = ? LIMIT 1",
+                (link_id,),
+            ).fetchone()
+        return _row_dict(row) if row else {
+            "id": link_id,
+            "entity_type": "approvals_batch",
+            "entity_id": workspace_id,
+            "workspace_id": workspace_id,
+            "owner_id": owner_id,
+            "token_hash": token_hash,
+            "created_at": created_at,
+            "expires_at": expires_at,
+            "revoked_at": None,
+        }
+
+    def resolve_approvals_batch_share(self, *, token_hash: str, now_iso_str: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            self._ensure_table(conn)
+            row = conn.execute(
+                """
+                SELECT *
+                FROM share_links
+                WHERE entity_type = 'approvals_batch'
+                  AND token_hash = ?
+                  AND revoked_at IS NULL
+                  AND (expires_at IS NULL OR expires_at > ?)
+                LIMIT 1
+                """,
+                (token_hash, now_iso_str),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def revoke_approvals_batch_share(
+        self,
+        *,
+        token_hash: str | None = None,
+        link_id: str | None = None,
+        owner_id: str,
+        revoked_at: str,
+    ) -> bool:
+        if not token_hash and not link_id:
+            return False
+        where = "id = ?" if link_id else "token_hash = ?"
+        value = link_id or token_hash
+        with get_db() as conn:
+            self._ensure_table(conn)
+            cursor = conn.execute(
+                f"""
+                UPDATE share_links
+                SET revoked_at = ?
+                WHERE entity_type = 'approvals_batch'
+                  AND {where}
+                  AND owner_id = ?
+                  AND revoked_at IS NULL
+                """,
+                (revoked_at, value, owner_id),
+            )
+        return cursor.rowcount == 1
+
+    def revoke_all_for_workspace(self, *, workspace_id: str, owner_id: str, revoked_at: str) -> int:
+        with get_db() as conn:
+            self._ensure_table(conn)
+            cursor = conn.execute(
+                """
+                UPDATE share_links
+                SET revoked_at = ?
+                WHERE entity_type = 'approvals_batch'
+                  AND workspace_id = ?
+                  AND owner_id = ?
+                  AND revoked_at IS NULL
+                """,
+                (revoked_at, workspace_id, owner_id),
+            )
+        return int(cursor.rowcount or 0)
 
 
 

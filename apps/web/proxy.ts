@@ -70,6 +70,7 @@ const PUBLIC_PROXY_PATHS = ["/api/proxy/connections/callback"];
 const PUBLIC_PROXY_PREFIXES = [
   "/api/proxy/connections/authorize/",
   "/api/proxy/approvals/public/",
+  "/api/proxy/approvals/public-batch/",
   // ReviewPack Review Pack: the public token-gated read/vote endpoints the
   // /review/[token] page calls from the browser (no Floom session). The path
   // token + pack password are the secret; CSRF still applies to the POST.

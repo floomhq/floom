@@ -15,7 +15,6 @@ import { approvalActionLine } from "@/components/share/ApprovalActionItems";
 import { ApprovalReviewBody } from "@/components/share/ApprovalReviewBody";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import { SHARE_CARD_BODY_HEIGHT, FloomMark } from "@/components/share/ShareCardShell";
-import { API_BASE } from "@/lib/api";
 import type { ApprovalRow, PublicShareFile, StandaloneShare } from "@/lib/types";
 
 function formatBytes(bytes: number): string {
@@ -86,7 +85,7 @@ async function decideBatchApproval(
   reason?: string,
 ): Promise<void> {
   const response = await fetch(
-    `${API_BASE}/approvals/public-batch/${encodeURIComponent(token)}/items/${encodeURIComponent(approvalId)}/decision`,
+    `/s/${encodeURIComponent(token)}/items/${encodeURIComponent(approvalId)}/decision`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },

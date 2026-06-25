@@ -397,6 +397,34 @@ def test_sqlite_run_repo_implements_fail_all_pending_approval():
 
 
 # ---------------------------------------------------------------------------
+# #1965 — workspace-scoped pending approvals repository contract
+# ---------------------------------------------------------------------------
+
+def test_list_pending_for_workspace_in_approval_repository_protocol():
+    """ApprovalRepository must declare workspace-scoped pending listing."""
+    from db.interface import ApprovalRepository
+    import inspect
+    members = {name for name, _ in inspect.getmembers(ApprovalRepository)}
+    assert "list_pending_for_workspace" in members, (
+        "ApprovalRepository protocol must declare list_pending_for_workspace"
+    )
+
+
+def test_approval_batch_share_link_repository_protocol():
+    """ShareLinkRepository must expose approval-batch link persistence."""
+    from db.interface import ShareLinkRepository
+    import inspect
+
+    members = {name for name, _ in inspect.getmembers(ShareLinkRepository)}
+    assert {
+        "create_approvals_batch_share",
+        "resolve_approvals_batch_share",
+        "revoke_approvals_batch_share",
+        "revoke_all_for_workspace",
+    }.issubset(members)
+
+
+# ---------------------------------------------------------------------------
 # #1481/#1482 - approval decisions must honor atomic claim result
 # ---------------------------------------------------------------------------
 
