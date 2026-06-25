@@ -442,7 +442,7 @@ def _active_workspace_id_for_batch(request: Request, auth: AuthContext) -> str:
     header_workspace_id = _safe_workspace_id(header_value)
     active_workspace_id: str | None = None
     try:
-        from apps.api.auth.workspace_context import get_active_workspace_id
+        from git_ops import get_active_workspace_id
 
         active_workspace_id = _safe_workspace_id(get_active_workspace_id())
     except Exception:

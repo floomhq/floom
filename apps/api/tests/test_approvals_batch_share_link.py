@@ -198,6 +198,32 @@ def test_batch_share_link_is_idempotent_and_uses_top_level_standalone_url(client
     assert client.get(f"/approvals/public-batch/{first.json()['token']}").status_code == 200
 
 
+def test_batch_share_link_uses_active_workspace_context_in_cloud(client_and_main, monkeypatch):
+    client, main = client_and_main
+    _seed_approval(
+        main,
+        approval_id="apr_cloud",
+        run_id="run_cloud",
+        worker_id="w_cloud",
+        workspace_id="ws_cloud",
+    )
+    db_factory = importlib.import_module("db.factory")
+    auth_factory = importlib.import_module("auth.factory")
+    auth_multi_member = importlib.import_module("auth.multi_member")
+    repos = main.get_repositories()
+    db_factory.register_repositories("cloud", lambda: repos)
+    auth_factory.register_auth_provider("cloud", lambda: auth_multi_member.MultiMemberAuthProvider())
+    git_ops = importlib.import_module("git_ops")
+    monkeypatch.setattr(git_ops, "get_active_workspace_id", lambda: "ws_cloud")
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+
+    response = client.post("/approvals/batch-share-link")
+
+    assert response.status_code == 200, response.text
+    token = response.json()["token"]
+    assert client.get(f"/approvals/public-batch/{token}").json()["approvals"][0]["id"] == "apr_cloud"
+
+
 def test_batch_share_link_stores_hash_only_token(client_and_main):
     client, main = client_and_main
     _seed_approval(main, approval_id="apr_hash_only", run_id="run_hash_only", worker_id="w_hash_only")
