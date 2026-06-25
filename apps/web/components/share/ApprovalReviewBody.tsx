@@ -58,6 +58,16 @@ function formatExpiry(iso?: string | null): string | null {
   return `${Math.floor(hours / 24)}d`;
 }
 
+export function approvalCostLine(a: ApprovalRow): string | null {
+  return costLine(a);
+}
+export function approvalExpiry(iso?: string | null): string | null {
+  return formatExpiry(iso);
+}
+export function approvalRequestedRelative(iso?: string): string {
+  return formatRelative(iso);
+}
+
 function costLine(a: ApprovalRow): string | null {
   const parts: string[] = [];
   if (typeof a.tokens_so_far === "number" && a.tokens_so_far > 0) {
@@ -86,7 +96,13 @@ function emailPayload(a: ApprovalRow): { to?: string; subject?: string; body?: s
 
 /* ---- proposed output (RIGHT) ----------------------------------------------- */
 
-function ProposedOutput({ approval }: { approval: ApprovalRow }) {
+// Exported so the in-app register-framed Approvals Review tab
+// (app/approvals/ApprovalsCollection.tsx) renders the SAME proposed output
+// (email-shaped / structured items / preview) without duplicating the logic.
+// The standalone hero review (this component) and the shared-link / standalone
+// card keep their approved c-appr-* design; the in-app tab frames the same
+// proposed output inside the detail register.
+export function ProposedOutput({ approval }: { approval: ApprovalRow }) {
   const di = parseDecisionInput(approval.decision_input_json);
   const email = emailPayload(approval);
 

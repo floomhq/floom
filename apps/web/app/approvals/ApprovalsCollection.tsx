@@ -6,9 +6,20 @@ import { toast } from "sonner";
 import { CheckSquare2 } from "lucide-react";
 import type { ApprovalRow, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey, TagOption } from "@/lib/collection/types";
-import { Collection } from "@/components/collection";
+import {
+  Collection,
+  DetailGroup,
+  DetailRow,
+  DetailNote,
+  DetailActions,
+} from "@/components/collection";
 import { approvalActionLine } from "@/components/share/ApprovalActionItems";
-import { ApprovalReviewBody } from "@/components/share/ApprovalReviewBody";
+import {
+  ProposedOutput,
+  approvalCostLine,
+  approvalExpiry,
+  approvalRequestedRelative,
+} from "@/components/share/ApprovalReviewBody";
 import {
   parseDecisionInput,
   approveApproval,
@@ -61,6 +72,111 @@ function approvalContentTagOptions(
     label: tag,
     count: counts.get(tag) ?? 0,
   }));
+}
+
+// In-app Review tab body, framed through the detail register (DetailGroup /
+// DetailRow / DetailNote / DetailActions) so it matches the Connections and
+// Workers detail surfaces. Stays custom: "approval-review" — it is interactive
+// (comment + approve/reject) and loads the proposed output via shared helpers.
+// The standalone hero review (ApprovalReviewBody) is kept for the shared-link /
+// standalone-card surfaces; here the same content is register-framed.
+function ApprovalReviewTabBody({
+  approval,
+  actionLine,
+  comment,
+  onComment,
+  approveKeepsComment,
+  busy,
+  onApprove,
+  onReject,
+  runLink,
+  workerLink,
+}: {
+  approval: ApprovalRow;
+  actionLine: string;
+  comment: string;
+  onComment: (value: string) => void;
+  approveKeepsComment: boolean;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  runLink: React.ReactNode;
+  workerLink: React.ReactNode;
+}) {
+  const cost = approvalCostLine(approval);
+  const expiry = approvalExpiry(approval.expires_at);
+  return (
+    <div>
+      <DetailGroup label="Proposed action">
+        <p style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 500, color: "var(--ink)" }}>
+          {actionLine}
+        </p>
+        <ProposedOutput approval={approval} />
+      </DetailGroup>
+
+      <DetailGroup label="Your response">
+        <textarea
+          className="c-appr-comment"
+          value={comment}
+          onChange={(e) => onComment(e.target.value)}
+          placeholder="Add a comment with your decision, or leave a note…"
+          rows={3}
+          disabled={busy}
+          style={{ width: "100%" }}
+        />
+        {comment.trim() && !approveKeepsComment && (
+          <DetailNote>
+            This worker approves via a tool callback that cannot store a comment. Your note is sent only if you reject.
+          </DetailNote>
+        )}
+        <DetailActions separated>
+          <button
+            type="button"
+            className="c-addbtn"
+            style={{ padding: "8px 18px", fontSize: 13 }}
+            onClick={onApprove}
+            disabled={busy}
+          >
+            {busy ? "Working" : "Approve"}
+          </button>
+          <button
+            type="button"
+            className="c-vpill"
+            style={{ padding: "8px 18px", color: "var(--warning)", borderColor: "var(--warning)" }}
+            onClick={onReject}
+            disabled={busy}
+          >
+            Reject
+          </button>
+        </DetailActions>
+      </DetailGroup>
+
+      <DetailGroup label="Context">
+        <DetailRow label="Worker" value={workerLink} />
+        <DetailRow label="Run" value={runLink} />
+        <DetailRow label="Why" value={approval.label?.trim() ? approval.label : actionLine} />
+        <DetailRow label="Requested" value={approvalRequestedRelative(approval.created_at)} />
+        {cost && <DetailRow label="Cost so far" value={cost} />}
+        {expiry && (
+          <DetailRow label="Expires" value={expiry === "expired" ? "Expired" : `in ${expiry}`} />
+        )}
+      </DetailGroup>
+
+      <DetailGroup>
+        <DetailNote>
+          Same request in-app and via a shared link. Your decision is recorded against this request.
+          {approval.public_link && (
+            <>
+              {" "}
+              <Link href={approval.public_link} style={{ color: "var(--accent)" }}>
+                Open shareable link →
+              </Link>
+            </>
+          )}
+        </DetailNote>
+      </DetailGroup>
+    </div>
+  );
 }
 
 export default function ApprovalsCollection() {
@@ -185,29 +301,30 @@ export default function ApprovalsCollection() {
           // the decision lives in the body, not crammed above the divider.
           leading: undefined,
           title: a.worker_name ?? a.worker_id,
+          // Structured header status pill (engine-rendered), like Connections.
+          status: {
+            tone: "pending",
+            label: itemCount(a) > 0 ? `Pending · ${itemCount(a)} items` : "Pending",
+          },
           sub: (
             <span className="c-dh-sub" style={{ margin: 0 }}>
               <span className="c-dh-desc">{actionLine}</span>
             </span>
           ),
         },
-        // Single review surface (no tab row): the in-app inbox detail IS the
-        // canonical input-left / proposed-output-right review. One link with
-        // several approvals (Emily/Slack/WhatsApp) is the dotted pager on
-        // /approvals/review; here the pager reads "1 of 1".
+        // Single review surface (no tab row). Stays custom: "approval-review"
+        // (interactive: comment + approve/reject), but the body is now framed
+        // through the detail register (DetailGroup / DetailRow / DetailNote /
+        // DetailActions) so it matches the rest of the detail surfaces.
         tabs: [
           {
             key: "Review",
             label: "Review",
             custom: "approval-review",
             render: () => (
-              <ApprovalReviewBody
+              <ApprovalReviewTabBody
                 approval={a}
                 actionLine={actionLine}
-                index={0}
-                total={1}
-                onPrev={() => {}}
-                onNext={() => {}}
                 comment={comments[a.id] ?? ""}
                 onComment={(value) => setComment(a.id, value)}
                 approveKeepsComment={approveCommentSupported(a)}
@@ -223,19 +340,6 @@ export default function ApprovalsCollection() {
                   <Link href={`/workers?sel=${encodeURIComponent(a.worker_id)}`} style={{ color: "var(--accent)" }}>
                     {a.worker_name ?? a.worker_id}
                   </Link>
-                }
-                footnote={
-                  <>
-                    Same view in-app and via a shared link. Your decision is recorded against this request.
-                    {a.public_link && (
-                      <>
-                        {" "}
-                        <Link href={a.public_link} style={{ color: "var(--accent)" }}>
-                          Open shareable link →
-                        </Link>
-                      </>
-                    )}
-                  </>
                 }
               />
             ),
