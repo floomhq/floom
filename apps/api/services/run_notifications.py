@@ -566,6 +566,8 @@ def _dispatch_terminal_run_alerts(
                 run_id,
                 exc,
             )
+        # Deprecated no-op for broad auto-pause; keep the compatibility call so
+        # older imports/tests still resolve while incidents remain the live path.
         _maybe_pause_worker_after_consecutive_failures(
             worker_id=worker_id,
             user_id=user_id,
@@ -577,5 +579,4 @@ def _dispatch_terminal_run_alerts(
         daemon=True,
         name=f"alert-{run_id}",
     ).start()
-
 

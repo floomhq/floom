@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -740,7 +741,10 @@ class TestOverviewConsecutiveFailureAlerting:
 
     def test_overview_surfaces_consecutive_failures_at_threshold(self, client_and_repos):
         client, repos = client_and_repos
+        base_time = datetime.now(timezone.utc) - timedelta(minutes=10)
         for index, status in enumerate(["completed", "failed", "failed", "failed"], start=1):
+            created_at = (base_time + timedelta(minutes=index)).isoformat()
+            completed_at = (base_time + timedelta(minutes=index, seconds=10)).isoformat()
             repos.runs.create(
                 user_id=_USER_ID,
                 run_id=f"run_{uuid.uuid4().hex[:12]}",
@@ -750,8 +754,8 @@ class TestOverviewConsecutiveFailureAlerting:
                 runner="e2b",
                 error="boom" if status == "failed" else None,
                 error_code="test_failure" if status == "failed" else None,
-                created_at=f"2026-06-06T10:0{index}:00+00:00",
-                completed_at=f"2026-06-06T10:0{index}:10+00:00",
+                created_at=created_at,
+                completed_at=completed_at,
             )
 
         resp = client.get("/system/overview")
@@ -901,7 +905,7 @@ class TestEmailNotifications:
         fake_resend.Emails.send.assert_called_once()
         payload = fake_resend.Emails.send.call_args.args[0]
         assert fake_resend.api_key == "re_test"
-        assert payload["from"] == "notifications@example.com"
+        assert payload["from"] == "Floom <notifications@example.com>"
         assert payload["to"] == ["ops@example.com"]
         assert payload["subject"] == "Worker Weekly <Digest> failed"
         assert "Weekly &lt;Digest&gt;" in payload["html"]

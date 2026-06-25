@@ -77,6 +77,7 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "interrupted_by_restart": "crash",
     "run_abandoned_server_restart": "crash",
     "run_claimed_without_dispatch": "crash",
+    "schedule_missed": "crash",
     # configuration / worker definition problems
     "invalid_worker": "config",
     "worker_not_found": "config",

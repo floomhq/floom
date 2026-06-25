@@ -14,7 +14,9 @@ Concurrency rule: skip if a previous run for this worker is still running.
 
 import json
 import logging
+import os
 import threading
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -22,6 +24,7 @@ from zoneinfo import ZoneInfo
 from croniter import croniter
 
 from db.factory import get_repositories
+from models import RunStatus
 from run_service import (
     create_run,
     get_worker_config_for_run,
@@ -137,6 +140,8 @@ POLL_INTERVAL_SECONDS = 60  # check every minute
 _stop_event: threading.Event = threading.Event()
 _scheduler_thread: threading.Thread | None = None
 _scheduler_lock = threading.Lock()
+SCHEDULE_MISSED_ERROR_CODE = "schedule_missed"
+SCHEDULE_MISSED_ERROR = "Scheduled fire was missed or delayed by the scheduler."
 
 
 def _cron_zone(cron_timezone: str | None) -> ZoneInfo:
@@ -165,6 +170,80 @@ def compute_next_run_at(cron_expr: str, after: datetime, cron_timezone: str | No
     except Exception as exc:
         logger.warning("Invalid cron expression %r: %s", cron_expr, exc)
         return None
+
+
+def _schedule_missed_grace_seconds() -> int:
+    raw = os.environ.get("WORKEROS_SCHEDULE_MISSED_GRACE_SECONDS", "300")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 300
+
+
+def _create_synthetic_failed_schedule_run(
+    repos,
+    *,
+    worker_id: str,
+    user_id: str | None,
+    now_iso: str,
+    error: str,
+    error_code: str,
+    trigger_source: str = "schedule",
+    trigger_ref: str | None = None,
+    input_json: dict[str, object] | None = None,
+) -> str | None:
+    if not user_id:
+        return None
+    run_id = f"run_{uuid.uuid4().hex[:12]}"
+    try:
+        repos.runs.create(
+            user_id=user_id,
+            run_id=run_id,
+            worker_id=worker_id,
+            status=RunStatus.FAILED.value,
+            trigger_source=trigger_source,
+            trigger_ref=trigger_ref,
+            runner="scheduler",
+            input_json=input_json or {},
+            error=error,
+            error_code=error_code,
+            started_at=now_iso,
+            completed_at=now_iso,
+            duration_ms=0,
+            created_at=now_iso,
+        )
+        return run_id
+    except Exception:
+        logger.exception(
+            "Failed to record synthetic scheduled failure for worker %s",
+            worker_id,
+        )
+        return None
+
+
+def _record_schedule_missed_if_late(
+    repos,
+    *,
+    worker_id: str,
+    user_id: str | None,
+    next_at: datetime,
+    now: datetime,
+    now_iso: str,
+    trigger_ref: str | None = None,
+) -> str | None:
+    grace = _schedule_missed_grace_seconds()
+    if (now - next_at).total_seconds() <= grace:
+        return None
+    return _create_synthetic_failed_schedule_run(
+        repos,
+        worker_id=worker_id,
+        user_id=user_id,
+        now_iso=now_iso,
+        trigger_source=SCHEDULE_MISSED_ERROR_CODE,
+        trigger_ref=trigger_ref,
+        error=SCHEDULE_MISSED_ERROR,
+        error_code=SCHEDULE_MISSED_ERROR_CODE,
+    )
 
 
 def _owner_is_active(repos, user_id: str | None) -> bool:
@@ -364,6 +443,15 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             except Exception:
                 logger.exception("Failed to claim schedule trigger %s", trigger_id)
                 continue
+        _record_schedule_missed_if_late(
+            repos,
+            worker_id=worker_id,
+            user_id=user_id,
+            next_at=next_at,
+            now=now,
+            now_iso=now_iso_str,
+            trigger_ref=trigger_id,
+        )
         # Concurrency guard is per-WORKER (one bundle, one running run at a time).
         running_count = (
             repos.runs.count_running_for_worker(user_id=user_id, worker_id=worker_id)
@@ -387,6 +475,19 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             workspace_id=workspace_id,
         )
         if missing_inputs:
+            _create_synthetic_failed_schedule_run(
+                repos,
+                worker_id=worker_id,
+                user_id=user_id,
+                now_iso=now_iso_str,
+                trigger_ref=trigger_id,
+                input_json=scheduled_inputs,
+                error=(
+                    "Missing required scheduled input(s): "
+                    + ", ".join(missing_inputs)
+                ),
+                error_code="missing_required_input",
+            )
             if new_next:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
             logger.warning(
@@ -405,6 +506,16 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             workspace_id=workspace_id,
         )
         if _sched_missing_secrets:
+            _create_synthetic_failed_schedule_run(
+                repos,
+                worker_id=worker_id,
+                user_id=user_id,
+                now_iso=now_iso_str,
+                trigger_ref=trigger_id,
+                input_json=scheduled_inputs,
+                error="Missing secrets: " + ", ".join(_sched_missing_secrets),
+                error_code="missing_secret",
+            )
             if new_next:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
             logger.warning(
@@ -419,6 +530,16 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             workspace_id=workspace_id,
         )
         if _sched_missing_conns:
+            _create_synthetic_failed_schedule_run(
+                repos,
+                worker_id=worker_id,
+                user_id=user_id,
+                now_iso=now_iso_str,
+                trigger_ref=trigger_id,
+                input_json=scheduled_inputs,
+                error="Missing connections: " + ", ".join(_sched_missing_conns),
+                error_code="missing_connection",
+            )
             if new_next:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
             logger.warning(
@@ -565,6 +686,14 @@ def _tick() -> None:
         # Note: the scheduler runs in a single daemon thread, so this is
         # belt-and-suspenders for future multi-scheduler safety.
         new_next = compute_next_run_at(cron_expr, now, cron_timezone)
+        _record_schedule_missed_if_late(
+            repos,
+            worker_id=worker_id,
+            user_id=user_id,
+            next_at=next_at,
+            now=now,
+            now_iso=now_iso_str,
+        )
         running_count = (
             repos.runs.count_running_for_worker(user_id=user_id, worker_id=worker_id)
             if user_id
@@ -587,6 +716,18 @@ def _tick() -> None:
             workspace_id=workspace_id,
         )
         if missing_inputs:
+            _create_synthetic_failed_schedule_run(
+                repos,
+                worker_id=worker_id,
+                user_id=user_id,
+                now_iso=now_iso_str,
+                input_json=scheduled_inputs,
+                error=(
+                    "Missing required scheduled input(s): "
+                    + ", ".join(missing_inputs)
+                ),
+                error_code="missing_required_input",
+            )
             if new_next:
                 repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
             logger.warning(
@@ -604,6 +745,15 @@ def _tick() -> None:
             workspace_id=workspace_id,
         )
         if _sched_missing_secrets:
+            _create_synthetic_failed_schedule_run(
+                repos,
+                worker_id=worker_id,
+                user_id=user_id,
+                now_iso=now_iso_str,
+                input_json=scheduled_inputs,
+                error="Missing secrets: " + ", ".join(_sched_missing_secrets),
+                error_code="missing_secret",
+            )
             if new_next:
                 repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
             logger.warning(
@@ -618,6 +768,15 @@ def _tick() -> None:
             workspace_id=workspace_id,
         )
         if _sched_missing_conns:
+            _create_synthetic_failed_schedule_run(
+                repos,
+                worker_id=worker_id,
+                user_id=user_id,
+                now_iso=now_iso_str,
+                input_json=scheduled_inputs,
+                error="Missing connections: " + ", ".join(_sched_missing_conns),
+                error_code="missing_connection",
+            )
             if new_next:
                 repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
             logger.warning(
