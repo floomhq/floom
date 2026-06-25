@@ -539,8 +539,8 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         ),
       },
       tabs: [
-        { key: "Files", label: "Files", count: c.file_count, custom: "unmigrated", render: () => <FilesTab folder={c} /> },
-        { key: "Used by", label: "Used by", count: c.worker_count, custom: "unmigrated", render: () => <UsedByTab folder={c} /> },
+        { key: "Files", label: "Files", count: c.file_count, custom: "file-viewer", render: () => <FilesTab folder={c} /> },
+        { key: "Used by", label: "Used by", count: c.worker_count, custom: "used-by", render: () => <UsedByTab folder={c} /> },
       ],
     }),
     // No prominent toolbar "+ New folder" addButton (the operator 2026-06-15):
