@@ -114,6 +114,25 @@ describe("CollectionView — list & grid (§8e)", () => {
     );
     expect(container.querySelector('[style*="max-width: 900px"]')).toBeInTheDocument();
   });
+
+  it("keeps filters below the search/action row in the control strip", () => {
+    const { container } = render(<Harness config={makeConfig()} />);
+    const strip = container.querySelector(".c-controlstrip-inner");
+    const topRow = container.querySelector(".c-controlstrip-toprow");
+    const search = container.querySelector(".c-srch");
+    const filterBar = container.querySelector(".c-filterbar");
+    const actions = container.querySelector(".c-toolbar-actions");
+
+    expect(strip).toBeInTheDocument();
+    expect(topRow).toBeInTheDocument();
+    expect(search).toBeInTheDocument();
+    expect(filterBar).toBeInTheDocument();
+    expect(actions).toBeInTheDocument();
+    expect(topRow).toContainElement(search);
+    expect(topRow).toContainElement(actions);
+    expect(topRow).not.toContainElement(filterBar);
+    expect(strip?.children[1]).toBe(filterBar);
+  });
 });
 
 describe("CollectionView — grouped (day-section) list variant (#1225)", () => {
