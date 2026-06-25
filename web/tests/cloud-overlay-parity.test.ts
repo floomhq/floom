@@ -20,11 +20,11 @@ describe("Cloud overlay parity", () => {
     const chrome = readOverlay("components/CloudAppChrome.tsx");
 
     expect(webChrome).toBe(chrome);
-    expect(chrome).toContain('import { EmilyDock } from "@/components/emily/EmilyChat";');
+    expect(chrome).toContain('import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";');
     expect(chrome).toContain("const isChatPath =");
     expect(chrome).toContain('pathname === "/app/chat"');
     expect(chrome).toContain("if (isChatPath)");
-    expect(chrome).toContain('<EmilyDock className="hidden md:flex" />');
+    expect(chrome).toContain("<EmilyDock />");
 
     const chatBranchStart = chrome.indexOf("if (isChatPath)");
     const defaultBranchStart = chrome.indexOf("return (", chatBranchStart + 1);
@@ -38,7 +38,8 @@ describe("Cloud overlay parity", () => {
     const actionCopy = readWeb("lib/workspace/action-copy.ts");
     const packageJson = readWeb("package.json");
 
-    expect(webSwitcher).toContain("getWorkspaceActionCopy(isCloudMode())");
+    expect(webSwitcher).toContain("const cloudMode = isCloudMode()");
+    expect(webSwitcher).toContain("getWorkspaceActionCopy(cloudMode)");
     expect(webSwitcher).not.toContain("Copy setup link");
     expect(actionCopy).toContain("Invite someone by link");
     expect(actionCopy).toContain("Invite link copied");

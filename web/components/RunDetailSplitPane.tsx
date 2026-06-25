@@ -84,7 +84,9 @@ export function TrackRunFeedbackIssue({ run }: { run: RunDetail }) {
     if (!feedback || submitting) return;
     setSubmitting(true);
     try {
-      const created = await api.runs.feedback.create(run.id, feedback);
+      const created = await api.runs.feedback.create(run.id, feedback, undefined, {
+        worker_id: run.worker_id,
+      });
       setItems((prev) => [...(prev ?? []), created]);
       toast.success("Feedback saved");
       setNote("");

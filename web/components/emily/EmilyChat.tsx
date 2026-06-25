@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize, Minimize, MessageCircle, PenSquare, Download, History, MoreHorizontal, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -40,7 +40,6 @@ import {
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
 import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
-import { createWorkerHref } from "@/lib/create-worker-nav";
 // Re-export so the create-mode wiring + its tests share one source of truth.
 export { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
@@ -51,6 +50,8 @@ import type { ConversationSummary, SystemOverview } from "@/lib/types";
 import type { AttachedFile, ChatMessage, MsgPart, ToolCard } from "@/lib/emily-chat-types";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { EmilyHomeEmpty } from "@/components/home/EmilyHomeEmpty";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { readStoredConversationId } from "@/lib/emily-chat-storage";
 
 // ── Chat controls (New chat + Export) ─────────────────────────────────────────
 
@@ -958,7 +959,7 @@ const DOCK_WIDTH: Record<DockMode, string> = {
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
-  const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<DockMode>("rail");
   // True fullscreen lives in shared context (AppShell hides the page pane and
   // this dock flex-grows to fill the main area — the left sidebar stays put).
@@ -981,6 +982,31 @@ export function EmilyDock({ className }: { className?: string }) {
   const [coreHasMessages, setCoreHasMessages] = useState(false);
   // Active conversation ID as state for recent-chats active highlight (can't read ref in render)
   const [coreConversationId, setCoreConversationId] = useState<string | null>(null);
+  // The core has reported its message state at least once → it is mounted and
+  // its conversation (if any) has hydrated. We gate the confirm-vs-begin decision
+  // on this so a deep-link `?create=1` that lands before hydration doesn't
+  // mis-read "no existing thread" and skip the confirm.
+  const [coreReady, setCoreReady] = useState(false);
+  const handleCoreHasMessages = useCallback((has: boolean) => {
+    setCoreHasMessages(has);
+    setCoreReady(true);
+  }, []);
+  // ── In-Emily create flow (supersede the SAME chat) ───────────────────────────
+  // "New worker" reuses THIS Emily surface: it starts a fresh worker-building
+  // chat in place (createEpoch bump + create mode) rather than spawning a second
+  // Emily or a separate page. createEpoch increments on each create entry; the
+  // core's effect calls newSession() so the prior conversation is saved to Recent
+  // chats and the view switches to a clean create thread.
+  const [createEpoch, setCreateEpoch] = useState(0);
+  const [createPrime, setCreatePrime] = useState<string | undefined>(undefined);
+  // While createMode is latched the dock renders this Emily as a create chat.
+  const [createActive, setCreateActive] = useState(false);
+  // Confirm-before-supersede dialog state + the prime carried through the prompt.
+  const [confirmReplaceOpen, setConfirmReplaceOpen] = useState(false);
+  const pendingCreatePrime = useRef<string | undefined>(undefined);
+  // Guards the deep-link create effect so a single ?create=1 entry is handled
+  // once (re-renders / param strips must not re-fire it).
+  const createRequestHandledRef = useRef(false);
   // Local state for recent chats popover in the header ⋯ menu
   const [recentItems, setRecentItems] = useState<import("@/lib/types").ConversationSummary[] | null>(null);
   // #1363 — detect empty workspace so Emily shows a proactive first-run opener.
@@ -1013,8 +1039,81 @@ export function EmilyDock({ className }: { className?: string }) {
     const enteringHome = pathname === "/" || pathname === "/overview";
     if (leftChat || (leftHome && !enteringHome)) {
       coreActionsRef.current?.newSession();
+      // Leaving the create surface → drop create mode so a later send isn't
+      // silently treated as a worker-creation request.
+      setCreateActive(false);
+      setCreatePrime(undefined);
     }
   }, [pathname]);
+
+  // ── Enter the in-place create flow ───────────────────────────────────────────
+  // Supersede THIS Emily with a fresh worker-building chat: bump createEpoch (the
+  // core's effect calls newSession() → the prior conversation is saved to Recent
+  // chats and a clean create thread is seeded), latch create mode, strip the
+  // `?create`/`?prime` params (so a reload / back doesn't re-trigger), and force
+  // fullscreen so the create chat takes over the main area. No second Emily.
+  const beginCreateFlow = useCallback((prime?: string) => {
+    createRequestHandledRef.current = true;
+    setCreatePrime(prime);
+    setCreateActive(true);
+    setCreateEpoch((n) => n + 1);
+    // Strip the create params without a navigation so the URL is clean and the
+    // effect below won't re-fire. history.replaceState avoids a router re-render
+    // race with the freshly-latched create state.
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("create");
+      url.searchParams.delete("prime");
+      window.history.replaceState(window.history.state, "", url.toString());
+    }
+    setMode((m) => (m === "collapsed" ? "rail" : m));
+    setFullscreen(true);
+  }, [setFullscreen]);
+
+  // In-dock "New worker" trigger (the ⋯ menu item). Same supersede-in-place
+  // behavior as a `?create=1` deep link, without a route change: confirm when a
+  // thread is active, otherwise begin immediately. This REPLACES the old
+  // `router.push(createWorkerHref())` which navigated to /workers/new and left
+  // the docked Emily AND the separate NewWorkerClient surface both on screen.
+  const handleNewWorkerClick = useCallback(() => {
+    const hasExistingThread =
+      coreHasMessages || coreConversationId !== null || readStoredConversationId() !== null;
+    if (hasExistingThread) {
+      pendingCreatePrime.current = undefined;
+      setConfirmReplaceOpen(true);
+    } else {
+      beginCreateFlow(undefined);
+    }
+  }, [coreHasMessages, coreConversationId, beginCreateFlow]);
+
+  // Deep-link / "New worker" create entry. A `?create=1` (optionally `&prime=`)
+  // on the CURRENT route enters the create flow IN PLACE. If there's an existing
+  // Emily thread (live messages, a live conversation id, or a persisted one) we
+  // confirm first so the user doesn't silently lose their chat; otherwise we
+  // supersede immediately. Gated on `coreReady` so a deep link that lands before
+  // the core hydrates doesn't mis-read "no existing thread" and skip the confirm.
+  const createParam = searchParams.get("create") === "1";
+  useEffect(() => {
+    if (!createParam) {
+      // Param gone → ready for the next create entry.
+      createRequestHandledRef.current = false;
+      return;
+    }
+    if (createRequestHandledRef.current) return;
+    if (!coreReady) return;
+    const prime = searchParams.get("prime")?.trim() || searchParams.get("prompt")?.trim() || undefined;
+    const hasExistingThread =
+      coreHasMessages || coreConversationId !== null || readStoredConversationId() !== null;
+    if (hasExistingThread) {
+      // Mark handled now so re-renders don't reopen the dialog; the dialog's
+      // confirm/cancel drives the rest.
+      createRequestHandledRef.current = true;
+      pendingCreatePrime.current = prime;
+      setConfirmReplaceOpen(true);
+    } else {
+      beginCreateFlow(prime);
+    }
+  }, [createParam, coreReady, coreHasMessages, coreConversationId, searchParams, beginCreateFlow]);
 
   // HOME (Federico 2026-06-19): "/" and "/overview" ARE the existing Emily shown
   // FULLSCREEN — no separate main-pane composer, no parallel home. On the home
@@ -1238,7 +1337,7 @@ export function EmilyDock({ className }: { className?: string }) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="bottom" sideOffset={6} className="w-44 p-1">
               <DropdownMenuItem
-                onClick={() => router.push(createWorkerHref())}
+                onClick={handleNewWorkerClick}
                 className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
               >
                 <Plus className="size-4" />
@@ -1246,7 +1345,14 @@ export function EmilyDock({ className }: { className?: string }) {
               </DropdownMenuItem>
               <DropdownMenuSeparator className="-mx-1 my-1" />
               <DropdownMenuItem
-                onClick={() => coreActionsRef.current?.newSession()}
+                onClick={() => {
+                  // Plain "New chat" → a normal (non-create) Emily session.
+                  // Drop create mode so the next send isn't treated as a
+                  // worker-creation request.
+                  setCreateActive(false);
+                  setCreatePrime(undefined);
+                  coreActionsRef.current?.newSession();
+                }}
                 className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
               >
                 <PenSquare className="size-4" />
@@ -1311,12 +1417,48 @@ export function EmilyDock({ className }: { className?: string }) {
           fullPage={isFull}
           hideControls
           actionsRef={coreActionsRef}
-          onHasMessagesChange={setCoreHasMessages}
+          onHasMessagesChange={handleCoreHasMessages}
           onConversationIdChange={setCoreConversationId}
           isNewWorkspace={isNewWorkspace}
           homeMode={isHomeRoute}
+          createMode={createActive}
+          createEpoch={createEpoch}
+          primeInput={createPrime}
         />
       </div>
+
+      {/* Confirm-before-supersede: "New worker" while an Emily conversation is
+          active replaces THIS chat in place. Confirm so the live chat isn't lost
+          silently (it's saved to Recent chats). Renders via a portal, its
+          position in the dock tree doesn't matter. */}
+      <ConfirmDialog
+        open={confirmReplaceOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            // Dialog dismissed (cancel / Esc / backdrop): treat the create
+            // request as handled and clear the carried prime + URL params so a
+            // re-render or reload doesn't re-prompt.
+            setConfirmReplaceOpen(false);
+            createRequestHandledRef.current = true;
+            pendingCreatePrime.current = undefined;
+            if (typeof window !== "undefined") {
+              const url = new URL(window.location.href);
+              url.searchParams.delete("create");
+              url.searchParams.delete("prime");
+              window.history.replaceState(window.history.state, "", url.toString());
+            }
+          }
+        }}
+        title="Start a new worker chat?"
+        body="Your current Emily conversation will be saved in Recent chats, and this view will switch to a fresh worker-building chat."
+        cancelLabel="Keep current chat"
+        confirmLabel="Start new worker chat"
+        onConfirm={() => {
+          setConfirmReplaceOpen(false);
+          beginCreateFlow(pendingCreatePrime.current);
+          pendingCreatePrime.current = undefined;
+        }}
+      />
     </div>
   );
 }

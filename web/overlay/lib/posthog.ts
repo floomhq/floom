@@ -17,7 +17,7 @@
 // unset (local/dev, and any deploy until an operator sets the env) every export
 // here is a no-op, so importing it is always safe.
 
-import posthog from "posthog-js";
+import posthog, { type BeforeSendFn } from "posthog-js";
 import type { CurrentUser } from "@/lib/types";
 
 const SCHEMA_VERSION = 1;
@@ -30,22 +30,31 @@ const SCHEMA_VERSION = 1;
 // POSTHOG_PROXY_PATH used by the rewrites.
 const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 const DEFAULT_HOST = `${BASE_PATH}/ingest`;
-function scrubExceptionEvent(event: any): any {
+
+type MutableRecord = Record<string, unknown>;
+function isRecord(value: unknown): value is MutableRecord {
+  return typeof value === "object" && value !== null;
+}
+
+const scrubExceptionEvent: BeforeSendFn = (event) => {
   if (!event || event.event !== "$exception") return event;
-  const p = event.properties || (event.properties = {});
+  const p = event.properties as MutableRecord;
   if (typeof p.$current_url === "string") p.$current_url = p.$current_url.split("?")[0].split("#")[0];
   if (p.$exception_message) p.$exception_message = "[scrubbed]";
   const list = p.$exception_list;
   if (Array.isArray(list)) for (const e of list) {
-    if (e && typeof e.value === "string") e.value = "[scrubbed]";
-    const frames = e && e.stacktrace && e.stacktrace.frames;
+    if (!isRecord(e)) continue;
+    if (typeof e.value === "string") e.value = "[scrubbed]";
+    const stacktrace = e.stacktrace;
+    const frames = isRecord(stacktrace) ? stacktrace.frames : null;
     if (Array.isArray(frames)) for (const fr of frames) {
+      if (!isRecord(fr)) continue;
       delete fr.context_line; delete fr.pre_context; delete fr.post_context; delete fr.vars;
       if (typeof fr.filename === "string") fr.filename = fr.filename.split("?")[0];
     }
   }
   return event;
-}
+};
 // ui_host tells the SDK where the PostHog app lives (toolbar links, "view in
 // PostHog" deep-links) since api_host is now a relative proxy path, not a
 // PostHog URL. Overridable for EU/self-hosted via NEXT_PUBLIC_POSTHOG_UI_HOST.
