@@ -1,16 +1,5 @@
 import type { ReactNode } from "react";
-
-type DetailFact = {
-  key: string;
-  label: ReactNode;
-  value: ReactNode;
-};
-
-type DetailChip = string | {
-  key: string;
-  label: ReactNode;
-  add?: boolean;
-};
+import type { DetailFact, DetailChip, DetailSection } from "@/lib/collection/types";
 
 export function DetailSummary({ items }: { items: DetailFact[] }) {
   if (items.length === 0) return null;
@@ -107,5 +96,60 @@ export function DetailActions({
     <div className="c-dact" data-sep={separated ? "true" : undefined}>
       {children}
     </div>
+  );
+}
+
+function sectionHasContent(s: DetailSection): boolean {
+  return (
+    (s.summary?.length ?? 0) > 0 ||
+    (s.pairs?.length ?? 0) > 0 ||
+    (s.rows?.length ?? 0) > 0 ||
+    (s.chips?.length ?? 0) > 0 ||
+    s.note != null ||
+    s.actions != null
+  );
+}
+
+/** Renders ONE declarative section through the register (engine-only helper). */
+export function DetailSectionView({ section }: { section: DetailSection }) {
+  const hasContent = sectionHasContent(section);
+  return (
+    <DetailGroup label={section.label}>
+      {section.context != null && <div className="c-dctx">{section.context}</div>}
+      {section.summary != null && section.summary.length > 0 && (
+        <DetailSummary items={section.summary} />
+      )}
+      {section.pairs != null && section.pairs.length > 0 && <DetailPair items={section.pairs} />}
+      {section.rows?.map((r) => (
+        <DetailRow key={r.key} label={r.label} value={r.value} mono={r.mono} />
+      ))}
+      {section.chips != null && section.chips.length > 0 && <DetailChips items={section.chips} />}
+      {section.note != null && <DetailNote>{section.note}</DetailNote>}
+      {section.actions != null && <DetailActions>{section.actions}</DetailActions>}
+      {!hasContent && section.empty != null && <DetailEmpty>{section.empty}</DetailEmpty>}
+    </DetailGroup>
+  );
+}
+
+/**
+ * Renders a structured tab body (summary + sections) through the register.
+ * This is what `DetailPane` calls for every non-custom tab, so the look is
+ * identical across all collections — drift can only happen via an explicit
+ * `custom` tab.
+ */
+export function DetailBody({
+  summary,
+  sections,
+}: {
+  summary?: DetailFact[];
+  sections?: DetailSection[];
+}) {
+  return (
+    <>
+      {summary != null && summary.length > 0 && <DetailSummary items={summary} />}
+      {sections?.map((s) => (
+        <DetailSectionView key={s.key} section={s} />
+      ))}
+    </>
   );
 }

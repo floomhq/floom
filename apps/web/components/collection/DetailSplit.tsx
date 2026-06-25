@@ -3,6 +3,18 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { ChevronsLeft, X } from "lucide-react";
 import type { DetailHeader, DetailTab } from "@/lib/collection/types";
+import { StatusPill } from "./StatusPill";
+import { DetailBody } from "./DetailKit";
+
+/**
+ * Renders a tab body. The XOR contract guarantees a tab is EITHER structured
+ * (summary/sections → register) OR custom (an explicit escape-hatch `render`).
+ * This is the single place drift could enter, so it lives in the engine.
+ */
+function TabBody({ tab }: { tab: DetailTab }) {
+  if (tab.custom != null) return <>{tab.render()}</>;
+  return <DetailBody summary={tab.summary} sections={tab.sections} />;
+}
 
 interface DetailPaneProps {
   header: DetailHeader;
@@ -43,6 +55,7 @@ export function DetailPane({
         <div className="c-dh-main">
           <div className="c-dh-title">
             <span className="nm">{header.title}</span>
+            {header.status != null && <StatusPill spec={header.status} />}
           </div>
           {header.sub != null && <div className="c-dh-sub">{header.sub}</div>}
         </div>
@@ -74,7 +87,7 @@ export function DetailPane({
         </div>
       )}
       <div className="c-dbody" role="tabpanel">
-        {current?.render()}
+        {current != null && <TabBody tab={current} />}
       </div>
     </>
   );
