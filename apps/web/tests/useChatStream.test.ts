@@ -553,6 +553,65 @@ describe("Emily streaming activity", () => {
     });
   });
 
+  it("materializes progress-only streams into visible activity", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-progress",
+        callId: "call_run",
+        card_id: "card_run",
+        status: "starting",
+        stage: "started",
+        label: "Starting worker run",
+      },
+      "assistant_1"
+    );
+
+    const card = toolCards(messages)[0]?.card;
+    expect(card?.kind).toBe("generic");
+    if (card?.kind !== "generic") throw new Error("expected generic card");
+    expect(card.card_id).toBe("card_run");
+    expect(card.status).toBe("starting");
+    expect(card.title).toBe("Starting worker run");
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Starting worker run",
+    });
+  });
+
+  it("appends progress-only tool cards to an existing assistant message", () => {
+    const assistantText = reduceSSEEvent(
+      [],
+      {
+        type: "text",
+        text: "I will check.",
+        conversation_id: "conv_1",
+      },
+      "assistant_1"
+    );
+    const messages = reduceSSEEvent(
+      assistantText,
+      {
+        type: "tool-progress",
+        callId: "call_approvals",
+        card_id: "card_approvals",
+        toolName: "approvals.list_pending",
+        status: "running",
+        label: "Checking approvals",
+      },
+      "assistant_1"
+    );
+
+    expect(messages).toHaveLength(1);
+    const assistant = messages[0];
+    expect(assistant.role).toBe("assistant");
+    expect(assistant.parts?.map((part) => part.type)).toEqual(["text", "tool-card"]);
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Checking approvals",
+    });
+  });
+
   it("shows writing while assistant text is streaming", () => {
     const messages: ChatMessage[] = [
       {
