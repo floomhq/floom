@@ -1,24 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { createWorkerHref } from "@/lib/create-worker-nav";
-
 /**
- * Legacy redirect: old links used `/?create=1` (and `&prime=` / `&prompt=`) to
- * open worker creation. Forward them to /workers/new.
+ * Product decision (2026-06-24): "New worker" now drives the IN-EMILY create
+ * flow that supersedes the active Emily chat IN PLACE (see EmilyDock in
+ * components/emily/EmilyChat.tsx — the `?create=1` deep-link effect). This hook
+ * USED to intercept `/?create=1` and forward it to the separate /workers/new
+ * page, which defeated the in-place flow. It is now a deliberate no-op so
+ * `?create=1` reaches EmilyDock's effect instead of being redirected away.
+ *
+ * Kept (rather than deleted) so existing imports/tests have a stable surface and
+ * the contract — "do NOT redirect ?create=1 to /workers/new" — stays covered.
+ * /workers/new remains reachable as a direct deep-link route.
  */
-export function useCreateWorkerLegacyRedirect() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const createParam = searchParams.get("create") === "1";
-
-  useEffect(() => {
-    if (!createParam) return;
-    const prompt =
-      searchParams.get("prime")?.trim() ||
-      searchParams.get("prompt")?.trim() ||
-      "";
-    router.replace(createWorkerHref(prompt || undefined));
-  }, [createParam, router, searchParams]);
+export function useCreateWorkerLegacyRedirect(): void {
+  // Intentionally does nothing: ?create=1 is handled in place by EmilyDock.
 }

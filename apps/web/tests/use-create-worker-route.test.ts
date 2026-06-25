@@ -13,26 +13,39 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(search()),
 }));
 
+// Product decision (2026-06-24): "New worker" drives the IN-EMILY create flow
+// (`?create=1`, handled by EmilyDock) that supersedes the active Emily chat in
+// place. The legacy redirect that used to forward `?create=1` to the separate
+// /workers/new page is now a deliberate no-op, so `?create=1` reaches EmilyDock's
+// effect instead of being redirected away.
 describe("useCreateWorkerLegacyRedirect", () => {
   beforeEach(() => {
     search.mockReturnValue("create=1");
     replace.mockClear();
   });
 
-  it("forwards legacy ?create=1 to /workers/new", async () => {
+  it("does NOT redirect ?create=1 to /workers/new (handled in place by Emily)", async () => {
     renderHook(() => useCreateWorkerLegacyRedirect());
-    await waitFor(() => {
-      expect(replace).toHaveBeenCalledWith("/workers/new");
-    });
+    // Give any (would-be) redirect effect a chance to fire before asserting none did.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(replace).not.toHaveBeenCalled();
   });
 
-  it("preserves primed prompt text as ?prompt=", async () => {
+  it("does not redirect even when a primed prompt is present", async () => {
     search.mockReturnValue("create=1&prime=" + encodeURIComponent("Digest worker"));
     renderHook(() => useCreateWorkerLegacyRedirect());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("never navigates to /workers/new", async () => {
+    renderHook(() => useCreateWorkerLegacyRedirect());
     await waitFor(() => {
-      expect(replace).toHaveBeenCalledWith(
-        "/workers/new?prompt=" + encodeURIComponent("Digest worker"),
+      // No call should ever target the legacy page.
+      const calledWithLegacy = replace.mock.calls.some((args) =>
+        String(args[0]).includes("/workers/new"),
       );
+      expect(calledWithLegacy).toBe(false);
     });
   });
 });

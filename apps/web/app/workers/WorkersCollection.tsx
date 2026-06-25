@@ -2445,7 +2445,7 @@ export default function WorkersCollection({
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
     add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) },
     states: {
-      // #1364 — improved help text + action CTA linking to /workers/new
+      // #1364 — improved help text + action CTA driving the in-Emily create flow
       empty: {
         title: "No workers yet",
         help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
