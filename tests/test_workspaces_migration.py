@@ -120,6 +120,23 @@ def test_workspace_share_links_migration_hashes_tokens_and_enforces_rls():
     assert "workspaces.owner_user_id = auth.uid()" in text
 
 
+def test_approval_batch_share_links_migration_hashes_tokens_and_enforces_rls():
+    path = SUPABASE_MIGRATIONS_DIR / "0050_approval_batch_share_links.sql"
+    assert path.is_file(), f"canonical Supabase migration missing: {path}"
+    text = path.read_text(encoding="utf-8").lower()
+    assert "create table if not exists public.share_links" in text
+    assert "entity_type text not null" in text
+    assert "workspace_id text references public.workspaces" in text
+    assert "owner_id uuid not null references auth.users" in text
+    assert "token_hash text not null unique" in text
+    assert "raw_token" not in text
+    assert "token text" not in text
+    assert "share_links_token_hash_idx" in text
+    assert "share_links_approvals_batch_scope_idx" in text
+    assert "alter table public.share_links enable row level security" in text
+    assert "workspaces.owner_user_id = auth.uid()" in text
+
+
 def test_workspace_transfer_events_migration_audits_transfers_and_enforces_rls():
     path = SUPABASE_MIGRATIONS_DIR / "0021_workspace_transfer_events.sql"
     assert path.is_file(), f"canonical Supabase migration missing: {path}"

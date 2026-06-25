@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import hashlib as _hashlib
+import re
 import sys
 import threading as _threading
 import time as _time
@@ -2135,8 +2136,29 @@ def _public_batch_approval_item(approval: dict[str, Any], repos: Any) -> dict[st
     return public
 
 
-def _load_approvals_batch_share(token: str) -> dict[str, Any]:
-    row = _engine_share_links._load_standalone_share_row(token)
+def _share_links_repo(repos: Any) -> Any | None:
+    repo = getattr(repos, "share_links", None)
+    return repo if repo is not None else None
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_approvals_batch_share(token: str, repos: Any) -> dict[str, Any]:
+    repo = _share_links_repo(repos)
+    if repo is not None:
+        if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
+            raise HTTPException(status_code=404, detail="Approval batch link not found")
+        token_hash = _engine_share_links._hash_share_token(token)
+        row = repo.resolve_approvals_batch_share(
+            token_hash=token_hash,
+            now_iso_str=_now_iso(),
+        )
+    else:
+        row = _engine_share_links._load_standalone_share_row(token)
     if not row or str(row.get("entity_type") or "") != "approvals_batch":
         raise HTTPException(status_code=404, detail="Approval batch link not found")
     workspace_id = _safe_workspace_id(str(row.get("entity_id") or ""))
@@ -2176,7 +2198,7 @@ def _public_approvals_batch_payload(
 ) -> dict[str, Any]:
     if request is not None:
         _enforce_public_batch_rate_limit(request, token, action=False)
-    share = _load_approvals_batch_share(token)
+    share = _load_approvals_batch_share(token, repos)
     workspace_id = str(share["entity_id"])
     owner_id = str(share["owner_id"])
     rows = _list_pending_approvals_for_workspace(
@@ -2261,6 +2283,27 @@ def create_approvals_batch_share_link(
     repos: Any = Depends(_engine_db.get_repos),
 ) -> dict[str, str]:
     workspace_id = _active_workspace_id_for_batch(request, auth)
+    repo = _share_links_repo(repos)
+    if repo is not None:
+        for _ in range(8):
+            token = _engine_share_links._mint_standalone_share_token()
+            try:
+                repo.create_approvals_batch_share(
+                    workspace_id=workspace_id,
+                    owner_id=auth.user_id,
+                    token_hash=_engine_share_links._hash_share_token(token),
+                )
+                return {
+                    "token": token,
+                    "url": _engine_share_links._standalone_share_url(token),
+                    "entity_type": "approvals_batch",
+                }
+            except Exception:
+                # Token hash collisions are vanishingly rare; retry exactly like
+                # the engine's SQLite helper. Other repository failures surface
+                # after retries as a creation failure.
+                continue
+        raise HTTPException(status_code=500, detail="Could not create share link")
     return _engine_share_links._create_or_get_standalone_share_link(
         entity_type="approvals_batch",
         entity_id=workspace_id,
@@ -2291,7 +2334,7 @@ def decide_public_approvals_batch_item(
     if decision not in {"approved", "rejected"}:
         raise HTTPException(status_code=422, detail="decision must be approved or rejected")
     _enforce_public_batch_rate_limit(request, token, action=True)
-    share = _load_approvals_batch_share(token)
+    share = _load_approvals_batch_share(token, repos)
     workspace_id = str(share["entity_id"])
     approval = repos.approvals.get_public(approval_id=approval_id)
     if approval is None:
@@ -2323,7 +2366,10 @@ def get_cloud_standalone_share(
     token: str,
     repos: Any = Depends(_engine_db.get_repos),
 ) -> Any:
-    row = _engine_share_links._load_standalone_share_row(token)
+    try:
+        row = _load_approvals_batch_share(token, repos)
+    except HTTPException:
+        row = _engine_share_links._load_standalone_share_row(token)
     if row and str(row.get("entity_type") or "") == "approvals_batch":
         return _public_approvals_batch_payload(token, repos)
     return _engine_main_public_share_payload(token, repos)

@@ -4893,7 +4893,7 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         self,
         *,
         workspace_id: str,
-        owner_id: str | None = None,
+        owner_id: str,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         try:
@@ -4906,12 +4906,11 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
                 self._client.table(self._TABLE)
                 .select("*")
                 .eq("workspace_id", workspace_id)
+                .eq("owner_id", owner_id)
                 .eq("status", "pending")
                 .order("created_at")
                 .limit(bounded)
             )
-            if owner_id:
-                builder = builder.eq("owner_id", owner_id)
             response = builder.execute()
             return _response_rows(response)
         except Exception as exc:
@@ -5094,6 +5093,98 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         if not rows:
             return None
         return rows[0]
+
+
+class SupabaseShareLinkRepository(_BaseSupabaseRepository):
+    """Supabase-backed public share-link repository."""
+
+    _TABLE = "share_links"
+
+    def create_approvals_batch_share(
+        self,
+        *,
+        workspace_id: str,
+        owner_id: str,
+        token_hash: str,
+        expires_at: str | None = None,
+    ) -> dict[str, Any]:
+        import uuid as _uuid
+
+        now = datetime.now(timezone.utc).isoformat()
+        row = {
+            "id": f"sl_{_uuid.uuid4().hex}",
+            "entity_type": "approvals_batch",
+            "entity_id": workspace_id,
+            "file_path": "",
+            "workspace_id": workspace_id,
+            "owner_id": owner_id,
+            "token_hash": token_hash,
+            "created_at": now,
+            "expires_at": expires_at,
+            "revoked_at": None,
+        }
+        response = self._client.table(self._TABLE).insert(row).execute()
+        return _first_row(response) or row
+
+    @staticmethod
+    def _is_expired(expires_at: Any, now_iso_str: str) -> bool:
+        if not expires_at:
+            return False
+        return str(expires_at) <= str(now_iso_str)
+
+    def resolve_approvals_batch_share(self, *, token_hash: str, now_iso_str: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table(self._TABLE)
+            .select("*")
+            .eq("entity_type", "approvals_batch")
+            .eq("token_hash", token_hash)
+            .is_("revoked_at", "null")
+            .or_(f"expires_at.is.null,expires_at.gt.{now_iso_str}")
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        if row is None:
+            return None
+        if row.get("revoked_at") or self._is_expired(row.get("expires_at"), now_iso_str):
+            return None
+        return row
+
+    def revoke_approvals_batch_share(
+        self,
+        *,
+        token_hash: str | None = None,
+        link_id: str | None = None,
+        owner_id: str,
+        revoked_at: str,
+    ) -> bool:
+        if not token_hash and not link_id:
+            return False
+        builder = (
+            self._client.table(self._TABLE)
+            .update({"revoked_at": revoked_at})
+            .eq("entity_type", "approvals_batch")
+            .eq("owner_id", owner_id)
+            .is_("revoked_at", "null")
+        )
+        if link_id:
+            builder = builder.eq("id", link_id)
+        else:
+            builder = builder.eq("token_hash", token_hash)
+        response = builder.execute()
+        return bool(_response_rows(response))
+
+    def revoke_all_for_workspace(self, *, workspace_id: str, owner_id: str, revoked_at: str) -> int:
+        response = (
+            self._client.table(self._TABLE)
+            .update({"revoked_at": revoked_at})
+            .eq("entity_type", "approvals_batch")
+            .eq("workspace_id", workspace_id)
+            .eq("owner_id", owner_id)
+            .is_("revoked_at", "null")
+            .execute()
+        )
+        return len(_response_rows(response))
 
 
 class SupabaseApiTokenRepository(_BaseSupabaseRepository):

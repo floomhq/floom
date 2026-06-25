@@ -17,6 +17,7 @@ from apps.api.db.supabase_repos import (
     SupabaseConnectionRepository,
     SupabaseRunRepository,
     SupabaseSecretRepository,
+    SupabaseShareLinkRepository,
     SupabaseWorkerRepository,
     _bytea_literal,
 )
@@ -34,6 +35,7 @@ class _FakeTable:
         self.filters: list[tuple[str, str]] = []
         self.in_filters: list[tuple[str, set[str]]] = []
         self.or_filters: list[str] = []
+        self.is_filters: list[tuple[str, object]] = []
         self.limit_value = None
         self.selected = None
         self.update_values = None
@@ -73,6 +75,10 @@ class _FakeTable:
         self.or_filters.append(value)
         return self
 
+    def is_(self, key, value):
+        self.is_filters.append((key, value))
+        return self
+
     def limit(self, value):
         self.limit_value = value
         return self
@@ -93,6 +99,9 @@ class _FakeTable:
                 for row in rows
                 if any(_matches_or_clause(row, clause) for clause in clauses)
             ]
+        for key, value in self.is_filters:
+            if value == "null":
+                rows = [row for row in rows if row.get(key) is None]
         if self.update_values is not None:
             # UPDATE: mutate the matching rows in place (so a sibling table()
             # handle / get_by_run_id sees the change) and return only the rows
@@ -270,6 +279,156 @@ def test_approval_repository_get_public_loads_by_id_without_owner_scope():
     assert repo.get_public(approval_id="apr_test") == approval
     assert client.table_ref.table_name == "approvals"
     assert ("id", "apr_test") in client.table_ref.filters
+
+
+def test_approval_repository_lists_pending_for_workspace_with_owner_and_limit():
+    rows = {
+        "approvals": [
+            {"id": "apr_1", "workspace_id": "ws_1", "owner_id": "user_1", "status": "pending"},
+            {"id": "apr_2", "workspace_id": "ws_1", "owner_id": "user_1", "status": "pending"},
+            {"id": "apr_other_owner", "workspace_id": "ws_1", "owner_id": "user_2", "status": "pending"},
+            {"id": "apr_done", "workspace_id": "ws_1", "owner_id": "user_1", "status": "approved"},
+            {"id": "apr_other_ws", "workspace_id": "ws_2", "owner_id": "user_1", "status": "pending"},
+        ]
+    }
+    repo = SupabaseApprovalRepository(client=_FakeClient(rows))
+
+    out = repo.list_pending_for_workspace(workspace_id="ws_1", owner_id="user_1", limit=1)
+
+    assert [row["id"] for row in out] == ["apr_1"]
+
+
+def test_share_link_repo_create_resolve_and_revoke_approval_batch_share():
+    rows = {"share_links": []}
+    repo = SupabaseShareLinkRepository(client=_FakeClient(rows))
+
+    created = repo.create_approvals_batch_share(
+        workspace_id="ws_1",
+        owner_id="user_1",
+        token_hash="hash_active",
+        expires_at="2999-01-01T00:00:00+00:00",
+    )
+    resolved = repo.resolve_approvals_batch_share(
+        token_hash="hash_active",
+        now_iso_str="2026-06-25T00:00:00+00:00",
+    )
+
+    assert created["entity_type"] == "approvals_batch"
+    assert created["workspace_id"] == "ws_1"
+    assert created["owner_id"] == "user_1"
+    assert resolved is not None
+    assert resolved["token_hash"] == "hash_active"
+
+    assert repo.revoke_approvals_batch_share(
+        token_hash="hash_active",
+        owner_id="user_1",
+        revoked_at="2026-06-25T00:01:00+00:00",
+    ) is True
+    assert repo.resolve_approvals_batch_share(
+        token_hash="hash_active",
+        now_iso_str="2026-06-25T00:02:00+00:00",
+    ) is None
+
+
+def test_share_link_repo_rejects_missing_revoked_and_expired_batch_links():
+    rows = {
+        "share_links": [
+            {
+                "id": "sl_revoked",
+                "entity_type": "approvals_batch",
+                "workspace_id": "ws_1",
+                "owner_id": "user_1",
+                "token_hash": "hash_revoked",
+                "revoked_at": "2026-06-24T00:00:00+00:00",
+                "expires_at": None,
+            },
+            {
+                "id": "sl_expired",
+                "entity_type": "approvals_batch",
+                "workspace_id": "ws_1",
+                "owner_id": "user_1",
+                "token_hash": "hash_expired",
+                "revoked_at": None,
+                "expires_at": "2020-01-01T00:00:00+00:00",
+            },
+            {
+                "id": "sl_legacy_standalone",
+                "entity_type": "worker",
+                "workspace_id": "ws_1",
+                "owner_id": "user_1",
+                "token_hash": "hash_legacy",
+                "revoked_at": None,
+                "expires_at": None,
+            },
+        ]
+    }
+    repo = SupabaseShareLinkRepository(client=_FakeClient(rows))
+
+    assert repo.resolve_approvals_batch_share(token_hash="hash_missing", now_iso_str=_now_iso()) is None
+    assert repo.resolve_approvals_batch_share(token_hash="hash_revoked", now_iso_str=_now_iso()) is None
+    assert repo.resolve_approvals_batch_share(
+        token_hash="hash_expired",
+        now_iso_str="2026-06-25T00:00:00+00:00",
+    ) is None
+    assert repo.resolve_approvals_batch_share(token_hash="hash_legacy", now_iso_str=_now_iso()) is None
+
+
+def test_share_link_repo_revoke_all_for_workspace_only_active_owner_links():
+    rows = {
+        "share_links": [
+            {
+                "id": "sl_1",
+                "entity_type": "approvals_batch",
+                "workspace_id": "ws_1",
+                "owner_id": "user_1",
+                "token_hash": "hash_1",
+                "revoked_at": None,
+            },
+            {
+                "id": "sl_2",
+                "entity_type": "approvals_batch",
+                "workspace_id": "ws_1",
+                "owner_id": "user_1",
+                "token_hash": "hash_2",
+                "revoked_at": None,
+            },
+            {
+                "id": "sl_revoked",
+                "entity_type": "approvals_batch",
+                "workspace_id": "ws_1",
+                "owner_id": "user_1",
+                "token_hash": "hash_revoked",
+                "revoked_at": "2026-06-24T00:00:00+00:00",
+            },
+            {
+                "id": "sl_other_workspace",
+                "entity_type": "approvals_batch",
+                "workspace_id": "ws_2",
+                "owner_id": "user_1",
+                "token_hash": "hash_other_ws",
+                "revoked_at": None,
+            },
+            {
+                "id": "sl_other_owner",
+                "entity_type": "approvals_batch",
+                "workspace_id": "ws_1",
+                "owner_id": "user_2",
+                "token_hash": "hash_other_owner",
+                "revoked_at": None,
+            },
+        ]
+    }
+    repo = SupabaseShareLinkRepository(client=_FakeClient(rows))
+
+    count = repo.revoke_all_for_workspace(
+        workspace_id="ws_1",
+        owner_id="user_1",
+        revoked_at="2026-06-25T00:00:00+00:00",
+    )
+
+    assert count == 2
+    revoked = {row["id"] for row in rows["share_links"] if row.get("revoked_at") == "2026-06-25T00:00:00+00:00"}
+    assert revoked == {"sl_1", "sl_2"}
 
 
 def test_worker_get_hides_owned_exact_id_when_workspace_cookie_is_stale():
@@ -970,6 +1129,9 @@ def _matches_or_clause(row: dict, clause: list[str]) -> bool:
     if op == "gte":
         actual = row.get(key)
         return actual is not None and str(actual) >= value
+    if op == "gt":
+        actual = row.get(key)
+        return actual is not None and str(actual) > value
     return False
 
 

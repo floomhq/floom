@@ -47,6 +47,7 @@ from apps.api.db.supabase_repos import (
     SupabasePersonalAccessTokenRepository,
     SupabaseRunRepository,
     SupabaseSecretRepository,
+    SupabaseShareLinkRepository,
     SupabaseUserRepository,
     SupabaseUserSessionRepository,
     SupabaseWorkerRepository,
@@ -163,6 +164,7 @@ def _cloud_repositories() -> Repositories:
         tokens=SupabasePersonalAccessTokenRepository(),
         sessions=SupabaseUserSessionRepository(),
         feedback=SupabaseFeedbackRepository(),
+        share_links=SupabaseShareLinkRepository(),
         # FW-02: wire engine-shaped membership so the dashboard's
         # `/workspace/members` surface stops returning HTTP 501. The
         # control-plane membership (routes/members.py) is unaffected.

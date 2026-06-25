@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 cloud_main = importlib.import_module("apps.api.main")
 
-VALID_TOKEN = "batchtoken123"
+VALID_TOKEN = "fls_batchtoken123"
 INVALID_TOKEN = "badbatch123"
 WORKSPACE_ID = "ws_batch"
 OWNER_ID = "owner_batch"
@@ -84,10 +84,25 @@ class RunsRepo:
         return []
 
 
+class ShareLinksRepo:
+    def resolve_approvals_batch_share(self, *, token_hash: str, now_iso_str: str):
+        if token_hash == cloud_main._engine_share_links._hash_share_token(VALID_TOKEN):
+            return {
+                "entity_type": "approvals_batch",
+                "entity_id": WORKSPACE_ID,
+                "owner_id": OWNER_ID,
+                "token_hash": token_hash,
+                "revoked_at": None,
+                "expires_at": "2999-01-01T00:00:00+00:00",
+            }
+        return None
+
+
 class Repos:
     approvals = ApprovalsRepo()
     workers = WorkersRepo()
     runs = RunsRepo()
+    share_links = ShareLinksRepo()
 
 
 def load_share(token: str):

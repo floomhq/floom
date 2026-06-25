@@ -6,6 +6,7 @@ from .supabase_repos import (
     SupabaseConnectionRepository,
     SupabaseRunRepository,
     SupabaseSecretRepository,
+    SupabaseShareLinkRepository,
     SupabaseWorkerRepository,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "SupabaseConnectionRepository",
     "SupabaseRunRepository",
     "SupabaseSecretRepository",
+    "SupabaseShareLinkRepository",
     "SupabaseWorkerRepository",
 ]
