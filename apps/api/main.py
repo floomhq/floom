@@ -1148,7 +1148,6 @@ def _cors_allowed_origins() -> List[str]:
         "https://floom.dev",
         "https://www.floom.dev",
         "https://workers.floom.dev",
-        "https://workeros.floom.dev",
     ]
     if os.environ.get("WORKEROS_DEV"):
         origins.extend(["http://localhost:3000", "http://localhost:3011"])

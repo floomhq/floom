@@ -86,6 +86,36 @@ def test_failed_status_update_synthesizes_error_fields(repo_bundle):
     assert row["error_code"] == "unknown_error"
 
 
+def test_run_create_persists_error_code_and_retry_metadata(repo_bundle):
+    repos, _db, manifest = repo_bundle
+
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-retry-child",
+        worker_id="worker-a",
+        status=RunStatus.FAILED.value,
+        trigger_source="retry",
+        runner="e2b",
+        error="Scheduled fire was missed or delayed by the scheduler.",
+        error_code="schedule_missed",
+        retry_of_run_id="run-parent",
+        retry_attempt=2,
+    )
+
+    row = repos.runs.get_any(run_id="run-retry-child")
+    assert row["error_code"] == "schedule_missed"
+    assert row["retry_of_run_id"] == "run-parent"
+    assert row["retry_attempt"] == 2
+
+
 def test_run_service_failed_status_update_synthesizes_error_fields(repo_bundle):
     import run_service
 
@@ -128,7 +158,10 @@ def test_run_service_scrubs_secret_values_before_persisting_output(repo_bundle):
         user_id="user-a",
         worker_id="worker-secret-output",
         name="Worker Secret Output",
-        manifest_json=manifest("worker-secret-output", "Worker Secret Output"),
+        manifest_json={
+            **manifest("worker-secret-output", "Worker Secret Output"),
+            "secrets": ["API_KEY"],
+        },
         bundle_path="workers/worker-secret-output",
     )
     repos.secrets.set(user_id="user-a", name="API_KEY", value="sk-test-secret-output")
@@ -151,6 +184,7 @@ def test_run_service_scrubs_secret_values_before_persisting_output(repo_bundle):
         },
         user_id="user-a",
         repos=repos,
+        run_secrets={"API_KEY": "sk-test-secret-output"},
     )
 
     row = repos.runs.get(user_id="user-a", run_id="run-secret-output")

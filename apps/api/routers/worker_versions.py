@@ -33,6 +33,7 @@ from services.worker_registry_ops import (
     _git_commit_worker,
     _persist_discovered_workers,
 )
+from services.worker_create import _build_worker_detail_after_write
 from services.worker_serialize import _build_worker_detail, _should_ignore_worker_file
 
 logger = logging.getLogger("floom.api")
@@ -228,4 +229,7 @@ def rollback_worker(
     except Exception:
         logger.warning("Failed to embed files in DB after rollback for worker %s", worker_id, exc_info=True)
 
-    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+    # Read-after-write tolerant: the rollback was just persisted (raise_on_skip),
+    # so a transient 404 from the hosted PostgREST read-back is a not-yet-visible
+    # commit, not a missing worker (workeros-cloud#735).
+    return _build_worker_detail_after_write(worker_id, user_id=auth.user_id, repos=repos)

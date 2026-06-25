@@ -2391,6 +2391,7 @@ class SqliteRunRepository:
                 "output_json",
                 "approval_status",
                 "error",
+                "error_code",
                 "started_at",
                 "completed_at",
                 "duration_ms",
@@ -2398,6 +2399,8 @@ class SqliteRunRepository:
                 "bundle_snapshot_path",
                 "quality_warning",
                 "trigger_ref",
+                "retry_of_run_id",
+                "retry_attempt",
             ]
             values = [
                 run_id,
@@ -2409,6 +2412,7 @@ class SqliteRunRepository:
                 _json_dump(fields.get("output_json") or {}),
                 fields.get("approval_status") or "not_required",
                 fields.get("error"),
+                fields.get("error_code"),
                 fields.get("started_at"),
                 fields.get("completed_at"),
                 fields.get("duration_ms"),
@@ -2416,6 +2420,8 @@ class SqliteRunRepository:
                 fields.get("bundle_snapshot_path"),
                 fields.get("quality_warning"),
                 fields.get("trigger_ref"),
+                fields.get("retry_of_run_id"),
+                int(fields.get("retry_attempt") or 0),
             ]
             if has_actor_user_id:
                 columns.insert(2, "actor_user_id")

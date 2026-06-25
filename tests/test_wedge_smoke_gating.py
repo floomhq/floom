@@ -137,7 +137,11 @@ def _make_smoke_env(monkeypatch, tmp_path, config, driver_factory):
     monkeypatch.setattr(run_authoring, "ARTIFACTS_DIR", tmp_path / "artifacts")
     (tmp_path / "artifacts").mkdir()
 
-    monkeypatch.setattr(run_service, "_load_worker_recipe", lambda wid, repos=None: ("u1", config, {"enabled": True}))
+    monkeypatch.setattr(
+        run_service,
+        "_load_worker_recipe",
+        lambda wid, repos=None, user_id=None: ("u1", config, {"enabled": True}),
+    )
     monkeypatch.setattr(run_service, "get_secrets_for_worker", lambda *a, **k: {})
     monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: driver_factory())
     # context scope is a no-op context manager in this stub
@@ -348,7 +352,9 @@ def _track_repair_env(monkeypatch, tmp_path, config, *, user_run_py):
     monkeypatch.setattr(run_authoring, "ARTIFACTS_DIR", tmp_path / "artifacts")
     (tmp_path / "artifacts").mkdir()
     monkeypatch.setattr(
-        run_service, "_load_worker_recipe", lambda wid, repos=None: ("u1", config, {"enabled": True})
+        run_service,
+        "_load_worker_recipe",
+        lambda wid, repos=None, user_id=None: ("u1", config, {"enabled": True}),
     )
     monkeypatch.setattr(run_service, "get_secrets_for_worker", lambda *a, **k: {})
     monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _failing_code_driver())

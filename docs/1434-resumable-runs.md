@@ -26,9 +26,7 @@ Issue fix option #2 ("automatic retry on abandoned"), fully wired and unit-teste
   - **Startup zombie sweep** (`main.py` lifespan) uses `recover_abandoned_runs`.
 - **Loop-safe bound:** the retry run is tagged `trigger_source="restart_retry"`;
   a run that is itself a `restart_retry` is never recovered again. This bounds
-  recovery to one attempt per lineage and is robust even though
-  `RunsRepository.create()` does not persist `retry_attempt` (a latent gap - see
-  below). `WORKEROS_MAX_RESTART_RETRIES` (default 1) and
+  recovery to one attempt per lineage. `WORKEROS_MAX_RESTART_RETRIES` (default 1) and
   `WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS` (default on) tune/disable it.
 - Reuses the existing cross-backend retry plumbing (`_schedule_retry` ->
   `repos.runs.create(retry_of_run_id=...)` -> `start_run`), so it works on both
@@ -81,10 +79,8 @@ recovery in the meantime (re-runs fresh rather than resuming, which for
 idempotent workers is equivalent and for all workers is strictly better than a
 hard failure).
 
-### Related latent gap found
-`RunsRepository.create()` (`db/sqlite.py`) does not include `retry_attempt` /
-`retry_of_run_id` in its INSERT column list, so retry runs persist
-`retry_attempt=0`. The worker-failure retry path bounds on that column; worth a
-separate fix (add both columns to the insert on the SQLite + Supabase repos).
-The #1434 recovery here deliberately does not rely on it (bounds on
-`trigger_source` instead).
+### Related retry metadata gap
+`RunsRepository.create()` (`db/sqlite.py`) now persists `retry_attempt` and
+`retry_of_run_id`, so worker-failure retries remain durably bounded and
+observable in local SQLite installs. The #1434 recovery still also bounds on
+`trigger_source` as a second no-loop guard.
