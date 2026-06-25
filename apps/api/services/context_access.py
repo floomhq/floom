@@ -244,6 +244,12 @@ def _context_worker_counts(repos: Optional[Repositories], user_id: str) -> dict[
     counts: dict[str, int] = {}
     if repos is None:
         return counts
+    count_fn = getattr(repos.workers, "context_worker_counts", None)
+    if callable(count_fn):
+        try:
+            return {str(k): int(v) for k, v in count_fn(user_id=user_id).items()}
+        except Exception:
+            logger.debug("context worker count aggregate failed", exc_info=True)
     try:
         workers = repos.workers.list(user_id=user_id)
     except Exception:
