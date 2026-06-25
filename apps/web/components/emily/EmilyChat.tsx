@@ -1026,22 +1026,21 @@ export function EmilyDock({ className }: { className?: string }) {
       .catch((err) => logError("Could not load workspace overview.", err));
     return () => { alive = false; };
   }, []);
-  // #1141: reset the dock conversation when navigating away from the create flow
-  // so the next page (or a fresh home visit) shows a clean context instead of the
-  // ephemeral create-mode thread. The create flow now lives on the home route
-  // (?create=1), so reset on leaving home too.
+  // #2011: route navigation must never clear or abort an active Emily chat. The
+  // stream belongs to the persistent dock; clicking Workers/Runs/etc. may dock
+  // Emily out of fullscreen, but the conversation keeps running. Leaving the
+  // create route only drops create-mode chrome; it does not call newSession().
   const pathname = usePathname();
   const prevPathname = useRef<string | null>(null);
   useEffect(() => {
     const prev = prevPathname.current;
     prevPathname.current = pathname;
-    const leftChat = prev !== null && prev.startsWith("/chat") && !pathname.startsWith("/chat");
     const leftHome = prev === "/" || prev === "/overview";
     const enteringHome = pathname === "/" || pathname === "/overview";
-    if (leftChat || (leftHome && !enteringHome)) {
-      coreActionsRef.current?.newSession();
+    if (leftHome && !enteringHome) {
       // Leaving the create surface → drop create mode so a later send isn't
-      // silently treated as a worker-creation request.
+      // silently treated as a worker-creation request. Do NOT clear the chat:
+      // a running create/chat stream must survive navigation.
       setCreateActive(false);
       setCreatePrime(undefined);
     }
@@ -1548,4 +1547,14 @@ export function EmilyChatPage() {
       </div>
     </div>
   );
+}
+
+export function EmilyChatRouteFullscreen() {
+  const { setFullscreen } = useEmilyFullscreen();
+
+  useEffect(() => {
+    setFullscreen(true);
+  }, [setFullscreen]);
+
+  return null;
 }
