@@ -913,7 +913,7 @@ function materializeToolCardFromFollowup(
     title,
     status,
     ...(event.actions ? { actions: event.actions } : {}),
-    ...(event.streams ? { streams: event.streams } : {}),
+    ...("streams" in event && event.streams ? { streams: event.streams } : {}),
   };
 }
 
