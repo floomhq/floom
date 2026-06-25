@@ -151,3 +151,20 @@ def test_human_preview_with_error_words_still_creates_pending_approval(monkeypat
         assert any("awaiting approval" in message for message, _level in logs)
     finally:
         _purge_run_modules()
+
+
+def test_infra_error_detected_via_error_message_key():
+    """#1967 follow-up: {"error":{"message":"... not connected"}} must be caught.
+
+    Previously the traversal entered the ``error`` object but discarded the
+    ``message`` child (not in the inspected key set), so the run wrongly became
+    a pending approval. ``message``/``msg`` are now inspected.
+    """
+    import run_service
+
+    bad = {"error": {"message": "channel 'youtube' not connected in personal-2"}}
+    assert run_service._decision_required_has_infra_error(bad) is True
+
+    # a benign human-facing message must NOT be flagged as an infra error
+    benign = {"message": "Here is your draft caption for review"}
+    assert run_service._decision_required_has_infra_error(benign) is False

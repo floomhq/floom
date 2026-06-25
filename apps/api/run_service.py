@@ -2663,6 +2663,8 @@ _APPROVAL_PROPOSAL_INFRA_ERROR_KEYS = {
     "error_kind",
     "error_message",
     "failure",
+    "message",
+    "msg",
     "raw_error",
 }
 
