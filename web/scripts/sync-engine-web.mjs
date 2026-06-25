@@ -117,6 +117,7 @@ export const OVERLAY_FILES = [
   "middleware.ts",
   "tests/cloud-invite-install.test.ts",
   "tests/fl-batch-6.test.ts",
+  "tests/login-magic-link-error-1702.dom.test.tsx",
   "tests/login-secrets-render-987-988.dom.test.tsx",
   // Cloud parallel of the engine emily-fullscreen behavior test: the cloud
   // dashboard renders CloudAppChrome (overlay), not the engine AppShell, so its
@@ -193,6 +194,22 @@ function rmIfExists(p) {
   if (existsSync(p)) rmSync(p, { recursive: true, force: true });
 }
 
+function hasPreSyncedTree() {
+  return (
+    DEST === WEB_DIR &&
+    existsSync(join(DEST, "app")) &&
+    existsSync(join(DEST, "components", "layout", "sidebar.tsx"))
+  );
+}
+
+function hasUsableEngineTree() {
+  return (
+    existsSync(ENGINE_WEB) &&
+    existsSync(join(ENGINE_WEB, "app", "layout.tsx")) &&
+    existsSync(join(ENGINE_WEB, "components", "layout", "sidebar.tsx"))
+  );
+}
+
 // Public build seams the synced engine tree needs:
 //   NEXT_PUBLIC_BASE_PATH=/app, NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy
 // These are NOT written to any file (no .env.local) — they are passed inline
@@ -201,20 +218,16 @@ function rmIfExists(p) {
 // committed/regenerated secrets-adjacent artifact.
 
 function main() {
-  if (!existsSync(ENGINE_WEB)) {
+  if (!hasUsableEngineTree()) {
     // Deploy context: the dashboard is deployed via `vercel deploy` from `web/`
     // (project rootDirectory=null, CLI uploads only web/), so the root-level
     // `engine/` submodule is NOT present in the build container. That's fine —
     // the tree was synced locally BEFORE deploy and uploaded with web/. Skip
     // gracefully if a pre-synced tree exists; only fail if there's nothing to
     // build (genuinely broken local run with no engine and no synced tree).
-    const preSynced =
-      DEST === WEB_DIR &&
-      existsSync(join(DEST, "app")) &&
-      existsSync(join(DEST, "components", "layout", "sidebar.tsx"));
-    if (preSynced) {
+    if (hasPreSyncedTree()) {
       log(
-        `[sync] engine source absent at ${ENGINE_WEB}; using pre-synced tree ` +
+        `[sync] engine source absent or incomplete at ${ENGINE_WEB}; using pre-synced tree ` +
           `(deploy context). Skipping sync.`
       );
       return;

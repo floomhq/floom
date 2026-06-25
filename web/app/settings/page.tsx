@@ -827,6 +827,7 @@ function SettingsContent() {
             ? SYSTEM_SUBTABS.map((t) => ({
                 key: t.key,
                 label: t.label,
+                custom: "unmigrated" as const,
                 render: () => (
                   <SystemSubTab
                     tab={t.key}
@@ -841,6 +842,7 @@ function SettingsContent() {
                 {
                   key: "settings",
                   label: item.label,
+                  custom: "unmigrated" as const,
                   render: () => renderSection(item.key),
                 },
               ],

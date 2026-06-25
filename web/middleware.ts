@@ -38,6 +38,9 @@ function isPublicPath(pathname: string): boolean {
   if (path === "/favicon.ico") return true;
   if (path === "/version") return true;
   if (path === "/login") return true;
+  // PostHog first-party reverse proxy (/app/ingest -> us(.i).posthog.com) must be
+  // public so capture/replay POSTs are not 307-bounced to /login.
+  if (path === "/ingest" || path.startsWith("/ingest/")) return true;
   // #1447: pre-session onboarding + magic-link consumption pages. (The proxy
   // hop these use is already public above via the /api/proxy/ rule.)
   if (path === "/start" || path.startsWith("/start/")) return true;

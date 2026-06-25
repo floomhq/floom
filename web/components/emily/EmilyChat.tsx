@@ -36,6 +36,7 @@ import {
   getStreamingActivity,
   shouldAutoOpenRunDetails,
   useChatStream,
+  type StreamingActivity,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
 import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
@@ -228,10 +229,13 @@ function SuggestionPills({
   );
 }
 
-// ── Streaming activity (thinking / writing; idle while tools run) ─────────────
+// ── Streaming activity (thinking / tool progress / writing) ──────────────────
 
-function StreamingActivityRow({ kind }: { kind: "thinking" | "writing" }) {
-  const title = kind === "writing" ? "Writing…" : "Thinking…";
+function StreamingActivityRow({ activity }: { activity: Exclude<StreamingActivity, { kind: "idle" }> }) {
+  const title =
+    activity.kind === "writing" ? "Writing…" :
+    activity.kind === "tool" ? activity.title :
+    "Thinking…";
   return (
     <div className="flex items-start gap-2">
       <EmilyAvatar size="sm" active />
@@ -838,8 +842,11 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 onPickMcp={() => mcpModal.open()}
               />
               <div className="mt-6 w-full max-w-2xl px-6">
-                {/* Hero composer: home/create empty state uses the visible grey
-                    in-app fill. createMode only changes the send affordance. */}
+                {/* Hero composer (Federico 2026-06-21): the home/create empty
+                    state is the primary call-to-action, so it uses the FLAT,
+                    BORDERLESS landing-style composer (no "Uses" chip row) at the
+                    LARGER hero size. Tool names are highlighted INLINE inside the
+                    example pills above (PromptTokens), matching the landing box. */}
                 <PromptInput
                   value={input}
                   onChange={setInput}
@@ -848,7 +855,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   attachedFiles={attachedFiles}
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
-                  sendMode={createMode ? "hire" : "send"}
+                  variant="landing"
                   large
                   // #1698: "New worker" / ?create=1 must give visible feedback
                   // from ANY route. Focus the composer when entering create mode
@@ -876,7 +883,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
             {(() => {
               const activity = getStreamingActivity(messages, isStreaming);
               return activity.kind !== "idle" ? (
-                <StreamingActivityRow kind={activity.kind} />
+                <StreamingActivityRow activity={activity} />
               ) : null;
             })()}
             <div ref={bottomRef} />

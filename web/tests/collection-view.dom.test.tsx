@@ -3,7 +3,7 @@ import { useState } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CollectionView } from "@/components/collection/CollectionView";
-import { Avatar } from "@/components/collection/Avatar";
+import { Avatar } from "@/components/ui/Avatar";
 import { emptyState } from "@/lib/collection/url-state";
 import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
 
@@ -41,23 +41,23 @@ function makeConfig(over: Partial<CollectionConfig<Item>> = {}): CollectionConfi
     view: { default: "list", grid: true },
     columns: { template: "1fr 120px 40px", headers: ["Worker", "Status", ""] },
     row: (i) => ({
-      leading: <Avatar name={i.name} />,
+      leading: <Avatar role="workspace" name={i.name} />,
       primary: i.name,
       secondary: "a worker",
       status: { tone: "ok", label: "Active" },
       menu: [{ label: "Delete", onSelect: () => {}, danger: true }],
     }),
     card: (i) => ({
-      leading: <Avatar name={i.name} />,
+      leading: <Avatar role="workspace" name={i.name} />,
       name: i.name,
       description: "a worker",
       status: { tone: "ok", label: "Active" },
     }),
     detail: (i) => ({
-      header: { leading: <Avatar name={i.name} />, title: i.name },
+      header: { leading: <Avatar role="workspace" name={i.name} />, title: i.name },
       tabs: [
-        { key: "About", label: "About", render: () => <div>About {i.name}</div> },
-        { key: "Runs", label: "Runs", render: () => <div>Runs body</div> },
+        { key: "About", label: "About", custom: "unmigrated" as const, render: () => <div>About {i.name}</div> },
+        { key: "Runs", label: "Runs", custom: "unmigrated" as const, render: () => <div>Runs body</div> },
       ],
     }),
     add: { label: "Add", onSelect: () => {} },
@@ -113,6 +113,25 @@ describe("CollectionView — list & grid (§8e)", () => {
       <Harness config={makeConfig({ restingMaxWidth: 900 })} />,
     );
     expect(container.querySelector('[style*="max-width: 900px"]')).toBeInTheDocument();
+  });
+
+  it("keeps filters below the search/action row in the control strip", () => {
+    const { container } = render(<Harness config={makeConfig()} />);
+    const strip = container.querySelector(".c-controlstrip-inner");
+    const topRow = container.querySelector(".c-controlstrip-toprow");
+    const search = container.querySelector(".c-srch");
+    const filterBar = container.querySelector(".c-filterbar");
+    const actions = container.querySelector(".c-toolbar-actions");
+
+    expect(strip).toBeInTheDocument();
+    expect(topRow).toBeInTheDocument();
+    expect(search).toBeInTheDocument();
+    expect(filterBar).toBeInTheDocument();
+    expect(actions).toBeInTheDocument();
+    expect(topRow).toContainElement(search);
+    expect(topRow).toContainElement(actions);
+    expect(topRow).not.toContainElement(filterBar);
+    expect(strip?.children[1]).toBe(filterBar);
   });
 });
 

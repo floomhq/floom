@@ -8,7 +8,7 @@ function worker(id: string, name: string, description = ""): WorkerSummary {
     name,
     description,
     tags: [],
-    status: "healthy",
+    status: "ready",
     trigger_type: "manual",
     runner: "e2b",
     triggers: [],

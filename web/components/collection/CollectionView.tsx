@@ -452,7 +452,14 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           {!collectionEmpty && (
             <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
               <div className="c-controlstrip-inner" style={restingFrameStyle}>
-                {searchBox()}
+                <div className="c-controlstrip-toprow">
+                  {searchBox()}
+                  <div className="c-toolbar-actions">
+                    {viewToggle}
+                    {config.toolbarActions}
+                    {addButton}
+                  </div>
+                </div>
                 {config.tags ? (
                   <TagBar
                     families={config.tags}
@@ -461,11 +468,6 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
                     onClear={clearTags}
                   />
                 ) : null}
-                <div className="c-toolbar-actions">
-                  {viewToggle}
-                  {config.toolbarActions}
-                  {addButton}
-                </div>
               </div>
             </div>
           )}

@@ -3,11 +3,9 @@
 import { useEffect, useRef } from "react";
 import { ArrowUp, Paperclip, SendHorizonal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { InlineToolToken } from "@/components/InlineToolToken";
 import { PromptChips } from "@/components/PromptChips";
 import { FileChip } from "./FileChip";
 import { api } from "@/lib/api";
-import { tokenisePrompt } from "@/lib/prompt-detect";
 import { cn } from "@/lib/utils";
 import type { AttachedFile } from "@/lib/emily-chat-types";
 
@@ -23,26 +21,6 @@ const ACCEPTED_TYPES = [
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-function PromptMirror({ text }: { text: string }) {
-  const safe = text.endsWith("\n") ? `${text} ` : text;
-  const segments = tokenisePrompt(safe);
-
-  return (
-    <>
-      {segments.map((seg, i) => {
-        if (seg.kind === "plain") {
-          return <span key={i}>{seg.text}</span>;
-        }
-        return (
-          <InlineToolToken key={i} brand={seg.brand} className="mx-px">
-            {seg.text}
-          </InlineToolToken>
-        );
-      })}
-    </>
-  );
-}
-
 export function PromptInput({
   value,
   onChange,
@@ -53,7 +31,6 @@ export function PromptInput({
   disabled,
   sendDisabled,
   variant = "default",
-  sendMode,
   large = false,
   autoFocus = false,
   /** Bumps on each fresh ?create=1 entry so autoFocus re-runs on repeat clicks. */
@@ -75,15 +52,16 @@ export function PromptInput({
   sendDisabled?: boolean;
   /**
    * #1557 + P1-10 (Federico 2026-06-19): "landing" matches the marketing landing
-   * prompt box — a FLAT, borderless composer with inline brand-logo highlights,
-   * a labeled "Hire ↑" send affordance instead of a bare arrow icon, and no
-   * "Will use / Uses" chip row.
+   * prompt box — a FLAT, borderless composer with a labeled "Hire ↑" send
+   * affordance instead of a bare arrow icon, and no "Will use / Uses" chip row.
    * Used by Emily's HOME/CREATE empty state so the in-app first prompt reads the
    * same as the landing's. The "default" variant (the bottom-anchored
    * conversation composer) keeps its existing flat-but-outlined box + icon send.
+   * NOTE: rendering the detected tools as rich INLINE chips inside the editable
+   * textarea (as the landing does within static prompt text) is a follow-up; the
+   * landing variant simply drops the separate Uses-row to stay clean.
    */
   variant?: "default" | "landing";
-  sendMode?: "send" | "hire";
   /**
    * Hero sizing (Federico 2026-06-21): the home empty-state composer is the
    * primary call-to-action, so it gets a taller min-height, larger text, and
@@ -101,7 +79,6 @@ export function PromptInput({
   focusKey?: number;
 }) {
   const isLanding = variant === "landing";
-  const isHire = sendMode ? sendMode === "hire" : isLanding;
   const textareaLabel = placeholder ?? "Describe the job you want done";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -182,9 +159,9 @@ export function PromptInput({
 
       {/* Detected tools + capabilities in the message text (read-only here —
           the assistant decides what to wire). Same shared detector as
-          /workers/new (lib/prompt-detect). #1557/P1-10: the landing variant shows
-          connection logos inline in the composer mirror instead of a separate
-          Uses row. */}
+          /workers/new (lib/prompt-detect). #1557/P1-10: the landing variant keeps
+          the composer clean (no separate Uses-row); inline tool chips are a
+          follow-up. */}
       {!isLanding && <PromptChips prompt={value} className="px-1" />}
 
       {/* Two-row composer: textarea on top, action toolbar below (attach left,
@@ -201,42 +178,26 @@ export function PromptInput({
           large && "p-2",
         )}
       >
-        <div className="relative">
-          {isLanding && value ? (
-            <div
-              aria-hidden="true"
-              className={cn(
-                "pointer-events-none absolute inset-x-0 top-0 whitespace-pre-wrap break-words px-2 pt-1.5 text-left text-foreground overflow-hidden",
-                large
-                  ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px]"
-                  : "text-sm min-h-[24px] max-h-[120px]",
-              )}
-            >
-              <PromptMirror text={value} />
-            </div>
-          ) : null}
-          <textarea
-            ref={textareaRef}
-            // a11y #1711: explicit accessible name (the textarea has no visible
-            // <label>; the placeholder is not an accessible name).
-            aria-label={textareaLabel}
-            className={cn(
-              "relative w-full resize-none bg-transparent px-2 pt-1.5 outline-none placeholder:text-muted-foreground overflow-auto",
-              // Hero (large): bigger type + taller min-height so the home composer
-              // reads as the primary input. Standard: compact body text.
-              large
-                ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px]"
-                : "text-sm min-h-[24px] max-h-[120px]",
-              isLanding && value && "text-transparent [caret-color:var(--ink)] [-webkit-text-fill-color:transparent]",
-            )}
-            placeholder={placeholder ?? "Message Emily..."}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={handleKey}
-            rows={1}
-            disabled={disabled}
-          />
-        </div>
+        <textarea
+          ref={textareaRef}
+          // a11y #1711: explicit accessible name (the textarea has no visible
+          // <label>; the placeholder is not an accessible name).
+          aria-label={textareaLabel}
+          className={cn(
+            "w-full resize-none bg-transparent px-2 pt-1.5 outline-none placeholder:text-muted-foreground overflow-auto",
+            // Hero (large): bigger type + taller min-height so the home composer
+            // reads as the primary input. Standard: compact body text.
+            large
+              ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px]"
+              : "text-sm min-h-[24px] max-h-[120px]",
+          )}
+          placeholder={placeholder ?? "Message Emily..."}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKey}
+          rows={1}
+          disabled={disabled}
+        />
 
         <input
           ref={fileInputRef}
@@ -265,7 +226,7 @@ export function PromptInput({
 
           <div className="flex-1" />
 
-          {isHire ? (
+          {isLanding ? (
             // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
             // landing's prompt CTA, not a bare arrow. Keeps an accessible name so
             // the send action stays discoverable to AT + tests.

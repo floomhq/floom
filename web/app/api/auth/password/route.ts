@@ -10,12 +10,20 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const mode = typeof body.mode === "string" ? body.mode : "signin";
   const path = mode === "signup" ? "/auth/password-signup" : "/auth/password-login";
-  const upstream = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+  } catch {
+    return NextResponse.json(
+      { detail: "Could not reach the API server. Start the local API or use the deployed app to sign in." },
+      { status: 502 },
+    );
+  }
 
   const payload = await upstream.json().catch(() => ({}));
   const response = NextResponse.json(payload, { status: upstream.status });

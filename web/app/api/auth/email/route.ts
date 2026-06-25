@@ -19,7 +19,15 @@ export async function POST(req: NextRequest) {
   url.searchParams.set("email", email);
   url.searchParams.set("next", next);
 
-  const upstream = await fetch(url, { method: "GET", cache: "no-store" });
+  let upstream: Response;
+  try {
+    upstream = await fetch(url, { method: "GET", cache: "no-store" });
+  } catch {
+    return NextResponse.json(
+      { detail: "Could not reach the API server. Start the local API or use the deployed app to sign in." },
+      { status: 502 },
+    );
+  }
   const payload = await upstream.json().catch(() => ({}));
   return NextResponse.json(payload, { status: upstream.status });
 }

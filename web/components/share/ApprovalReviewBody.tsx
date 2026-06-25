@@ -37,35 +37,6 @@ function asString(v: unknown): string {
   return sanitizeOutputText(typeof v === "string" ? v : String(v));
 }
 
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-}
-
-function parsePreviewRecord(a: ApprovalRow): Record<string, unknown> | null {
-  const payload = asRecord(a.preview_payload);
-  if (payload) return payload;
-  const preview = a.preview?.trim();
-  if (!preview || !(preview.startsWith("{") && preview.endsWith("}"))) return null;
-  try {
-    return asRecord(JSON.parse(preview));
-  } catch {
-    return null;
-  }
-}
-
-function explicitFalse(v: unknown): boolean {
-  return v === false || (typeof v === "string" && v.trim().toLowerCase() === "false");
-}
-
-function approvalBlockedState(a: ApprovalRow): { blocked: boolean; error: string | null } {
-  const proposed = parsePreviewRecord(a);
-  const status = String(proposed?.status ?? proposed?.state ?? "").trim().toLowerCase();
-  const hasErrorStatus = status === "error" || status === "failed";
-  const noDecisionRequired = explicitFalse(proposed?.decision_required ?? proposed?.decisionRequired);
-  const error = asString(proposed?.error ?? proposed?.message ?? proposed?.reason) || null;
-  return { blocked: hasErrorStatus || noDecisionRequired, error };
-}
-
 function formatRelative(iso?: string): string {
   if (!iso) return "";
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
@@ -293,8 +264,6 @@ export function ApprovalReviewBody({
   const worker = approval.worker_name ?? approval.worker_id;
   const cost = costLine(approval);
   const expiry = formatExpiry(approval.expires_at);
-  const blocked = approvalBlockedState(approval);
-  const blockedTitle = blocked.error ? `This action failed: ${blocked.error}` : "This action does not need a decision.";
 
   return (
     <div className="c-appr-root" style={{ maxWidth: 820, margin: "0 auto" }}>
@@ -310,14 +279,12 @@ export function ApprovalReviewBody({
       {/* HERO — the ask, confident */}
       <div className="c-appr-hero">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span className="c-appr-eyebrow">{blocked.blocked ? "Action blocked" : "Approval requested"}</span>
-          {!blocked.blocked && (
-            <span className="c-appr-wait">
-              <span className="dot" /> Awaiting your decision
-            </span>
-          )}
+          <span className="c-appr-eyebrow">Approval requested</span>
+          <span className="c-appr-wait">
+            <span className="dot" /> Awaiting your decision
+          </span>
         </div>
-        <h2 className="c-appr-title">{blocked.blocked ? blockedTitle : actionLine}</h2>
+        <h2 className="c-appr-title">{actionLine}</h2>
         <p className="c-appr-meta">
           Requested {formatRelative(approval.created_at)} by worker <b>{worker}</b>
           {cost && (
@@ -334,33 +301,24 @@ export function ApprovalReviewBody({
       {/* TWO COLUMN: response LEFT, proposed output RIGHT */}
       <div className="c-appr-grid">
         <div className="col-left">
-          <p className="c-appr-sech">{blocked.blocked ? "Review state" : "Your response"}</p>
-          {blocked.blocked ? (
-            <div className="c-appr-blocked" role="status">
-              <p className="title">{blockedTitle}</p>
-              <p>No approval or rejection is available because the proposed action is not awaiting a decision.</p>
-            </div>
-          ) : (
-            <>
-              <textarea
-                className="c-appr-comment"
-                value={comment}
-                onChange={(e) => onComment(e.target.value)}
-                placeholder="Add a comment with your decision, or leave a note…"
-                rows={3}
-                disabled={busy}
-              />
-              {comment.trim() && !approveKeepsComment && (
-                <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
-                  This worker approves via a tool callback that cannot store a comment. Your note is sent only if you reject.
-                </p>
-              )}
-              {onAttach && (
-                <button type="button" className="c-appr-attach" onClick={onAttach} disabled={busy}>
-                  <Paperclip size={15} /> Attach a file or screenshot
-                </button>
-              )}
-            </>
+          <p className="c-appr-sech">Your response</p>
+          <textarea
+            className="c-appr-comment"
+            value={comment}
+            onChange={(e) => onComment(e.target.value)}
+            placeholder="Add a comment with your decision, or leave a note…"
+            rows={3}
+            disabled={busy}
+          />
+          {comment.trim() && !approveKeepsComment && (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
+              This worker approves via a tool callback that cannot store a comment. Your note is sent only if you reject.
+            </p>
+          )}
+          {onAttach && (
+            <button type="button" className="c-appr-attach" onClick={onAttach} disabled={busy}>
+              <Paperclip size={15} /> Attach a file or screenshot
+            </button>
           )}
 
           <dl className="c-appr-kv">
@@ -378,28 +336,26 @@ export function ApprovalReviewBody({
             )}
           </dl>
 
-          {!blocked.blocked && (
-            <div className="c-appr-decide">
-              <button
-                type="button"
-                className="c-addbtn"
-                style={{ padding: "8px 18px", fontSize: 13 }}
-                onClick={onApprove}
-                disabled={busy}
-              >
-                {busy ? "Working" : total > 1 ? "Approve this" : "Approve"}
-              </button>
-              <button
-                type="button"
-                className="c-vpill"
-                style={{ padding: "8px 18px", color: "var(--warning)", borderColor: "var(--warning)" }}
-                onClick={onReject}
-                disabled={busy}
-              >
-                {total > 1 ? "Reject this" : "Reject"}
-              </button>
-            </div>
-          )}
+          <div className="c-appr-decide">
+            <button
+              type="button"
+              className="c-addbtn"
+              style={{ padding: "8px 18px", fontSize: 13 }}
+              onClick={onApprove}
+              disabled={busy}
+            >
+              {busy ? "Working" : total > 1 ? "Approve this" : "Approve"}
+            </button>
+            <button
+              type="button"
+              className="c-vpill"
+              style={{ padding: "8px 18px", color: "var(--warning)", borderColor: "var(--warning)" }}
+              onClick={onReject}
+              disabled={busy}
+            >
+              {total > 1 ? "Reject this" : "Reject"}
+            </button>
+          </div>
 
           {leftExtra}
         </div>

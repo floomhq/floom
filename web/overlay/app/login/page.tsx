@@ -47,7 +47,7 @@ const ACTIVITY_ROWS: {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string; mode?: string; install?: string; switch?: string }>;
+  searchParams?: Promise<{ next?: string; mode?: string; install?: string; switch?: string; error?: string }>;
 }) {
   // Next 16: searchParams is always a Promise in server components.
   const sp = (await searchParams) ?? {};
@@ -56,6 +56,7 @@ export default async function LoginPage({
   const initialMode = sp.mode === "signup" || sp.mode === "signin" ? sp.mode : "magic";
   const switchAccount = sp.switch === "1" || sp.switch === "true";
   const signupHref = `/login?mode=signup&next=${encodeURIComponent(next)}${install ? `&install=${encodeURIComponent(install)}` : ""}`;
+  const errorMessage = authErrorMessage(sp.error);
 
   return (
     <main
@@ -205,6 +206,16 @@ export default async function LoginPage({
               </p>
             </div>
 
+            {errorMessage ? (
+              <div
+                className="mb-4 rounded-[12px] px-3 py-2 text-center text-[12px] leading-5"
+                style={{ background: "rgba(180,83,9,.10)", color: "var(--warning)" }}
+                role="alert"
+              >
+                {errorMessage}
+              </div>
+            ) : null}
+
             <div className="space-y-2.5">
               <AuthButton method="google" href={oauthLoginUrl("google", next, switchAccount)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-foreground px-4 text-[14px] font-medium text-background">
                 <GoogleIcon />
@@ -308,20 +319,34 @@ function FloomMark({ size = 20 }: { size?: number }) {
 function WorkerRowIcon({ icon }: { icon: ReactNode }) {
   return (
     <span
+      data-login-worker-icon
       className="inline-flex shrink-0 items-center justify-center [&_svg]:h-[13px] [&_svg]:w-[13px]"
       style={{
         width: 20,
         height: 20,
         borderRadius: "var(--radius-squircle)",
-        background: "var(--accent-soft)",
+        background: "transparent",
         color: "var(--text-primary)",
-        border: "1px solid color-mix(in srgb, var(--text-primary) 14%, transparent)",
       }}
       aria-hidden="true"
     >
       {icon}
     </span>
   );
+}
+
+function authErrorMessage(error?: string): string | null {
+  if (!error) return null;
+  if (error === "expired_link") {
+    return "This sign-in link expired or was already used. Request a new one below.";
+  }
+  if (error === "account_disabled") {
+    return "This account has been disabled. Contact your workspace admin.";
+  }
+  if (error === "api_unavailable" || error === "local_api_unavailable") {
+    return "Could not reach the API server. Start the local API or use the deployed app to sign in.";
+  }
+  return "Could not sign you in. Please try again.";
 }
 
 function StatusPill({

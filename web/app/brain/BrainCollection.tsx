@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
-import { qk, useContexts, useStreamedInitialData } from "@/lib/query/hooks";
+import { useContexts } from "@/lib/query/hooks";
 import { reportError } from "@/lib/notify";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -361,14 +361,7 @@ function EmptyStateActions({ onBrowse }: { onBrowse: () => void }) {
   );
 }
 
-export default function BrainCollection({
-  initialFolders = [],
-  initialFoldersPromise,
-}: {
-  initialFolders?: ContextSummary[];
-  initialFoldersPromise?: Promise<ContextSummary[]>;
-}) {
-  useStreamedInitialData(qk.contexts, initialFoldersPromise);
+export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
   const foldersQuery = useContexts(initialFolders.length > 0 ? initialFolders : undefined);
   const folders = foldersQuery.data ?? initialFolders;
   // Show a loading skeleton until the first fetch completes so we never flash
@@ -546,8 +539,8 @@ export default function BrainCollection({
         ),
       },
       tabs: [
-        { key: "Files", label: "Files", count: c.file_count, render: () => <FilesTab folder={c} /> },
-        { key: "Used by", label: "Used by", count: c.worker_count, render: () => <UsedByTab folder={c} /> },
+        { key: "Files", label: "Files", count: c.file_count, custom: "unmigrated", render: () => <FilesTab folder={c} /> },
+        { key: "Used by", label: "Used by", count: c.worker_count, custom: "unmigrated", render: () => <UsedByTab folder={c} /> },
       ],
     }),
     // No prominent toolbar "+ New folder" addButton (the operator 2026-06-15):

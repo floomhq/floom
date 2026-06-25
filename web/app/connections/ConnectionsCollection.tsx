@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useConnections, useMembers, useSecrets, useWorkers, useStreamedInitialData, qk } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
-import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
+import type { CollectionConfig, CustomDetailTab, DetailTab, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
@@ -856,10 +856,11 @@ export default function ConnectionsCollection({
         const using = workersUsing(c, workers);
         const related = secretsForConnection(c, secrets);
         const advancedTabs = isEmailConnection ? ["Recent emails"] : [];
-        const baseTabs = [
+        const baseTabs: CustomDetailTab[] = [
           {
             key: "Overview",
             label: "Overview",
+            custom: "unmigrated",
             render: () => (
               <KV
                 rows={[
@@ -879,12 +880,14 @@ export default function ConnectionsCollection({
             key: "Tools",
             label: "Tools",
             count: c.scopes?.length,
+            custom: "unmigrated",
             render: () => <OAuthToolsPanel connection={c} />,
           },
           {
             key: "Secrets",
             label: "Secrets",
             count: related.length || undefined,
+            custom: "unmigrated",
             render: () => (
               <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
             ),
@@ -893,19 +896,22 @@ export default function ConnectionsCollection({
             key: "Used by",
             label: "Used by",
             count: using.length || undefined,
+            custom: "unmigrated",
             render: () => <UsedByPanel connection={c} workers={workers} />,
           },
           {
             key: "Activity",
             label: "Activity",
+            custom: "unmigrated",
             render: () => <ActivityPanel connectionId={c.id} />,
           },
         ];
-        const advancedRendered = advancedTabs
+        const advancedRendered: CustomDetailTab[] = advancedTabs
           .filter((t) => pinnedTabs.has(t))
           .map((t) => ({
             key: t,
             label: t,
+            custom: "unmigrated" as const,
             render: () => <EmailPeekPanel connectionId={c.id} />,
           }));
         return {
@@ -924,10 +930,11 @@ export default function ConnectionsCollection({
         const using = workersUsing(c, workers);
         const related = secretsForConnection(c, secrets);
         const advancedTabs = ["Config"];
-        const baseTabs = [
+        const baseTabs: CustomDetailTab[] = [
           {
             key: "Overview",
             label: "Overview",
+            custom: "unmigrated",
             render: () => (
               <KV
                 rows={[
@@ -951,12 +958,14 @@ export default function ConnectionsCollection({
             key: "Tools",
             label: "Tools",
             count: c.mcp_allowed_tools?.length,
+            custom: "unmigrated",
             render: () => <McpToolsPanel connection={c} />,
           },
           {
             key: "Secrets",
             label: "Secrets",
             count: related.length || undefined,
+            custom: "unmigrated",
             render: () => (
               <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
             ),
@@ -965,19 +974,22 @@ export default function ConnectionsCollection({
             key: "Used by",
             label: "Used by",
             count: using.length || undefined,
+            custom: "unmigrated",
             render: () => <UsedByPanel connection={c} workers={workers} />,
           },
           {
             key: "Activity",
             label: "Activity",
+            custom: "unmigrated",
             render: () => <ActivityPanel connectionId={c.id} />,
           },
         ];
-        const advancedRendered = advancedTabs
+        const advancedRendered: CustomDetailTab[] = advancedTabs
           .filter((t) => pinnedTabs.has(t))
           .map((t) => ({
             key: t,
             label: t,
+            custom: "unmigrated" as const,
             render: () => (
               <pre style={codeBlock}>
                 {JSON.stringify(
@@ -1003,10 +1015,11 @@ export default function ConnectionsCollection({
       const usedByCount = s.used_by?.length ?? 0;
       return {
         header,
-        tabs: [
+        tabs: ([
           {
             key: "Overview",
             label: "Overview",
+            custom: "unmigrated",
             render: () => (
               <KV
                 rows={[
@@ -1052,6 +1065,7 @@ export default function ConnectionsCollection({
             key: "Used by",
             label: "Used by",
             count: s.used_by?.length,
+            custom: "unmigrated",
             render: () => (
               <div className="c-ltable">
                 {(s.used_by ?? []).map((workerName) => {
@@ -1083,7 +1097,7 @@ export default function ConnectionsCollection({
               </div>
             ),
           },
-        ],
+        ] as DetailTab[]),
       };
     },
     add: {

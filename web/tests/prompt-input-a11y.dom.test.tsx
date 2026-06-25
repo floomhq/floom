@@ -14,13 +14,7 @@ vi.mock("@/lib/api", () => ({
 
 import { PromptInput } from "@/components/emily/PromptInput";
 
-function renderComposer({
-  variant = "default",
-  sendMode,
-}: {
-  variant?: "default" | "landing";
-  sendMode?: "send" | "hire";
-} = {}) {
+function renderComposer(variant: "default" | "landing" = "default") {
   return render(
     <PromptInput
       value=""
@@ -29,7 +23,6 @@ function renderComposer({
       onFilesChange={() => {}}
       attachedFiles={[]}
       variant={variant}
-      sendMode={sendMode}
     />,
   );
 }
@@ -43,7 +36,7 @@ describe("PromptInput a11y (#1711)", () => {
   it("composer wrapper renders a visible focus ring (focus-within:ring)", () => {
     renderComposer();
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
-    const wrapper = textarea.parentElement?.parentElement as HTMLElement;
+    const wrapper = textarea.parentElement as HTMLElement;
     expect(wrapper.className).toMatch(/focus-within:ring-2/);
     expect(wrapper.className).toMatch(/focus-within:ring-\[var\(--ring\)\]/);
   });
@@ -51,23 +44,13 @@ describe("PromptInput a11y (#1711)", () => {
 
 describe("PromptInput send-button label/aria (#1709)", () => {
   it("landing send button visible text is 'Hire' and accessible name is 'Hire worker'", () => {
-    renderComposer({ variant: "landing" });
+    renderComposer("landing");
     const btn = screen.getByRole("button", { name: "Hire worker" });
     expect(btn.textContent).toContain("Hire");
   });
 
   it("default send button keeps the 'Send message' accessible name", () => {
-    renderComposer();
+    renderComposer("default");
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy();
-  });
-
-  it("hire send mode can render on the grey default composer", () => {
-    renderComposer({ sendMode: "hire" });
-    const btn = screen.getByRole("button", { name: "Hire worker" });
-    const textarea = screen.getByRole("textbox", { name: /describe the job/i });
-    const wrapper = textarea.parentElement?.parentElement as HTMLElement;
-    expect(btn.textContent).toContain("Hire");
-    expect(wrapper.className).toContain("bg-[var(--bg-2)]");
-    expect(wrapper.className).toContain("focus-within:bg-[var(--bg-3)]");
   });
 });

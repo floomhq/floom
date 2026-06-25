@@ -8,6 +8,7 @@ data/
 ops/
 docs/
 node_modules
+.venv
 .next
 .vercel
 web/node_modules

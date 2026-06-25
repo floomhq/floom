@@ -94,17 +94,102 @@ export interface ListColumns {
   menuColumn?: boolean;
 }
 
-/** One detail tab (SPEC §3). */
-export interface DetailTab {
+/** A label/value fact — the unit of summary rows, pairs, and key/value rows. */
+export interface DetailFact {
+  key: string;
+  label: ReactNode;
+  value: ReactNode;
+}
+
+/** A chip in a DetailChips group. String shorthand: a leading "+" → add chip. */
+export type DetailChip =
+  | string
+  | { key: string; label: ReactNode; add?: boolean };
+
+/** One key/value row inside a DetailSection. */
+export interface DetailRowSpec {
+  key: string;
+  label: ReactNode;
+  value: ReactNode;
+  mono?: boolean;
+}
+
+/**
+ * A declarative detail section — the engine renders it through DetailKit so
+ * every surface looks identical. Compose a summary + grouped rows/pairs/chips
+ * + an optional note/actions; `empty` shows when the section resolves to no
+ * rows/pairs/chips.
+ */
+export interface DetailSection {
+  key: string;
+  label?: ReactNode;
+  /** Muted line under the label (c-dctx). */
+  context?: ReactNode;
+  summary?: DetailFact[];
+  pairs?: DetailFact[];
+  rows?: DetailRowSpec[];
+  chips?: DetailChip[];
+  /** Rendered when the section has no rows/pairs/chips. */
+  empty?: ReactNode;
+  note?: ReactNode;
+  actions?: ReactNode;
+}
+
+/**
+ * Reasons a tab may opt OUT of the structured register (the escape hatch).
+ * Every custom tab must name one — that keeps bespoke UI explicit and
+ * review-visible. `unmigrated` is transitional debt: a surface not yet ported
+ * to the structured register (lint warns, burned down per follow-up PR).
+ */
+export type CustomTabReason =
+  | "worker-flow"
+  | "version-history"
+  | "brain-editor"
+  | "file-viewer"
+  | "approval-review"
+  | "run-output"
+  | "run-logs"
+  | "unmigrated";
+
+interface DetailTabBase {
   key: string;
   label: string;
   count?: number;
-  render: () => ReactNode;
 }
+
+/**
+ * Structured tab: declares its content as DATA; the engine renders it through
+ * the register. Must have a non-empty summary OR sections. `render`/`custom`
+ * are forbidden — that XOR makes drift a compile error.
+ */
+export type StructuredDetailTab = DetailTabBase &
+  (
+    | { summary: [DetailFact, ...DetailFact[]]; sections?: DetailSection[] }
+    | { summary?: DetailFact[]; sections: [DetailSection, ...DetailSection[]] }
+  ) & {
+    render?: never;
+    custom?: never;
+  };
+
+/**
+ * Custom tab: genuinely bespoke UI (graphs, editors, file/log viewers). MUST
+ * name a `custom` reason from the allowlist. Structured fields are forbidden.
+ */
+export interface CustomDetailTab extends DetailTabBase {
+  custom: CustomTabReason;
+  render: () => ReactNode;
+  summary?: never;
+  sections?: never;
+}
+
+/** One detail tab (SPEC §3): structured-by-default, custom-by-exception. */
+export type DetailTab = StructuredDetailTab | CustomDetailTab;
 
 export interface DetailHeader {
   leading: ReactNode;
   title: ReactNode;
+  /** Structured status pill, rendered by the engine (SPEC §2a). */
+  status?: StatusPillSpec;
   /** Right-aligned primary/secondary actions + overflow. */
   actions?: ReactNode;
   /** Subtitle row (visibility pill, description, app logos). */

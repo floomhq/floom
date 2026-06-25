@@ -1,5 +1,5 @@
-// #819 — channel install stays pre-auth, but the landing row exposes
-// non-dev-friendly inline controls instead of dumping visitors into docs.
+// #819 — channel install stays pre-auth, with public setup routes instead of
+// dumping visitors into docs.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -61,10 +61,9 @@ describe("pre-auth /start/<channel> pages (#819)", () => {
     expect(screen.queryByText("Read the MCP setup")).toBeNull();
   });
 
-  it("landing row exposes inline channel controls, not docs links", () => {
+  it("landing hero does not duplicate the nav MCP setup control", () => {
     const body = readFileSync(path.join(root, "app/v3/V3Body.tsx"), "utf-8");
-    const row = body.slice(body.indexOf("Works without the dashboard"));
-    expect(row).toContain("<ChannelActions />");
-    expect(row.slice(0, 800)).not.toContain("/docs");
+    expect(body).not.toContain("Works without the dashboard");
+    expect(body).not.toContain("<ChannelActions />");
   });
 });

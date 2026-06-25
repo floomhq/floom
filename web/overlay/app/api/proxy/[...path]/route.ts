@@ -207,7 +207,24 @@ async function handler(
     fetchOptions.duplex = "half";
   }
 
-  const upstream = await fetch(upstreamUrl, fetchOptions);
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, fetchOptions);
+  } catch {
+    const isLoginStart = isAuthPath && rawProxyPath === "/auth/login";
+    if (isLoginStart) {
+      const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/app";
+      const loginUrl = new URL(`${basePath}/login`, req.nextUrl.origin);
+      loginUrl.searchParams.set("error", "api_unavailable");
+      const next = req.nextUrl.searchParams.get("next");
+      if (next) loginUrl.searchParams.set("next", next);
+      return NextResponse.redirect(loginUrl, { status: 307 });
+    }
+    return NextResponse.json(
+      { detail: "Could not reach the API server" },
+      { status: 502 },
+    );
+  }
 
   // Stream response back; preserves binary content (artifacts, etc.)
   const responseHeaders = new Headers();

@@ -36,8 +36,9 @@ jobs:
           python3 - <<'PY'
           import json, pathlib, sys
 
-          canonical = "https://workeros-cloud-dashboard-three.vercel.app"
+          canonical = "https://floom-dashboard.vercel.app"
           stale_fragments = [
+              "workeros-cloud-dashboard-three.vercel.app",
               "workeros-cloud-dashboard.vercel.app",
               "r9-detail.floom.dev",
               "web-iota-five-" + "12.vercel.app",

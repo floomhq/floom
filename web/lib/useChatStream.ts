@@ -1095,23 +1095,34 @@ const IN_FLIGHT_TOOL_CARD_STATUSES = new Set<CardStatus>([
   "loading",
 ]);
 
-export type StreamingActivityKind = "idle" | "thinking" | "writing";
+export type StreamingActivityKind = "idle" | "thinking" | "writing" | "tool";
+export type StreamingActivity =
+  | { kind: "idle" }
+  | { kind: "thinking" }
+  | { kind: "writing" }
+  | { kind: "tool"; title: string };
+
+function streamingToolTitle(card: ToolCard): string {
+  const toolName = toolCardToolName(card);
+  if ("title" in card && typeof card.title === "string" && card.title.trim()) return card.title;
+  if (toolName) return getToolCardTitle(toolName, card.status);
+  return "Working";
+}
 
 export function getStreamingActivity(
   messages: ChatMessage[],
   isStreaming: boolean,
-): { kind: StreamingActivityKind } {
+): StreamingActivity {
   if (!isStreaming) return { kind: "idle" };
 
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   if (!lastAssistant?.parts?.length) return { kind: "thinking" };
 
-  const hasInFlightTool = lastAssistant.parts.some(
-    (part) =>
-      part.type === "tool-card" &&
-      IN_FLIGHT_TOOL_CARD_STATUSES.has(part.card.status),
+  const inFlightTool = [...lastAssistant.parts].reverse().find(
+    (part): part is Extract<MsgPart, { type: "tool-card" }> =>
+      part.type === "tool-card" && IN_FLIGHT_TOOL_CARD_STATUSES.has(part.card.status),
   );
-  if (hasInFlightTool) return { kind: "idle" };
+  if (inFlightTool) return { kind: "tool", title: streamingToolTitle(inFlightTool.card) };
 
   const hasStreamingText = lastAssistant.parts.some(
     (part) => part.type === "text" && part.streaming,

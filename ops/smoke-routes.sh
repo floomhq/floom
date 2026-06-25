@@ -37,7 +37,7 @@ OS_API="https://workers-api.floom.dev"
 CLOUD_HOST="https://floom.dev"
 CLOUD_LANDING_HOST="https://floom.dev"
 CLOUD_API="https://workeros-api.floom.dev"
-CLOUD_DASHBOARD_HOST="${CLOUD_DASHBOARD_HOST:-https://workeros-cloud-dashboard-three.vercel.app}"
+CLOUD_DASHBOARD_HOST="${CLOUD_DASHBOARD_HOST:-https://floom-dashboard.vercel.app}"
 CLOUD_APP_HOSTS=(
   "https://floom.dev"
   "$CLOUD_HOST"
@@ -48,8 +48,6 @@ CLOUD_APP_HOSTS=(
 CLOUD_ROUTES=(
   "/"
   "/login"
-  "/start/slack"
-  "/start/whatsapp"
   "/start/mcp"
   "/app"
   "/app/login"
@@ -65,10 +63,25 @@ CLOUD_ROUTES=(
 CLOUD_LANDING_ROUTES=(
   "/"
   "/login"
-  "/start/slack"
-  "/start/whatsapp"
   "/start/mcp"
 )
+
+env_enabled() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if env_enabled "${NEXT_PUBLIC_LANDING_CHANNEL_SLACK:-}"; then
+  CLOUD_ROUTES+=("/start/slack")
+  CLOUD_LANDING_ROUTES+=("/start/slack")
+fi
+
+if env_enabled "${NEXT_PUBLIC_LANDING_CHANNEL_WHATSAPP:-}"; then
+  CLOUD_ROUTES+=("/start/whatsapp")
+  CLOUD_LANDING_ROUTES+=("/start/whatsapp")
+fi
 
 OS_ROUTES=(
   "/"

@@ -5,7 +5,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { buildCsp } from "@/middleware";
+import { buildCsp } from "@/proxy";
 
 // Fake fixture value, not a real credential. gitleaks:allow
 const SECRET = "fake-test-secret-not-real";
@@ -76,7 +76,7 @@ describe("#926/#945 middleware headers", () => {
   });
 
   it("authed app pages get nonce CSP + private no-store", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/connections/secrets", await validCookie()));
     expect(res.headers.get("x-middleware-next")).toBe("1");
     const csp = res.headers.get("content-security-policy")!;
@@ -86,7 +86,7 @@ describe("#926/#945 middleware headers", () => {
   });
 
   it("every sensitive shell flagged by the audit is covered", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const cookie = await validCookie();
     for (const p of ["/contexts", "/connections/secrets", "/brain", "/members", "/"]) {
       const res = await middleware(req(p, cookie));
@@ -95,21 +95,21 @@ describe("#926/#945 middleware headers", () => {
   });
 
   it("public login page gets CSP but is not forced no-store", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/login"));
     expect(res.headers.get("content-security-policy")).toContain("'strict-dynamic'");
     expect(res.headers.get("cache-control")).toBeNull();
   });
 
   it("share pages keep noindex + no-store", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const res = await middleware(req("/s/some-token"));
     expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
   it("nonces are unique per request", async () => {
-    const { middleware } = await import("@/middleware");
+    const { proxy: middleware } = await import("@/proxy");
     const a = await middleware(req("/login"));
     const b = await middleware(req("/login"));
     const nonce = (r: Response) =>

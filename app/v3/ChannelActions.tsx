@@ -51,7 +51,7 @@ function ModalShell({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[420px] rounded-[20px] bg-[var(--bg-app)] p-5 text-left"
+        className="w-full max-w-[540px] rounded-[20px] bg-[var(--bg-app)] p-6 text-left"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-4">
@@ -95,9 +95,9 @@ function McpCopyButton() {
 export function McpConfigModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
-    <ModalShell title="Use Floom from an MCP agent" onClose={onClose}>
+    <ModalShell title="Agent install" onClose={onClose}>
       <p className="mt-4 text-[13px] leading-relaxed text-muted-foreground">
-        Add this server block to Claude Code, Cursor, Codex, or any MCP client. Floom asks for a workspace token the first time it runs.
+        Copy this into Claude Code, Cursor, Codex, VS Code, Windsurf, Cline, or any MCP client. Floom asks for a workspace token the first time it runs.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         {MCP_CLIENTS.map((c) => (

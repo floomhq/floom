@@ -17,6 +17,7 @@ type LoginViewProps = {
   authButton: ComponentType<AuthButtonProps>;
   emailPanel: ReactNode;
   signupHref?: string;
+  errorMessage?: string | null;
 };
 
 const ACTIVITY_ROWS: {
@@ -38,6 +39,7 @@ export function LoginView({
   authButton: AuthButton,
   emailPanel,
   signupHref,
+  errorMessage,
 }: LoginViewProps) {
   const installName = install.trim();
 
@@ -233,6 +235,16 @@ export function LoginView({
                   : "Use OAuth or a magic link to enter your workspace."}
               </p>
             </div>
+
+            {errorMessage ? (
+              <div
+                className="mb-4 rounded-[12px] px-3 py-2 text-center text-[12px] leading-5"
+                style={{ background: "rgba(180,83,9,.10)", color: "var(--warning)" }}
+                role="alert"
+              >
+                {errorMessage}
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <AuthButton method="google" href={googleHref} className="auth-btn auth-btn-primary">
