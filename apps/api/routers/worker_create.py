@@ -36,6 +36,7 @@ from services.worker_registry_ops import (
     _free_worker_id,
     _parse_worker_payload,
     _persist_discovered_workers,
+    _purge_partial_worker,
     _register_worker_from_files,
     _rewrite_worker_yml_id,
 )
@@ -270,10 +271,23 @@ async def create_worker_from_bundle(
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    # Embed the portable bundle (manifest_json._files) through the canonical repo
+    # so it lands in the cloud's Postgres store, not only SQLite. Fail LOUD — a
+    # bundle that can't be embedded is unrunnable on the e2b/agent executor
+    # ("Worker directory not found", workeros-cloud#717). Mirror the inline-create
+    # path: on failure remove the directory AND purge the just-persisted DB row so
+    # a broken bundle never silently reaches 'ready'.
     try:
-        _embed_files_in_skill_version(worker_id, target_dir)
-    except Exception:
-        logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
+        _embed_files_in_skill_version(worker_id, target_dir, repos=repos, strict=True)
+    except Exception as exc:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        _purge_partial_worker(worker_id, user_id=auth.user_id, repos=repos)
+        invalidate_worker_cache()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to persist worker bundle for {worker_id!r}: {exc}",
+        ) from exc
 
     return _build_worker_detail_after_write(
         worker_id,
