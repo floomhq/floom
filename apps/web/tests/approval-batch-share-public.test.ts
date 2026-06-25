@@ -37,6 +37,9 @@ describe("public approval batch share route", () => {
         body: JSON.stringify({ decision: "rejected", reason: "No" }),
       }),
     );
+    // #1966 hardening: the public route must NOT forward the privileged secret upstream.
+    const calledHeaders = (fetchMock.mock.calls[0][1] as { headers: Headers }).headers;
+    expect(calledHeaders.get("x-floom-secret")).toBeNull();
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ status: "rejected", run_id: "run_1" });
   });

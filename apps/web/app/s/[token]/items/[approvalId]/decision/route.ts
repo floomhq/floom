@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
-const API_SECRET = process.env.FLOOM_API_SECRET || "";
+// Public route: do NOT forward FLOOM_API_SECRET. The upstream
+// /approvals/public-batch/{token}/items/{id}/decision is middleware-exempt
+// (token-gated by the share token), so the privileged secret must not leak here (#1966 hardening).
 
 export async function POST(
   request: NextRequest,
@@ -12,7 +14,6 @@ export async function POST(
   const headers = new Headers({
     "content-type": request.headers.get("content-type") || "application/json",
   });
-  if (API_SECRET) headers.set("x-floom-secret", API_SECRET);
 
   const upstream = await fetch(
     `${API_BASE}/approvals/public-batch/${encodeURIComponent(token)}/items/${encodeURIComponent(approvalId)}/decision`,
