@@ -43,6 +43,50 @@ type WorkspaceState = {
   activeId: string;
 };
 
+type WorkspaceSwitcherCache = {
+  state: WorkspaceState;
+  canExportWorkspace: boolean;
+};
+
+let workspaceSwitcherCache: WorkspaceSwitcherCache | null = null;
+let workspaceSwitcherLoadPromise: Promise<WorkspaceSwitcherCache> | null = null;
+
+function workspaceStateFromList(data: Awaited<ReturnType<typeof api.workspace.list>>): WorkspaceState {
+  const browserActiveId = getActiveWorkspaceId();
+  const activeId =
+    browserActiveId && data.workspaces?.some((workspace) => workspace.id === browserActiveId)
+      ? browserActiveId
+      : data.active_id || "local-default";
+  return {
+    workspaces: data.workspaces ?? [],
+    activeId,
+  };
+}
+
+function cacheWorkspaceSwitcherState(next: WorkspaceSwitcherCache) {
+  workspaceSwitcherCache = next;
+  return next;
+}
+
+function loadWorkspaceSwitcherState() {
+  if (!workspaceSwitcherLoadPromise) {
+    workspaceSwitcherLoadPromise = Promise.all([
+      api.workspace.list(),
+      api.me().catch(() => null),
+    ])
+      .then(([data, me]) =>
+        cacheWorkspaceSwitcherState({
+          state: workspaceStateFromList(data),
+          canExportWorkspace: computeIsAdmin(me),
+        })
+      )
+      .finally(() => {
+        workspaceSwitcherLoadPromise = null;
+      });
+  }
+  return workspaceSwitcherLoadPromise;
+}
+
 /** Identity mark for a workspace — squircle (non-human), seeded by id then name.
  *  Prefer the stable `id` so the mark survives workspace renames.
  *  Company logo/favicon overrides the generated mark when available. */
@@ -62,7 +106,7 @@ function WorkspaceAvatar({
 }
 
 export function WorkspaceSwitcher() {
-  const [state, setState] = useState<WorkspaceState | null>(null);
+  const [state, setState] = useState<WorkspaceState | null>(() => workspaceSwitcherCache?.state ?? null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -77,7 +121,9 @@ export function WorkspaceSwitcher() {
   const [importing, setImporting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [sharingLink, setSharingLink] = useState(false);
-  const [canExportWorkspace, setCanExportWorkspace] = useState(false);
+  const [canExportWorkspace, setCanExportWorkspace] = useState(
+    () => workspaceSwitcherCache?.canExportWorkspace ?? false
+  );
   const importInputRef = useRef<HTMLInputElement>(null);
   // #1005: cloud speaks invite copy, OSS speaks template-zip copy.
   const cloudMode = isCloudMode();
@@ -85,28 +131,18 @@ export function WorkspaceSwitcher() {
   const actionAvailability = getWorkspaceActionAvailability(cloudMode);
 
   useEffect(() => {
+    if (workspaceSwitcherCache) return;
     let cancelled = false;
-    Promise.all([
-      api.workspace.list(),
-      api.me().catch(() => null),
-    ])
-      .then(([data, me]) => {
+    loadWorkspaceSwitcherState()
+      .then((next) => {
         if (cancelled) return;
-        const browserActiveId = getActiveWorkspaceId();
-        const activeId =
-          browserActiveId && data.workspaces?.some((workspace) => workspace.id === browserActiveId)
-            ? browserActiveId
-            : data.active_id || "local-default";
-        setState({
-          workspaces: data.workspaces ?? [],
-          activeId,
-        });
+        setState(next.state);
         // Attach the active workspace as the PostHog `workspace` group with its
         // name, so client events are workspace-attributed with readable group
         // props. (Switching reloads the page, so this re-runs per workspace.)
-        const activeWorkspace = data.workspaces?.find((w) => w.id === activeId);
-        groupPostHogWorkspace(activeId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
-        setCanExportWorkspace(computeIsAdmin(me));
+        const activeWorkspace = next.state.workspaces.find((w) => w.id === next.state.activeId);
+        groupPostHogWorkspace(next.state.activeId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
+        setCanExportWorkspace(next.canExportWorkspace);
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -152,12 +188,19 @@ export function WorkspaceSwitcher() {
     setRenaming(true);
     try {
       const updated = await api.workspace.rename(state.activeId, name);
-      setState({
+      const nextState = {
         ...state,
         workspaces: state.workspaces.map((w) =>
           w.id === state.activeId ? { ...w, name: updated.name } : w
         ),
-      });
+      };
+      setState(nextState);
+      if (workspaceSwitcherCache) {
+        workspaceSwitcherCache = {
+          ...workspaceSwitcherCache,
+          state: nextState,
+        };
+      }
       setRenameOpen(false);
     } catch (err) {
       setError((err as Error).message || "Failed to rename workspace");

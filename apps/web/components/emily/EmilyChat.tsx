@@ -1429,7 +1429,7 @@ export function EmilyDock({ className }: { className?: string }) {
 
       {/* Confirm-before-supersede: "New worker" while an Emily conversation is
           active replaces THIS chat in place. Confirm so the live chat isn't lost
-          silently (it's saved to Recent chats). Renders via a portal — its
+          silently (it's saved to Recent chats). Renders via a portal, its
           position in the dock tree doesn't matter. */}
       <ConfirmDialog
         open={confirmReplaceOpen}

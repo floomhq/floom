@@ -65,7 +65,8 @@ describe("code-freeze hardening fixes", () => {
     const src = source("components/layout/WorkspaceSwitcher.tsx");
     expect(src).toContain("canExportWorkspace");
     expect(src).toContain("{canExportWorkspace && (");
-    expect(src).toContain("setCanExportWorkspace(computeIsAdmin(me))");
+    expect(src).toContain("canExportWorkspace: computeIsAdmin(me)");
+    expect(src).toContain("setCanExportWorkspace(next.canExportWorkspace)");
   });
 
   it("limits public approval preview/download links to same-origin paths", () => {
