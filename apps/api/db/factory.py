@@ -18,6 +18,7 @@ from .interface import (
     RunFeedbackRepository,
     RunRepository,
     SecretRepository,
+    ShareLinkRepository,
     UserRepository,
     UserSessionRepository,
     WorkerRepository,
@@ -35,6 +36,7 @@ from .sqlite import (
     SqliteRunFeedbackRepository,
     SqliteRunRepository,
     SqliteSecretRepository,
+    SqliteShareLinkRepository,
     SqliteUserRepository,
     SqliteUserSessionRepository,
     SqliteWorkerRepository,
@@ -67,6 +69,9 @@ class Repositories(NamedTuple):
     # Run feedback (#1807). Optional so downstream repository factories can adopt
     # it independently without breaking older deploys.
     run_feedback: Optional[RunFeedbackRepository] = None
+    # Share links. Optional so downstream repository factories can adopt the
+    # approval-batch public-link store independently.
+    share_links: Optional[ShareLinkRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -86,6 +91,7 @@ def _local_repositories() -> Repositories:
         sessions=SqliteUserSessionRepository(),
         feedback=SqliteFeedbackRepository(),
         run_feedback=SqliteRunFeedbackRepository(),
+        share_links=SqliteShareLinkRepository(),
     )
 
 

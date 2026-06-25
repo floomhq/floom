@@ -410,6 +410,20 @@ def test_list_pending_for_workspace_in_approval_repository_protocol():
     )
 
 
+def test_approval_batch_share_link_repository_protocol():
+    """ShareLinkRepository must expose approval-batch link persistence."""
+    from db.interface import ShareLinkRepository
+    import inspect
+
+    members = {name for name, _ in inspect.getmembers(ShareLinkRepository)}
+    assert {
+        "create_approvals_batch_share",
+        "resolve_approvals_batch_share",
+        "revoke_approvals_batch_share",
+        "revoke_all_for_workspace",
+    }.issubset(members)
+
+
 # ---------------------------------------------------------------------------
 # #1481/#1482 - approval decisions must honor atomic claim result
 # ---------------------------------------------------------------------------

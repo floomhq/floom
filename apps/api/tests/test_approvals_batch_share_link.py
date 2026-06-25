@@ -328,6 +328,10 @@ def test_sqlite_approval_repo_exposes_workspace_scoped_pending_contract(client_a
     _client, main = client_and_main
     repos = main.get_repositories()
     assert callable(getattr(repos.approvals, "list_pending_for_workspace", None))
+    assert callable(getattr(repos.share_links, "create_approvals_batch_share", None))
+    assert callable(getattr(repos.share_links, "resolve_approvals_batch_share", None))
+    assert callable(getattr(repos.share_links, "revoke_approvals_batch_share", None))
+    assert callable(getattr(repos.share_links, "revoke_all_for_workspace", None))
 
 
 def test_batch_share_link_stores_hash_only_token(client_and_main):
@@ -338,12 +342,13 @@ def test_batch_share_link_stores_hash_only_token(client_and_main):
 
     db = importlib.import_module("db")
     with db.get_db() as conn:
-        columns = [row["name"] for row in conn.execute("PRAGMA table_info(approval_batch_share_links)").fetchall()]
-        row = conn.execute("SELECT * FROM approval_batch_share_links").fetchone()
+        columns = [row["name"] for row in conn.execute("PRAGMA table_info(share_links)").fetchall()]
+        row = conn.execute("SELECT * FROM share_links WHERE entity_type = 'approvals_batch'").fetchone()
 
     assert "token_hash" in columns
     assert "token" not in columns
-    assert "approval_ids_json" not in columns
+    assert "workspace_id" in columns
+    assert "owner_id" in columns
     assert "revoked_at" in columns
     assert "expires_at" in columns
     assert row is not None
@@ -366,7 +371,7 @@ def test_batch_share_link_revoke_and_expiry_reject_public_resolution(client_and_
     with db.get_db() as conn:
         conn.execute(
             """
-            UPDATE approval_batch_share_links
+            UPDATE share_links
             SET expires_at = ?
             WHERE token_hash = ?
             """,
@@ -379,8 +384,8 @@ def test_batch_share_link_revoke_and_expiry_reject_public_resolution(client_and_
     revoked = anon.get(f"/approvals/public-batch/{revoked_token}")
     expired = anon.get(f"/approvals/public-batch/{expiring_token}")
 
-    assert revoked.status_code == 410
-    assert expired.status_code == 410
+    assert revoked.status_code == 404
+    assert expired.status_code == 404
 
 
 def test_batch_share_link_revoke_all_for_workspace_kills_sibling_links(client_and_main):
@@ -397,8 +402,8 @@ def test_batch_share_link_revoke_all_for_workspace_kills_sibling_links(client_an
     from fastapi.testclient import TestClient
 
     anon = TestClient(client.app, raise_server_exceptions=False)
-    assert anon.get(f"/approvals/public-batch/{first_token}").status_code == 410
-    assert anon.get(f"/approvals/public-batch/{second_token}").status_code == 410
+    assert anon.get(f"/approvals/public-batch/{first_token}").status_code == 404
+    assert anon.get(f"/approvals/public-batch/{second_token}").status_code == 404
 
 
 def test_batch_share_link_revoke_and_expiry_reject_public_decisions(client_and_main):
@@ -425,7 +430,7 @@ def test_batch_share_link_revoke_and_expiry_reject_public_decisions(client_and_m
     with db.get_db() as conn:
         conn.execute(
             """
-            UPDATE approval_batch_share_links
+            UPDATE share_links
             SET expires_at = ?
             WHERE token_hash = ?
             """,
@@ -444,8 +449,8 @@ def test_batch_share_link_revoke_and_expiry_reject_public_decisions(client_and_m
         json={"decision": "rejected"},
     )
 
-    assert revoked.status_code == 410
-    assert expired.status_code == 410
+    assert revoked.status_code == 404
+    assert expired.status_code == 404
     repos = main.get_repositories()
     assert repos.approvals.get(owner_id=OWNER, approval_id="apr_revoked_decision")["status"] == "pending"
     assert repos.approvals.get(owner_id=OWNER, approval_id="apr_expired_decision")["status"] == "pending"
@@ -506,12 +511,12 @@ def test_public_batch_legacy_raw_token_table_is_hard_rejected(client_and_main):
     assert response.status_code == 404
 
     with db.get_db() as conn:
-        columns = [row["name"] for row in conn.execute("PRAGMA table_info(approval_batch_share_links)").fetchall()]
-        rows = conn.execute("SELECT * FROM approval_batch_share_links").fetchall()
+        legacy = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='approval_batch_share_links'"
+        ).fetchone()
+        rows = conn.execute("SELECT * FROM share_links WHERE entity_type = 'approvals_batch'").fetchall()
 
-    assert "token_hash" in columns
-    assert "token" not in columns
-    assert "approval_ids_json" not in columns
+    assert legacy is None
     assert rows == []
 
     reshared = _batch_token(client)

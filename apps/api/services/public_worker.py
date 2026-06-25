@@ -298,7 +298,7 @@ def _standalone_share_payload(
     try:
         from routers.approvals import _load_approvals_batch_share, _public_approvals_batch_payload
 
-        _load_approvals_batch_share(token)
+        _load_approvals_batch_share(token, repos)
         return _public_approvals_batch_payload(token, repos, request=request)
     except HTTPException as exc:
         if exc.status_code != 404:

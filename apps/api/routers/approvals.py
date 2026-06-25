@@ -86,98 +86,6 @@ _APPROVAL_LEAK_PATTERNS = (
     "rate limit exceeded",
     "not connected",
 )
-_APPROVAL_BATCH_SHARE_SQL = """
-    CREATE TABLE IF NOT EXISTS approval_batch_share_links (
-        token_hash TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
-        owner_id TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        revoked_at TEXT,
-        expires_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_approval_batch_share_workspace
-        ON approval_batch_share_links(workspace_id, owner_id);
-    CREATE INDEX IF NOT EXISTS idx_approval_batch_share_active
-        ON approval_batch_share_links(workspace_id, owner_id, revoked_at);
-"""
-
-
-def _approval_batch_scope_unique_exists(conn: Any) -> bool:
-    for index in conn.execute("PRAGMA index_list(approval_batch_share_links)").fetchall():
-        index_row = dict(index)
-        if not int(index_row.get("unique") or 0):
-            continue
-        index_name = str(index_row["name"]).replace('"', '""')
-        columns = [
-            str(row["name"])
-            for row in conn.execute(f'PRAGMA index_info("{index_name}")').fetchall()
-        ]
-        if columns in (["workspace_id", "owner_id"], ["workspace_id", "owner_id", "approval_ids_json"]):
-            return True
-    return False
-
-
-def _rebuild_approval_batch_share_links_table(conn: Any, columns: set[str]) -> None:
-    from db import now_iso
-
-    conn.execute("DROP TABLE IF EXISTS approval_batch_share_links_migrate")
-    conn.execute("ALTER TABLE approval_batch_share_links RENAME TO approval_batch_share_links_migrate")
-    conn.executescript(_APPROVAL_BATCH_SHARE_SQL)
-    rows = conn.execute("SELECT * FROM approval_batch_share_links_migrate").fetchall()
-    for row in rows:
-        stored = dict(row)
-        token_hash = str(stored.get("token_hash") or "")
-        workspace_id = _safe_workspace_id(str(stored.get("workspace_id") or ""))
-        owner_id = str(stored.get("owner_id") or "")
-        # Legacy raw-token rows are intentionally NOT migrated. Only rows already
-        # in the revocable token_hash store remain actionable.
-        if not token_hash:
-            continue
-        if not workspace_id or not owner_id:
-            continue
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO approval_batch_share_links
-                (token_hash, workspace_id, owner_id, created_at, revoked_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                token_hash,
-                workspace_id,
-                owner_id,
-                str(stored.get("created_at") or now_iso()),
-                stored.get("revoked_at") if "revoked_at" in columns else None,
-                stored.get("expires_at") if "expires_at" in columns else None,
-            ),
-        )
-    conn.execute("DROP TABLE approval_batch_share_links_migrate")
-
-
-def _ensure_approval_batch_share_links_table() -> None:
-    from db import get_db
-
-    with get_db() as conn:
-        existing = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'approval_batch_share_links'"
-        ).fetchone()
-        if existing:
-            columns = {
-                str(row["name"])
-                for row in conn.execute("PRAGMA table_info(approval_batch_share_links)").fetchall()
-            }
-            needs_rebuild = (
-                ("token" in columns and "token_hash" not in columns)
-                or "approval_ids_json" in columns
-                or "revoked_at" not in columns
-                or "expires_at" not in columns
-                or _approval_batch_scope_unique_exists(conn)
-            )
-            if needs_rebuild:
-                _rebuild_approval_batch_share_links_table(conn, columns)
-                return
-        conn.executescript(_APPROVAL_BATCH_SHARE_SQL)
-
-
 def _new_approval_batch_token() -> str:
     return f"fls_{pysecrets.token_urlsafe(32)}"
 
@@ -188,100 +96,84 @@ def _approval_batch_token_hash(token: str) -> str:
 
 def _create_approvals_batch_share_link(
     *,
+    repos: Repositories,
     workspace_id: str,
     owner_id: str,
 ) -> Dict[str, str]:
-    from db import get_db, now_iso
-
     workspace_id = _safe_workspace_id(workspace_id) or ""
     if not workspace_id or not owner_id:
         raise HTTPException(status_code=409, detail="Approval batch cannot be shared")
-    _ensure_approval_batch_share_links_table()
-    with get_db() as conn:
-        for _attempt in range(5):
-            token = _new_approval_batch_token()
-            token_hash = _approval_batch_token_hash(token)
-            inserted = conn.execute(
-                """
-                INSERT OR IGNORE INTO approval_batch_share_links
-                    (token_hash, workspace_id, owner_id, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (token_hash, workspace_id, owner_id, now_iso()),
+    share_repo = getattr(repos, "share_links", None)
+    if share_repo is None or not callable(getattr(share_repo, "create_approvals_batch_share", None)):
+        raise HTTPException(status_code=503, detail="Share-link repository does not support approval batches")
+    for _attempt in range(5):
+        token = _new_approval_batch_token()
+        try:
+            share_repo.create_approvals_batch_share(
+                workspace_id=workspace_id,
+                owner_id=owner_id,
+                token_hash=_approval_batch_token_hash(token),
+                expires_at=None,
             )
-            if inserted.rowcount == 1:
-                return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+            return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+        except Exception:
+            logger.warning("approval batch share-link create failed", exc_info=True)
     raise HTTPException(status_code=503, detail="Could not create approval batch share link")
 
 
-def _load_approval_batch_share_row(token: str) -> Dict[str, Any] | None:
-    from db import get_db, now_iso
-
+def _load_approval_batch_share_row(token: str, repos: Repositories) -> Dict[str, Any] | None:
     if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
         raise HTTPException(status_code=404, detail="Approval batch link not found")
-    _ensure_approval_batch_share_links_table()
-    with get_db() as conn:
-        row = conn.execute(
-            """
-            SELECT workspace_id, owner_id, created_at, revoked_at, expires_at
-            FROM approval_batch_share_links
-            WHERE token_hash = ?
-            LIMIT 1
-            """,
-            (_approval_batch_token_hash(token),),
-        ).fetchone()
-    if row and row["revoked_at"]:
-        raise HTTPException(status_code=410, detail="Approval batch link revoked")
-    if row and row["expires_at"] and str(row["expires_at"]) <= now_iso():
-        raise HTTPException(status_code=410, detail="Approval batch link expired")
+    share_repo = getattr(repos, "share_links", None)
+    if share_repo is None or not callable(getattr(share_repo, "resolve_approvals_batch_share", None)):
+        raise HTTPException(status_code=503, detail="Share-link repository does not support approval batches")
+    from db import now_iso
+
+    row = share_repo.resolve_approvals_batch_share(
+        token_hash=_approval_batch_token_hash(token),
+        now_iso_str=now_iso(),
+    )
     return dict(row) if row else None
 
 
-def _revoke_approvals_batch_share_link(*, token: str, owner_id: str) -> Dict[str, str]:
-    from db import get_db, now_iso
-
+def _revoke_approvals_batch_share_link(*, repos: Repositories, token: str, owner_id: str) -> Dict[str, str]:
     if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
         raise HTTPException(status_code=404, detail="Approval batch link not found")
-    _ensure_approval_batch_share_links_table()
-    with get_db() as conn:
-        updated = conn.execute(
-            """
-            UPDATE approval_batch_share_links
-            SET revoked_at = ?
-            WHERE token_hash = ?
-              AND owner_id = ?
-              AND revoked_at IS NULL
-            """,
-            (now_iso(), _approval_batch_token_hash(token), owner_id),
-        )
-    if updated.rowcount != 1:
+    share_repo = getattr(repos, "share_links", None)
+    if share_repo is None or not callable(getattr(share_repo, "revoke_approvals_batch_share", None)):
+        raise HTTPException(status_code=503, detail="Share-link repository does not support approval batches")
+    from db import now_iso
+
+    revoked = share_repo.revoke_approvals_batch_share(
+        token_hash=_approval_batch_token_hash(token),
+        owner_id=owner_id,
+        revoked_at=now_iso(),
+    )
+    if not revoked:
         raise HTTPException(status_code=404, detail="Approval batch link not found")
     return {"status": "revoked", "entity_type": "approvals_batch"}
 
 
 def _revoke_all_approvals_batch_share_links_for_workspace(
     *,
+    repos: Repositories,
     workspace_id: str,
     owner_id: str,
 ) -> Dict[str, Any]:
-    from db import get_db, now_iso
-
     workspace_id = _safe_workspace_id(workspace_id) or ""
     if not workspace_id or not owner_id:
         raise HTTPException(status_code=409, detail="Approval batch links cannot be revoked")
-    _ensure_approval_batch_share_links_table()
-    with get_db() as conn:
-        updated = conn.execute(
-            """
-            UPDATE approval_batch_share_links
-            SET revoked_at = ?
-            WHERE workspace_id = ?
-              AND owner_id = ?
-              AND revoked_at IS NULL
-            """,
-            (now_iso(), workspace_id, owner_id),
-        )
-    return {"status": "revoked", "entity_type": "approvals_batch", "revoked": int(updated.rowcount or 0)}
+    share_repo = getattr(repos, "share_links", None)
+    if share_repo is None or not callable(getattr(share_repo, "revoke_all_for_workspace", None)):
+        raise HTTPException(status_code=503, detail="Share-link repository does not support approval batches")
+    from db import now_iso
+
+    revoked = share_repo.revoke_all_for_workspace(
+        workspace_id=workspace_id,
+        owner_id=owner_id,
+        revoked_at=now_iso(),
+    )
+    return {"status": "revoked", "entity_type": "approvals_batch", "revoked": int(revoked)}
 
 
 _BATCH_SENSITIVE_KEYS = {
@@ -725,8 +617,8 @@ def _public_batch_approval_item(approval: Dict[str, Any], repos: Repositories) -
     return public
 
 
-def _load_approvals_batch_share(token: str) -> Dict[str, Any]:
-    row = _load_approval_batch_share_row(token)
+def _load_approvals_batch_share(token: str, repos: Repositories) -> Dict[str, Any]:
+    row = _load_approval_batch_share_row(token, repos)
     if row:
         workspace_id = _safe_workspace_id(str(row.get("workspace_id") or ""))
         if not workspace_id:
@@ -1152,6 +1044,7 @@ def create_approvals_batch_share_link(
         limit=200,
     )
     return _create_approvals_batch_share_link(
+        repos=repos,
         workspace_id=workspace_id,
         owner_id=auth.user_id,
     )
@@ -1161,10 +1054,12 @@ def create_approvals_batch_share_link(
 def revoke_all_approvals_batch_share_links_for_workspace(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
     """Revoke every active approval batch public link for the active workspace."""
     workspace_id = _active_workspace_id_for_batch(request, auth)
     return _revoke_all_approvals_batch_share_links_for_workspace(
+        repos=repos,
         workspace_id=workspace_id,
         owner_id=auth.user_id,
     )
@@ -1174,9 +1069,10 @@ def revoke_all_approvals_batch_share_links_for_workspace(
 def revoke_approvals_batch_share_link(
     token: str = Path(..., min_length=10),
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
     """Revoke one approval batch public link without rotating sibling links."""
-    return _revoke_approvals_batch_share_link(token=token, owner_id=auth.user_id)
+    return _revoke_approvals_batch_share_link(repos=repos, token=token, owner_id=auth.user_id)
 
 
 def _public_approvals_batch_payload(
@@ -1187,7 +1083,7 @@ def _public_approvals_batch_payload(
 ) -> Dict[str, Any]:
     if request is not None:
         _enforce_public_batch_rate_limit(request, token, action=False)
-    share = _load_approvals_batch_share(token)
+    share = _load_approvals_batch_share(token, repos)
     workspace_id = str(share["entity_id"])
     owner_id = str(share["owner_id"])
     rows = _list_pending_approvals_for_workspace(
@@ -1236,7 +1132,7 @@ def decide_public_approvals_batch_item(
     if body.decision not in {"approved", "rejected"}:
         raise HTTPException(status_code=422, detail="decision must be approved or rejected")
     _enforce_public_batch_rate_limit(request, token, action=True)
-    share = _load_approvals_batch_share(token)
+    share = _load_approvals_batch_share(token, repos)
     workspace_id = str(share["entity_id"])
     owner_id = str(share["owner_id"])
     rows = _list_pending_approvals_for_workspace(

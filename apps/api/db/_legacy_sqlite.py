@@ -2151,6 +2151,25 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_run_feedback_run_id
         ON run_feedback(run_id, created_at);
     """,
+    # -- migration 88: repository-backed public share links -------------------
+    """
+    CREATE TABLE IF NOT EXISTS share_links (
+        id          TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id   TEXT NOT NULL DEFAULT '',
+        file_path   TEXT NOT NULL DEFAULT '',
+        workspace_id TEXT,
+        owner_id    TEXT NOT NULL,
+        token_hash  TEXT NOT NULL UNIQUE,
+        created_at  TEXT NOT NULL,
+        expires_at  TEXT,
+        revoked_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_share_links_token_hash
+        ON share_links(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_share_links_approvals_batch_scope
+        ON share_links(entity_type, workspace_id, owner_id, revoked_at);
+    """,
 ]
 
 

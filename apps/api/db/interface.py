@@ -834,3 +834,27 @@ class RunFeedbackRepository(Protocol):
     def get(self, *, feedback_id: str) -> RowDict | None: ...
 
     def mark_issue_created(self, *, feedback_id: str, issue_id: str) -> RowDict | None: ...
+
+
+class ShareLinkRepository(Protocol):
+    def create_approvals_batch_share(
+        self,
+        *,
+        workspace_id: str,
+        owner_id: str,
+        token_hash: str,
+        expires_at: str | None = None,
+    ) -> RowDict: ...
+
+    def resolve_approvals_batch_share(self, *, token_hash: str, now_iso_str: str) -> RowDict | None: ...
+
+    def revoke_approvals_batch_share(
+        self,
+        *,
+        token_hash: str | None = None,
+        link_id: str | None = None,
+        owner_id: str,
+        revoked_at: str,
+    ) -> bool: ...
+
+    def revoke_all_for_workspace(self, *, workspace_id: str, owner_id: str, revoked_at: str) -> int: ...
