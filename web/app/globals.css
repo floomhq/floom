@@ -1091,7 +1091,7 @@ html.dark .grain {
    to the pane width, not the viewport — a wide viewport with a narrow detail
    pane (the approval-review side-pane) must still stack. */
 .c-appr-root { container-type:inline-size; }
-.c-appr-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0; }
+.c-appr-grid { display:grid; grid-template-columns:minmax(220px,.85fr) minmax(320px,1.15fr); gap:0; }
 .c-appr-grid .col-left { padding-right:28px; }
 .c-appr-grid .col-right { padding-left:28px; border-left:var(--bd-div); }
 .c-appr-sech { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); margin:0 0 11px; }

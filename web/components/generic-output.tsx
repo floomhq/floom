@@ -198,15 +198,15 @@ function KeyValueList({ obj }: { obj: Record<string, unknown> }) {
   // tiny — a viewport `sm:` breakpoint would still give the key up to 180px and
   // crush the value to a few characters per line (the approval-review side-pane
   // bug). A container query keys the layout off the actual available width:
-  // below ~24rem the rows stack full-width, at/above it the key takes a capped
-  // column and the value flexes.
+  // below ~28rem the rows stack full-width, at/above it the key takes a capped
+  // column and the value keeps a readable track.
   return (
     <div className="@container">
-      <dl className="grid gap-x-4 gap-y-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 text-sm @sm:grid-cols-[minmax(0,160px)_minmax(0,1fr)]">
+      <dl className="grid gap-x-4 gap-y-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 text-sm @md:grid-cols-[minmax(0,140px)_minmax(14rem,1fr)]">
         {entries.map(([key, value]) => (
           <div key={key} className="contents">
-            <dt className="text-xs font-medium text-muted-foreground @sm:py-0.5">{humanizeColumn(sanitizeOutputText(key))}</dt>
-            <dd className="min-w-0 @sm:py-0.5">
+            <dt className="text-xs font-medium text-muted-foreground @md:py-0.5">{humanizeColumn(sanitizeOutputText(key))}</dt>
+            <dd className="min-w-0 @md:py-0.5">
               {isScalar(value) || value == null ? (
                 <CellValue value={value} />
               ) : (

@@ -81,8 +81,8 @@ describe("#1562 approval proposed output", () => {
     const { container } = renderBody(
       baseRow({
         preview: JSON.stringify({
-          audit_job_id: "20260623T235947Z-12f591be69bf",
-          status: "audit_started",
+          status: "error",
+          error: "missing STAGING_GATE_SSH_KEY secret; no audit was started",
           decision_required: false,
         }),
         preview_type: "json",
@@ -90,18 +90,19 @@ describe("#1562 approval proposed output", () => {
       }),
     );
     // Humanized keys render.
-    expect(screen.getByText("Audit Job Id")).toBeTruthy();
     expect(screen.getByText("Status")).toBeTruthy();
-    // The long token is present in FULL (not split into char-level fragments).
-    expect(screen.getByText("20260623T235947Z-12f591be69bf")).toBeTruthy();
-    expect(screen.getByText("audit_started")).toBeTruthy();
-    // The two-column layout is gated on the CONTAINER (a container-query
-    // wrapper + `@sm:` grid), never a bare viewport `sm:` breakpoint.
+    expect(screen.getByText("Error")).toBeTruthy();
+    // The full value stays in one text node; CSS controls readable wrapping.
+    expect(screen.getByText("missing STAGING_GATE_SSH_KEY secret; no audit was started")).toBeTruthy();
+    expect(screen.getByText("error")).toBeTruthy();
+    // The two-column layout is gated on the CONTAINER, never a bare viewport
+    // `sm:` breakpoint.
     const cq = container.querySelector(".\\@container");
     expect(cq).not.toBeNull();
     const dl = cq?.querySelector("dl");
     expect(dl).not.toBeNull();
-    expect(dl?.className).toContain("@sm:grid-cols-");
+    expect(dl?.className).toContain("@md:grid-cols-");
     expect(dl?.className).not.toMatch(/(^|\s)sm:grid-cols-/);
+    expect(container.querySelector(".break-all")).toBeNull();
   });
 });
