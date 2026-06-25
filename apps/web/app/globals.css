@@ -780,8 +780,7 @@ html.dark .grain {
 }
 .c-controlstrip-inner {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   gap: 10px;
   min-width: 0;
 }
@@ -789,7 +788,11 @@ html.dark .grain {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-width: 0;
+}
+.c-filterstrip {
+  padding-top: 10px !important;
 }
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
@@ -804,7 +807,7 @@ html.dark .grain {
   background: var(--bg-card);
   border: var(--bd-card);
 }
-.c-controlstrip-inner .c-filterbar { width: 100%; min-width: 0; }
+.c-filterstrip .c-filterbar { width: 100%; min-width: 0; }
 .c-controlstrip-inner .c-toolbar-actions {
   display: flex;
   align-items: center;

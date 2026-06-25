@@ -80,7 +80,7 @@ export function CollectionSkeleton({ rows = 6 }: { rows?: number }) {
         </div>
       </div>
 
-      {/* Control strip: search/actions row, then filters row. Mirrors CollectionView. */}
+      {/* Control strip: search/actions band, then separate filters row. Mirrors CollectionView. */}
       <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
         <div className="c-controlstrip-inner">
           <div className="c-controlstrip-toprow">
@@ -90,6 +90,10 @@ export function CollectionSkeleton({ rows = 6 }: { rows?: number }) {
               <Skeleton className="h-9 w-24 rounded-[var(--radius-button)]" />
             </div>
           </div>
+        </div>
+      </div>
+      <div className="c-filterstrip" style={{ padding: `0 ${PAGE_X}px` }}>
+        <div>
           <Skeleton className="h-7 w-24 rounded-[var(--radius-pill)]" />
         </div>
       </div>

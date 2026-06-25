@@ -450,26 +450,32 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       {!isOpen && !creating && (
         <>
           {!collectionEmpty && (
-            <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
-              <div className="c-controlstrip-inner" style={restingFrameStyle}>
-                <div className="c-controlstrip-toprow">
-                  {searchBox()}
-                  <div className="c-toolbar-actions">
-                    {viewToggle}
-                    {config.toolbarActions}
-                    {addButton}
+            <>
+              <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
+                <div className="c-controlstrip-inner" style={restingFrameStyle}>
+                  <div className="c-controlstrip-toprow">
+                    {searchBox()}
+                    <div className="c-toolbar-actions">
+                      {viewToggle}
+                      {config.toolbarActions}
+                      {addButton}
+                    </div>
                   </div>
                 </div>
-                {config.tags ? (
-                  <TagBar
-                    families={config.tags}
-                    active={state.tags}
-                    onToggle={toggleTagValue}
-                    onClear={clearTags}
-                  />
-                ) : null}
               </div>
-            </div>
+              {config.tags ? (
+                <div className="c-filterstrip" style={{ padding: `0 ${PAGE_X}px` }}>
+                  <div style={restingFrameStyle}>
+                    <TagBar
+                      families={config.tags}
+                      active={state.tags}
+                      onToggle={toggleTagValue}
+                      onClear={clearTags}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </>
           )}
           <div className="c-body" style={{ marginTop: 14 }}>
             <div className="c-listcol" ref={bodyRef} style={{ padding: `0 ${PAGE_X}px 26px` }}>
