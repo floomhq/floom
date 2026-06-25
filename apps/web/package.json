@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint && npm run lint:emdash && npm run lint:tokens && npm run lint:borders",
+    "lint": "eslint && npm run lint:emdash && npm run lint:tokens && npm run lint:borders && node scripts/lint-detail-tabs.mjs",
     "lint:emdash": "node scripts/lint-emdash.mjs",
     "lint:tokens": "node scripts/lint-tokens.mjs",
     "lint:borders": "node scripts/lint-borders.mjs --fail",

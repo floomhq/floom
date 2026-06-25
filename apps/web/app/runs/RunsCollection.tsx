@@ -755,7 +755,7 @@ export default function RunsCollection({
       // the live tab set.
       tabs: RUN_DETAIL_TABS.map((key) => {
         const Tab = RUN_TAB_COMPONENT[key];
-        return { key, label: key, render: () => <Tab r={r} /> };
+        return { key, label: key, custom: "unmigrated" as const, render: () => <Tab r={r} /> };
       }),
     }),
     states: {

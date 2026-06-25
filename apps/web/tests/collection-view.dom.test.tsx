@@ -56,8 +56,8 @@ function makeConfig(over: Partial<CollectionConfig<Item>> = {}): CollectionConfi
     detail: (i) => ({
       header: { leading: <Avatar role="workspace" name={i.name} />, title: i.name },
       tabs: [
-        { key: "About", label: "About", render: () => <div>About {i.name}</div> },
-        { key: "Runs", label: "Runs", render: () => <div>Runs body</div> },
+        { key: "About", label: "About", custom: "unmigrated" as const, render: () => <div>About {i.name}</div> },
+        { key: "Runs", label: "Runs", custom: "unmigrated" as const, render: () => <div>Runs body</div> },
       ],
     }),
     add: { label: "Add", onSelect: () => {} },

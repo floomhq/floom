@@ -199,6 +199,7 @@ export default function ApprovalsCollection() {
           {
             key: "Review",
             label: "Review",
+            custom: "unmigrated",
             render: () => (
               <ApprovalReviewBody
                 approval={a}
