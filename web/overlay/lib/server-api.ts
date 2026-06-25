@@ -14,6 +14,7 @@ const API_BASE =
   process.env.WORKEROS_API_BASE || "https://workeros-api.floom.dev";
 const SESSION_COOKIE = "workeros_cloud_session";
 const ACTIVE_WORKSPACE_COOKIE = "workeros_active_workspace";
+const CLIENT_ACTIVE_WORKSPACE_COOKIE = "workeros.activeWorkspaceId";
 
 async function authHeaders(): Promise<Record<string, string>> {
   const cookieStore = await cookies();
@@ -32,7 +33,9 @@ async function authHeaders(): Promise<Record<string, string>> {
     "content-type": "application/json",
     Authorization: `Bearer ${accessToken}`,
   };
-  const activeWorkspace = cookieStore.get(ACTIVE_WORKSPACE_COOKIE)?.value;
+  const activeWorkspace =
+    cookieStore.get(ACTIVE_WORKSPACE_COOKIE)?.value ||
+    cookieStore.get(CLIENT_ACTIVE_WORKSPACE_COOKIE)?.value;
   if (activeWorkspace) {
     headers["x-workeros-workspace"] = activeWorkspace;
   }

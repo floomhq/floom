@@ -11,6 +11,7 @@ const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "
 const IS_CLOUD_DEPLOY = process.env.NEXT_PUBLIC_WORKEROS_DEPLOY === "cloud";
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 const ACTIVE_WORKSPACE_COOKIE_KEY = "workeros.activeWorkspaceId";
+const LEGACY_ACTIVE_WORKSPACE_COOKIE_KEY = "workeros_active_workspace";
 const APP_API_BASE = API_BASE.endsWith("/api/proxy")
   ? API_BASE.slice(0, -"/api/proxy".length) + "/api"
   : "/api";
@@ -24,8 +25,18 @@ function activeWorkspaceCookieAttrs(): string {
 export function getActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
   const value = safeStorageGet("local", ACTIVE_WORKSPACE_STORAGE_KEY);
-  if (IS_CLOUD_DEPLOY && (!value || value === "local-default")) return null;
-  return value || "local-default";
+  if (value && !(IS_CLOUD_DEPLOY && value === "local-default")) return value;
+  const cookieValue = [ACTIVE_WORKSPACE_COOKIE_KEY, LEGACY_ACTIVE_WORKSPACE_COOKIE_KEY]
+    .map((key) =>
+      window.document.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(`${key}=`))
+        ?.slice(key.length + 1),
+    )
+    .find(Boolean);
+  if (cookieValue) return decodeURIComponent(cookieValue);
+  return IS_CLOUD_DEPLOY ? null : "local-default";
 }
 
 export function setActiveWorkspaceId(workspaceId: string | null) {

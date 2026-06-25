@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { keepPreviousData, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, getActiveWorkspaceId } from "@/lib/api";
 import type {
   ApprovalRow,
   ContextSummary,
@@ -28,7 +28,7 @@ export const qk = {
   approvals: (status = "pending") => ["approvals", status] as const,
   approvalsCount: ["approvals", "count"] as const,
   members: ["workspace", "members"] as const,
-  runs: (params?: Record<string, unknown>) => ["runs", params ?? {}] as const,
+  runs: (params?: Record<string, unknown>) => ["runs", getActiveWorkspaceId() ?? "server", params ?? {}] as const,
 };
 
 // Each hook is cache-first (see QueryProvider defaults: staleTime 30s,

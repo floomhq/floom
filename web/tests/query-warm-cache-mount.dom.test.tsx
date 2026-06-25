@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,6 +25,7 @@ vi.mock("@/lib/api", () => ({
     workers: { list: (opts?: unknown) => calls.workers(opts) },
     runs: { list: (params?: unknown) => calls.runs(params) },
   },
+  getActiveWorkspaceId: () => localStorage.getItem("workeros.activeWorkspaceId") || "local-default",
 }));
 
 import {
@@ -57,13 +58,14 @@ function WorkersProbe() {
 function RunsProbe() {
   const query = useRuns(RUNS_FIRST_PAGE_QUERY_PARAMS);
   if (query.isLoading && !query.data) return <div data-testid="runs-skeleton" />;
-  return <div>{query.data?.[0]?.id}</div>;
+  return <div data-testid="runs-count">{query.data?.length ?? 0}</div>;
 }
 
 describe("warm list cache mounts", () => {
   beforeEach(() => {
     calls.workers.mockClear();
     calls.runs.mockClear();
+    localStorage.clear();
   });
 
   it("renders cached workers on a second mount instead of a skeleton", () => {
@@ -100,7 +102,7 @@ describe("warm list cache mounts", () => {
       </QueryClientProvider>,
     );
     expect(screen.queryByTestId("runs-skeleton")).toBeNull();
-    expect(screen.getByText("run-1")).toBeInTheDocument();
+    expect(screen.getByTestId("runs-count").textContent).toBe("1");
     first.unmount();
 
     render(
@@ -110,7 +112,24 @@ describe("warm list cache mounts", () => {
     );
 
     expect(screen.queryByTestId("runs-skeleton")).toBeNull();
-    expect(screen.getByText("run-1")).toBeInTheDocument();
+    expect(screen.getByTestId("runs-count").textContent).toBe("1");
     expect(calls.runs).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse an empty runs cache across workspaces", async () => {
+    const qc = makeClient();
+    localStorage.setItem("workeros.activeWorkspaceId", "ws_empty");
+    qc.setQueryData(qk.runs(RUNS_FIRST_PAGE_QUERY_PARAMS), []);
+
+    localStorage.setItem("workeros.activeWorkspaceId", "ws_nova");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <RunsProbe />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("runs-count").textContent).toBe("1"));
+    expect(calls.runs).toHaveBeenCalledWith(RUNS_FIRST_PAGE_QUERY_PARAMS);
   });
 });
