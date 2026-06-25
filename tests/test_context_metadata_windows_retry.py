@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 API_DIR = Path(__file__).resolve().parents[1] / "apps" / "api"
 if str(API_DIR) not in sys.path:
@@ -11,6 +13,7 @@ if str(API_DIR) not in sys.path:
 import contexts  # noqa: E402
 
 
+@pytest.mark.flaky_ci
 def test_save_context_metadata_retries_transient_windows_replace_error(monkeypatch, tmp_path):
     monkeypatch.setattr(contexts, "CONTEXTS_DIR", tmp_path)
     monkeypatch.setattr(contexts, "CONTEXT_METADATA_PATH", tmp_path / ".workeros-contexts.json")

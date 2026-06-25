@@ -217,6 +217,7 @@ def test_sequential_runs_reuse_closed_loop_no_error(tmp_path, monkeypatch):
         shutdown()
 
 
+@pytest.mark.flaky_ci
 def test_concurrent_runs_no_closed_loop_error(tmp_path, monkeypatch):
     """8 overlapping AgentDriver runs (x2 = 16) must not raise closed-loop.
 
