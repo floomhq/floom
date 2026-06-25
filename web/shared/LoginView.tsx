@@ -1,0 +1,397 @@
+import React, { type ComponentType, type ReactNode } from "react";
+import Link from "next/link";
+
+type AuthMethod = "google" | "github";
+
+type AuthButtonProps = {
+  method: AuthMethod;
+  href: string;
+  className?: string;
+  children: ReactNode;
+};
+
+type LoginViewProps = {
+  install?: string;
+  googleHref: string;
+  githubHref: string;
+  authButton: ComponentType<AuthButtonProps>;
+  emailPanel: ReactNode;
+  signupHref?: string;
+};
+
+const ACTIVITY_ROWS: {
+  name: string;
+  result: string;
+  status: "done" | "running";
+  time: string;
+}[] = [
+  { name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago" },
+  { name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago" },
+  { name: "Pipeline report", result: "Gathering data", status: "running", time: "now" },
+  { name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago" },
+];
+
+export function LoginView({
+  install = "",
+  googleHref,
+  githubHref,
+  authButton: AuthButton,
+  emailPanel,
+  signupHref,
+}: LoginViewProps) {
+  const installName = install.trim();
+
+  return (
+    <main
+      className="min-h-screen font-sans antialiased"
+      style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+    >
+      <style>{`
+        @keyframes login-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+        .auth-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          height: 44px;
+          border-radius: var(--radius-button);
+          font-size: 14px;
+          font-weight: 500;
+          letter-spacing: 0;
+          text-decoration: none;
+          outline: none;
+          transition: background 120ms var(--ease, ease), opacity 120ms var(--ease, ease), color 120ms var(--ease, ease);
+        }
+        .auth-btn:focus-visible,
+        .login-focus:focus-visible {
+          outline: none;
+          box-shadow: var(--focus);
+        }
+        .auth-btn-primary {
+          background: var(--ink);
+          color: var(--bg-card);
+        }
+        .auth-btn-primary:hover { background: var(--solid-2, var(--foreground)); }
+        .auth-btn-secondary {
+          background: var(--bg-2);
+          color: var(--ink);
+        }
+        .auth-btn-secondary:hover {
+          background: var(--bg-3);
+        }
+        .c-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          border-radius: var(--radius-pill, 9999px);
+          font-size: 10.5px;
+          padding: 1.5px 7px;
+          font-weight: 500;
+          border: var(--bd-pill, none);
+        }
+        .c-pill .dot {
+          width: 5px;
+          height: 5px;
+          border-radius: var(--radius-pill, 9999px);
+          background: currentColor;
+        }
+        .c-pill.ok {
+          background: color-mix(in srgb, var(--success, #2f8f5b) 8%, transparent);
+          color: color-mix(in srgb, var(--success, #2f8f5b) 78%, var(--ink));
+        }
+        .c-pill.run {
+          background: color-mix(in srgb, var(--info, #3563cc) 8%, transparent);
+          color: color-mix(in srgb, var(--info, #3563cc) 78%, var(--ink));
+        }
+      `}</style>
+
+      <header className="mx-auto flex w-full max-w-[1040px] px-6 py-6">
+        <Link
+          href="/"
+          className="login-focus inline-flex items-center gap-2 rounded-[var(--radius-button)] text-[15px] font-semibold transition-opacity hover:opacity-80"
+          style={{ color: "var(--ink)" }}
+        >
+          <FloomMark size={22} />
+          Floom{" "}
+          <span style={{ color: "var(--muted-text)", fontWeight: 450, marginLeft: 2 }}>
+            / workeros
+          </span>
+        </Link>
+      </header>
+
+      <section
+        className="mx-auto grid w-full max-w-[1040px] items-start gap-14 px-6 pb-24 pt-10 md:grid-cols-[minmax(0,1fr)_400px] md:gap-20 md:pt-20"
+        aria-labelledby="login-heading"
+      >
+        <div className="hidden max-w-[480px] md:block">
+          <p
+            className="font-mono text-[11px] font-medium uppercase leading-none tracking-[0.12em]"
+            style={{ color: "var(--accent)" }}
+          >
+            Floom Cloud
+          </p>
+          <h2
+            className="mt-5 text-[44px] font-semibold leading-[1.02]"
+            style={{ color: "var(--ink)", letterSpacing: 0 }}
+          >
+            Hire AI workers for your company.
+          </h2>
+          <p
+            className="mt-5 max-w-[390px] text-[15px] leading-7"
+            style={{ color: "var(--muted-text)" }}
+          >
+            {installName
+              ? `Sign in to install ${installName} and put it to work.`
+              : "Jobs that run on a schedule, from a message, or on demand. You get the output, not the mechanics."}
+          </p>
+
+          <div
+            className="mt-10 overflow-hidden"
+            style={{
+              background: "var(--bg-card)",
+              borderRadius: "var(--radius-card)",
+              border: "1px solid var(--border-default)",
+            }}
+          >
+            <div
+              className="flex items-center justify-between"
+              style={{
+                padding: "14px 18px 13px",
+                borderBottom: "var(--bd-div, 1px solid var(--line-soft, rgba(16,17,20,.055)))",
+              }}
+            >
+              <span
+                className="font-mono text-[11px] font-medium uppercase tracking-[0.08em]"
+                style={{ color: "var(--muted-text)" }}
+              >
+                Recent worker runs
+              </span>
+              <CPill tone="ok" label="6 active" />
+            </div>
+
+            {ACTIVITY_ROWS.map((row, i) => (
+              <div
+                key={row.name}
+                className="flex items-center gap-3.5"
+                style={{
+                  minHeight: 64,
+                  padding: "0 18px",
+                  borderTop:
+                    i > 0
+                      ? "var(--bd-div, 1px solid var(--line-soft, rgba(16,17,20,.055)))"
+                      : undefined,
+                }}
+              >
+                <WorkerAvatar name={row.name} seed={row.name} size="size-10" />
+
+                <div className="min-w-0 flex-1 py-3">
+                  <div
+                    className="truncate text-[14.5px] font-semibold"
+                    style={{ color: "var(--ink)" }}
+                  >
+                    {row.name}
+                  </div>
+                  <div
+                    className="mt-0.5 truncate text-[12.5px]"
+                    style={{ color: "var(--muted-text)" }}
+                  >
+                    {row.result}
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <CPill tone={row.status === "done" ? "ok" : "run"} />
+                  <span
+                    className="text-[11px] tabular-nums"
+                    style={{ color: "var(--ink-faint)" }}
+                  >
+                    {row.time}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="w-full md:max-w-[380px] md:justify-self-end">
+          <div
+            className="rounded-[var(--radius-card)] p-7 sm:p-8 md:p-9"
+            style={{
+              background: "var(--bg-card)",
+            }}
+          >
+            <div className="mb-8 space-y-2">
+              <h1 id="login-heading" className="text-[28px] font-semibold leading-tight">
+                Welcome back
+              </h1>
+              <p className="text-[14px] leading-6" style={{ color: "var(--muted-text)" }}>
+                {installName
+                  ? `Install ${installName} after signing in.`
+                  : "Use OAuth or a magic link to enter your workspace."}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <AuthButton method="google" href={googleHref} className="auth-btn auth-btn-primary">
+                <GoogleIcon />
+                <span>Continue with Google</span>
+              </AuthButton>
+              <AuthButton method="github" href={githubHref} className="auth-btn auth-btn-secondary">
+                <GitHubIcon />
+                <span>Continue with GitHub</span>
+              </AuthButton>
+            </div>
+
+            <div className="my-5 flex items-center gap-3">
+              <span className="h-px flex-1" style={{ background: "var(--line)" }} />
+              <span
+                className="font-mono text-[11px] font-medium uppercase tracking-[0.08em]"
+                style={{ color: "var(--ink-mute)" }}
+              >
+                or
+              </span>
+              <span className="h-px flex-1" style={{ background: "var(--line)" }} />
+            </div>
+
+            {emailPanel}
+
+            <p
+              className="mt-6 text-center text-[11.5px] leading-[1.6]"
+              style={{ color: "var(--ink-mute)" }}
+            >
+              By signing in you agree to the{" "}
+              <Link
+                href="/terms"
+                className="login-focus rounded-[4px] underline underline-offset-2 transition-colors hover:text-[var(--ink)]"
+              >
+                Terms
+              </Link>{" "}
+              and{" "}
+              <Link
+                href="/privacy"
+                className="login-focus rounded-[4px] underline underline-offset-2 transition-colors hover:text-[var(--ink)]"
+              >
+                Privacy Policy
+              </Link>
+              . We&apos;ll create your workspace automatically on first sign-in.
+            </p>
+          </div>
+
+          {signupHref ? (
+            <p className="mt-5 text-center text-[12px]" style={{ color: "var(--ink-mute)" }}>
+              New here?{" "}
+              <Link
+                href={signupHref}
+                className="login-focus rounded-[4px] underline underline-offset-2 transition-colors hover:text-[var(--ink)]"
+                style={{ color: "var(--ink-soft)" }}
+              >
+                Create an account
+              </Link>
+            </p>
+          ) : null}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function CPill({ tone, label }: { tone: "ok" | "run"; label?: string }) {
+  return (
+    <span className={`c-pill ${tone}`} style={{ fontSize: 11, padding: "3px 9px" }}>
+      <span
+        className="dot"
+        style={tone === "run" ? { animation: "login-pulse 1.5s ease-in-out infinite" } : undefined}
+      />
+      {label ?? (tone === "ok" ? "Done" : "Running")}
+    </span>
+  );
+}
+
+function FloomMark({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 100 100"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      style={{ borderRadius: "22%", color: "var(--ink)" }}
+    >
+      <rect width="100" height="100" rx="22" fill="currentColor" />
+      <path
+        d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z"
+        fill="var(--bg-app)"
+      />
+    </svg>
+  );
+}
+
+function workerInitials(name: string): string {
+  const cleaned = name.replace(/[_-]+/g, " ").trim();
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.[0] ?? "";
+  const second = parts.length > 1 ? parts[parts.length - 1][0] : (parts[0]?.[1] ?? "");
+  return (first + second).toUpperCase();
+}
+
+function WorkerAvatar({
+  seed,
+  name,
+  className,
+  size = "size-9",
+}: {
+  seed?: string;
+  name?: string;
+  className?: string;
+  size?: string;
+}) {
+  const display = name || seed || "?";
+  const classes = [
+    "grid shrink-0 place-items-center rounded-[var(--radius-button)] bg-muted font-medium tracking-tight text-foreground",
+    size,
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className={classes} aria-label={`${display} avatar`}>
+      <span className="text-[11px] leading-none">{workerInitials(display)}</span>
+    </div>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path
+        d="M21.6 12.227c0-.78-.07-1.53-.2-2.25H12v4.255h5.39a4.6 4.6 0 0 1-2 3.025v2.515h3.23c1.89-1.74 2.98-4.3 2.98-7.545z"
+        fill="#4285F4"
+      />
+      <path
+        d="M12 22c2.7 0 4.965-.895 6.62-2.428l-3.23-2.515c-.895.6-2.04.955-3.39.955-2.605 0-4.81-1.76-5.6-4.125H3.07v2.595A10 10 0 0 0 12 22z"
+        fill="#34A853"
+      />
+      <path
+        d="M6.4 13.887A6 6 0 0 1 6.085 12c0-.655.11-1.295.315-1.887V7.518H3.07A10 10 0 0 0 2 12c0 1.615.385 3.145 1.07 4.482L6.4 13.887z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M12 5.99c1.47 0 2.785.505 3.823 1.498l2.865-2.866C16.96 2.99 14.695 2 12 2 8.115 2 4.755 4.225 3.07 7.518L6.4 10.113C7.19 7.748 9.395 5.99 12 5.99z"
+        fill="#EA4335"
+      />
+    </svg>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+      <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2 0 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.4-.5-1.6.2-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" />
+    </svg>
+  );
+}
