@@ -234,6 +234,10 @@ def test_mint_and_public_batch_lists_only_pending_workspace_items(client_and_mai
     assert "connection_id" not in item["preview_payload"]
     assert "api_token" not in item["preview_payload"]["nested"]
 
+    standalone = anon.get(f"/s/{token}")
+    assert standalone.status_code == 200, standalone.text
+    _assert_no_independent_batch_item_bearers(standalone.json())
+
 
 def test_batch_share_link_remint_is_random_keeps_prior_link_and_uses_top_level_url(client_and_main, monkeypatch):
     client, main = client_and_main
@@ -339,6 +343,7 @@ def test_batch_share_link_stores_hash_only_token(client_and_main):
 
     assert "token_hash" in columns
     assert "token" not in columns
+    assert "approval_ids_json" not in columns
     assert "revoked_at" in columns
     assert "expires_at" in columns
     assert row is not None
@@ -376,6 +381,24 @@ def test_batch_share_link_revoke_and_expiry_reject_public_resolution(client_and_
 
     assert revoked.status_code == 410
     assert expired.status_code == 410
+
+
+def test_batch_share_link_revoke_all_for_workspace_kills_sibling_links(client_and_main):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_revoke_all", run_id="run_revoke_all", worker_id="w_revoke_all")
+    first_token = _batch_token(client)
+    second_token = _batch_token(client)
+
+    revoke = client.post("/approvals/batch-share-link/revoke-all")
+
+    assert revoke.status_code == 200, revoke.text
+    assert revoke.json() == {"status": "revoked", "entity_type": "approvals_batch", "revoked": 2}
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    assert anon.get(f"/approvals/public-batch/{first_token}").status_code == 410
+    assert anon.get(f"/approvals/public-batch/{second_token}").status_code == 410
 
 
 def test_batch_share_link_revoke_and_expiry_reject_public_decisions(client_and_main):
@@ -428,7 +451,7 @@ def test_batch_share_link_revoke_and_expiry_reject_public_decisions(client_and_m
     assert repos.approvals.get(owner_id=OWNER, approval_id="apr_expired_decision")["status"] == "pending"
 
 
-def test_public_batch_token_is_scoped_to_minted_pending_approval_snapshot(client_and_main):
+def test_public_batch_token_authorizes_current_pending_workspace_scope(client_and_main):
     client, main = client_and_main
     _seed_approval(main, approval_id="apr_original", run_id="run_original", worker_id="w_original")
     token = _batch_token(client)
@@ -439,18 +462,18 @@ def test_public_batch_token_is_scoped_to_minted_pending_approval_snapshot(client
     anon = TestClient(client.app, raise_server_exceptions=False)
     batch = anon.get(f"/approvals/public-batch/{token}")
     assert batch.status_code == 200, batch.text
-    assert [item["id"] for item in batch.json()["approvals"]] == ["apr_original"]
+    assert [item["id"] for item in batch.json()["approvals"]] == ["apr_original", "apr_later"]
 
-    denied = anon.post(
+    accepted = anon.post(
         f"/approvals/public-batch/{token}/items/apr_later/decision",
         json={"decision": "rejected"},
     )
-    assert denied.status_code == 404
+    assert accepted.status_code == 200, accepted.text
     row = main.get_repositories().approvals.get(owner_id=OWNER, approval_id="apr_later")
-    assert row["status"] == "pending"
+    assert row["status"] == "rejected"
 
 
-def test_public_batch_legacy_raw_token_table_migrates_and_freezes_scope(client_and_main):
+def test_public_batch_legacy_raw_token_table_is_hard_rejected(client_and_main):
     client, main = client_and_main
     legacy_token = "fls_legacy123456"
     _seed_approval(main, approval_id="apr_legacy", run_id="run_legacy", worker_id="w_legacy")
@@ -480,24 +503,69 @@ def test_public_batch_legacy_raw_token_table_migrates_and_freezes_scope(client_a
 
     anon = TestClient(client.app, raise_server_exceptions=False)
     response = anon.get(f"/approvals/public-batch/{legacy_token}")
-    assert response.status_code == 200, response.text
-    assert [item["id"] for item in response.json()["approvals"]] == ["apr_legacy"]
+    assert response.status_code == 404
 
     with db.get_db() as conn:
         columns = [row["name"] for row in conn.execute("PRAGMA table_info(approval_batch_share_links)").fetchall()]
-        row = conn.execute("SELECT * FROM approval_batch_share_links").fetchone()
+        rows = conn.execute("SELECT * FROM approval_batch_share_links").fetchall()
 
     assert "token_hash" in columns
     assert "token" not in columns
-    stored = dict(row)
-    assert stored["token_hash"] == hashlib.sha256(legacy_token.encode("utf-8")).hexdigest()
-    assert stored["approval_ids_json"] == '["apr_legacy"]'
-    assert legacy_token not in repr(stored)
+    assert "approval_ids_json" not in columns
+    assert rows == []
 
     reshared = _batch_token(client)
     reshared_response = anon.get(f"/approvals/public-batch/{reshared}")
     assert reshared_response.status_code == 200, reshared_response.text
     assert [item["id"] for item in reshared_response.json()["approvals"]] == ["apr_legacy"]
+
+
+def test_public_batch_legacy_standalone_approvals_batch_link_is_hard_rejected(client_and_main):
+    client, main = client_and_main
+    legacy_token = "fls_legacy_standalone"
+    _seed_approval(
+        main,
+        approval_id="apr_standalone_legacy",
+        run_id="run_standalone_legacy",
+        worker_id="w_standalone_legacy",
+    )
+
+    db = importlib.import_module("db")
+    with db.get_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS standalone_share_links (
+                token_hash TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                file_path TEXT NOT NULL DEFAULT '',
+                owner_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(entity_type, entity_id, file_path, owner_id)
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO standalone_share_links
+                (token_hash, entity_type, entity_id, file_path, owner_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                hashlib.sha256(legacy_token.encode("utf-8")).hexdigest(),
+                "approvals_batch",
+                "local-default",
+                "",
+                OWNER,
+                "2026-06-24T00:00:00Z",
+            ),
+        )
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    assert anon.get(f"/approvals/public-batch/{legacy_token}").status_code == 404
+    assert anon.get(f"/s/{legacy_token}").status_code == 404
 
 
 def test_public_batch_allows_floom_preflight_for_decision(client_and_main):
