@@ -2,7 +2,8 @@
  * Server-side API fetch helper.
  *
  * Calls the upstream API directly (bypassing the /api/proxy route) using
- * FLOOM_API_BASE + FLOOM_API_SECRET from env. Only valid in Server Components
+ * FLOOM_API_BASE and, by default, FLOOM_API_SECRET from env. Public routes can
+ * opt out of forwarding the privileged secret. Only valid in Server Components
  * and Route Handlers — never import this from client-side code.
  */
 
@@ -18,16 +19,19 @@ export async function serverFetch<T>(
   options?: RequestInit & {
     next?: { revalidate?: number | false; tags?: string[] };
     includeWorkspace?: boolean;
+    includeSecret?: boolean;
   }
 ): Promise<T> {
-  const { next, includeWorkspace = true, ...fetchOptions } = options ?? {};
+  const { next, includeWorkspace = true, includeSecret = true, ...fetchOptions } = options ?? {};
   const cookieStore = await cookies();
   const workspaceCookie = cookieStore.get(ACTIVE_WORKSPACE_COOKIE_KEY)?.value || "";
   const backendSession = cookieStore.get("wos_session")?.value || "";
   const activeWorkspace = workspaceCookie ? decodeURIComponent(workspaceCookie) : "local-default";
   const headers = new Headers(fetchOptions.headers);
   headers.set("content-type", "application/json");
-  headers.set("x-floom-secret", API_SECRET);
+  if (includeSecret) {
+    headers.set("x-floom-secret", API_SECRET);
+  }
   if (includeWorkspace && activeWorkspace) {
     headers.set("x-workeros-workspace", activeWorkspace);
   }
@@ -128,6 +132,6 @@ export async function fetchPublicWorker(id: string, token: string) {
 export async function fetchStandaloneShare(token: string) {
   return serverFetch<import("./types").StandaloneShare>(
     `/s/${encodeURIComponent(token)}`,
-    { next: { revalidate: false }, includeWorkspace: false }
+    { next: { revalidate: false }, includeWorkspace: false, includeSecret: false }
   );
 }

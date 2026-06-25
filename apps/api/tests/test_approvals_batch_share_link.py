@@ -155,6 +155,42 @@ def _old_deterministic_batch_token(*, workspace_id: str, owner_id: str, approval
     return f"fls_{digest[:48]}"
 
 
+def _collect_keys(value) -> set[str]:
+    if isinstance(value, dict):
+        out = {str(key) for key in value}
+        for item in value.values():
+            out.update(_collect_keys(item))
+        return out
+    if isinstance(value, list):
+        out: set[str] = set()
+        for item in value:
+            out.update(_collect_keys(item))
+        return out
+    return set()
+
+
+def _assert_no_independent_batch_item_bearers(payload: dict) -> None:
+    forbidden = {
+        "action_token",
+        "actionToken",
+        "approval_token",
+        "approvalToken",
+        "authorization",
+        "bearer",
+        "claim_token",
+        "download_token",
+        "mcp_auth_secret",
+        "public_link",
+        "refresh_token",
+        "secret",
+        "signature",
+        "signed_token",
+        "token",
+    }
+    keys = _collect_keys(payload)
+    assert forbidden.isdisjoint(keys), sorted(forbidden & keys)
+
+
 def test_mint_and_public_batch_lists_only_pending_workspace_items(client_and_main):
     client, main = client_and_main
     _seed_approval(
@@ -192,9 +228,8 @@ def test_mint_and_public_batch_lists_only_pending_workspace_items(client_and_mai
     item = body["approvals"][0]
     assert item["label"] == "Approve apr_local"
     assert item["preview"] == "Preview for apr_local"
-    assert item["action_token"]
+    _assert_no_independent_batch_item_bearers(body)
     assert "owner_id" not in item
-    assert "public_link" not in item
     assert "decision_input_json" not in item
     assert "connection_id" not in item["preview_payload"]
     assert "api_token" not in item["preview_payload"]["nested"]
@@ -341,6 +376,56 @@ def test_batch_share_link_revoke_and_expiry_reject_public_resolution(client_and_
 
     assert revoked.status_code == 410
     assert expired.status_code == 410
+
+
+def test_batch_share_link_revoke_and_expiry_reject_public_decisions(client_and_main):
+    client, main = client_and_main
+    _seed_approval(
+        main,
+        approval_id="apr_revoked_decision",
+        run_id="run_revoked_decision",
+        worker_id="w_revoked_decision",
+    )
+    _seed_approval(
+        main,
+        approval_id="apr_expired_decision",
+        run_id="run_expired_decision",
+        worker_id="w_expired_decision",
+    )
+    revoked_token = _batch_token(client)
+    expiring_token = _batch_token(client)
+
+    revoke = client.post(f"/approvals/batch-share-link/{revoked_token}/revoke")
+    assert revoke.status_code == 200, revoke.text
+
+    db = importlib.import_module("db")
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            UPDATE approval_batch_share_links
+            SET expires_at = ?
+            WHERE token_hash = ?
+            """,
+            ("2000-01-01T00:00:00+00:00", hashlib.sha256(expiring_token.encode("utf-8")).hexdigest()),
+        )
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    revoked = anon.post(
+        f"/approvals/public-batch/{revoked_token}/items/apr_revoked_decision/decision",
+        json={"decision": "rejected"},
+    )
+    expired = anon.post(
+        f"/approvals/public-batch/{expiring_token}/items/apr_expired_decision/decision",
+        json={"decision": "rejected"},
+    )
+
+    assert revoked.status_code == 410
+    assert expired.status_code == 410
+    repos = main.get_repositories()
+    assert repos.approvals.get(owner_id=OWNER, approval_id="apr_revoked_decision")["status"] == "pending"
+    assert repos.approvals.get(owner_id=OWNER, approval_id="apr_expired_decision")["status"] == "pending"
 
 
 def test_public_batch_token_is_scoped_to_minted_pending_approval_snapshot(client_and_main):

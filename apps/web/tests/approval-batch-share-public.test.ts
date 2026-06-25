@@ -3,6 +3,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: () => undefined,
+  }),
+}));
+
 describe("public approval batch share route", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -88,6 +94,33 @@ describe("public approval batch share route", () => {
     expect(new Headers(init.headers).get("x-floom-secret")).toBeNull();
     expect(res.status).toBe(200);
     await expect(res.text()).resolves.toBe("download-body");
+  });
+
+  it("does not forward FLOOM_API_SECRET from public /s page data fetches", async () => {
+    vi.resetModules();
+    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    process.env.FLOOM_API_SECRET = "fake-test-secret-not-real";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        entity_type: "approvals_batch",
+        title: "Pending approvals",
+        approvals: [],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const { fetchStandaloneShare } = await import("@/lib/server-api");
+
+    await fetchStandaloneShare("fls_test");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://workers-api.floom.dev/s/fls_test",
+      expect.objectContaining({ next: { revalidate: false } }),
+    );
+    const init = fetchMock.mock.calls[0][1] as { headers?: HeadersInit };
+    expect(new Headers(init.headers).get("x-floom-secret")).toBeNull();
+    expect(new Headers(init.headers).get("x-workeros-workspace")).toBeNull();
   });
 
   it("fails public share downloads closed when FLOOM_API_BASE is missing", async () => {

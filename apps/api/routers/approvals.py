@@ -710,7 +710,6 @@ def _public_batch_approval_item(approval: Dict[str, Any], repos: Repositories) -
     public["label"] = _public_batch_human_label(approval, decision_input, public.get("preview_payload"))
     public["preview"] = _public_batch_clean_preview(approval, decision_input, public.get("preview_payload"))
     public["kind"] = _approval_kind(approval)
-    public["action_token"] = try_approval_public_token(dict(approval))
     return public
 
 
