@@ -93,22 +93,26 @@ def _fast_worker_summaries(
     if not callable(list_summaries):
         return None
     starred_ids = _starred_worker_ids(auth.user_id)
-    rows = list_summaries(
-        user_id=user_id,
-        role=role,
-        include_system=include_system,
-        include_archived=include_archived,
-        visibility=visibility,
-        q=q,
-        starred=starred,
-        starred_ids=starred_ids,
-        limit=limit,
-        offset=offset,
-        owner_aliases={auth.user_id, auth.username or ""},
-    )
-    if rows is None:
+    try:
+        rows = list_summaries(
+            user_id=user_id,
+            role=role,
+            include_system=include_system,
+            include_archived=include_archived,
+            visibility=visibility,
+            q=q,
+            starred=starred,
+            starred_ids=starred_ids,
+            limit=limit,
+            offset=offset,
+            owner_aliases={auth.user_id, auth.username or ""},
+        )
+        if rows is None:
+            return None
+        return [_coerce_worker_summary(row) for row in rows]
+    except Exception:
+        logger.warning("workers list: fast summary hook failed; falling back to full list", exc_info=True)
         return None
-    return [_coerce_worker_summary(row) for row in rows]
 
 
 @worker_listing_router.get("/workers", response_model=List[WorkerListSummary])
