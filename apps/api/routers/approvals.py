@@ -208,6 +208,16 @@ def _create_or_get_approvals_batch_share_link(
         ).fetchone()
         if existing and existing["token_hash"] == token_hash:
             return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+        if existing:
+            conn.execute(
+                """
+                UPDATE approval_batch_share_links
+                SET token_hash = ?
+                WHERE workspace_id = ? AND owner_id = ? AND approval_ids_json = ?
+                """,
+                (token_hash, workspace_id, owner_id, approval_ids_json),
+            )
+            return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
         conn.execute(
             """
             INSERT OR IGNORE INTO approval_batch_share_links

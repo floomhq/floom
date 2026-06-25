@@ -309,6 +309,11 @@ def test_public_batch_legacy_raw_token_table_migrates_and_freezes_scope(client_a
     assert stored["approval_ids_json"] == '["apr_legacy"]'
     assert legacy_token not in repr(stored)
 
+    reshared = _batch_token(client)
+    reshared_response = anon.get(f"/approvals/public-batch/{reshared}")
+    assert reshared_response.status_code == 200, reshared_response.text
+    assert [item["id"] for item in reshared_response.json()["approvals"]] == ["apr_legacy"]
+
 
 def test_public_batch_allows_floom_preflight_for_decision(client_and_main):
     client, main = client_and_main

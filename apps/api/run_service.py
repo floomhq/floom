@@ -2536,6 +2536,18 @@ _APPROVAL_PROPOSAL_INFRA_PATTERNS = (
     "rate limit exceeded",
     "not connected",
 )
+_APPROVAL_PROPOSAL_INFRA_ERROR_KEYS = {
+    "code",
+    "details",
+    "error",
+    "error_code",
+    "error_detail",
+    "error_details",
+    "error_kind",
+    "error_message",
+    "failure",
+    "raw_error",
+}
 
 
 def _is_engine_approved_execution_run(run_id: str, repos: Repositories) -> bool:
@@ -2609,12 +2621,21 @@ def _apply_approval_phase_inputs(
     return out
 
 
+def _approval_proposal_error_text(value: Any) -> str:
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key, child in value.items():
+            if str(key).strip().lower() in _APPROVAL_PROPOSAL_INFRA_ERROR_KEYS:
+                parts.append(_approval_proposal_error_text(child))
+        return "\n".join(part for part in parts if part)
+    if isinstance(value, list):
+        return "\n".join(_approval_proposal_error_text(item) for item in value)
+    return str(value)
+
+
 def _decision_required_has_infra_error(decision_required: Dict[str, Any]) -> bool:
-    try:
-        text = json.dumps(decision_required, default=str).lower()
-    except Exception:
-        text = str(decision_required).lower()
-    return any(pattern in text for pattern in _APPROVAL_PROPOSAL_INFRA_PATTERNS)
+    text = _approval_proposal_error_text(decision_required).lower()
+    return bool(text) and any(pattern in text for pattern in _APPROVAL_PROPOSAL_INFRA_PATTERNS)
 
 
 def _fail_invalid_approval_proposal(
