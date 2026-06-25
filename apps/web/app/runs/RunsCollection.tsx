@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import Papa from "papaparse";
@@ -349,7 +349,7 @@ function LogsTab({ r }: { r: RunSummary }) {
 function isScalar(v: unknown): boolean {
   return v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 }
-const EMPTY_VALUE = "—"; // em dash placeholder for an empty input field
+const EMPTY_VALUE = "-";
 function renderInputValue(v: unknown): { node: React.ReactNode; mono: boolean } {
   if (v == null || v === "") return { node: EMPTY_VALUE, mono: false };
   if (isScalar(v)) {

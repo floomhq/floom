@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { CheckSquare2 } from "lucide-react";
-import type { ApprovalRow, WorkerSummary } from "@/lib/types";
+import type { ApprovalRow } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey, TagOption } from "@/lib/collection/types";
 import {
   Collection,

@@ -20,7 +20,6 @@ import type {
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import {
-  WORKER_DETAIL_TABS,
   WORKER_DETAIL_TAB_LABEL,
   type WorkerDetailTab,
   SETUP_SUBTABS,
