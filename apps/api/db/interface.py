@@ -10,6 +10,29 @@ RowDict = dict[str, Any]
 class WorkerRepository(Protocol):
     def list(self, *, user_id: str, role: str | None = None) -> list[RowDict]: ...
 
+    def list_summaries(
+        self,
+        *,
+        user_id: str,
+        role: str | None = None,
+        include_system: bool = False,
+        include_archived: bool = False,
+        visibility: str | None = None,
+        q: str | None = None,
+        starred: bool | None = None,
+        starred_ids: Iterable[str] = (),
+        limit: int | None = None,
+        offset: int = 0,
+        owner_aliases: Iterable[str] = (),
+    ) -> list[RowDict]:
+        """Fast worker-card summaries for ``GET /workers?shape=list``.
+
+        Implementations may return rows shaped like ``WorkerListSummary`` and
+        avoid building full worker recipes/manifests. Callers fall back to
+        ``list`` when this hook is unavailable.
+        """
+        ...
+
     def get(self, *, user_id: str, worker_id: str) -> RowDict | None: ...
 
     def list_for_agent(
@@ -74,6 +97,10 @@ class WorkerRepository(Protocol):
     def list_recent_runs(self, *, user_id: str, worker_id: str, limit: int = 10) -> list[RowDict]: ...
 
     def get_last_run(self, *, user_id: str, worker_id: str) -> RowDict | None: ...
+
+    def context_worker_counts(self, *, user_id: str) -> dict[str, int]:
+        """Map mounted context name to visible-worker count without full list()."""
+        ...
 
     def stats_batch(
         self,
