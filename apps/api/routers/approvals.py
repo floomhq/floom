@@ -48,7 +48,6 @@ from pydantic import BaseModel
 from auth import AuthContext, get_auth_context
 from core.approval_signing import (
     _approval_public_payload,
-    _approval_signing_secret,
     approval_public_token,
     try_approval_public_token,
 )
