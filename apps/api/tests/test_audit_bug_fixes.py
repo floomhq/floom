@@ -397,6 +397,20 @@ def test_sqlite_run_repo_implements_fail_all_pending_approval():
 
 
 # ---------------------------------------------------------------------------
+# #1965 — workspace-scoped pending approvals repository contract
+# ---------------------------------------------------------------------------
+
+def test_list_pending_for_workspace_in_approval_repository_protocol():
+    """ApprovalRepository must declare workspace-scoped pending listing."""
+    from db.interface import ApprovalRepository
+    import inspect
+    members = {name for name, _ in inspect.getmembers(ApprovalRepository)}
+    assert "list_pending_for_workspace" in members, (
+        "ApprovalRepository protocol must declare list_pending_for_workspace"
+    )
+
+
+# ---------------------------------------------------------------------------
 # #1481/#1482 - approval decisions must honor atomic claim result
 # ---------------------------------------------------------------------------
 

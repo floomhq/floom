@@ -7,7 +7,9 @@ Run:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -137,6 +139,22 @@ def _batch_token(client) -> str:
     return body["token"]
 
 
+def _old_deterministic_batch_token(*, workspace_id: str, owner_id: str, approval_ids: list[str]) -> str:
+    payload = json.dumps(
+        {
+            "v": 1,
+            "kind": "approvals_batch",
+            "workspace_id": workspace_id,
+            "owner_id": owner_id,
+            "approval_ids": sorted({str(item) for item in approval_ids if item}),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hmac.new(SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"fls_{digest[:48]}"
+
+
 def test_mint_and_public_batch_lists_only_pending_workspace_items(client_and_main):
     client, main = client_and_main
     _seed_approval(
@@ -182,7 +200,7 @@ def test_mint_and_public_batch_lists_only_pending_workspace_items(client_and_mai
     assert "api_token" not in item["preview_payload"]["nested"]
 
 
-def test_batch_share_link_is_idempotent_and_uses_top_level_standalone_url(client_and_main, monkeypatch):
+def test_batch_share_link_remint_is_random_keeps_prior_link_and_uses_top_level_url(client_and_main, monkeypatch):
     client, main = client_and_main
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://floom.dev/app")
     _seed_approval(main, approval_id="apr_local", run_id="run_local", worker_id="w_local")
@@ -192,10 +210,21 @@ def test_batch_share_link_is_idempotent_and_uses_top_level_standalone_url(client
 
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
-    assert first.json()["token"] == second.json()["token"]
+    assert first.json()["token"] != second.json()["token"]
+    assert first.json()["token"] != _old_deterministic_batch_token(
+        workspace_id="local-default",
+        owner_id=OWNER,
+        approval_ids=["apr_local"],
+    )
+    assert second.json()["token"] != _old_deterministic_batch_token(
+        workspace_id="local-default",
+        owner_id=OWNER,
+        approval_ids=["apr_local"],
+    )
     assert first.json()["url"] == f"https://floom.dev/s/{first.json()['token']}"
     assert "/app/s/" not in first.json()["url"]
     assert client.get(f"/approvals/public-batch/{first.json()['token']}").status_code == 200
+    assert client.get(f"/approvals/public-batch/{second.json()['token']}").status_code == 200
 
 
 def test_batch_share_link_uses_active_workspace_context_in_cloud(client_and_main, monkeypatch):
@@ -275,10 +304,43 @@ def test_batch_share_link_stores_hash_only_token(client_and_main):
 
     assert "token_hash" in columns
     assert "token" not in columns
+    assert "revoked_at" in columns
+    assert "expires_at" in columns
     assert row is not None
     stored = dict(row)
     assert stored["token_hash"] == hashlib.sha256(token.encode("utf-8")).hexdigest()
     assert token not in repr(stored)
+
+
+def test_batch_share_link_revoke_and_expiry_reject_public_resolution(client_and_main):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_revoke", run_id="run_revoke", worker_id="w_revoke")
+    revoked_token = _batch_token(client)
+    expiring_token = _batch_token(client)
+
+    revoke = client.post(f"/approvals/batch-share-link/{revoked_token}/revoke")
+    assert revoke.status_code == 200, revoke.text
+    assert revoke.json() == {"status": "revoked", "entity_type": "approvals_batch"}
+
+    db = importlib.import_module("db")
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            UPDATE approval_batch_share_links
+            SET expires_at = ?
+            WHERE token_hash = ?
+            """,
+            ("2000-01-01T00:00:00+00:00", hashlib.sha256(expiring_token.encode("utf-8")).hexdigest()),
+        )
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    revoked = anon.get(f"/approvals/public-batch/{revoked_token}")
+    expired = anon.get(f"/approvals/public-batch/{expiring_token}")
+
+    assert revoked.status_code == 410
+    assert expired.status_code == 410
 
 
 def test_public_batch_token_is_scoped_to_minted_pending_approval_snapshot(client_and_main):

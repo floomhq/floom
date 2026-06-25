@@ -145,7 +145,7 @@ def _create_or_get_standalone_share_link(
 
 def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
     from db import get_db
-    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
+    if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
         raise HTTPException(status_code=404, detail="Share link not found")
     _ensure_standalone_share_links_table()
     with get_db() as conn:

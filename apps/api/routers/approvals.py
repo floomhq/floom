@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import re
+import secrets as pysecrets
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -94,11 +95,63 @@ _APPROVAL_BATCH_SHARE_SQL = """
         owner_id TEXT NOT NULL,
         approval_ids_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        UNIQUE(workspace_id, owner_id, approval_ids_json)
+        revoked_at TEXT,
+        expires_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_approval_batch_share_workspace
         ON approval_batch_share_links(workspace_id, owner_id);
+    CREATE INDEX IF NOT EXISTS idx_approval_batch_share_active
+        ON approval_batch_share_links(workspace_id, owner_id, revoked_at);
 """
+
+
+def _approval_batch_scope_unique_exists(conn: Any) -> bool:
+    for index in conn.execute("PRAGMA index_list(approval_batch_share_links)").fetchall():
+        index_row = dict(index)
+        if not int(index_row.get("unique") or 0):
+            continue
+        index_name = str(index_row["name"]).replace('"', '""')
+        columns = [
+            str(row["name"])
+            for row in conn.execute(f'PRAGMA index_info("{index_name}")').fetchall()
+        ]
+        if columns in (["workspace_id", "owner_id"], ["workspace_id", "owner_id", "approval_ids_json"]):
+            return True
+    return False
+
+
+def _rebuild_approval_batch_share_links_table(conn: Any, columns: set[str]) -> None:
+    from db import now_iso
+
+    conn.execute("DROP TABLE IF EXISTS approval_batch_share_links_migrate")
+    conn.execute("ALTER TABLE approval_batch_share_links RENAME TO approval_batch_share_links_migrate")
+    conn.executescript(_APPROVAL_BATCH_SHARE_SQL)
+    rows = conn.execute("SELECT * FROM approval_batch_share_links_migrate").fetchall()
+    for row in rows:
+        stored = dict(row)
+        raw_token = str(stored.get("token") or "")
+        token_hash = str(stored.get("token_hash") or "")
+        if not token_hash and raw_token:
+            token_hash = _approval_batch_token_hash(raw_token)
+        if not token_hash:
+            continue
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO approval_batch_share_links
+                (token_hash, workspace_id, owner_id, approval_ids_json, created_at, revoked_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                token_hash,
+                str(stored.get("workspace_id") or ""),
+                str(stored.get("owner_id") or ""),
+                str(stored.get("approval_ids_json") or "null"),
+                str(stored.get("created_at") or now_iso()),
+                stored.get("revoked_at") if "revoked_at" in columns else None,
+                stored.get("expires_at") if "expires_at" in columns else None,
+            ),
+        )
+    conn.execute("DROP TABLE approval_batch_share_links_migrate")
 
 
 def _ensure_approval_batch_share_links_table() -> None:
@@ -113,39 +166,14 @@ def _ensure_approval_batch_share_links_table() -> None:
                 str(row["name"])
                 for row in conn.execute("PRAGMA table_info(approval_batch_share_links)").fetchall()
             }
-            if "token" in columns and "token_hash" not in columns:
-                conn.execute("ALTER TABLE approval_batch_share_links RENAME TO approval_batch_share_links_legacy_raw")
-                conn.executescript(_APPROVAL_BATCH_SHARE_SQL)
-                for row in conn.execute(
-                    """
-                    SELECT token, workspace_id, owner_id, created_at
-                    FROM approval_batch_share_links_legacy_raw
-                    """
-                ).fetchall():
-                    token = str(row["token"] or "")
-                    if not token:
-                        continue
-                    conn.execute(
-                        """
-                        INSERT OR IGNORE INTO approval_batch_share_links
-                            (token_hash, workspace_id, owner_id, approval_ids_json, created_at)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (
-                            _approval_batch_token_hash(token),
-                            str(row["workspace_id"] or ""),
-                            str(row["owner_id"] or ""),
-                            "null",
-                            str(row["created_at"] or ""),
-                        ),
-                    )
-                conn.execute("DROP TABLE approval_batch_share_links_legacy_raw")
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_approval_batch_share_workspace
-                    ON approval_batch_share_links(workspace_id, owner_id)
-                    """
-                )
+            needs_rebuild = (
+                ("token" in columns and "token_hash" not in columns)
+                or "revoked_at" not in columns
+                or "expires_at" not in columns
+                or _approval_batch_scope_unique_exists(conn)
+            )
+            if needs_rebuild:
+                _rebuild_approval_batch_share_links_table(conn, columns)
                 return
         conn.executescript(_APPROVAL_BATCH_SHARE_SQL)
 
@@ -154,23 +182,8 @@ def _batch_approval_ids_json(approval_ids: list[str]) -> str:
     return json.dumps(sorted({str(item) for item in approval_ids if item}), separators=(",", ":"))
 
 
-def _approval_batch_token(*, workspace_id: str, owner_id: str, approval_ids_json: str) -> str:
-    secret = _approval_signing_secret()
-    if not secret:
-        raise HTTPException(status_code=503, detail="Server signing secret not configured")
-    payload = json.dumps(
-        {
-            "v": 1,
-            "kind": "approvals_batch",
-            "workspace_id": workspace_id,
-            "owner_id": owner_id,
-            "approval_ids": json.loads(approval_ids_json),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    digest = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    return f"fls_{digest[:48]}"
+def _new_approval_batch_token() -> str:
+    return f"fls_{pysecrets.token_urlsafe(32)}"
 
 
 def _approval_batch_token_hash(token: str) -> str:
@@ -189,63 +202,67 @@ def _create_or_get_approvals_batch_share_link(
     if not workspace_id or not owner_id:
         raise HTTPException(status_code=409, detail="Approval batch cannot be shared")
     approval_ids_json = _batch_approval_ids_json(approval_ids)
-    token = _approval_batch_token(
-        workspace_id=workspace_id,
-        owner_id=owner_id,
-        approval_ids_json=approval_ids_json,
-    )
-    token_hash = _approval_batch_token_hash(token)
     _ensure_approval_batch_share_links_table()
     with get_db() as conn:
-        existing = conn.execute(
-            """
-            SELECT token_hash
-            FROM approval_batch_share_links
-            WHERE workspace_id = ? AND owner_id = ? AND approval_ids_json = ?
-            LIMIT 1
-            """,
-            (workspace_id, owner_id, approval_ids_json),
-        ).fetchone()
-        if existing and existing["token_hash"] == token_hash:
-            return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
-        if existing:
-            conn.execute(
+        for _attempt in range(5):
+            token = _new_approval_batch_token()
+            token_hash = _approval_batch_token_hash(token)
+            inserted = conn.execute(
                 """
-                UPDATE approval_batch_share_links
-                SET token_hash = ?
-                WHERE workspace_id = ? AND owner_id = ? AND approval_ids_json = ?
+                INSERT OR IGNORE INTO approval_batch_share_links
+                    (token_hash, workspace_id, owner_id, approval_ids_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (token_hash, workspace_id, owner_id, approval_ids_json),
+                (token_hash, workspace_id, owner_id, approval_ids_json, now_iso()),
             )
-            return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO approval_batch_share_links
-                (token_hash, workspace_id, owner_id, approval_ids_json, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (token_hash, workspace_id, owner_id, approval_ids_json, now_iso()),
-        )
-    return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+            if inserted.rowcount == 1:
+                return {"token": token, "url": _standalone_share_url(token), "entity_type": "approvals_batch"}
+    raise HTTPException(status_code=503, detail="Could not create approval batch share link")
 
 
 def _load_approval_batch_share_row(token: str) -> Dict[str, Any] | None:
-    from db import get_db
+    from db import get_db, now_iso
 
-    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
+    if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
         raise HTTPException(status_code=404, detail="Approval batch link not found")
     _ensure_approval_batch_share_links_table()
     with get_db() as conn:
         row = conn.execute(
             """
-            SELECT workspace_id, owner_id, approval_ids_json, created_at
+            SELECT workspace_id, owner_id, approval_ids_json, created_at, revoked_at, expires_at
             FROM approval_batch_share_links
             WHERE token_hash = ?
             LIMIT 1
             """,
             (_approval_batch_token_hash(token),),
         ).fetchone()
+    if row and row["revoked_at"]:
+        raise HTTPException(status_code=410, detail="Approval batch link revoked")
+    if row and row["expires_at"] and str(row["expires_at"]) <= now_iso():
+        raise HTTPException(status_code=410, detail="Approval batch link expired")
     return dict(row) if row else None
+
+
+def _revoke_approvals_batch_share_link(*, token: str, owner_id: str) -> Dict[str, str]:
+    from db import get_db, now_iso
+
+    if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    _ensure_approval_batch_share_links_table()
+    with get_db() as conn:
+        updated = conn.execute(
+            """
+            UPDATE approval_batch_share_links
+            SET revoked_at = ?
+            WHERE token_hash = ?
+              AND owner_id = ?
+              AND revoked_at IS NULL
+            """,
+            (now_iso(), _approval_batch_token_hash(token), owner_id),
+        )
+    if updated.rowcount != 1:
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    return {"status": "revoked", "entity_type": "approvals_batch"}
 
 
 def _approval_ids_from_batch_row(row: Dict[str, Any]) -> list[str] | None:
@@ -1205,6 +1222,15 @@ def create_approvals_batch_share_link(
         owner_id=auth.user_id,
         approval_ids=approval_ids,
     )
+
+
+@approvals_router.post("/approvals/batch-share-link/{token}/revoke")
+def revoke_approvals_batch_share_link(
+    token: str = Path(..., min_length=10),
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, str]:
+    """Revoke one approval batch public link without rotating sibling links."""
+    return _revoke_approvals_batch_share_link(token=token, owner_id=auth.user_id)
 
 
 def _public_approvals_batch_payload(
