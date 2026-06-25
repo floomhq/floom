@@ -7,8 +7,13 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useConnections, useMembers, useSecrets, useWorkers, useStreamedInitialData, qk } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
-import type { CollectionConfig, CustomDetailTab, DetailTab, TagFamilyKey } from "@/lib/collection/types";
-import { Collection } from "@/components/collection";
+import type { CollectionConfig, DetailTab, TagFamilyKey } from "@/lib/collection/types";
+import {
+  Collection,
+  DetailGroup,
+  DetailEmpty,
+  DetailChips,
+} from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { RunStatusBadge } from "@/components/RunStatus";
@@ -61,19 +66,6 @@ function Logo({ item }: { item: UnifiedConn }) {
     <span className="c-logo">
       {item.kind === "mcp" ? <Server size={16} /> : <KeyRound size={16} />}
     </span>
-  );
-}
-
-function KV({ rows }: { rows: [string, React.ReactNode][] }) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" }}>
-      {rows.map(([k, v], i) => (
-        <span key={i} style={{ display: "contents" }}>
-          <span style={{ color: "var(--muted-foreground)", fontSize: 12.5 }}>{k}</span>
-          <span>{v}</span>
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -188,36 +180,40 @@ function EmailPeekPanel({ connectionId }: { connectionId: string }) {
   if (loadingPeek) return <LoadingState rows={3} />;
 
   return (
-    <div className="c-ltable">
-      <div className="c-lrow" style={{ gridTemplateColumns: "auto 1fr", alignItems: "start" }}>
-        <Mail className="mt-1 size-4 text-muted-foreground" />
-        <div className="c-lprimary">
-          <div className="c-lp-tx">
-            <div className="nm">Recent emails</div>
-            <div className="meta">Trust signal from the connected Gmail account.</div>
-          </div>
-        </div>
-      </div>
-      {emailPeek.map((email, index) => (
-        <div
-          key={`${email.from_email}-${email.date}-${index}`}
-          className="c-lrow"
-          style={{ gridTemplateColumns: "1fr auto" }}
-        >
-          <div className="c-lprimary">
-            <div className="c-lp-tx">
-              <div className="nm">{email.subject || "(No subject)"}</div>
-              <div className="meta">
-                {email.from_name || email.from_email}
-                {email.from_name && email.from_email ? ` <${email.from_email}>` : ""}
+    <DetailGroup
+      label={
+        <span className="inline-flex items-center gap-1.5">
+          <Mail className="size-3.5" aria-hidden="true" />
+          Recent emails
+        </span>
+      }
+    >
+      <p className="c-dctx">Trust signal from the connected Gmail account.</p>
+      {emailPeek.length > 0 ? (
+        <div className="c-ltable">
+          {emailPeek.map((email, index) => (
+            <div
+              key={`${email.from_email}-${email.date}-${index}`}
+              className="c-lrow"
+              style={{ gridTemplateColumns: "1fr auto" }}
+            >
+              <div className="c-lprimary">
+                <div className="c-lp-tx">
+                  <div className="nm">{email.subject || "(No subject)"}</div>
+                  <div className="meta">
+                    {email.from_name || email.from_email}
+                    {email.from_name && email.from_email ? ` <${email.from_email}>` : ""}
+                  </div>
+                </div>
               </div>
+              <span className="c-cell m">{email.date ? new Date(email.date).toLocaleDateString() : ""}</span>
             </div>
-          </div>
-          <span className="c-cell m">{email.date ? new Date(email.date).toLocaleDateString() : ""}</span>
+          ))}
         </div>
-      ))}
-      {emailPeek.length === 0 && <div style={pad}>No recent emails available.</div>}
-    </div>
+      ) : (
+        <DetailEmpty>No recent emails available.</DetailEmpty>
+      )}
+    </DetailGroup>
   );
 }
 
@@ -247,25 +243,30 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
   if (loadingActivity) return <LoadingState rows={3} />;
 
   return (
-    <div className="c-ltable">
-      {activity.map((run) => (
-        <Link
-          key={run.id}
-          href={`/runs?sel=${encodeURIComponent(run.id)}`}
-          className="c-lrow"
-          style={{ gridTemplateColumns: "1fr auto", textDecoration: "none" }}
-        >
-          <div className="c-lprimary">
-            <div className="c-lp-tx">
-              <div className="nm">{run.worker_name || run.worker_id}</div>
-              <div className="meta">{run.created_at ? new Date(run.created_at).toLocaleString() : run.id}</div>
-            </div>
-          </div>
-          <RunStatusBadge status={run.status} showSuccess />
-        </Link>
-      ))}
-      {activity.length === 0 && <div style={pad}>No recent activity.</div>}
-    </div>
+    <DetailGroup label="Activity">
+      {activity.length > 0 ? (
+        <div className="c-ltable">
+          {activity.map((run) => (
+            <Link
+              key={run.id}
+              href={`/runs?sel=${encodeURIComponent(run.id)}`}
+              className="c-lrow"
+              style={{ gridTemplateColumns: "1fr auto", textDecoration: "none" }}
+            >
+              <div className="c-lprimary">
+                <div className="c-lp-tx">
+                  <div className="nm">{run.worker_name || run.worker_id}</div>
+                  <div className="meta">{run.created_at ? new Date(run.created_at).toLocaleString() : run.id}</div>
+                </div>
+              </div>
+              <RunStatusBadge status={run.status} showSuccess />
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <DetailEmpty>No recent activity.</DetailEmpty>
+      )}
+    </DetailGroup>
   );
 }
 
@@ -280,30 +281,19 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
 //             scope for new workers — the real allowlist is per-worker
 //             (WorkerConnectionSpec.allowed_tools), so each worker can narrow it.
 // ---------------------------------------------------------------------------
-function ToolChips({ items, mono = true }: { items: string[]; mono?: boolean }) {
+// A scoped tool list framed through the register: the section name is the
+// DetailGroup label (with its count) and the tools render as DetailChips; an
+// empty list shows DetailEmpty. Tool identifiers stay monospace via the chip
+// `mono` modifier so codes like GMAIL_SEND_EMAIL read as code.
+function ToolSection({ label, items, mono = true }: { label: string; items: string[]; mono?: boolean }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-      {items.map((t) => (
-        <span
-          key={t}
-          className="c-vpill"
-          style={{ fontFamily: mono ? "var(--font-mono)" : undefined, fontSize: 11.5 }}
-        >
-          {t}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function ToolSection({ label, items, mono }: { label: string; items: string[]; mono?: boolean }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 11, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted-foreground)" }}>
-        {label} · {items.length}
-      </div>
-      {items.length > 0 ? <ToolChips items={items} mono={mono} /> : <div style={pad}>None.</div>}
-    </div>
+    <DetailGroup label={`${label} · ${items.length}`}>
+      {items.length > 0 ? (
+        <DetailChips items={items.map((t) => ({ key: t, label: mono ? <span className="font-mono">{t}</span> : t }))} />
+      ) : (
+        <DetailEmpty>None.</DetailEmpty>
+      )}
+    </DetailGroup>
   );
 }
 
@@ -340,13 +330,15 @@ function McpToolsPanel({ connection }: { connection: ConnectionItem }) {
   const available = (live ?? []).filter((t) => !allowedSet.has(t));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div>
       <ToolSection label="Allowed for workers" items={allowed} />
       {unreachable ? (
-        <div style={pad}>
-          Server unreachable: showing the configured allowlist only. Test the
-          connection to enumerate live tools.
-        </div>
+        <DetailGroup label="Available but not allowed">
+          <DetailEmpty>
+            Server unreachable: showing the configured allowlist only. Test the
+            connection to enumerate live tools.
+          </DetailEmpty>
+        </DetailGroup>
       ) : (
         <ToolSection label="Available but not allowed · live from server" items={available} />
       )}
@@ -382,25 +374,27 @@ function OAuthToolsPanel({ connection }: { connection: ConnectionItem }) {
     scope === "Read-only" ? readOnly : scope === "All" ? scopes : [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "inline-flex", gap: 2, alignSelf: "flex-start", background: "var(--bg-2)", padding: 3, borderRadius: "var(--radius-pill)" }}>
-        {TOOL_PRESET_SCOPES.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setScope(s)}
-            className={scope === s ? "c-addbtn" : "c-vpill"}
-            style={{ padding: "4px 12px", fontSize: 12, border: "none" }}
-          >
-            {s === "All" ? `All ${scopes.length}` : s}
-          </button>
-        ))}
-      </div>
-      <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-        Default tool scope for new workers. Each worker can narrow this further.
-      </div>
+    <div>
+      <DetailGroup label="Scope">
+        <p className="c-dctx">Default tool scope for new workers. Each worker can narrow this further.</p>
+        <div style={{ display: "inline-flex", gap: 2, alignSelf: "flex-start", background: "var(--bg-2)", padding: 3, borderRadius: "var(--radius-pill)" }}>
+          {TOOL_PRESET_SCOPES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setScope(s)}
+              className={scope === s ? "c-addbtn" : "c-vpill"}
+              style={{ padding: "4px 12px", fontSize: 12, border: "none" }}
+            >
+              {s === "All" ? `All ${scopes.length}` : s}
+            </button>
+          ))}
+        </div>
+      </DetailGroup>
       {scope === "Custom" ? (
-        <div style={pad}>Configure the exact tool list on each worker (Setup → Tools).</div>
+        <DetailGroup label="Granted scopes">
+          <DetailEmpty>Configure the exact tool list on each worker (Setup → Tools).</DetailEmpty>
+        </DetailGroup>
       ) : (
         <ToolSection label="Granted scopes" items={shown} mono={false} />
       )}
@@ -486,36 +480,42 @@ function ConnSecretsPanel({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div className="c-ltable">
-        {related.map((s) => {
-          const managed = isManaged(s.name);
-          return (
-            <div key={s.name} className="c-lrow" style={{ gridTemplateColumns: "1fr auto", alignItems: "center" }}>
-              <div className="c-lprimary">
-                <div className="c-lp-tx">
-                  <div className="nm" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</div>
-                  <div className="meta">
-                    {managed
-                      ? "Managed · rotates on reconnect"
-                      : `Reference as secret:${s.name}`}
+    <div>
+      <DetailGroup label="Secrets">
+        {related.length > 0 ? (
+          <div className="c-ltable">
+            {related.map((s) => {
+              const managed = isManaged(s.name);
+              return (
+                <div key={s.name} className="c-lrow" style={{ gridTemplateColumns: "1fr auto", alignItems: "center" }}>
+                  <div className="c-lprimary">
+                    <div className="c-lp-tx">
+                      <div className="nm" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</div>
+                      <div className="meta">
+                        {managed
+                          ? "Managed · rotates on reconnect"
+                          : `Reference as secret:${s.name}`}
+                      </div>
+                    </div>
                   </div>
+                  {managed ? (
+                    <StatusPill spec={{ tone: "ok", label: "Set" }} />
+                  ) : (
+                    <span style={{ display: "inline-flex", gap: 6 }}>
+                      <button type="button" className="c-vpill" style={pillBtn} onClick={() => void test(s.name)}>Test</button>
+                      <button type="button" className="c-vpill" style={pillBtn} onClick={() => void replace(s.name)}>Replace</button>
+                      <button type="button" className="c-vpill" style={pillBtn} onClick={() => void del(s.name)}>Delete</button>
+                    </span>
+                  )}
                 </div>
-              </div>
-              {managed ? (
-                <StatusPill spec={{ tone: "ok", label: "Set" }} />
-              ) : (
-                <span style={{ display: "inline-flex", gap: 6 }}>
-                  <button type="button" className="c-vpill" style={pillBtn} onClick={() => void test(s.name)}>Test</button>
-                  <button type="button" className="c-vpill" style={pillBtn} onClick={() => void replace(s.name)}>Replace</button>
-                  <button type="button" className="c-vpill" style={pillBtn} onClick={() => void del(s.name)}>Delete</button>
-                </span>
-              )}
-            </div>
-          );
-        })}
-        {related.length === 0 && <div style={pad}>No secrets stored for this connection.</div>}
-      </div>
+              );
+            })}
+          </div>
+        ) : (
+          <DetailEmpty>No secrets stored for this connection.</DetailEmpty>
+        )}
+      </DetailGroup>
+      <div style={{ marginTop: 12 }}>
       {adding ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 460 }}>
           <input
@@ -543,6 +543,7 @@ function ConnSecretsPanel({
           + Add secret
         </button>
       )}
+      </div>
     </div>
   );
 }
@@ -561,30 +562,33 @@ function workersUsing(connection: ConnectionItem, workers: WorkerSummary[]): Wor
 function UsedByPanel({ connection, workers }: { connection: ConnectionItem; workers: WorkerSummary[] }) {
   const using = workersUsing(connection, workers);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <DetailGroup label="Used by">
       {using.length > 0 && (
-        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+        <p className="c-dctx">
           Disconnecting stops {using.length} worker{using.length !== 1 ? "s" : ""} that depend on this connection.
-        </div>
+        </p>
       )}
-      <div className="c-ltable">
-        {using.map((w) => (
-          <Link
-            key={w.id}
-            href={`/workers/${encodeURIComponent(w.id)}`}
-            className="c-lrow"
-            style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
-          >
-            <div className="c-lprimary">
-              <div className="c-lp-tx">
-                <div className="nm">{w.name}</div>
+      {using.length > 0 ? (
+        <div className="c-ltable">
+          {using.map((w) => (
+            <Link
+              key={w.id}
+              href={`/workers/${encodeURIComponent(w.id)}`}
+              className="c-lrow"
+              style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
+            >
+              <div className="c-lprimary">
+                <div className="c-lp-tx">
+                  <div className="nm">{w.name}</div>
+                </div>
               </div>
-            </div>
-          </Link>
-        ))}
-        {using.length === 0 && <div style={pad}>No workers use this connection yet.</div>}
-      </div>
-    </div>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <DetailEmpty>No workers use this connection yet.</DetailEmpty>
+      )}
+    </DetailGroup>
   );
 }
 
@@ -836,6 +840,7 @@ export default function ConnectionsCollection({
       const header = {
         leading: <Logo item={i} />,
         title: i.name,
+        status: STATUS_PILL[i.statusKey],
         actions,
         sub: (
           <>
@@ -856,38 +861,48 @@ export default function ConnectionsCollection({
         const using = workersUsing(c, workers);
         const related = secretsForConnection(c, secrets);
         const advancedTabs = isEmailConnection ? ["Recent emails"] : [];
-        const baseTabs: CustomDetailTab[] = [
+        const baseTabs: DetailTab[] = [
           {
+            // Synchronous key/value pane → structured (rendered by the engine via
+            // DetailKit), identical content to the prior KV grid.
             key: "Overview",
             label: "Overview",
-            custom: "unmigrated",
-            render: () => (
-              <KV
-                rows={[
-                  ["App", humaniseAppName(c.app_name)],
-                  ["Account", i.account],
-                  ["Auth", "OAuth · managed token (rotates on reconnect)"],
-                  ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
-                  ["Scopes", String(c.scopes?.length ?? 0)],
-                  ["Connected", new Date(c.created_at).toLocaleDateString()],
-                  ["Last used", formatLastUsed(c)],
-                  ["Owner", resolveOwner(c.owner_id, members)],
-                ]}
-              />
-            ),
+            summary: [
+              { key: "scopes", label: "Scopes", value: String(c.scopes?.length ?? 0) },
+              { key: "last-used", label: "Last used", value: formatLastUsed(c) },
+            ],
+            sections: [
+              {
+                key: "access",
+                label: "Access",
+                rows: [
+                  { key: "app", label: "App", value: humaniseAppName(c.app_name) },
+                  { key: "account", label: "Account", value: i.account },
+                  { key: "auth", label: "Auth", value: "OAuth · managed token (rotates on reconnect)" },
+                ],
+              },
+              {
+                key: "activity",
+                label: "Activity",
+                rows: [
+                  { key: "connected", label: "Connected", value: new Date(c.created_at).toLocaleDateString() },
+                  { key: "owner", label: "Owner", value: resolveOwner(c.owner_id, members) },
+                ],
+              },
+            ],
           },
           {
             key: "Tools",
             label: "Tools",
             count: c.scopes?.length,
-            custom: "unmigrated",
+            custom: "tool-list",
             render: () => <OAuthToolsPanel connection={c} />,
           },
           {
             key: "Secrets",
             label: "Secrets",
             count: related.length || undefined,
-            custom: "unmigrated",
+            custom: "secret-form",
             render: () => (
               <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
             ),
@@ -896,22 +911,22 @@ export default function ConnectionsCollection({
             key: "Used by",
             label: "Used by",
             count: using.length || undefined,
-            custom: "unmigrated",
+            custom: "used-by",
             render: () => <UsedByPanel connection={c} workers={workers} />,
           },
           {
             key: "Activity",
             label: "Activity",
-            custom: "unmigrated",
+            custom: "activity-feed",
             render: () => <ActivityPanel connectionId={c.id} />,
           },
         ];
-        const advancedRendered: CustomDetailTab[] = advancedTabs
+        const advancedRendered: DetailTab[] = advancedTabs
           .filter((t) => pinnedTabs.has(t))
           .map((t) => ({
             key: t,
             label: t,
-            custom: "unmigrated" as const,
+            custom: "activity-feed" as const,
             render: () => <EmailPeekPanel connectionId={c.id} />,
           }));
         return {
@@ -930,42 +945,46 @@ export default function ConnectionsCollection({
         const using = workersUsing(c, workers);
         const related = secretsForConnection(c, secrets);
         const advancedTabs = ["Config"];
-        const baseTabs: CustomDetailTab[] = [
+        const baseTabs: DetailTab[] = [
           {
+            // Synchronous key/value pane → structured, identical content to the
+            // prior KV grid. Mono fields use the row `mono` flag.
             key: "Overview",
             label: "Overview",
-            custom: "unmigrated",
-            render: () => (
-              <KV
-                rows={[
-                  ["Server", c.mcp_label || c.app_name],
-                  [
-                    "Endpoint",
-                    <span key="ep" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                      {c.mcp_url || c.mcp_command || "—"}
-                    </span>,
-                  ],
-                  ["Transport", c.mcp_transport || "—"],
-                  ["Secret name", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
-                  ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
-                  ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
-                  ["Last used", formatLastUsed(c)],
-                ]}
-              />
-            ),
+            summary: [
+              { key: "tools", label: "Tools", value: String(c.mcp_allowed_tools?.length ?? 0) },
+              { key: "last-used", label: "Last used", value: formatLastUsed(c) },
+            ],
+            sections: [
+              {
+                key: "server",
+                label: "Server",
+                rows: [
+                  { key: "endpoint", label: "Endpoint", value: c.mcp_url || c.mcp_command || "—", mono: true },
+                  { key: "transport", label: "Transport", value: c.mcp_transport || "—" },
+                ],
+              },
+              {
+                key: "auth",
+                label: "Auth",
+                rows: [
+                  { key: "secret-name", label: "Secret name", value: c.mcp_auth_secret || "None", mono: c.mcp_auth_secret != null },
+                ],
+              },
+            ],
           },
           {
             key: "Tools",
             label: "Tools",
             count: c.mcp_allowed_tools?.length,
-            custom: "unmigrated",
+            custom: "tool-list",
             render: () => <McpToolsPanel connection={c} />,
           },
           {
             key: "Secrets",
             label: "Secrets",
             count: related.length || undefined,
-            custom: "unmigrated",
+            custom: "secret-form",
             render: () => (
               <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
             ),
@@ -974,32 +993,34 @@ export default function ConnectionsCollection({
             key: "Used by",
             label: "Used by",
             count: using.length || undefined,
-            custom: "unmigrated",
+            custom: "used-by",
             render: () => <UsedByPanel connection={c} workers={workers} />,
           },
           {
             key: "Activity",
             label: "Activity",
-            custom: "unmigrated",
+            custom: "activity-feed",
             render: () => <ActivityPanel connectionId={c.id} />,
           },
         ];
-        const advancedRendered: CustomDetailTab[] = advancedTabs
+        const advancedRendered: DetailTab[] = advancedTabs
           .filter((t) => pinnedTabs.has(t))
           .map((t) => ({
             key: t,
             label: t,
-            custom: "unmigrated" as const,
+            custom: "file-viewer" as const,
             render: () => (
-              <pre style={codeBlock}>
-                {JSON.stringify(
-                  c.mcp_transport === "stdio" || c.mcp_command
-                    ? { command: c.mcp_command, args: c.mcp_args ?? [], transport: c.mcp_transport ?? "stdio" }
-                    : { url: c.mcp_url, transport: c.mcp_transport ?? "streamable_http" },
-                  null,
-                  2,
-                )}
-              </pre>
+              <DetailGroup label="Config">
+                <pre style={codeBlock}>
+                  {JSON.stringify(
+                    c.mcp_transport === "stdio" || c.mcp_command
+                      ? { command: c.mcp_command, args: c.mcp_args ?? [], transport: c.mcp_transport ?? "stdio" }
+                      : { url: c.mcp_url, transport: c.mcp_transport ?? "streamable_http" },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </DetailGroup>
             ),
           }));
         return {
@@ -1017,84 +1038,85 @@ export default function ConnectionsCollection({
         header,
         tabs: ([
           {
+            // Synchronous key/value pane → structured, identical content to the
+            // prior KV grid. Interactive controls (reveal/copy, used-by link) stay
+            // inside the row `value` (ReactNode).
             key: "Overview",
             label: "Overview",
-            custom: "unmigrated",
-            render: () => (
-              <KV
-                rows={[
-                  [
-                    "Name",
-                    <span key="nm" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</span>,
-                  ],
-                  ["Value", <SecretValueField key="val" name={s.name} />],
-                  [
-                    "Status",
-                    <StatusPill
-                      key="st"
-                      spec={
-                        s.status === "set"
-                          ? { tone: "ok", label: "Set" }
-                          : { tone: "err", label: "Not set" }
-                      }
-                    />,
-                  ],
-                  [
-                    "Used by",
-                    usedByCount > 0 ? (
-                      <Link
-                        href={`?tab=Used+by`}
-                        style={{
-                          color: "var(--accent)",
-                          textDecoration: "underline",
-                          textDecorationColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
-                          textUnderlineOffset: 3,
-                        }}
-                      >
-                        {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
-                      </Link>
-                    ) : (
-                      <span style={{ color: "var(--muted-foreground)" }}>None</span>
-                    ),
-                  ],
-                ]}
-              />
-            ),
+            summary: [
+              { key: "state", label: "State", value: s.status === "set" ? "Set" : "Not set" },
+              { key: "used-by-count", label: "Used by", value: String(usedByCount) },
+            ],
+            sections: [
+              {
+                key: "secret",
+                label: "Secret",
+                rows: [
+                  { key: "name", label: "Name", value: s.name, mono: true },
+                  { key: "value", label: "Value", value: <SecretValueField name={s.name} /> },
+                  {
+                    key: "used-by",
+                    label: "Used by",
+                    value:
+                      usedByCount > 0 ? (
+                        <Link
+                          href={`?tab=Used+by`}
+                          style={{
+                            color: "var(--accent)",
+                            textDecoration: "underline",
+                            textDecorationColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
+                            textUnderlineOffset: 3,
+                          }}
+                        >
+                          {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
+                        </Link>
+                      ) : (
+                        <span style={{ color: "var(--muted-foreground)" }}>None</span>
+                      ),
+                  },
+                ],
+              },
+            ],
           },
           {
             key: "Used by",
             label: "Used by",
             count: s.used_by?.length,
-            custom: "unmigrated",
+            custom: "used-by",
             render: () => (
-              <div className="c-ltable">
-                {(s.used_by ?? []).map((workerName) => {
-                  const workerId = workersByName.get(workerName);
-                  return workerId ? (
-                    <Link
-                      key={workerName}
-                      href={`/workers/${encodeURIComponent(workerId)}`}
-                      className="c-lrow"
-                      style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
-                    >
-                      <div className="c-lprimary">
-                        <div className="c-lp-tx">
-                          <div className="nm">{workerName}</div>
+              <DetailGroup label="Used by">
+                {(s.used_by?.length ?? 0) > 0 ? (
+                  <div className="c-ltable">
+                    {(s.used_by ?? []).map((workerName) => {
+                      const workerId = workersByName.get(workerName);
+                      return workerId ? (
+                        <Link
+                          key={workerName}
+                          href={`/workers/${encodeURIComponent(workerId)}`}
+                          className="c-lrow"
+                          style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
+                        >
+                          <div className="c-lprimary">
+                            <div className="c-lp-tx">
+                              <div className="nm">{workerName}</div>
+                            </div>
+                          </div>
+                        </Link>
+                      ) : (
+                        <div key={workerName} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
+                          <div className="c-lprimary">
+                            <div className="c-lp-tx">
+                              <div className="nm">{workerName}</div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </Link>
-                  ) : (
-                    <div key={workerName} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-                      <div className="c-lprimary">
-                        <div className="c-lp-tx">
-                          <div className="nm">{workerName}</div>
-                        </div>
-                      </div>
-                    </div>
-                   );
-                })}
-                {(s.used_by?.length ?? 0) === 0 && <div style={pad}>Not used by any worker yet.</div>}
-              </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <DetailEmpty>Not used by any worker yet.</DetailEmpty>
+                )}
+              </DetailGroup>
             ),
           },
         ] as DetailTab[]),

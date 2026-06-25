@@ -10,7 +10,11 @@ import { reportError } from "@/lib/notify";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection } from "@/components/collection";
+import {
+  Collection,
+  DetailGroup,
+  DetailEmpty,
+} from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineDragItem } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
@@ -95,12 +99,21 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
     }
   };
 
+  // The file/code/SQLite viewer is a stateful editor (custom: "file-viewer"),
+  // so it cannot be reduced to register rows; it is framed in a labelled
+  // DetailGroup so it sits in the detail surface consistently. The byte/file
+  // count reads as the group's context line (c-dctx).
   return (
-    <InlineFileOpen
-      files={files}
-      rootLabel={folder.name}
-      emptyLabel="This folder is empty."
-      loadText={(f) => api.contexts.readTextFile(folder.name, f.id)}
+    <DetailGroup label="Files">
+      <p className="c-dctx">
+        {contextFiles.length} file{contextFiles.length === 1 ? "" : "s"}
+        {canWrite ? " · drag files in to add" : " · read only"}
+      </p>
+      <InlineFileOpen
+        files={files}
+        rootLabel={folder.name}
+        emptyLabel="This folder is empty."
+        loadText={(f) => api.contexts.readTextFile(folder.name, f.id)}
       // #777: inline SQLite viewer for .db files.
       loadSqlite={(f, table) => api.contexts.sqlite(folder.name, f.id, table)}
       // .npz array viewer: fetch raw bytes, parsed header-only client-side.
@@ -158,8 +171,9 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
               }
             }
           : undefined
-      }
-    />
+        }
+      />
+    </DetailGroup>
   );
 }
 
@@ -305,24 +319,31 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
   const [d] = useContextDetail(folder.name);
   if (!d) return <LoadingState rows={3} />;
   const used = d.used_by ?? [];
+  // Framed in the register (DetailGroup + a c-ltable list of links, DetailEmpty
+  // when empty) to match the Connections "Used by" panel.
   return (
-    <div className="c-ltable">
-      {used.map((ref) => (
-        <Link
-          key={ref.worker_id}
-          href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`}
-          className="c-lrow"
-          style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
-        >
-          <div className="c-lprimary">
-            <div className="c-lp-tx">
-              <div className="nm">{ref.worker_name}</div>
-            </div>
-          </div>
-        </Link>
-      ))}
-      {used.length === 0 && <div style={{ ...muted, padding: 14 }}>No workers use this folder yet.</div>}
-    </div>
+    <DetailGroup label="Used by">
+      {used.length > 0 ? (
+        <div className="c-ltable">
+          {used.map((ref) => (
+            <Link
+              key={ref.worker_id}
+              href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`}
+              className="c-lrow"
+              style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
+            >
+              <div className="c-lprimary">
+                <div className="c-lp-tx">
+                  <div className="nm">{ref.worker_name}</div>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <DetailEmpty>No workers use this folder yet.</DetailEmpty>
+      )}
+    </DetailGroup>
   );
 }
 
@@ -539,8 +560,8 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         ),
       },
       tabs: [
-        { key: "Files", label: "Files", count: c.file_count, custom: "unmigrated", render: () => <FilesTab folder={c} /> },
-        { key: "Used by", label: "Used by", count: c.worker_count, custom: "unmigrated", render: () => <UsedByTab folder={c} /> },
+        { key: "Files", label: "Files", count: c.file_count, custom: "file-viewer", render: () => <FilesTab folder={c} /> },
+        { key: "Used by", label: "Used by", count: c.worker_count, custom: "used-by", render: () => <UsedByTab folder={c} /> },
       ],
     }),
     // No prominent toolbar "+ New folder" addButton (the operator 2026-06-15):
@@ -657,5 +678,3 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     </div>
   );
 }
-
-const muted: React.CSSProperties = { color: "var(--muted-foreground)" };

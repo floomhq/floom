@@ -30,7 +30,7 @@ function config(over: Partial<CollectionConfig<Item>> = {}): CollectionConfig<It
     row: (item) => ({ primary: item.name }),
     detail: (item) => ({
       header: { leading: null, title: item.name },
-      tabs: [{ key: "About", label: "About", custom: "unmigrated" as const, render: () => null }],
+      tabs: [{ key: "About", label: "About", custom: "settings-form" as const, render: () => null }],
     }),
     ...over,
   };
