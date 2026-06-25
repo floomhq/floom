@@ -20,6 +20,7 @@ from db import Repositories, get_repos
 from models import DraftFile, WorkerCreateRequest, WorkerDetail
 from services.worker_access import _canonical_worker_id, _slugify_worker_id
 from services.worker_create import (
+    _build_worker_detail_after_write,
     _create_worker_from_parsed_payload,
     _reject_raw_local_runner_on_create,
 )
@@ -38,7 +39,7 @@ from services.worker_registry_ops import (
     _register_worker_from_files,
     _rewrite_worker_yml_id,
 )
-from services.worker_serialize import _DEFAULT_RUN_PY_STUB, _build_worker_detail, _is_secret_bearing_export_path
+from services.worker_serialize import _DEFAULT_RUN_PY_STUB, _is_secret_bearing_export_path
 
 import logging
 
@@ -105,7 +106,7 @@ def create_worker(
             user_id=auth.user_id,
             repos=repos,
         )
-        return _build_worker_detail(created_id, user_id=auth.user_id, repos=repos)
+        return _build_worker_detail_after_write(created_id, user_id=auth.user_id, repos=repos)
 
     if payload.run_py is None:
         raise HTTPException(status_code=422, detail="run_py is required when files are not supplied")
@@ -274,7 +275,7 @@ async def create_worker_from_bundle(
     except Exception:
         logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
 
-    return _build_worker_detail(
+    return _build_worker_detail_after_write(
         worker_id,
         user_id=auth.user_id,
         repos=repos,
