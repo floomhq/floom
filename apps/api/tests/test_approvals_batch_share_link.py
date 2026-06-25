@@ -224,6 +224,44 @@ def test_batch_share_link_uses_active_workspace_context_in_cloud(client_and_main
     assert client.get(f"/approvals/public-batch/{token}").json()["approvals"][0]["id"] == "apr_cloud"
 
 
+def test_public_batch_requires_workspace_scoped_approval_repo(client_and_main, monkeypatch):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_scoped", run_id="run_scoped", worker_id="w_scoped")
+    repos = main.get_repositories()
+
+    class UnscopedApprovalsRepo:
+        def __init__(self):
+            self.list_pending_called = False
+
+        def list_pending(self, *, owner_id: str, limit: int = 100):
+            self.list_pending_called = True
+            return repos.approvals.list_pending(owner_id=owner_id, limit=limit)
+
+    unscoped_approvals = UnscopedApprovalsRepo()
+    patched_repos = repos._replace(approvals=unscoped_approvals)
+    db_factory = importlib.import_module("db.factory")
+    auth_factory = importlib.import_module("auth.factory")
+    auth_multi_member = importlib.import_module("auth.multi_member")
+    db_factory.register_repositories("cloud", lambda: patched_repos)
+    auth_factory.register_auth_provider("cloud", lambda: auth_multi_member.MultiMemberAuthProvider())
+    git_ops = importlib.import_module("git_ops")
+    monkeypatch.setattr(git_ops, "get_active_workspace_id", lambda: "local-default")
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    db_factory.get_repositories.cache_clear()
+
+    response = client.post("/approvals/batch-share-link")
+
+    assert response.status_code == 503
+    assert "workspace-scoped pending approvals" in response.text
+    assert unscoped_approvals.list_pending_called is False
+
+
+def test_sqlite_approval_repo_exposes_workspace_scoped_pending_contract(client_and_main):
+    _client, main = client_and_main
+    repos = main.get_repositories()
+    assert callable(getattr(repos.approvals, "list_pending_for_workspace", None))
+
+
 def test_batch_share_link_stores_hash_only_token(client_and_main):
     client, main = client_and_main
     _seed_approval(main, approval_id="apr_hash_only", run_id="run_hash_only", worker_id="w_hash_only")

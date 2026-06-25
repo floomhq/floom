@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
-const API_SECRET = process.env.FLOOM_API_SECRET || "";
+function getApiBase(): string | null {
+  const apiBase = process.env.FLOOM_API_BASE?.trim();
+  return apiBase ? apiBase.replace(/\/$/, "") : null;
+}
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  const upstream = await fetch(`${API_BASE}/s/${encodeURIComponent(token)}/download`, {
-    headers: API_SECRET ? { "x-floom-secret": API_SECRET } : undefined,
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return NextResponse.json(
+      { detail: "FLOOM_API_BASE is required for public share downloads." },
+      { status: 503, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } },
+    );
+  }
+
+  const upstream = await fetch(`${apiBase}/s/${encodeURIComponent(token)}/download`, {
     cache: "no-store",
   });
 

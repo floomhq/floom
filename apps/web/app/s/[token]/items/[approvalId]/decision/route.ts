@@ -1,22 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 // Public route: do NOT forward FLOOM_API_SECRET. The upstream
 // /approvals/public-batch/{token}/items/{id}/decision is middleware-exempt
 // (token-gated by the share token), so the privileged secret must not leak here (#1966 hardening).
+
+function getApiBase(): string | null {
+  const apiBase = process.env.FLOOM_API_BASE?.trim();
+  return apiBase ? apiBase.replace(/\/$/, "") : null;
+}
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string; approvalId: string }> },
 ) {
   const { token, approvalId } = await params;
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return NextResponse.json(
+      { detail: "FLOOM_API_BASE is required for public approval decisions." },
+      { status: 503, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } },
+    );
+  }
   const body = await request.text();
   const headers = new Headers({
     "content-type": request.headers.get("content-type") || "application/json",
   });
 
   const upstream = await fetch(
-    `${API_BASE}/approvals/public-batch/${encodeURIComponent(token)}/items/${encodeURIComponent(approvalId)}/decision`,
+    `${apiBase}/approvals/public-batch/${encodeURIComponent(token)}/items/${encodeURIComponent(approvalId)}/decision`,
     {
       method: "POST",
       headers,

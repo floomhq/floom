@@ -44,6 +44,68 @@ describe("public approval batch share route", () => {
     await expect(res.json()).resolves.toEqual({ status: "rejected", run_id: "run_1" });
   });
 
+  it("fails public decisions closed when FLOOM_API_BASE is missing", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const { POST } = await import("@/app/s/[token]/items/[approvalId]/decision/route");
+
+    const res = await POST(
+      new NextRequest("https://floom.dev/s/fls_test/items/apr_1/decision", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "rejected" }),
+      }),
+      { params: Promise.resolve({ token: "fls_test", approvalId: "apr_1" }) },
+    );
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      detail: "FLOOM_API_BASE is required for public approval decisions.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not forward FLOOM_API_SECRET from public share downloads", async () => {
+    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev/";
+    process.env.FLOOM_API_SECRET = "fake-test-secret-not-real";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("download-body", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+    const { GET } = await import("@/app/s/[token]/download/route");
+
+    const res = await GET(
+      new NextRequest("https://floom.dev/s/fls_test/download"),
+      { params: Promise.resolve({ token: "fls_test" }) },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://workers-api.floom.dev/s/fls_test/download",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    const init = fetchMock.mock.calls[0][1] as { headers?: HeadersInit };
+    expect(new Headers(init.headers).get("x-floom-secret")).toBeNull();
+    expect(res.status).toBe(200);
+    await expect(res.text()).resolves.toBe("download-body");
+  });
+
+  it("fails public share downloads closed when FLOOM_API_BASE is missing", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const { GET } = await import("@/app/s/[token]/download/route");
+
+    const res = await GET(
+      new NextRequest("https://floom.dev/s/fls_test/download"),
+      { params: Promise.resolve({ token: "fls_test" }) },
+    );
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      detail: "FLOOM_API_BASE is required for public share downloads.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps minted /s links top-level when the hosted app uses basePath /app", () => {
     const config = readFileSync(join(process.cwd(), "next.config.ts"), "utf-8");
     expect(config).toContain('source: "/s/:path*"');

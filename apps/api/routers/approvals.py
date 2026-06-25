@@ -739,10 +739,12 @@ def _list_pending_approvals_for_workspace(
 ) -> list[Dict[str, Any]]:
     bounded_limit = max(1, min(int(limit or 200), 200))
     list_for_workspace = getattr(repos.approvals, "list_pending_for_workspace", None)
-    if callable(list_for_workspace):
-        rows = list_for_workspace(workspace_id=workspace_id, owner_id=owner_id, limit=bounded_limit)
-    else:
-        rows = repos.approvals.list_pending(owner_id=owner_id, limit=bounded_limit)
+    if not callable(list_for_workspace):
+        raise HTTPException(
+            status_code=503,
+            detail="Approval repository does not support workspace-scoped pending approvals",
+        )
+    rows = list_for_workspace(workspace_id=workspace_id, owner_id=owner_id, limit=bounded_limit)
     return [
         dict(row) for row in rows
         if _approval_workspace_id(dict(row), repos) == workspace_id
