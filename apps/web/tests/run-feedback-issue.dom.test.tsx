@@ -74,7 +74,9 @@ describe("TrackRunFeedbackIssue", () => {
 
     await user.click(screen.getByRole("button", { name: /Create issue/ }));
 
-    expect(createFeedback).toHaveBeenCalledWith("run_abc", "Summarised the wrong thread");
+    expect(createFeedback).toHaveBeenCalledWith("run_abc", "Summarised the wrong thread", undefined, {
+      worker_id: "inbox-helper",
+    });
     expect(createFeedbackIssue).toHaveBeenCalledWith("run_abc", {
       feedback_id: "rfb_1",
       title: null,

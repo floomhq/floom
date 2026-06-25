@@ -254,11 +254,22 @@ export const api = {
       fetchJson<import("./types").ShareGrant[]>(
         `/share/grants?asset_type=${encodeURIComponent(assetType)}&asset_id=${encodeURIComponent(assetId)}`
       ),
-    addGrant: (assetType: string, assetId: string, email: string) =>
-      fetchJson<import("./types").ShareGrant>("/share/grants", {
+    addGrant: (assetType: string, assetId: string, email: string) => {
+      // INTENT: run output shared with a specific person — quality signal. Only
+      // emitted for run assets (worker/brain-pack grants are not output-quality).
+      // The grantee email is NEVER sent as a property.
+      if (assetType === "run") {
+        captureProductEvent("run_output_share_submitted", {
+          run_id: assetId,
+          asset_type: "run",
+          share_method: "grant",
+        });
+      }
+      return fetchJson<import("./types").ShareGrant>("/share/grants", {
         method: "POST",
         body: JSON.stringify({ asset_type: assetType, asset_id: assetId, email }),
-      }),
+      });
+    },
     revokeGrant: (grantId: string) =>
       fetchJson<null>(`/share/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" }),
   },
@@ -523,10 +534,19 @@ export const api = {
     },
     logs: (id: string) => fetchJson<import("./types").LogEntry[]>(`/runs/${id}/logs`),
     // #765: mint a read-only public share link for a run (owner only). Create-or-rotate.
-    shareLink: (id: string) =>
-      fetchJson<import("./types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, {
+    shareLink: (id: string) => {
+      // INTENT: user shared a run's output via public link — a "this result is
+      // worth sending to someone" quality signal. The minted URL/secret is
+      // NEVER sent as a property; only the run id and share method.
+      captureProductEvent("run_output_share_submitted", {
+        run_id: id,
+        asset_type: "run",
+        share_method: "public_link",
+      });
+      return fetchJson<import("./types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
-      }),
+      });
+    },
     // #765/#766: revoke a run's public share link.
     revokeShareLink: (id: string) =>
       fetchJson<{ revoked: boolean }>(`/runs/${encodeURIComponent(id)}/share-link`, {
@@ -539,11 +559,30 @@ export const api = {
     feedback: {
       list: (id: string) =>
         fetchJson<import("./types").RunFeedback[]>(`/runs/${encodeURIComponent(id)}/feedback`),
-      create: (id: string, content: string, rating?: string | null) =>
-        fetchJson<import("./types").RunFeedback>(`/runs/${encodeURIComponent(id)}/feedback`, {
+      create: (
+        id: string,
+        content: string,
+        rating?: string | null,
+        // Optional analytics context. The API method cannot infer worker_id from
+        // a run id, so the caller (which holds the RunDetail) passes it for the
+        // run_result_feedback_submitted quality event. No effect on the request.
+        analytics?: { worker_id?: string | null },
+      ) => {
+        // INTENT: user submitted run feedback — the truest "was this output
+        // good?" signal. `rating` carries an explicit thumbs verdict when set.
+        // Bodies are never sent: only ids, the rating verdict, and a length.
+        captureProductEvent("run_result_feedback_submitted", {
+          run_id: id,
+          worker_id: analytics?.worker_id ?? null,
+          has_rating: rating != null,
+          rating: rating ?? null,
+          content_length: content.length,
+        });
+        return fetchJson<import("./types").RunFeedback>(`/runs/${encodeURIComponent(id)}/feedback`, {
           method: "POST",
           body: JSON.stringify({ content, rating: rating ?? null }),
-        }),
+        });
+      },
     },
     // #1807: explicitly convert one actionable run feedback item into a
     // git-backed workspace issue bound to the run. Opt-in only — normal
@@ -551,21 +590,37 @@ export const api = {
     createFeedbackIssue: (
       id: string,
       payload: import("./types").RunFeedbackIssueRequest,
-    ) =>
-      fetchJson<import("./types").RunFeedbackIssueResponse>(
+    ) => {
+      // INTENT: feedback was actionable enough to promote into a git-backed
+      // workspace issue — a strong "output needs work / was useful enough to
+      // act on" quality signal. Only ids travel; never the issue title/body.
+      captureProductEvent("run_feedback_issue_submitted", {
+        run_id: id,
+        feedback_id: payload.feedback_id,
+        has_title: Boolean(payload.title),
+      });
+      return fetchJson<import("./types").RunFeedbackIssueResponse>(
         `/runs/${encodeURIComponent(id)}/feedback/issue`,
         { method: "POST", body: JSON.stringify(payload) },
-      ),
+      );
+    },
     approve: async (
       id: string,
       editedOutput?: Record<string, unknown>,
       annotations?: import("./types").ApprovalAnnotations | null
     ) => {
       // INTENT: user clicked approve. The authoritative approval_approved
-      // outcome is emitted server-side.
+      // outcome is emitted server-side. Output-quality enrichment: whether the
+      // approver edited the result and how much they annotated it (counts only,
+      // never the edited values or annotation text).
       captureProductEvent("approval_action_clicked", {
         run_id: id,
         action: "approve",
+        has_edited_output: editedOutput != null && Object.keys(editedOutput).length > 0,
+        edited_output_key_count: editedOutput ? Object.keys(editedOutput).length : 0,
+        annotation_count: annotations
+          ? (annotations.text?.length ?? 0) + (annotations.images?.length ?? 0)
+          : 0,
       });
       const result = await fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, {
         method: "POST",
@@ -579,10 +634,15 @@ export const api = {
       annotations?: import("./types").ApprovalAnnotations | null
     ) => {
       // INTENT: user clicked reject. The authoritative approval_rejected
-      // outcome is emitted server-side.
+      // outcome is emitted server-side. Output-quality enrichment: how much the
+      // approver annotated the rejection (counts only, never the reason text or
+      // annotation contents).
       captureProductEvent("approval_action_clicked", {
         run_id: id,
         action: "reject",
+        annotation_count: annotations
+          ? (annotations.text?.length ?? 0) + (annotations.images?.length ?? 0)
+          : 0,
       });
       const result = await fetchJson<import("./types").ActionResponse>(`/runs/${id}/reject`, {
         method: "POST",

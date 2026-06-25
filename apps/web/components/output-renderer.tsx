@@ -10,6 +10,8 @@ import { Download } from "lucide-react";
 import { GenericOutput } from "@/components/generic-output";
 import type { OutputField } from "@/lib/types";
 import { sanitizeOutputText, sanitizeJsonValue } from "@/lib/strip-citations";
+import { getActiveWorkspaceId } from "@/lib/api";
+import { capturePostHogEvent } from "@/lib/posthog";
 
 function downloadBlob(content: string, filename: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -88,7 +90,20 @@ export function OutputRenderer({ field, runId }: { field: OutputField; runId?: s
         {spec && type !== "file" && (
           <DownloadButton
             label={spec.label}
-            onClick={() => downloadBlob(downloadContent, `${baseFilename}.${spec.ext}`, spec.mime)}
+            onClick={() => {
+              // INTENT: user downloaded a single output field — "this result
+              // was useful enough to take with me" quality signal. We send the
+              // run id, the field's declared type, and the byte size only.
+              // The field name (worker-author schema metadata) and the body are
+              // deliberately omitted to keep props content-free.
+              capturePostHogEvent("run_output_download_clicked", {
+                workspace_id: getActiveWorkspaceId(),
+                run_id: runId ?? null,
+                content_type: type,
+                byte_size: downloadContent.length,
+              });
+              downloadBlob(downloadContent, `${baseFilename}.${spec.ext}`, spec.mime);
+            }}
           />
         )}
       </div>
