@@ -20,7 +20,7 @@ import urllib.parse
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from core.config import PUBLIC_SHARE_TEXT_PREVIEW_LIMIT
 from core.urls import _frontend_base_url
@@ -271,7 +271,12 @@ def _public_run_share(row: Dict[str, Any], repos: "Repositories") -> Dict[str, A
     }
 
 
-def _standalone_share_payload(token: str, repos: "Repositories") -> Dict[str, Any]:
+def _standalone_share_payload(
+    token: str,
+    repos: "Repositories",
+    *,
+    request: Request | None = None,
+) -> Dict[str, Any]:
     row = _load_standalone_share_row(token)
     if row:
         entity_type = str(row.get("entity_type") or "")
@@ -289,15 +294,17 @@ def _standalone_share_payload(token: str, repos: "Repositories") -> Dict[str, An
         if entity_type == "approvals_batch":
             from routers.approvals import _public_approvals_batch_payload
 
-            return _public_approvals_batch_payload(token, repos)
+            return _public_approvals_batch_payload(token, repos, request=request)
         raise HTTPException(status_code=404, detail="Share link not found")
 
     try:
         from routers.approvals import _load_approvals_batch_share, _public_approvals_batch_payload
 
         _load_approvals_batch_share(token)
-        return _public_approvals_batch_payload(token, repos)
-    except HTTPException:
+        return _public_approvals_batch_payload(token, repos, request=request)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
         pass
 
     # Backward compatibility for worker short links created before the unified

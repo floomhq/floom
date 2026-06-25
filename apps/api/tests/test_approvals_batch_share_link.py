@@ -463,3 +463,21 @@ def test_public_batch_rejects_same_workspace_different_owner_item(client_and_mai
     assert denied.status_code == 404
     row = main.get_repositories().approvals.get(owner_id="other-user", approval_id="apr_other_owner")
     assert row["status"] == "pending"
+
+
+def test_standalone_batch_share_route_enforces_read_rate_limit(client_and_main, monkeypatch):
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_standalone_limit", run_id="run_standalone_limit", worker_id="w_limit")
+    token = _batch_token(client)
+
+    approvals = importlib.import_module("routers.approvals")
+    monkeypatch.setattr(approvals, "_PUBLIC_BATCH_READ_LIMIT", 1)
+    approvals._PUBLIC_BATCH_RATE_BUCKETS.clear()
+
+    from fastapi.testclient import TestClient
+
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    first = anon.get(f"/s/{token}")
+    assert first.status_code == 200, first.text
+    second = anon.get(f"/s/{token}")
+    assert second.status_code == 429

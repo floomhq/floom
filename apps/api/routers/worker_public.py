@@ -332,9 +332,9 @@ def download_standalone_share_file(
 
 @worker_public_router.get("/s/{token}")
 def get_standalone_share(
+    request: Request,
     token: str,
     repos: Repositories = Depends(get_repos),
 ) -> JSONResponse:
-    return _json_noindex(_standalone_share_payload(token, repos))
-
+    return _json_noindex(_standalone_share_payload(token, repos, request=request))
 
