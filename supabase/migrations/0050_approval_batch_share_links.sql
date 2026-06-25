@@ -36,6 +36,7 @@ create index if not exists share_links_approvals_batch_scope_idx
     on public.share_links (entity_type, workspace_id, owner_id, revoked_at);
 
 alter table public.share_links enable row level security;
+alter table public.share_links force row level security;
 
 drop policy if exists "share_links: workspace owners manage links" on public.share_links;
 create policy "share_links: workspace owners manage links"

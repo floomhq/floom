@@ -134,6 +134,7 @@ def test_approval_batch_share_links_migration_hashes_tokens_and_enforces_rls():
     assert "share_links_token_hash_idx" in text
     assert "share_links_approvals_batch_scope_idx" in text
     assert "alter table public.share_links enable row level security" in text
+    assert "alter table public.share_links force row level security" in text
     assert "workspaces.owner_user_id = auth.uid()" in text
 
 
