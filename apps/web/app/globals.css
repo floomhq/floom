@@ -790,7 +790,14 @@ html.dark .grain {
 .c-srch { flex:1; min-width:0; display:flex; align-items:center; gap:9px; border:var(--bd-input); border-radius:var(--radius-button); padding:9px 12px; color:var(--muted-foreground); background:var(--bg-2); max-width:480px; }
 .c-srch input { flex:1; border:0; background:none; outline:none; color:var(--ink); font:inherit; min-width:0; }
 .c-srch input::placeholder { color:var(--muted-foreground); }
-.c-controlstrip-inner .c-srch { flex: 1 1 220px; max-width: none; }
+.c-controlstrip-inner .c-srch {
+  flex: 1 1 220px;
+  max-width: none;
+  /* Lift off the bg-2 strip: --bd-input is none globally, so without a fill the
+     search reads as floating placeholder text (audit: Connections/Settings). */
+  background: var(--bg-card);
+  border: var(--bd-card);
+}
 .c-controlstrip-inner .c-filterbar { flex: 1 1 auto; min-width: 0; }
 .c-controlstrip-inner .c-toolbar-actions {
   display: flex;
