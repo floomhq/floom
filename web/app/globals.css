@@ -1099,6 +1099,9 @@ html.dark .grain {
 /* LEFT: comment box, attach affordance, who/why k/v, decide buttons. */
 .c-appr-comment { width:100%; min-height:84px; resize:vertical; border-radius:var(--radius-button); background:var(--bg-2); padding:11px 13px; font-size:13.5px; color:var(--ink); line-height:1.5; }
 .c-appr-comment::placeholder { color:var(--ink-faint); }
+.c-appr-blocked { border-radius:var(--radius-button); background:var(--bg-2); padding:12px 13px; font-size:13px; color:var(--ink-soft); line-height:1.5; }
+.c-appr-blocked .title { margin:0 0 6px; color:var(--ink); font-weight:600; }
+.c-appr-blocked p { margin:0; }
 .c-appr-attach { display:inline-flex; align-items:center; gap:7px; margin-top:11px; font-size:12.5px; color:var(--ink-soft); }
 .c-appr-attach:hover { color:var(--ink); }
 .c-appr-kv { display:grid; grid-template-columns:96px 1fr; gap:8px 14px; margin:16px 0 0; font-size:12.5px; }
