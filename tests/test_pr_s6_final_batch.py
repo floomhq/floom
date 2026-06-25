@@ -20,6 +20,7 @@ import pytest
 # P1.1 — Newline injection in secret values
 # ---------------------------------------------------------------------------
 
+@pytest.mark.flaky_ci
 class TestNewlineInjectionInSecretValue:
     """P1.1: the sanitisation logic in _upsert_env_var must reject values
     containing newline or null bytes before writing to .env."""

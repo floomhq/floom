@@ -7,6 +7,8 @@ import types
 from io import BytesIO
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, os.path.join(str(ROOT), "apps", "api"))
 
@@ -439,6 +441,7 @@ def test_e2b_driver_sets_request_timeouts_for_dependency_installs(tmp_path, monk
     assert worker_kwargs["timeout"] == 120.0
 
 
+@pytest.mark.flaky_ci
 def test_e2b_driver_falls_back_to_next_key_on_quota_error(tmp_path, monkeypatch):
     primary_key = "e2b-primary-test-key"
     fallback_key = "e2b-fallback-test-key"

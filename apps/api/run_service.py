@@ -458,6 +458,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
 }
 
 _TRANSIENT_RETRY_ERROR_CODES = {
+    "agent_runtime_error",
     "context_mount_failed",
     "e2b_quota_exhausted",
     "e2b_sandbox_error",
