@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import Papa from "papaparse";
@@ -19,8 +19,14 @@ import { useRuns, useStreamedInitialData, qk, RUNS_FIRST_PAGE_QUERY_PARAMS } fro
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
-import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection } from "@/components/collection";
+import type { CollectionConfig, CustomTabReason, TagFamilyKey } from "@/lib/collection/types";
+import {
+  Collection,
+  DetailGroup,
+  DetailRow,
+  DetailSummary,
+  DetailEmpty,
+} from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineFile } from "@/components/file-viewer/InlineFileOpen";
 import { OutputRenderer } from "@/components/output-renderer";
@@ -123,38 +129,21 @@ function ResultPreview({ d }: { d: RunDetail }) {
   );
 }
 
-// R9: quiet one-line metrics strip for the output-first in-app run detail.
-// A thin inline row of muted key/value pairs (started · duration · tokens ·
-// files), NOT a card grid and NOT a left sidebar; the result leads, this is
-// context underneath the header.
+// R9: the run metrics as a DetailSummary strip — the same register strip the
+// Worker tabs lead with (started · duration · files · tokens · cost), so the
+// run Output matches every other detail surface.
 function RunMetricsStrip({ d }: { d: RunDetail }) {
   const tokenCount = resolveTokenCount(d);
-  const items: Array<[string, string]> = [
-    ["Started", d.started_at ? formatRelative(d.started_at) : "Not started"],
-    ["Duration", formatDuration(d.duration_ms)],
-    ["Files", String(d.artifacts?.length ?? 0)],
+  const items = [
+    { key: "started", label: "Started", value: d.started_at ? formatRelative(d.started_at) : "Not started" },
+    { key: "duration", label: "Duration", value: formatDuration(d.duration_ms) },
+    { key: "files", label: "Files", value: String(d.artifacts?.length ?? 0) },
+    ...(tokenCount != null
+      ? [{ key: "tokens", label: "Tokens", value: tokenCount.toLocaleString() }]
+      : []),
+    { key: "cost", label: "Cost", value: d.total_cost_usd != null ? `$${d.total_cost_usd.toFixed(2)}` : "Not reported" },
   ];
-  if (tokenCount != null) items.push(["Tokens", tokenCount.toLocaleString()]);
-  items.push(["Cost", d.total_cost_usd != null ? `$${d.total_cost_usd.toFixed(2)}` : "Not reported"]);
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "4px 18px",
-        fontSize: 12.5,
-        color: "var(--muted-foreground)",
-      }}
-    >
-      {items.map(([label, value]) => (
-        <span key={label}>
-          {label}
-          {": "}
-          <span style={{ color: "var(--ink-soft)", fontWeight: 500 }}>{value}</span>
-        </span>
-      ))}
-    </div>
-  );
+  return <DetailSummary items={items} />;
 }
 
 // SPEC §4 Output: files FIRST (§2.6), then the humane result with a Preview/Raw
@@ -190,23 +179,24 @@ function OutputTab({ r }: { r: RunSummary }) {
     if (!res.ok) throw new Error(`Could not read ${file.name}`);
     return res.arrayBuffer();
   };
+  // §2.6: files shown FIRST, before the result — framed in their own group.
+  // rule #1: same result, Preview/Raw toggle in place — not a Raw tab; the
+  // toggle now sits in the "Output" group label so it reads as a section control.
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* R9: output-first. A quiet, thin inline metrics row (NOT a card grid,
-          NOT a left sidebar) carries the run's context; the result owns the
-          full width below. Duration / started / tokens moved here out of the
-          header so the header matches the worker-detail treatment. */}
+    <div>
+      {/* R9: output-first. The metrics now lead as the register summary strip,
+          matching the worker-detail treatment. */}
       <RunMetricsStrip d={d} />
       {d.error && (
-        <div className="c-pill err" style={{ alignSelf: "flex-start" }}>
-          <span className="dot" />
-          {d.error}
+        <div style={{ marginBottom: 14 }}>
+          <span className="c-pill err">
+            <span className="dot" />
+            {d.error}
+          </span>
         </div>
       )}
-      {/* §2.6: files shown FIRST, before the result */}
       {files.length > 0 && (
-        <div>
-          <h4 style={h4}>{files.length === 1 ? "File" : "Files"}</h4>
+        <DetailGroup label={files.length === 1 ? "File" : "Files"}>
           <InlineFileOpen
             files={files}
             rootLabel="Output"
@@ -214,37 +204,39 @@ function OutputTab({ r }: { r: RunSummary }) {
             loadText={loadArtifactText}
             loadBlob={loadArtifactBlob}
           />
-        </div>
+        </DetailGroup>
       )}
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
-          <h4 style={{ ...h4, margin: 0 }}>Result</h4>
-          {/* rule #1: same result, Preview/Raw toggle in place — not a Raw tab. */}
-          <div className="c-vtog" role="group" aria-label="Result view mode" style={{ marginLeft: "auto" }}>
-            <button
-              type="button"
-              className={resultMode === "preview" ? "on" : ""}
-              aria-pressed={resultMode === "preview"}
-              onClick={() => setResultMode("preview")}
-            >
-              Preview
-            </button>
-            <button
-              type="button"
-              className={resultMode === "raw" ? "on" : ""}
-              aria-pressed={resultMode === "raw"}
-              onClick={() => setResultMode("raw")}
-            >
-              Raw
-            </button>
-          </div>
-        </div>
+      <DetailGroup
+        label={
+          <span className="flex items-center gap-2" style={{ width: "100%" }}>
+            <span>Output</span>
+            <span className="c-vtog" role="group" aria-label="Result view mode" style={{ marginLeft: "auto" }}>
+              <button
+                type="button"
+                className={resultMode === "preview" ? "on" : ""}
+                aria-pressed={resultMode === "preview"}
+                onClick={() => setResultMode("preview")}
+              >
+                Preview
+              </button>
+              <button
+                type="button"
+                className={resultMode === "raw" ? "on" : ""}
+                aria-pressed={resultMode === "raw"}
+                onClick={() => setResultMode("raw")}
+              >
+                Raw
+              </button>
+            </span>
+          </span>
+        }
+      >
         {resultMode === "preview" ? (
           <ResultPreview d={d} />
         ) : (
           <pre style={code}>{JSON.stringify(d.output ?? {}, null, 2)}</pre>
         )}
-      </div>
+      </DetailGroup>
     </div>
   );
 }
@@ -295,37 +287,32 @@ function LogsTab({ r }: { r: RunSummary }) {
     : (d.logs ?? []);
   const tokenCount = resolveTokenCount(d);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={kv}>
-        <span style={kvK}>Duration</span>
-        <span>{formatDuration(d.duration_ms)}</span>
-        <span style={kvK}>Tokens</span>
-        <span style={{ fontFamily: "var(--font-mono)" }}>
-          {tokenCount != null ? tokenCount.toLocaleString() : "Not reported"}
-        </span>
-        <span style={kvK}>Cost</span>
-        <span style={{ fontFamily: "var(--font-mono)" }}>
-          {d.total_cost_usd != null ? `$${d.total_cost_usd.toFixed(2)}` : "Not reported"}
-        </span>
-      </div>
-      <div>
-        <h4 style={h4}>Activity</h4>
+    <div>
+      <DetailSummary
+        items={[
+          { key: "duration", label: "Duration", value: formatDuration(d.duration_ms) },
+          { key: "tokens", label: "Tokens", value: tokenCount != null ? tokenCount.toLocaleString() : "Not reported" },
+          { key: "cost", label: "Cost", value: d.total_cost_usd != null ? `$${d.total_cost_usd.toFixed(2)}` : "Not reported" },
+        ]}
+      />
+      <DetailGroup label="Activity">
         {/* R9: reuse RunDetailSplitPane's real ai-elements (Tool / Task /
             StackTrace) transcript renderer, no hand-rolled steps table. The
             tool-call blocks, step tasks, and failure banners are the same
             components used everywhere else a run is rendered. */}
         <RunTranscript run={d} />
-      </div>
-      <div>
-        <h4 style={h4}>
-          Logs
-          {/* Live indicator while stream is open and run is active */}
-          {logConnected && isActive && (
-            <span style={{ marginLeft: 8, color: "var(--accent, #3661C7)", fontWeight: 500, fontSize: 10 }}>
-              Live
-            </span>
-          )}
-        </h4>
+      </DetailGroup>
+      <DetailGroup
+        label={
+          <span className="flex items-center gap-2">
+            <span>Logs</span>
+            {/* Live indicator while stream is open and run is active */}
+            {logConnected && isActive && (
+              <span style={{ color: "var(--accent, #3661C7)", fontWeight: 500, fontSize: 10 }}>Live</span>
+            )}
+          </span>
+        }
+      >
         {logs.length > 0 ? (
           <pre style={code}>
             {logs
@@ -337,28 +324,70 @@ function LogsTab({ r }: { r: RunSummary }) {
               .join("\n")}
           </pre>
         ) : isActive && logConnected ? (
-          <div style={{ ...muted, padding: 14 }}>Waiting for log output...</div>
+          <DetailEmpty>Waiting for log output...</DetailEmpty>
         ) : (
-          <div style={{ ...muted, padding: 14 }}>No logs recorded.</div>
+          <DetailEmpty>No logs recorded.</DetailEmpty>
         )}
-      </div>
-      <details>
-        <summary className="c-vpill inline-flex cursor-pointer" style={{ padding: "6px 11px", fontSize: 12.5 }}>
-          View raw JSON
-        </summary>
-        <pre style={{ ...code, marginTop: 10 }}>{JSON.stringify(d, null, 2)}</pre>
-      </details>
+      </DetailGroup>
+      <DetailGroup label="Raw">
+        <details>
+          <summary className="c-vpill inline-flex cursor-pointer" style={{ padding: "6px 11px", fontSize: 12.5 }}>
+            View raw JSON
+          </summary>
+          <pre style={{ ...code, marginTop: 10 }}>{JSON.stringify(d, null, 2)}</pre>
+        </details>
+      </DetailGroup>
     </div>
   );
 }
 
-// SPEC §4: Inputs — the run's input payload.
+// SPEC §4: Inputs — the run's input payload, framed through the register.
+// Each declared field renders as a DetailRow (label = field name, value = the
+// value; mono for code-ish values) inside a DetailGroup. A non-scalar value
+// (object/array) keeps its JSON form in a mono row. When the input is not a
+// structured object at all, a single raw-JSON fallback row is shown.
+function isScalar(v: unknown): boolean {
+  return v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+}
+const EMPTY_VALUE = "-";
+function renderInputValue(v: unknown): { node: React.ReactNode; mono: boolean } {
+  if (v == null || v === "") return { node: EMPTY_VALUE, mono: false };
+  if (isScalar(v)) {
+    const s = String(v);
+    // Treat multi-line / JSON-ish / long strings as code-ish (mono).
+    const codeish = /[\n{}[\]]/.test(s) || s.length > 60;
+    return { node: s, mono: codeish };
+  }
+  return { node: JSON.stringify(v, null, 2), mono: true };
+}
 function InputsTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id, r.status);
   if (!d) return <LoadingState rows={3} />;
   const input = d.input ?? {};
-  if (Object.keys(input).length === 0) return <div style={muted}>This run took no inputs.</div>;
-  return <pre style={code}>{JSON.stringify(input, null, 2)}</pre>;
+  const keys = Object.keys(input);
+  if (keys.length === 0) {
+    return (
+      <DetailGroup label="Inputs">
+        <DetailEmpty>This run took no inputs.</DetailEmpty>
+      </DetailGroup>
+    );
+  }
+  return (
+    <DetailGroup label="Inputs">
+      {keys.map((key) => {
+        const { node, mono } = renderInputValue(input[key]);
+        return mono ? (
+          <DetailRow
+            key={key}
+            label={humanizeKey(key)}
+            value={<pre style={inputCode}>{node}</pre>}
+          />
+        ) : (
+          <DetailRow key={key} label={humanizeKey(key)} value={node} />
+        );
+      })}
+    </DetailGroup>
+  );
 }
 
 // #765: run Share — opens the real Share modal (anonymous public link, view-only,
@@ -396,6 +425,14 @@ const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => Reac
   Output: OutputTab,
   Logs: LogsTab,
   Inputs: InputsTab,
+};
+
+// Run tabs are bespoke async viewers (output artifacts + metrics, log stream,
+// raw input JSON) — each names its accurate custom reason.
+const RUN_TAB_REASON: Record<RunDetailTab, CustomTabReason> = {
+  Output: "run-output",
+  Logs: "run-logs",
+  Inputs: "run-inputs",
 };
 
 const PAGE_SIZE = 50;
@@ -704,18 +741,16 @@ export default function RunsCollection({
             {`Run · ${r.worker_name ?? r.worker_id}`}
           </span>
         ),
-        // R9: header matches the WORKER detail treatment exactly — a status
-        // c-pill plus a quiet description line, NOT a verbose
+        // Structured header status pill (rendered by the engine), like the
+        // Connections detail. The trigger stays as the quiet description line.
+        status: runStatusPill(r.status),
+        // R9: header matches the WORKER detail treatment exactly — the status
+        // pill above plus a quiet description line, NOT a verbose
         // "trigger · duration · started" string above the tabs (Federico:
         // "too much info above the tabs, inconsistent"). Duration / started /
-        // tokens now live as a quiet metrics strip INSIDE the Output body
+        // tokens now live as the register metrics strip INSIDE the Output body
         // (output-first), not in the header.
-        sub: (
-          <>
-            <StatusPill spec={runStatusPill(r.status)} />
-            <span className="c-dh-desc">{formatTrigger(r.trigger_source)}</span>
-          </>
-        ),
+        sub: <span className="c-dh-desc">{formatTrigger(r.trigger_source)}</span>,
         actions: (
           <>
             {/* SPEC §4: ↑ worker link (worker_id on every run — BUILT). */}
@@ -755,7 +790,7 @@ export default function RunsCollection({
       // the live tab set.
       tabs: RUN_DETAIL_TABS.map((key) => {
         const Tab = RUN_TAB_COMPONENT[key];
-        return { key, label: key, custom: "unmigrated" as const, render: () => <Tab r={r} /> };
+        return { key, label: key, custom: RUN_TAB_REASON[key], render: () => <Tab r={r} /> };
       }),
     }),
     states: {
@@ -794,14 +829,6 @@ export default function RunsCollection({
 }
 
 const muted: React.CSSProperties = { color: "var(--muted-foreground)" };
-const h4: React.CSSProperties = {
-  fontSize: 11,
-  letterSpacing: ".05em",
-  textTransform: "uppercase",
-  color: "var(--muted-foreground)",
-  margin: "0 0 9px",
-};
-const kv: React.CSSProperties = { display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" };
 const kvK: React.CSSProperties = { color: "var(--muted-foreground)", fontSize: 12.5 };
 const code: React.CSSProperties = {
   border: "var(--bd-card)",
@@ -814,4 +841,14 @@ const code: React.CSSProperties = {
   fontSize: 12,
   fontFamily: "var(--font-mono)",
   maxHeight: 420,
+};
+// Inline code-ish value inside a DetailRow (multi-line / JSON input fields).
+const inputCode: React.CSSProperties = {
+  margin: 0,
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--ink-soft)",
+  textAlign: "left",
 };
