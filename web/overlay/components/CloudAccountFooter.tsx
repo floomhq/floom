@@ -44,6 +44,40 @@ type CloudUser = CurrentUser & { picture?: string | null };
 // Populated on first successful /api/me fetch; cleared to null on logout.
 let _cachedCloudUser: CloudUser | null = null;
 
+// #749: the module-level cache above is wiped on a hard reload, so the footer
+// re-renders a placeholder while /api/me round-trips the (slow) backend, then
+// flashes to the real identity. Mirror the cache into sessionStorage so a reload
+// seeds the real user INSTANTLY. The /api/me fetch + token-bootstrap below still
+// runs to validate/refresh — this only changes the first-paint seed.
+const _CLOUD_USER_SESSION_KEY = "floom_cloud_user";
+export function readSessionCloudUser(): CloudUser | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(_CLOUD_USER_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CloudUser;
+    return parsed && parsed.email ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+export function writeSessionCloudUser(u: CloudUser): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(_CLOUD_USER_SESSION_KEY, JSON.stringify(u));
+  } catch {
+    /* private mode / quota — non-fatal, falls back to the live fetch */
+  }
+}
+export function clearSessionCloudUser(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(_CLOUD_USER_SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -52,9 +86,13 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     pathname.startsWith("/login/") ||
     pathname === "/app/login" ||
     pathname.startsWith("/app/login/");
-  // Seed from module-level cache: remounts (sidebar collapse/expand) render the
-  // correct mark immediately without waiting for /api/me to round-trip again.
-  const [user, setUser] = useState<CloudUser | null>(() => _cachedCloudUser);
+  // Seed from module-level cache, then sessionStorage (#749): remounts (sidebar
+  // collapse/expand) hit the module cache; a hard reload falls through to
+  // sessionStorage so the mark renders immediately without waiting for the (slow)
+  // /api/me round-trip — no placeholder flash.
+  const [user, setUser] = useState<CloudUser | null>(
+    () => _cachedCloudUser ?? readSessionCloudUser(),
+  );
 
   useEffect(() => {
     if (isLoginPath) return;
@@ -67,6 +105,7 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
         if (!cancelled && data?.user?.email) {
           const currentUser = data.user as CloudUser;
           _cachedCloudUser = currentUser;
+          writeSessionCloudUser(currentUser);
           setUser(currentUser);
           identifyPostHogUser(currentUser);
           fetch("/app/api/proxy/auth/tokens/bootstrap", {
@@ -106,6 +145,7 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
       // Cookie clearing is best effort; navigate regardless.
     }
     _cachedCloudUser = null;
+    clearSessionCloudUser();
     clearClientLogoutState();
     // Backend clears workeros_active_workspace on logout; mirror it client-side
     // so a re-login does not inherit the prior user's workspace selection.
