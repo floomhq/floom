@@ -84,7 +84,7 @@ export function CollectionSkeleton({ rows = 6 }: { rows?: number }) {
       <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
         <div className="c-controlstrip-inner">
           <div className="c-controlstrip-toprow">
-            <Skeleton className="h-9 flex-1 rounded-[var(--radius-button)]" style={{ minWidth: 220 }} />
+            <Skeleton className="h-9 rounded-[var(--radius-button)]" style={{ flex: "0 1 560px", maxWidth: 560, minWidth: 220 }} />
             <div className="c-toolbar-actions">
               <Skeleton className="h-9 w-16 rounded-[var(--radius-button)]" />
               <Skeleton className="h-9 w-24 rounded-[var(--radius-button)]" />

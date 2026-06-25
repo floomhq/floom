@@ -78,12 +78,13 @@ describe("new worker = the consistent Emily empty state (no bespoke hero)", () =
     expect(screen.queryByText(/Score new CRM contacts against a job brief/i)).not.toBeInTheDocument();
   });
 
-  it("renders the SAME home empty state (greeting + pills)", async () => {
+  it("renders the Emily empty shell with worker-creation pills", async () => {
     render(<EmilyChatCore fullPage createMode />);
-    // Active-workspace pulse from the home empty state.
-    expect(await screen.findByText(/done this week/i)).toBeInTheDocument();
-    // Home active pills.
-    expect(screen.getByRole("button", { name: /What ran overnight/i })).toBeInTheDocument();
+    expect(await screen.findByText(/What should this worker do/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create a Linear triage worker/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Daily GitHub PR digest/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /What ran overnight/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show me this week's runs/i })).not.toBeInTheDocument();
   });
 
   it("renders the real PromptInput composer, centered, with the generic placeholder", async () => {
@@ -97,12 +98,12 @@ describe("new worker = the consistent Emily empty state (no bespoke hero)", () =
     expect(screen.queryByRole("heading", { name: /hire a new worker/i })).not.toBeInTheDocument();
   });
 
-  it("clicking a home pill primes the composer with that prompt", async () => {
+  it("clicking a create pill primes the composer with that prompt", async () => {
     const user = userEvent.setup();
     render(<EmilyChatCore fullPage createMode />);
     const composer = (await screen.findByPlaceholderText("Message Emily...")) as HTMLTextAreaElement;
     expect(composer.value).toBe("");
-    await user.click(screen.getByRole("button", { name: /What ran overnight/i }));
-    expect(composer.value).toBe("What ran overnight?");
+    await user.click(screen.getByRole("button", { name: /Create a Linear triage worker/i }));
+    expect(composer.value).toBe("Create a Linear triage worker");
   });
 });

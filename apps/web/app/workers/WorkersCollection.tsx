@@ -42,6 +42,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ActionMenu } from "@/components/ui/action-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { CollectionConfig, CustomTabReason, TagFamilyKey } from "@/lib/collection/types";
 import {
   Collection,
@@ -410,6 +416,10 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 // "Runs N" badge flipping 0↔1 across tab clicks.
 const workerRunsCache = new Map<string, RunSummary[]>();
 const WORKER_RUNS_LIMIT = 20;
+
+function workerRunsCount(w: WorkerSummary): number | undefined {
+  return w.recent_stats?.runs_7d ?? workerRunsCache.get(w.id)?.length;
+}
 
 function useWorkerRuns(workerId: string): RunSummary[] | undefined {
   const [runs, setRuns] = useState<RunSummary[] | undefined>(() =>
@@ -1780,34 +1790,36 @@ const WORKER_TAB_REASON: Record<WorkerDetailTab, CustomTabReason> = {
   Tools: "tool-list",
 };
 
-/**
- * Inline "Developer" disclosure button — sits directly after the operator tabs
- * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Brain, Tools).
- * One click reveals all; clicking again collapses all. No dropdown, no pin, no
- * per-item checkmark. Replaces the pick-one dropdown (kills the #1680 bug class).
- */
-function DeveloperDisclosure({
-  open,
-  onToggle,
+/** Compact Developer menu: advanced tabs do not expand the primary row sideways. */
+function DeveloperMenu({
+  active,
+  onSelect,
 }: {
-  open: boolean;
-  onToggle: () => void;
+  active?: WorkerDetailTab;
+  onSelect: (key: WorkerDetailTab) => void;
 }) {
   return (
-    <button
-      type="button"
-      className={`c-dtab-adv inline-flex items-center gap-1${open ? " open" : ""}`}
-      aria-label={open ? "Hide developer tabs" : "Show developer tabs"}
-      aria-expanded={open}
-      onClick={onToggle}
-    >
-      Developer
-      <ChevronDown
-        className="size-3.5"
-        aria-hidden="true"
-        style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms" }}
-      />
-    </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={`c-dtab-adv inline-flex items-center gap-1${active ? " open" : ""}`}
+        aria-label="Open developer tabs"
+      >
+        Developer
+        <ChevronDown className="size-3.5" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" sideOffset={6} className="w-44 p-1">
+        {ADVANCED_DETAIL_TABS.map((key) => (
+          <DropdownMenuItem
+            key={key}
+            onClick={() => onSelect(key)}
+            className="justify-between"
+          >
+            {WORKER_DETAIL_TAB_LABEL[key]}
+            {active === key && <span className="text-xs text-[var(--muted-foreground)]">Active</span>}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -2129,26 +2141,14 @@ export default function WorkersCollection({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
-  // Developer disclosure — single boolean persisted to localStorage so the
-  // user's preference (expanded / collapsed) survives page reloads.
-  const [developerOpen, setDeveloperOpen] = useState(false);
-  useEffect(() => {
-    setDeveloperOpen(safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY) === "true");
-  }, []);
-  const toggleDeveloper = useCallback(() => {
-    setDeveloperOpen((prev) => {
-      const next = !prev;
-      safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, next ? "true" : "false");
-      return next;
-    });
-  }, []);
+  const [developerTab, setDeveloperTab] = useState<WorkerDetailTab | null>(null);
   // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
   // `tab` URL param to drive the active tab. replace() avoids a history entry.
   const openAdvancedAndSelectWorkerTab = useCallback(
     (workerId: string, key: WorkerDetailTab) => {
       if (ADVANCED_DETAIL_TABS.includes(key)) {
-        setDeveloperOpen(true);
-        safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "true");
+        setDeveloperTab(key);
+        safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, key);
       }
       router.replace(
         `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
@@ -2372,7 +2372,7 @@ export default function WorkersCollection({
         quickActions: [],
       };
     },
-    detail: (w) => {
+    detail: (w, activeTab) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const stage = workerStageKey(w);
       const actions = (
@@ -2416,14 +2416,15 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // Inline disclosure: BASE_DETAIL_TABS always visible; ADVANCED_DETAIL_TABS
-        // appear after them when developerOpen=true. CollectionView already handles
-        // the "active tab no longer in tab set" case by falling back to tabs[0],
-        // so collapsing while an advanced tab is active gracefully switches to Overview.
+        // Primary tabs stay stable. If an advanced tab is active, show only that
+        // selected advanced tab; the rest stay inside the compact Developer menu.
         tabs: (() => {
+          const activeAdvanced = ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab)
+            ? (activeTab as WorkerDetailTab)
+            : developerTab;
           const visibleKeys: WorkerDetailTab[] = [
             ...BASE_DETAIL_TABS,
-            ...(developerOpen ? ADVANCED_DETAIL_TABS : []),
+            ...(activeAdvanced ? [activeAdvanced] : []),
           ];
           return visibleKeys.map((key) => {
             const Tab = WORKER_TAB_COMPONENT[key];
@@ -2436,13 +2437,8 @@ export default function WorkersCollection({
               // key/value pane — so each names an accurate custom reason.
               // #1251 / #1679: badge matches the count listed in the Runs tab.
               // Both read the SAME worker-scoped runs cache (api.runs.list) so the
-              // badge can no longer disagree with the tab body or flip 0↔1: until
-              // that fetch resolves the badge stays on the summary's last_run
-              // fallback, then settles to the real worker-scoped count.
-              count: key === "Runs"
-                ? (workerRunsCache.get(w.id)?.length
-                    ?? (w.last_run ? 1 : undefined))
-                : undefined,
+              // badge can no longer disagree with the tab body or flip 0↔1.
+              count: key === "Runs" ? workerRunsCount(w) : undefined,
               custom: WORKER_TAB_REASON[key],
               render: () => key === "Setup"
                 ? <SetupTab w={w} onOpenSource={() => openAdvancedAndSelectWorkerTab(w.id, "Source")} />
@@ -2450,11 +2446,12 @@ export default function WorkersCollection({
             };
           });
         })(),
-        // Developer disclosure sits inline directly after the operator tabs —
-        // no far-right spacer. One click reveals ALL advanced tabs; clicking
-        // again collapses them. Replaces the pick-one dropdown (#1680 bug class).
+        // Developer menu stays compact; it does not expand the tab row sideways.
         tabsTrailing: (
-          <DeveloperDisclosure open={developerOpen} onToggle={toggleDeveloper} />
+          <DeveloperMenu
+            active={ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab) ? (activeTab as WorkerDetailTab) : undefined}
+            onSelect={(key) => openAdvancedAndSelectWorkerTab(w.id, key)}
+          />
         ),
       };
     },

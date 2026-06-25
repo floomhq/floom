@@ -167,7 +167,7 @@ function Pill({
 }
 
 const CREATE_PILLS = [
-  "Summarise my Granola meetings → HubSpot",
+  "Create a Linear triage worker",
   "Daily GitHub PR digest",
   "Alert me on big Stripe charges",
 ] as const;
@@ -184,6 +184,7 @@ export function EmilyHomeEmpty({
   initialData = null,
   onSeed,
   onPickMcp,
+  createMode = false,
 }: {
   /** Server-rendered overview for the pulse, hydrates without a round-trip. */
   initialData?: SystemOverview | null;
@@ -191,6 +192,8 @@ export function EmilyHomeEmpty({
   onSeed: (text: string) => void;
   /** Open the MCP-server browse modal. */
   onPickMcp: () => void;
+  /** New-worker entry: show worker-building prompts, not ops/status prompts. */
+  createMode?: boolean;
 }) {
   const assistantName = useAssistantName();
   const { greeting, firstName } = useGreeting();
@@ -211,6 +214,7 @@ export function EmilyHomeEmpty({
     isError: workersQuery.isError,
   });
   const isFirstWorker = gate.isFirstWorker;
+  const showCreatePrompts = createMode || isFirstWorker;
 
   // Fix-as-prompt: needs-attention items + per-worker fix pills.
   const attention = useMemo(() => overview?.needs_attention ?? [], [overview]);
@@ -242,10 +246,10 @@ export function EmilyHomeEmpty({
   return (
     <div className="flex w-full max-w-[600px] flex-col items-center px-6">
       {/* greeting / hero */}
-      {isFirstWorker ? (
+      {showCreatePrompts ? (
         <div className="flex flex-col items-center pb-[22px]">
           <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
-            Let&apos;s hire your first worker
+            {isFirstWorker ? "Let's hire your first worker" : "What should this worker do?"}
           </div>
           <div className="mt-[7px] max-w-[360px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
             Describe what you want automated. {assistantName} builds it, connects the
@@ -285,7 +289,7 @@ export function EmilyHomeEmpty({
       )}
 
       {/* pills (BELOW the hero, ABOVE the real composer the host renders next) */}
-      {isFirstWorker ? (
+      {showCreatePrompts ? (
         <>
           <div className="flex flex-wrap justify-center gap-2">
             {CREATE_PILLS.map((p) => (
