@@ -507,6 +507,86 @@ def test_context_summary_uses_cached_metadata_without_tree_walk(monkeypatch, tmp
     assert captured["hydrate"] is False
 
 
+def test_workers_shape_list_uses_repository_summary_fast_path(monkeypatch):
+    from starlette.responses import Response
+    from routers import worker_listing
+
+    captured: dict[str, object] = {}
+
+    class WorkersRepo:
+        def list_summaries(self, **kwargs):
+            captured.update(kwargs)
+            return [
+                {
+                    "id": "worker-a",
+                    "name": "Worker A",
+                    "status": "ready",
+                    "trigger_type": "manual",
+                    "runner": "e2b",
+                    "created_at": "2026-06-18T00:00:00+00:00",
+                    "updated_at": "2026-06-18T00:00:00+00:00",
+                    "description": "Fast summary row",
+                    "triggers": ["Manual"],
+                    "runtime": "python311",
+                    "owner_id": "user-a",
+                    "visibility": "private",
+                    "starred": False,
+                }
+            ]
+
+        def list(self, **_kwargs):
+            raise AssertionError("full worker list path was used")
+
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.setattr(worker_listing.hot_cache, "get", lambda _key: None)
+    monkeypatch.setattr(worker_listing.hot_cache, "set", lambda _key, _value: None)
+    monkeypatch.setattr(worker_listing, "_starred_worker_ids", lambda _user_id: {"worker-b"})
+
+    response = Response()
+    result = worker_listing.list_workers(
+        response=response,
+        shape="list",
+        q="worker",
+        limit=25,
+        offset=5,
+        auth=SimpleNamespace(
+            user_id="user-a",
+            username="user-a@example.com",
+            role="member",
+            auth_method="token",
+        ),
+        repos=SimpleNamespace(workers=WorkersRepo()),
+    )
+
+    assert [row.id for row in result] == ["worker-a"]
+    assert captured["user_id"] == "user-a"
+    assert captured["role"] == "member"
+    assert captured["q"] == "worker"
+    assert captured["limit"] == 25
+    assert captured["offset"] == 5
+    assert captured["starred_ids"] == {"worker-b"}
+    assert 'desc="fast"' in response.headers["Server-Timing"]
+
+
+def test_context_worker_counts_uses_repository_aggregate():
+    from services import context_access
+
+    class WorkersRepo:
+        def context_worker_counts(self, *, user_id):
+            assert user_id == "user-a"
+            return {"pack": 2, "memory": 1}
+
+        def list(self, **_kwargs):
+            raise AssertionError("full worker list path was used")
+
+    counts = context_access._context_worker_counts(
+        SimpleNamespace(workers=WorkersRepo()),
+        "user-a",
+    )
+
+    assert counts == {"pack": 2, "memory": 1}
+
+
 def test_context_write_refreshes_summary_metadata(monkeypatch, tmp_path):
     import contexts
     from services import context_access

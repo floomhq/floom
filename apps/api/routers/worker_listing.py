@@ -11,7 +11,7 @@ run_service; db via Depends(get_repos). Purged in lockstep with main.
 
 from __future__ import annotations
 
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 
 import logging
 import os
@@ -67,6 +67,48 @@ def _safe_worker_config_for_listing(worker_id: str):
     except Exception:
         logger.warning("workers list: ignoring invalid config for worker %s", worker_id, exc_info=True)
         return None
+
+
+def _coerce_worker_summary(row: Any) -> WorkerListSummary:
+    if isinstance(row, WorkerListSummary):
+        return row
+    return WorkerListSummary(**dict(row))
+
+
+def _fast_worker_summaries(
+    *,
+    repos: Repositories,
+    user_id: str,
+    role: Optional[str],
+    auth: AuthContext,
+    include_system: bool,
+    include_archived: bool,
+    visibility: Optional[str],
+    q: Optional[str],
+    starred: Optional[bool],
+    limit: Optional[int],
+    offset: int,
+) -> Optional[List[WorkerListSummary]]:
+    list_summaries = getattr(repos.workers, "list_summaries", None)
+    if not callable(list_summaries):
+        return None
+    starred_ids = _starred_worker_ids(auth.user_id)
+    rows = list_summaries(
+        user_id=user_id,
+        role=role,
+        include_system=include_system,
+        include_archived=include_archived,
+        visibility=visibility,
+        q=q,
+        starred=starred,
+        starred_ids=starred_ids,
+        limit=limit,
+        offset=offset,
+        owner_aliases={auth.user_id, auth.username or ""},
+    )
+    if rows is None:
+        return None
+    return [_coerce_worker_summary(row) for row in rows]
 
 
 @worker_listing_router.get("/workers", response_model=List[WorkerListSummary])
@@ -131,6 +173,33 @@ def list_workers(
         return cached
 
     worker_user_id = _worker_access_user_id(auth)
+    if shape == "list":
+        fast_result = _fast_worker_summaries(
+            repos=repos,
+            user_id=worker_user_id,
+            role=_worker_repo_role(auth),
+            auth=auth,
+            include_system=include_system,
+            include_archived=include_archived,
+            visibility=visibility,
+            q=q,
+            starred=starred,
+            limit=limit,
+            offset=offset,
+        )
+        if fast_result is not None:
+            hot_cache.set(cache_key, fast_result)
+            duration_ms = (time.perf_counter() - started) * 1000
+            if response is not None:
+                response.headers["Server-Timing"] = f"workers;dur={duration_ms:.1f};desc=\"fast\""
+            logger.info(
+                "workers list fast user_id=%s count=%s duration_ms=%.1f",
+                auth.user_id,
+                len(fast_result),
+                duration_ms,
+            )
+            return fast_result
+
     workers = _list_visible_workers(
         user_id=worker_user_id,
         repos=repos,
