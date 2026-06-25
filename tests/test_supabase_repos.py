@@ -422,6 +422,79 @@ def test_update_manifest_files_returns_false_for_missing_worker():
     assert repo.update_manifest_files(worker_id="nope", files={"run.py": "x"}) is False
 
 
+def test_worker_get_recipe_accepts_and_applies_explicit_workspace_id():
+    """workeros-cloud#731: engine callers may pass workspace_id to get_recipe.
+
+    The cloud Supabase implementation must accept the kwarg and scope the read
+    to that workspace, otherwise same-id rows in another workspace can be read
+    or the call can raise TypeError.
+    """
+    now_iso = _now_iso()
+    worker_id = "recipe-worker"
+    rows = {
+        "workers": [
+            {
+                "id": worker_id,
+                "user_id": "user_fede",
+                "workspace_id": "ws_a",
+                "skill_version_id": "sv_a",
+                "name": "Recipe Worker A",
+                "trigger_type": "manual",
+                "grants_json": {},
+                "input_values_json": {},
+                "triggers_json": [],
+                "enabled": True,
+                "created_at": now_iso,
+            },
+            {
+                "id": worker_id,
+                "user_id": "user_fede",
+                "workspace_id": "ws_b",
+                "skill_version_id": "sv_b",
+                "name": "Recipe Worker B",
+                "trigger_type": "manual",
+                "grants_json": {},
+                "input_values_json": {},
+                "triggers_json": [],
+                "enabled": True,
+                "created_at": now_iso,
+            },
+        ],
+        "skill_versions": [
+            {
+                "id": "sv_a",
+                "user_id": "user_fede",
+                "workspace_id": "ws_a",
+                "name": worker_id,
+                "version": "0.1.0",
+                "manifest_json": _manifest(worker_id, "Recipe Worker A"),
+                "bundle_path": f"workers/{worker_id}",
+                "created_at": now_iso,
+            },
+            {
+                "id": "sv_b",
+                "user_id": "user_fede",
+                "workspace_id": "ws_b",
+                "name": worker_id,
+                "version": "0.1.0",
+                "manifest_json": _manifest(worker_id, "Recipe Worker B"),
+                "bundle_path": f"workers/{worker_id}",
+                "created_at": now_iso,
+            },
+        ],
+    }
+    repo = SupabaseWorkerRepository(client=_FakeClient(rows))
+
+    recipe = repo.get_recipe(
+        worker_id=worker_id,
+        user_id="user_fede",
+        workspace_id="ws_b",
+    )
+
+    assert recipe is not None
+    assert recipe["config"].name == "Recipe Worker B"
+
+
 def test_secret_resolve_batches_vault_reads_and_last_used_updates():
     vault_a = str(uuid4())
     vault_b = str(uuid4())

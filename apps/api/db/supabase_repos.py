@@ -1362,19 +1362,24 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         user_id: str | None = None,
         worker_id: str | None = None,
         worker_ids: Iterable[str] | None = None,
+        workspace_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        if not _has_read_scope(user_id=user_id):
+        if not (workspace_id or _has_read_scope(user_id=user_id)):
             return []
         builder = self._client.table("workers").select("*")
         # Workspace scope: filter by workspace_id when set (per-request
         # contextvar). Falls back to user_id when out of request context.
-        builder = _scope_by_workspace(builder, user_id=user_id)
+        builder = _scope_by_workspace(
+            builder,
+            user_id=user_id,
+            explicit_workspace_id=workspace_id,
+        )
 
         # Visibility filter: applies only inside a workspace-scoped request.
         # The read surface is can_view-scoped: own private workers plus shared
         # workers. Workspace admin inventory lives on /api/workspaces/{id}/workers.
-        workspace_id_ctx = get_active_workspace_id()
-        if workspace_id_ctx and user_id:
+        effective_workspace_id = workspace_id or get_active_workspace_id()
+        if effective_workspace_id and user_id:
             builder = builder.or_(f"user_id.eq.{user_id},visibility.eq.shared")
 
         if worker_id is not None:
@@ -2194,6 +2199,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         *,
         worker_id: str,
         user_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any] | None:
         cache = _recipe_cache.get()
         # A populated recipe cache means we're inside a list/batch render: list()
@@ -2205,7 +2211,11 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             worker, skill = cache[worker_id]
             skill_map = {worker.get("skill_version_id"): skill} if skill else {}
         else:
-            rows = self._worker_rows(user_id=user_id, worker_id=worker_id)
+            rows = self._worker_rows(
+                user_id=user_id,
+                worker_id=worker_id,
+                workspace_id=workspace_id,
+            )
             if not rows:
                 return None
             worker = rows[0]
