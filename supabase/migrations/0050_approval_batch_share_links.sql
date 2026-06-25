@@ -12,7 +12,7 @@ create table if not exists public.share_links (
     entity_id text not null default '',
     file_path text not null default '',
     workspace_id text references public.workspaces (id) on delete cascade,
-    owner_id uuid not null references auth.users(id) on delete cascade,
+    owner_id uuid not null references public.users (id) on delete cascade,
     token_hash text not null unique,
     created_at timestamptz not null default now(),
     expires_at timestamptz,
