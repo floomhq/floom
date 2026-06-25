@@ -123,13 +123,20 @@ async function startMockApi({
   runDetail = { id: "run_1", status: "completed", output: { ok: true }, artifacts: [] },
 } = {}) {
   const seen = [];
+  const queries = [];
   const bodies = [];
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     seen.push(`${request.method} ${url.pathname}`);
+    queries.push({ method: request.method, path: url.pathname, search: url.search });
 
     if (request.headers["x-floom-secret"] !== "test-secret") {
       json(response, 401, { detail: "Unauthorized" });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workers") {
+      json(response, 200, [{ id: "cli-test-worker", name: "CLI Test Worker", status: "healthy" }]);
       return;
     }
 
@@ -235,6 +242,7 @@ async function startMockApi({
   return {
     server,
     seen,
+    queries,
     bodies,
     baseUrl: `http://127.0.0.1:${address.port}`,
   };
@@ -259,6 +267,18 @@ test("workers validate rejects missing runtime", async () => {
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /runtime field/);
+});
+
+test("workers validate rejects runtime aliases that prod API does not accept", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: scriptWorkerYml.replace("runtime: python311", "runtime: python3.11"),
+    run: runPy,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /runtime 'python3\.11' is not supported/);
+  assert.match(result.stderr, /python311/);
 });
 
 test("workers validate rejects Composio CLI subprocess in E2B worker", async () => {
@@ -426,6 +446,19 @@ test("workers push accepts cross-app Composio tool in explicit allowlist", async
     "POST /workers",
   ]);
   assert.match(mock.bodies[0].worker_yml, /GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE/);
+});
+
+test("workers list requests the fast list shape", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "list", "--json"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /cli-test-worker/);
+  assert.deepEqual(mock.seen, ["GET /workers"]);
+  assert.deepEqual(mock.queries, [{ method: "GET", path: "/workers", search: "?shape=list" }]);
 });
 
 test("workers push creates a new worker with POST /workers", async (t) => {
