@@ -44,5 +44,10 @@ describe("medium issue batch source guards", () => {
     expect(source).not.toContain("grid-cols-2");
     expect(source).not.toContain("bg-[var(--bg-2)] px-3 py-2.5");
     expect(source).toContain('aria-label="Supported MCP clients"');
+    expect(source).toContain('href="/settings?sel=personal_tokens"');
+    expect(source).toContain("Manage personal tokens");
+    expect(source).toContain('href="/settings?sel=connect&tab=mcp"');
+    expect(source).toContain("max-w-full overflow-x-auto");
+    expect(source).toContain("min-w-0 overflow-hidden");
   });
 });

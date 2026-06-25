@@ -459,7 +459,7 @@ describe("Emily streaming activity", () => {
     expect(getStreamingActivity([], false)).toEqual({ kind: "idle" });
   });
 
-  it("hides the footer while a tool card is in flight so the open card shows status", () => {
+  it("shows the current in-flight tool instead of a generic thinking state", () => {
     const messages = reduceSSEEvent(
       [],
       {
@@ -470,7 +470,37 @@ describe("Emily streaming activity", () => {
       },
       "assistant_1"
     );
-    expect(getStreamingActivity(messages, true)).toEqual({ kind: "idle" });
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Listing your workers",
+    });
+  });
+
+  it("uses the latest tool-progress label as the streaming activity", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-call",
+        callId: "call_workers",
+        toolName: "workers.list_all",
+        args: {},
+      },
+      "assistant_1"
+    );
+    const progressed = reduceSSEEvent(
+      messages,
+      {
+        type: "tool-progress",
+        callId: "call_workers",
+        status: "running",
+        label: "Checking worker runs",
+      },
+      "assistant_1"
+    );
+    expect(getStreamingActivity(progressed, true)).toEqual({
+      kind: "tool",
+      title: "Checking worker runs",
+    });
   });
 
   it("shows writing while assistant text is streaming", () => {
@@ -508,4 +538,3 @@ describe("Emily streaming activity", () => {
     expect(getStreamingActivity(completed, true)).toEqual({ kind: "thinking" });
   });
 });
-

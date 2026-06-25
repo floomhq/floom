@@ -36,6 +36,7 @@ import {
   getStreamingActivity,
   shouldAutoOpenRunDetails,
   useChatStream,
+  type StreamingActivity,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
 import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
@@ -228,10 +229,13 @@ function SuggestionPills({
   );
 }
 
-// ── Streaming activity (thinking / writing; idle while tools run) ─────────────
+// ── Streaming activity (thinking / tool progress / writing) ──────────────────
 
-function StreamingActivityRow({ kind }: { kind: "thinking" | "writing" }) {
-  const title = kind === "writing" ? "Writing…" : "Thinking…";
+function StreamingActivityRow({ activity }: { activity: Exclude<StreamingActivity, { kind: "idle" }> }) {
+  const title =
+    activity.kind === "writing" ? "Writing…" :
+    activity.kind === "tool" ? activity.title :
+    "Thinking…";
   return (
     <div className="flex items-start gap-2">
       <EmilyAvatar size="sm" active />
@@ -879,7 +883,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
             {(() => {
               const activity = getStreamingActivity(messages, isStreaming);
               return activity.kind !== "idle" ? (
-                <StreamingActivityRow kind={activity.kind} />
+                <StreamingActivityRow activity={activity} />
               ) : null;
             })()}
             <div ref={bottomRef} />
