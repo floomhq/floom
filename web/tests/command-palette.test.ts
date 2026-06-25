@@ -3,7 +3,18 @@ import { rankWorkersForCommandPalette } from "@/lib/command-palette";
 import type { WorkerSummary } from "@/lib/types";
 
 function worker(id: string, name: string, description = ""): WorkerSummary {
-  return { id, name, description };
+  return {
+    id,
+    name,
+    description,
+    tags: [],
+    status: "healthy",
+    trigger_type: "manual",
+    runner: "e2b",
+    triggers: [],
+    triggers_spec: [],
+    connections: [],
+  };
 }
 
 describe("command palette worker ranking", () => {

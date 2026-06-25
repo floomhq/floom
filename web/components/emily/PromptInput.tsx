@@ -53,6 +53,7 @@ export function PromptInput({
   disabled,
   sendDisabled,
   variant = "default",
+  sendMode,
   large = false,
   autoFocus = false,
   /** Bumps on each fresh ?create=1 entry so autoFocus re-runs on repeat clicks. */
@@ -82,6 +83,7 @@ export function PromptInput({
    * conversation composer) keeps its existing flat-but-outlined box + icon send.
    */
   variant?: "default" | "landing";
+  sendMode?: "send" | "hire";
   /**
    * Hero sizing (Federico 2026-06-21): the home empty-state composer is the
    * primary call-to-action, so it gets a taller min-height, larger text, and
@@ -99,6 +101,7 @@ export function PromptInput({
   focusKey?: number;
 }) {
   const isLanding = variant === "landing";
+  const isHire = sendMode ? sendMode === "hire" : isLanding;
   const textareaLabel = placeholder ?? "Describe the job you want done";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -262,7 +265,7 @@ export function PromptInput({
 
           <div className="flex-1" />
 
-          {isLanding ? (
+          {isHire ? (
             // #1557/P1-10: labeled "Hire ↑" affordance — same shape as the marketing
             // landing's prompt CTA, not a bare arrow. Keeps an accessible name so
             // the send action stays discoverable to AT + tests.
