@@ -26,6 +26,35 @@ def _env(*names: str, default: str | None = None) -> str | None:
     return default
 
 
+def _env_float(name: str, default: float, *, minimum: float = 0.0) -> float:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return max(minimum, float(raw))
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %.1f", name, raw, default)
+        return default
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return max(minimum, int(raw))
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw not in {"0", "false", "no", "off"}
+
+
 @dataclass(frozen=True)
 class CloudSettings:
     project_ref: str | None
@@ -202,15 +231,36 @@ class _RetryingHTTPTransport(httpx.HTTPTransport):
 def _new_retrying_httpx_client() -> httpx.Client:
     """Build the httpx client supabase-py uses for postgrest/auth/storage.
 
-    Mirrors postgrest's own defaults (http2=True, follow_redirects=True) so the
-    connection behavior is unchanged except that a dropped connection is now
-    retried once instead of surfacing as a 500.
+    Keep the retry rules conservative, but tune the pool so stale Supabase/LB
+    sockets are retired quickly instead of being reused until the 4-minute
+    client TTL expires. This reduces RemoteProtocolError churn without retrying
+    non-idempotent writes.
     """
+    http2 = _env_bool("WORKEROS_SUPABASE_HTTP2", True)
+    limits = httpx.Limits(
+        max_connections=_env_int("WORKEROS_SUPABASE_MAX_CONNECTIONS", 20),
+        max_keepalive_connections=_env_int(
+            "WORKEROS_SUPABASE_MAX_KEEPALIVE_CONNECTIONS",
+            5,
+        ),
+        keepalive_expiry=_env_float(
+            "WORKEROS_SUPABASE_KEEPALIVE_EXPIRY_SECONDS",
+            45.0,
+        ),
+    )
     return httpx.Client(
-        transport=_RetryingHTTPTransport(http2=True),
-        http2=True,
+        transport=_RetryingHTTPTransport(http2=http2, limits=limits),
+        http2=http2,
         follow_redirects=True,
-        timeout=httpx.Timeout(30.0),
+        timeout=httpx.Timeout(
+            _env_float("WORKEROS_SUPABASE_READ_TIMEOUT_SECONDS", 30.0, minimum=1.0),
+            connect=_env_float(
+                "WORKEROS_SUPABASE_CONNECT_TIMEOUT_SECONDS",
+                10.0,
+                minimum=1.0,
+            ),
+            pool=_env_float("WORKEROS_SUPABASE_POOL_TIMEOUT_SECONDS", 5.0),
+        ),
     )
 
 

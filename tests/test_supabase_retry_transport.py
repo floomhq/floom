@@ -187,7 +187,33 @@ def test_connection_never_established_is_retried_on_write_method(monkeypatch, me
 def test_client_and_options_wired_with_retry_transport():
     client = _new_retrying_httpx_client()
     assert isinstance(client._transport, _RetryingHTTPTransport)
+    assert client.timeout.connect == 10.0
+    assert client.timeout.read == 30.0
+    assert client.timeout.pool == 5.0
+    assert client._transport._pool._keepalive_expiry == 45.0
+    assert client._transport._pool._max_connections == 20
+    assert client._transport._pool._max_keepalive_connections == 5
 
     opts = _client_options()
     assert opts.httpx_client is not None
     assert isinstance(opts.httpx_client._transport, _RetryingHTTPTransport)
+
+
+def test_supabase_pool_tuning_is_env_configurable(monkeypatch):
+    monkeypatch.setenv("WORKEROS_SUPABASE_HTTP2", "0")
+    monkeypatch.setenv("WORKEROS_SUPABASE_MAX_CONNECTIONS", "7")
+    monkeypatch.setenv("WORKEROS_SUPABASE_MAX_KEEPALIVE_CONNECTIONS", "3")
+    monkeypatch.setenv("WORKEROS_SUPABASE_KEEPALIVE_EXPIRY_SECONDS", "12.5")
+    monkeypatch.setenv("WORKEROS_SUPABASE_CONNECT_TIMEOUT_SECONDS", "2")
+    monkeypatch.setenv("WORKEROS_SUPABASE_READ_TIMEOUT_SECONDS", "9")
+    monkeypatch.setenv("WORKEROS_SUPABASE_POOL_TIMEOUT_SECONDS", "1.5")
+
+    client = _new_retrying_httpx_client()
+
+    assert client.timeout.connect == 2.0
+    assert client.timeout.read == 9.0
+    assert client.timeout.pool == 1.5
+    assert client._transport._pool._http2 is False
+    assert client._transport._pool._keepalive_expiry == 12.5
+    assert client._transport._pool._max_connections == 7
+    assert client._transport._pool._max_keepalive_connections == 3
