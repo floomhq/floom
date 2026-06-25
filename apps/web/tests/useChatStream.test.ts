@@ -612,6 +612,30 @@ describe("Emily streaming activity", () => {
     });
   });
 
+  it("materializes action-required events without assuming stream handles", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-action-required",
+        callId: "call_approval",
+        card_id: "card_approval",
+        reason: "approval_required",
+        actions: [{ id: "approve", method: "POST", href: "/runs/run_1/approve" }],
+      },
+      "assistant_1"
+    );
+
+    const card = toolCards(messages)[0]?.card;
+    expect(card?.kind).toBe("generic");
+    if (card?.kind !== "generic") throw new Error("expected generic card");
+    expect(card.status).toBe("pending_approval");
+    expect(card.actions).toEqual([{ id: "approve", method: "POST", href: "/runs/run_1/approve" }]);
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Working",
+    });
+  });
+
   it("shows writing while assistant text is streaming", () => {
     const messages: ChatMessage[] = [
       {
