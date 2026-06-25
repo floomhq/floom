@@ -18,7 +18,7 @@
 // CliCommandPanel uses), so a token minted anywhere is reused everywhere.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, Copy, RefreshCw, ArrowRight } from "lucide-react";
+import { Check, Copy, RefreshCw, ArrowRight, KeyRound } from "lucide-react";
 
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { buildMcpJson } from "@/lib/mcp-config";
@@ -107,17 +107,17 @@ export function McpInstallPanel() {
       </div>
 
       {/* code block + copy */}
-      <div className="relative">
+      <div className="relative min-w-0 overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)]">
         <button
           type="button"
           onClick={() => void handleCopy()}
-          className="absolute right-0 top-0 z-10 inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--ink-soft)] transition-colors hover:text-ink"
+          className="absolute right-2 top-2 z-10 inline-flex items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--bg-card)] px-2 py-1 text-[12px] font-medium text-[var(--ink-soft)] shadow-sm transition-colors hover:text-ink"
           aria-label={copied ? "Copied" : "Copy config"}
         >
           {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
           {copied ? "Copied" : "Copy"}
         </button>
-        <pre className="overflow-x-auto pr-16 pt-7 font-mono text-[12.5px] leading-[1.7] text-[var(--ink-soft)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <pre className="max-w-full overflow-x-auto px-3 pb-3 pr-20 pt-10 font-mono text-[12.5px] leading-[1.7] text-[var(--ink-soft)] [scrollbar-width:thin]">
           <code>{snippet}</code>
         </pre>
       </div>
@@ -146,8 +146,25 @@ export function McpInstallPanel() {
         Drop it into your client&apos;s MCP config and your workers show up as tools.
         The key scopes to{" "}
         <code className="font-mono text-[11.5px]">{getPublicApiHost()}</code>;
-        rotate it anytime in Settings → Connect &amp; automate.
+        rotate it anytime in Settings → Personal access tokens.
       </p>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Link
+          href="/settings?sel=personal_tokens"
+          className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--ink-soft)] transition-colors hover:text-ink"
+        >
+          <KeyRound className="size-3" />
+          Manage personal tokens
+        </Link>
+        <Link
+          href="/settings?sel=connect&tab=mcp"
+          className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--ink-soft)] transition-colors hover:text-ink"
+        >
+          Agent install settings
+          <ArrowRight className="size-3" />
+        </Link>
+      </div>
 
       {/* Round-09 batch2: with the in-page Connections tab row gone, the full
           MCP page (register MCP servers your workers call) is reached from here
