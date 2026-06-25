@@ -2427,6 +2427,7 @@ export default function WorkersCollection({
                 ? (workerRunsCache.get(w.id)?.length
                     ?? (w.last_run ? 1 : undefined))
                 : undefined,
+              custom: "unmigrated" as const,
               render: () => key === "Setup"
                 ? <SetupTab w={w} onOpenSource={() => openAdvancedAndSelectWorkerTab(w.id, "Source")} />
                 : <Tab w={w} />,
