@@ -842,6 +842,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 initialData={homeInitialData}
                 onSeed={(text) => setInput(text)}
                 onPickMcp={() => mcpModal.open()}
+                createMode={createMode}
               />
               <div className="mt-6 w-full max-w-2xl px-6">
                 {/* Hero composer (Federico 2026-06-21): the home/create empty

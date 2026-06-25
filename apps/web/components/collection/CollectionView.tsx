@@ -165,12 +165,12 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     items.length === 0 && !config.loading && !config.error;
 
   // ---- detail (split right pane) ----
-  // First pass resolves the tab set so we can derive the active tab key, then we
-  // rebuild the detail passing that key — this lets a detail config (e.g. the
-  // worker "Advanced ▾" group) mark exactly the active view, not a parallel
-  // pinned set. config.detail is pure, so the double call is side-effect-free and
-  // the tab set does not depend on the active key.
-  const baseDetail = isOpen ? config.detail(selected!) : null;
+  // First pass resolves the tab set using the requested URL tab when present,
+  // then we rebuild with the accepted active key. This supports detail configs
+  // whose visible tabs depend on the requested tab (e.g. a compact Developer
+  // menu that shows only the selected advanced tab).
+  const requestedTab = state.tab ?? undefined;
+  const baseDetail = isOpen ? config.detail(selected!, requestedTab) : null;
   const activeTabKey =
     baseDetail && state.tab && baseDetail.tabs.some((t) => t.key === state.tab)
       ? state.tab!

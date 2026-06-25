@@ -94,56 +94,44 @@ async function openDetail() {
   await waitFor(() => expect(document.querySelector(".c-dtabs")).toBeTruthy());
 }
 
-describe("R9 worker-detail FIX 1 — Developer disclosure is inline on the tab row", () => {
-  it("renders a 'Developer' button inside the primary .c-dtabs row (not far-right / not a dropdown)", async () => {
+describe("R9 worker-detail FIX 1 — Developer menu is compact", () => {
+  it("renders a 'Developer' menu inside the primary .c-dtabs row", async () => {
     await openDetail();
     const tabRow = document.querySelector(".c-dtabs");
     expect(tabRow).toBeTruthy();
-    // The Developer button lives inside .c-dtabs-trailing which is a direct child
-    // of the tab row — inline, not a far-right floating pill.
     const trailing = tabRow!.querySelector(".c-dtabs-trailing");
     expect(trailing).toBeTruthy();
-    const adv = trailing!.querySelector("[aria-label='Show developer tabs']");
+    const adv = trailing!.querySelector("[aria-label='Open developer tabs']");
     expect(adv).toBeTruthy();
     expect(adv!.textContent).toMatch(/Developer/);
-    // It is a plain button, not a dropdown trigger.
-    expect(adv!.tagName.toLowerCase()).toBe("button");
-    // No checkmark/menuitemcheckbox inside the row.
-    expect(tabRow!.querySelector('[role="menuitemcheckbox"]')).toBeNull();
   });
 
-  it("clicking Developer once reveals ALL developer tabs (Source, Versions, Library, Tools) as real tabs", async () => {
+  it("clicking Developer opens a menu without expanding all developer tabs sideways", async () => {
     await openDetail();
-    // Initially no advanced tabs visible.
     expect(screen.queryByRole("tab", { name: "Source" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Versions" })).toBeNull();
-    // The "Brain" tab is surfaced to operators as "Library" (internal id stays
-    // "Brain"); assert on the user-facing label.
     expect(screen.queryByRole("tab", { name: "Library" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Tools" })).toBeNull();
 
-    // Click Developer — all four appear as real selectable tabs.
-    const advBtn = await screen.findByRole("button", { name: /Show developer tabs/i });
+    const advBtn = await screen.findByRole("button", { name: /Open developer tabs/i });
     fireEvent.click(advBtn);
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy());
-    expect(screen.getByRole("tab", { name: "Versions" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Library" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Tools" })).toBeTruthy();
+    expect(await screen.findByRole("menuitem", { name: /Source/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Versions/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Library/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Tools/i })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Source" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Versions" })).toBeNull();
   });
 
-  it("clicking Developer again collapses the developer tabs", async () => {
+  it("selecting a developer menu item shows only that selected advanced tab", async () => {
     await openDetail();
-    const advBtn = await screen.findByRole("button", { name: /Show developer tabs/i });
-
-    // Expand.
+    const advBtn = await screen.findByRole("button", { name: /Open developer tabs/i });
     fireEvent.click(advBtn);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Source/i }));
     await waitFor(() => expect(screen.getByRole("tab", { name: "Source" })).toBeTruthy());
-
-    // Collapse — advanced tabs gone, button label reverts.
-    const collapseBtn = screen.getByRole("button", { name: /Hide developer tabs/i });
-    fireEvent.click(collapseBtn);
-    await waitFor(() => expect(screen.queryByRole("tab", { name: "Source" })).toBeNull());
     expect(screen.queryByRole("tab", { name: "Versions" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Library" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Tools" })).toBeNull();
   });
 });
 
