@@ -37,6 +37,7 @@ from services.worker_registry_ops import (
     _register_worker_from_files,
     _rewrite_worker_yml_id,
 )
+from services.worker_create import _build_worker_detail_after_write
 from services.worker_serialize import (
     _build_worker_detail,
     _read_worker_files,
@@ -120,7 +121,10 @@ def clone_worker(
         repos=repos,
         dedupe_id=True,
     )
-    return _build_worker_detail(created_id, user_id=auth.user_id, repos=repos)
+    # Read-after-write tolerant: the clone was just persisted, so a transient
+    # 404 from the hosted PostgREST read-back is a not-yet-visible commit, not a
+    # missing worker (workeros-cloud#735).
+    return _build_worker_detail_after_write(created_id, user_id=auth.user_id, repos=repos)
 
 
 @worker_lifecycle_router.post("/workers/{worker_id}/reload")

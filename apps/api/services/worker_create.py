@@ -58,9 +58,10 @@ _worker_create_locks: Dict[str, threading.Lock] = {}
 # HTTPException(404, "Worker not found"), the create route re-raises it, and the
 # finally-block rollback DELETES the worker we just wrote — leaving an orphan
 # skill_version and a 404 for a worker that was, momentarily, fully created
-# (workeros-cloud#735). Because the persist already succeeded (raise_on_skip), a
-# 404 here is provably a transient read miss, NOT a missing row, so a short
-# bounded retry is safe and idempotent.
+# (workeros-cloud#735). On the strict-persist callers (raise_on_skip=True) the
+# row is known to exist, so a 404 here is provably a transient read miss; on the
+# non-strict callers a short bounded retry is still safe and idempotent — a real
+# missing row simply exhausts the budget and the 404 propagates unchanged.
 _READ_AFTER_WRITE_RETRIES = 4
 _READ_AFTER_WRITE_BACKOFF_SECONDS = 0.25
 
@@ -74,11 +75,13 @@ def _build_worker_detail_after_write(
     """_build_worker_detail for a worker we JUST persisted, tolerant of a
     transient read-after-write miss.
 
-    The row is known to exist (the persist raised on failure), so a 404 from the
-    detail read can only be a not-yet-visible commit on a pooled REST connection.
-    Retry a bounded number of times with a short backoff before giving up; any
-    non-404 error (or a 404 that survives every retry) propagates unchanged so a
-    genuinely-broken create still fails loud and rolls back.
+    On strict-persist callers the row is known to exist, so a 404 from the detail
+    read can only be a not-yet-visible commit on a pooled REST connection. Retry a
+    bounded number of times with a short backoff before giving up; any non-404
+    error (or a 404 that survives every retry) propagates unchanged so a
+    genuinely-broken create still fails loud and rolls back. On non-strict callers
+    the same bounded retry is safe: a truly missing row just exhausts the budget
+    and the 404 propagates as before — never masked indefinitely.
     """
     last_exc: Optional[HTTPException] = None
     for attempt in range(_READ_AFTER_WRITE_RETRIES + 1):
