@@ -1,24 +1,17 @@
-<p align="center">
-  <img src="docs/mascot.png" alt="Floom" width="180">
-</p>
+# Floom
 
-<h1 align="center">Floom</h1>
+**Create AI workers that run on schedules, webhooks, and tool calls.**
 
-<p align="center">
-  <em>Create a worker. Give it tools. Let it run. See everything.</em>
-</p>
+Write a worker in plain English, connect tools like Slack, Gmail, GitHub, or Stripe, and let it run in a sandbox with approvals, logs, outputs, and every run on the record.
 
-<p align="center">
+[Get started](docs/GETTING-STARTED.md) · [Try the hosted version](https://floom.dev) · [Read the docs](docs/)
+
+<p>
   <a href="https://github.com/floomhq/floom/actions/workflows/ci.yml"><img src="https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/floomhq/floom/stargazers"><img src="https://img.shields.io/github/stars/floomhq/floom?style=flat-square&color=111111&label=stars" alt="Stars"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Floom%20Source%20Available-111111?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/sandboxed-by%20default-111111?style=flat-square" alt="Sandboxed by default">
   <img src="https://img.shields.io/badge/runs%20on-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-111111?style=flat-square" alt="Linux, macOS, Windows">
-</p>
-
-<p align="center">
-  <strong>A source-available AI runtime for background workers that actually run.</strong><br>
-  <sub>Write a worker in plain English, give it tools, and let it run on a schedule or a webhook &mdash; script workers isolated in an E2B sandbox, side-effecting workers gated by human approval, every run on the record. <a href="docs/GETTING-STARTED.md">Get started</a> &middot; <a href="https://floom.dev">try the hosted version</a>.</sub>
 </p>
 
 <p align="center">
