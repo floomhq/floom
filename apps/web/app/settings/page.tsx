@@ -236,7 +236,7 @@ function PersonalAccessTokensPanel() {
           <CheckCircle2 className="size-4" />
           <AlertTitle>Token created</AlertTitle>
           <AlertDescription>
-            <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+            <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-ui)] bg-muted px-3 py-2 font-mono text-xs">
               <span className="flex-1 break-all">{createdToken}</span>
               <button
                 type="button"
@@ -268,7 +268,7 @@ function PersonalAccessTokensPanel() {
       {tokens.length > 0 ? (
         <div className="space-y-1">
           {tokens.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 rounded-lg [border:var(--bd-card)] px-3 py-2 text-sm">
+            <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-ui)] [border:var(--bd-card)] px-3 py-2 text-sm">
               <div className="flex-1 min-w-0">
                 <div className="font-medium">{t.name}</div>
                 <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
@@ -394,7 +394,7 @@ export function WorkspaceTokensPanel() {
               <CheckCircle2 className="size-4" />
               <AlertTitle>Workspace access key created</AlertTitle>
               <AlertDescription>
-                <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-ui)] bg-muted px-3 py-2 font-mono text-xs">
                   <span className="flex-1 break-all">{createdToken}</span>
                   <button
                     type="button"
@@ -809,7 +809,7 @@ function SettingsContent() {
             {item.description}
           </>
         ),
-        status: { tone: "idle", label: item.scope === "workspace" ? "Workspace" : "Account" },
+        status: null,
       }),
       detail: (item) => ({
         header: {
