@@ -100,7 +100,11 @@ function isSignedApprovalProxyPath(path: string): boolean {
   // Public, token-gated surfaces: a 401/403 here means "wrong token/password",
   // NOT "your session expired". Never bounce an anonymous reviewer to /login;
   // the page renders its own inline error instead.
-  return path.startsWith("/approvals/public/") || path.startsWith("/review/public/");
+  return (
+    path.startsWith("/approvals/public/") ||
+    path.startsWith("/approvals/public-batch/") ||
+    path.startsWith("/review/public/")
+  );
 }
 
 function currentPathForLoginNext(): string {

@@ -8,12 +8,15 @@
 // stays pinned. The old `npx ... add <token>` install artifact is dropped.
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Download, FileText, Folder, Package, X } from "lucide-react";
+import { CheckCircle, ChevronRight, Download, FileText, Folder, Package, X } from "lucide-react";
 import { GenericOutput } from "@/components/generic-output";
 import { BrandLogo } from "@/components/connections/BrandLogo";
+import { approvalActionLine } from "@/components/share/ApprovalActionItems";
+import { ApprovalReviewBody } from "@/components/share/ApprovalReviewBody";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import { SHARE_CARD_BODY_HEIGHT, FloomMark } from "@/components/share/ShareCardShell";
-import type { PublicShareFile, StandaloneShare } from "@/lib/types";
+import { API_BASE } from "@/lib/api";
+import type { ApprovalRow, PublicShareFile, StandaloneShare } from "@/lib/types";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -65,7 +68,141 @@ function baseName(path: string): string {
   return path.split("/").pop() || path;
 }
 
+type BatchApprovalRow = ApprovalRow & { kind?: string | null };
+
+type ApprovalBatchShare = StandaloneShare & {
+  entity_type: "approvals_batch";
+  approvals: BatchApprovalRow[];
+};
+
+function isApprovalBatchShare(share: StandaloneShare): share is ApprovalBatchShare {
+  return share.entity_type === "approvals_batch";
+}
+
+async function decideBatchApproval(
+  token: string,
+  approvalId: string,
+  decision: "approved" | "rejected",
+  reason?: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/approvals/public-batch/${encodeURIComponent(token)}/items/${encodeURIComponent(approvalId)}/decision`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision, reason: reason?.trim() || null }),
+    },
+  );
+  if (!response.ok) {
+    let detail = `Decision failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      /* keep status fallback */
+    }
+    throw new Error(detail);
+  }
+}
+
+function ApprovalsBatchShareCard({ share, token }: { share: ApprovalBatchShare; token: string }) {
+  const [approvals, setApprovals] = useState<BatchApprovalRow[]>(share.approvals || []);
+  const [index, setIndex] = useState(0);
+  const [comments, setComments] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const current = approvals[index] || null;
+
+  const decide = async (decision: "approved" | "rejected") => {
+    if (!current) return;
+    setBusyId(current.id);
+    setError(null);
+    try {
+      await decideBatchApproval(token, current.id, decision, comments[current.id]);
+      setApprovals((rows) => {
+        const nextRows = rows.filter((row) => row.id !== current.id);
+        setIndex((value) => Math.min(value, Math.max(nextRows.length - 1, 0)));
+        return nextRows;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not record the decision.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (!current) {
+    return (
+      <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
+        <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+          <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] px-5 py-3">
+            <FloomMark />
+          </div>
+          <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+            <CheckCircle className="size-9 text-[var(--success)]" />
+            <h1 className="text-lg font-semibold tracking-tight">No pending approvals</h1>
+            <p className="max-w-sm text-sm leading-6 text-[var(--ink-soft)]">
+              This workspace has no pending approvals on this link.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 920 }}>
+      <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+        <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] px-5 py-3">
+          <FloomMark />
+          <span className="text-xs text-[var(--ink-soft)]">
+            {approvals.length} pending
+          </span>
+        </div>
+        <div className="px-4 py-6 sm:px-7">
+          <ApprovalReviewBody
+            approval={current}
+            actionLine={approvalActionLine(current.label, {})}
+            index={index}
+            total={approvals.length}
+            onPrev={() => setIndex((value) => Math.max(value - 1, 0))}
+            onNext={() => setIndex((value) => Math.min(value + 1, approvals.length - 1))}
+            comment={comments[current.id] || ""}
+            onComment={(value) => setComments((next) => ({ ...next, [current.id]: value }))}
+            approveKeepsComment={current.kind !== "agent_tool"}
+            busy={busyId === current.id}
+            onApprove={() => void decide("approved")}
+            onReject={() => void decide("rejected")}
+          />
+          {error && (
+            <p className="mx-auto mt-4 max-w-[820px] rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--warning)]">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StandaloneShareCard({
+  share,
+  token,
+  authed = false,
+}: {
+  share: StandaloneShare;
+  token: string;
+  authed?: boolean;
+}) {
+  if (isApprovalBatchShare(share)) {
+    return <ApprovalsBatchShareCard share={share} token={token} />;
+  }
+
+  return <StandaloneLibraryShareCard share={share} token={token} authed={authed} />;
+}
+
+function StandaloneLibraryShareCard({
   share,
   token,
   authed = false,
