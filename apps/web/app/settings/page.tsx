@@ -1260,11 +1260,7 @@ function WorkspaceTokenSection({ workspaceName }: { workspaceName: string }) {
 function PersonalTokensSection({ accountName, workspaceName }: { accountName?: string; workspaceName: string }) {
   return (
     <div className="space-y-5">
-      <ScopeBanner
-        scope="account"
-        name={accountName}
-        detail="Yours · works across all your workspaces"
-      />
+      <ScopeChip scope="account" name={accountName} />
       <PersonalAccessTokensPanel />
       <ScopeCrossLink
         title="These are yours, not the workspace's."

@@ -840,6 +840,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
             <div className="flex h-full flex-col items-center justify-center py-10">
               <EmilyHomeEmpty
                 initialData={homeInitialData}
+                createMode={createMode}
                 onSeed={(text) => setInput(text)}
                 onPickMcp={() => mcpModal.open()}
               />

@@ -5,7 +5,7 @@ import { __deriveCounts } from "@/lib/useSelfOverviewItems";
 import type { SystemOverviewAttentionItem } from "@/lib/types";
 
 // The global AlertsBell was replaced by contextual count badges on the sidebar
-// nav (Approvals / Connections / Runs), all sourced from one shared, polled
+// nav (Approvals / Connections), all sourced from one shared, polled
 // overview fetch. These tests guard the derivation + the chrome wiring.
 
 function read(rel: string): string {
@@ -60,8 +60,9 @@ describe("nav badge count derivation (shared overview fetch)", () => {
 describe("sidebar nav badge wiring", () => {
   const sidebar = read("components/layout/sidebar.tsx");
 
-  it("the three badge-bearing nav items are Runs, Approvals, Connections", () => {
-    expect(sidebar).toContain('label: "Runs", icon: Clock, badge: "runs"');
+  it("badge-bearing nav items are Approvals and Connections; Runs stays unbadged", () => {
+    expect(sidebar).toContain('label: "Runs", icon: Clock }');
+    expect(sidebar).not.toContain('label: "Runs", icon: Clock, badge: "runs"');
     expect(sidebar).toContain('label: "Approvals", icon: CheckCircle, badge: "approvals"');
     expect(sidebar).toContain('label: "Connections", icon: Plug, badge: "connections"');
   });

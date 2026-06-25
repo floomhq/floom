@@ -82,10 +82,10 @@ export function McpInstallPanel() {
   }, []);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
       <div>
-        <h2 className="text-sm font-medium text-foreground">Agent install</h2>
-        <p className="text-xs text-muted-foreground">
+        <h2 className="text-lg font-semibold text-foreground">Agent install</h2>
+        <p className="mt-3 max-w-[58ch] text-sm leading-6 text-muted-foreground">
           Copy this into Claude Code, Cursor, Codex, VS Code, Windsurf, Cline, or any
           MCP client. {hasToken
             ? "Your key is already included."
@@ -93,34 +93,35 @@ export function McpInstallPanel() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3.5" aria-label="Supported MCP clients">
+      <div className="flex flex-wrap items-center gap-2" aria-label="Supported MCP clients">
         {MCP_CLIENTS.map((client) => (
           <span
             key={client.label}
             title={client.label}
-            className="inline-flex text-[var(--ink-soft)]"
+            className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 text-sm font-medium text-[var(--ink-soft)]"
           >
-            <BrandLogo icon={client.icon} className="size-6 shrink-0" />
-            <span className="sr-only">{client.label}</span>
+            <BrandLogo icon={client.icon} className="size-4 shrink-0" />
+            <span>{client.label}</span>
           </span>
         ))}
       </div>
 
       {/* code block + copy */}
-      <div className="relative min-w-0 overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)]">
-        <button
-          type="button"
-          onClick={() => void handleCopy()}
-          className="absolute right-2 top-2 z-10 inline-flex items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--bg-card)] px-2 py-1 text-[12px] font-medium text-[var(--ink-soft)] shadow-sm transition-colors hover:text-ink"
-          aria-label={copied ? "Copied" : "Copy config"}
-        >
-          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-          {copied ? "Copied" : "Copy"}
-        </button>
-        <pre className="max-w-full overflow-x-auto px-3 pb-3 pr-20 pt-10 font-mono text-[12.5px] leading-[1.7] text-[var(--ink-soft)] [scrollbar-width:thin]">
+      <div className="min-w-0 overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)]">
+        <pre className="max-w-full overflow-x-auto p-5 font-mono text-[13px] leading-7 text-[var(--ink-soft)] [scrollbar-width:thin]">
           <code>{snippet}</code>
         </pre>
       </div>
+
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-button)] bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-90"
+        aria-label={copied ? "Copied config" : "Copy config"}
+      >
+        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+        {copied ? "Copied" : "Copy config"}
+      </button>
 
       {/* token state */}
       {!hasToken && (

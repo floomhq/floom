@@ -184,7 +184,7 @@ function MobileWorkspaceName() {
 //  - approvals  → pending-approvals count   (neutral tone)
 //  - connections → connections needing re-auth / expired (amber attention)
 //  - runs       → recent failed runs        (amber attention)
-type NavBadgeKey = "approvals" | "connections" | "runs";
+type NavBadgeKey = "approvals" | "connections";
 
 type NavItem = {
   href: string;
@@ -201,7 +201,7 @@ type NavItem = {
 const nav: NavItem[] = [
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
-  { href: "/runs", label: "Runs", icon: Clock, badge: "runs" },
+  { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: "approvals" },
   { href: "/connections", label: "Connections", icon: Plug, badge: "connections" },
 ];
@@ -225,9 +225,7 @@ function resolveNavBadge(key: NavBadgeKey | undefined, counts: NavBadgeCounts) {
       ? { count: counts.connectionsExpired, tone: "amber" as const }
       : null;
   }
-  return counts.failedRuns > 0
-    ? { count: counts.failedRuns, tone: "amber" as const }
-    : null;
+  return null;
 }
 
 type NavBadgeCounts = {
@@ -771,7 +769,7 @@ export function UserProfileFooter({
             render={<Link href="/settings" onClick={onNavigate} />}
             className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
           >
-            <Settings className="size-4" />
+            <Settings className="size-4 text-current" />
             Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />

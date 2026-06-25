@@ -3,7 +3,7 @@
 // state — greeting + pills (EmilyHomeEmpty) ABOVE a CENTERED real composer — NOT
 // a bespoke create-worker hero. This test pins create-mode to that consistency:
 //   - it renders the home empty state (greeting + pills), no "Hire a new worker"
-//     heading, no "ADD SOURCES"/source pills, no create-specific example pills
+//     heading, no "ADD SOURCES"/source pills, with worker-authoring examples
 //   - the composer is the real PromptInput (a <textarea>), centered, with the
 //     generic "Message Emily…" placeholder (consistent with home)
 //   - clicking a home pill primes that SAME composer
@@ -18,7 +18,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 // EmilyHomeEmpty reads the overview/workers hooks — stub so it renders the
-// active-workspace empty state (greeting + ACTIVE_PILLS) without a QueryClient.
+// active-workspace empty state without a QueryClient.
 vi.mock("@/lib/query/hooks", () => ({
   useOverview: () => ({
     data: { stats: { work_shipped_7d: 7 }, outcomes: [], recent_runs: [], scheduled_today: [], needs_attention: [] },
@@ -73,17 +73,17 @@ describe("new worker = the consistent Emily empty state (no bespoke hero)", () =
   it("does NOT render the bespoke 'Hire a new worker' screen", () => {
     render(<EmilyChatCore fullPage createMode />);
     expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
-    // No bespoke create chrome: no ADD SOURCES row, no create-specific examples.
+    // No bespoke create chrome: no ADD SOURCES row or old bespoke examples.
     expect(screen.queryByText(/Add sources/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Score new CRM contacts against a job brief/i)).not.toBeInTheDocument();
   });
 
-  it("renders the SAME home empty state (greeting + pills)", async () => {
+  it("renders the same home shell with create-mode worker-authoring pills", async () => {
     render(<EmilyChatCore fullPage createMode />);
     // Active-workspace pulse from the home empty state.
     expect(await screen.findByText(/done this week/i)).toBeInTheDocument();
-    // Home active pills.
-    expect(screen.getByRole("button", { name: /What ran overnight/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Scrape HubSpot for matching leads and send a Gmail summary/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /What ran overnight/i })).not.toBeInTheDocument();
   });
 
   it("renders the real PromptInput composer, centered, with the generic placeholder", async () => {
@@ -97,12 +97,12 @@ describe("new worker = the consistent Emily empty state (no bespoke hero)", () =
     expect(screen.queryByRole("heading", { name: /hire a new worker/i })).not.toBeInTheDocument();
   });
 
-  it("clicking a home pill primes the composer with that prompt", async () => {
+  it("clicking a create-mode pill primes the composer with that prompt", async () => {
     const user = userEvent.setup();
     render(<EmilyChatCore fullPage createMode />);
     const composer = (await screen.findByPlaceholderText("Message Emily...")) as HTMLTextAreaElement;
     expect(composer.value).toBe("");
-    await user.click(screen.getByRole("button", { name: /What ran overnight/i }));
-    expect(composer.value).toBe("What ran overnight?");
+    await user.click(screen.getByRole("button", { name: /Scrape HubSpot for matching leads and send a Gmail summary/i }));
+    expect(composer.value).toBe("Scrape HubSpot for matching leads and send a Gmail summary");
   });
 });

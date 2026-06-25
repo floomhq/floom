@@ -178,15 +178,24 @@ const ACTIVE_PILLS = [
   "Show me this week's runs",
 ] as const;
 
+const CREATE_ACTIVE_PILLS = [
+  "Scrape HubSpot for matching leads and send a Gmail summary",
+  "Watch Stripe for large charges and notify the finance inbox",
+  "Summarize new Linear bugs every morning and post to Slack",
+] as const;
+
 // ── the home empty-state block ─────────────────────────────────────────────────
 
 export function EmilyHomeEmpty({
   initialData = null,
+  createMode = false,
   onSeed,
   onPickMcp,
 }: {
   /** Server-rendered overview for the pulse, hydrates without a round-trip. */
   initialData?: SystemOverview | null;
+  /** New worker flow: keep the home surface, but use worker-authoring examples. */
+  createMode?: boolean;
   /** Seed the REAL Emily composer with text (does NOT send). */
   onSeed: (text: string) => void;
   /** Open the MCP-server browse modal. */
@@ -211,6 +220,7 @@ export function EmilyHomeEmpty({
     isError: workersQuery.isError,
   });
   const isFirstWorker = gate.isFirstWorker;
+  const showCreatePills = createMode || isFirstWorker;
 
   // Fix-as-prompt: needs-attention items + per-worker fix pills.
   const attention = useMemo(() => overview?.needs_attention ?? [], [overview]);
@@ -285,10 +295,10 @@ export function EmilyHomeEmpty({
       )}
 
       {/* pills (BELOW the hero, ABOVE the real composer the host renders next) */}
-      {isFirstWorker ? (
+      {showCreatePills ? (
         <>
           <div className="flex flex-wrap justify-center gap-2">
-            {CREATE_PILLS.map((p) => (
+            {(createMode ? CREATE_ACTIVE_PILLS : CREATE_PILLS).map((p) => (
               <Pill key={p} onClick={() => onSeed(p)}>
                 <PromptTokens text={p} />
               </Pill>
