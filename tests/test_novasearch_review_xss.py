@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import apps.api.routes.novasearch as nova
-from auth import AuthContext, get_auth_context
+from auth import AuthContext
 
 
 class _FakeLabelsClient:
@@ -37,10 +37,11 @@ class _FakeLabelsClient:
 def _client(monkeypatch, *, query_row, labels_client=None):
     monkeypatch.setattr(nova, "_query_row_by_id", lambda _qid: query_row)
     monkeypatch.setattr(nova, "get_active_workspace_id", lambda: "ws_1")
+    monkeypatch.setattr(nova, "get_active_member_role", lambda: "admin")
     monkeypatch.setattr(nova, "new_supabase_service_client", lambda: labels_client or _FakeLabelsClient())
     app = FastAPI()
     app.include_router(nova.router, prefix="/api")
-    app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+    app.dependency_overrides[nova.get_auth_context] = lambda: AuthContext(
         user_id="reviewer-user",
         role="member",
         auth_method="session",

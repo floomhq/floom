@@ -13,10 +13,8 @@ real network or database is needed. Coverage targets:
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, call
 
 import pytest
 
@@ -456,7 +454,7 @@ def test_list_workspaces_includes_member_rows(monkeypatch):
     monkeypatch.setattr(ws_repo, "resolve_active_workspace", lambda **kw: owned[0])
 
     from fastapi.testclient import TestClient
-    from apps.api.routes.workspaces import router
+    import apps.api.routes.workspaces as workspace_routes
     from fastapi import FastAPI
     from apps.api._engine import ensure_engine_api_path
     ensure_engine_api_path()
@@ -467,13 +465,11 @@ def test_list_workspaces_includes_member_rows(monkeypatch):
     async def fake_auth():
         return AuthContext(user_id="user-1", email="u@example.com", scopes=())
 
-    mini_app.include_router(router, dependencies=[])
+    mini_app.include_router(workspace_routes.router, dependencies=[])
 
     # Override the auth dep
-    from apps.api.routes.workspaces import router as ws_router
-    from auth import get_auth_context
-    mini_app.dependency_overrides[get_auth_context] = fake_auth
-    mini_app.include_router(ws_router)
+    mini_app.dependency_overrides[workspace_routes.get_auth_context] = fake_auth
+    mini_app.include_router(workspace_routes.router)
 
     with TestClient(mini_app) as c:
         resp = c.get("/workspaces")
@@ -500,14 +496,14 @@ def test_select_workspace_allows_member(monkeypatch):
 
     from fastapi.testclient import TestClient
     from fastapi import FastAPI
-    from apps.api.routes.workspaces import router as ws_router
+    import apps.api.routes.workspaces as workspace_routes
     from apps.api._engine import ensure_engine_api_path
     ensure_engine_api_path()
-    from auth import AuthContext, get_auth_context
+    from auth import AuthContext
 
     mini_app = FastAPI()
-    mini_app.include_router(ws_router)
-    mini_app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+    mini_app.include_router(workspace_routes.router)
+    mini_app.dependency_overrides[workspace_routes.get_auth_context] = lambda: AuthContext(
         user_id="user-1", email=None, scopes=()
     )
     with TestClient(mini_app) as c:
@@ -524,14 +520,14 @@ def test_select_workspace_rejects_non_member(monkeypatch):
 
     from fastapi.testclient import TestClient
     from fastapi import FastAPI
-    from apps.api.routes.workspaces import router as ws_router
+    import apps.api.routes.workspaces as workspace_routes
     from apps.api._engine import ensure_engine_api_path
     ensure_engine_api_path()
-    from auth import AuthContext, get_auth_context
+    from auth import AuthContext
 
     mini_app = FastAPI()
-    mini_app.include_router(ws_router)
-    mini_app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+    mini_app.include_router(workspace_routes.router)
+    mini_app.dependency_overrides[workspace_routes.get_auth_context] = lambda: AuthContext(
         user_id="user-1", email=None, scopes=()
     )
     with TestClient(mini_app) as c:

@@ -557,11 +557,12 @@ def _oauth_code_verifier(client: Any) -> str | None:
 def _provider_flags() -> dict[str, bool | None]:
     pat = (os.environ.get("SUPABASE_MANAGEMENT_PAT") or "").strip()
     settings = get_cloud_settings()
-    if not pat or not settings.project_ref:
+    project_ref = getattr(settings, "project_ref", None)
+    if not pat or not project_ref:
         return {"google": None, "github": None}
     try:
         response = httpx.get(
-            f"https://api.supabase.com/v1/projects/{settings.project_ref}/config/auth",
+            f"https://api.supabase.com/v1/projects/{project_ref}/config/auth",
             headers={"Authorization": f"Bearer {pat}"},
             timeout=10.0,
         )

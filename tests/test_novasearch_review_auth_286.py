@@ -62,7 +62,7 @@ def _client(
     query_row: dict[str, Any] | None = QUERY_ROW,
     supabase: _FakeSupabaseClient | None = None,
 ) -> TestClient:
-    from auth import AuthContext, get_auth_context
+    from auth import AuthContext
 
     monkeypatch.setattr(nova, "_query_row_by_id", lambda _query_id: query_row)
     monkeypatch.setattr(nova, "get_active_workspace_id", lambda: active_workspace_id)
@@ -76,9 +76,9 @@ def _client(
         def _deny() -> None:
             raise HTTPException(status_code=401, detail="unauthorized")
 
-        app.dependency_overrides[get_auth_context] = _deny
+        app.dependency_overrides[nova.get_auth_context] = _deny
     else:
-        app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+        app.dependency_overrides[nova.get_auth_context] = lambda: AuthContext(
             user_id=auth_user_id,
             role="member",
             auth_method="session",

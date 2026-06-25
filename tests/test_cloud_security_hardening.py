@@ -46,7 +46,10 @@ def test_cloud_healthz_gets_security_headers(monkeypatch, tmp_path):
     response = client.get("/healthz")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "deploy": "cloud"}
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["deploy"] == "cloud"
+    assert payload["service"] == "cloud-api"
     assert response.headers["Strict-Transport-Security"] == "max-age=31536000; includeSubDomains"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
@@ -250,7 +253,7 @@ def test_cloud_rate_limits_by_bearer_token_before_ip(monkeypatch, tmp_path):
             json={},
             headers={"authorization": "Bearer floom_same_token", "cf-connecting-ip": f"203.0.113.{50 + idx}"},
         ).status_code
-        for idx in range(6)
+        for idx in range(121)
     ]
     second_token_status = client.post(
         "/auth/cli-exchange",
@@ -258,7 +261,8 @@ def test_cloud_rate_limits_by_bearer_token_before_ip(monkeypatch, tmp_path):
         headers={"authorization": "Bearer floom_other_token", "cf-connecting-ip": "203.0.113.50"},
     ).status_code
 
-    assert first_ip_statuses[5] == 429
+    assert first_ip_statuses[119] == 422
+    assert first_ip_statuses[120] == 429
     assert second_token_status == 422
 
 
@@ -519,7 +523,6 @@ def test_root_webhook_path_uses_cloud_wrapper(monkeypatch, tmp_path):
 def test_cloud_metrics_endpoint_requires_admin(monkeypatch, tmp_path):
     """P2-A: GET /metrics returns 403 for a non-admin member in cloud mode."""
     main = _load_cloud_app(monkeypatch, tmp_path)
-    client = TestClient(main.app, raise_server_exceptions=False)
 
     # In cloud dev mode the engine auth falls through to dev-context (admin).
     # We simulate a member-role auth by calling the engine function directly.

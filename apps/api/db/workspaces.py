@@ -259,6 +259,22 @@ def revoke_workspace_api_tokens(*, workspace_id: str) -> int:
     return count
 
 
+def _revoke_approval_batch_share_links_for_transfer(
+    *,
+    client: Any,
+    workspace_id: str,
+    owner_user_id: str,
+) -> int:
+    from apps.api.db.supabase_repos import SupabaseShareLinkRepository  # noqa: PLC0415
+
+    share_links = SupabaseShareLinkRepository(client=client)
+    return share_links.revoke_all_for_workspace(
+        workspace_id=workspace_id,
+        owner_id=owner_user_id,
+        revoked_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 def transfer_ownership(
     *,
     owner_user_id: str,
@@ -272,7 +288,8 @@ def transfer_ownership(
         raise PermissionError("workspace not found")
 
     event_id = _new_transfer_event_id()
-    response = get_supabase_service_client().rpc(
+    client = get_supabase_service_client()
+    response = client.rpc(
         "transfer_workspace_ownership",
         {
             "p_workspace_id": workspace_id,
@@ -288,6 +305,11 @@ def transfer_ownership(
         result = result[0] if result else None
     if not isinstance(result, dict):
         raise RuntimeError(f"failed to transfer workspace {workspace_id}")
+    _revoke_approval_batch_share_links_for_transfer(
+        client=client,
+        workspace_id=workspace_id,
+        owner_user_id=owner_user_id,
+    )
     if not result.get("audit_event_id"):
         result["audit_event_id"] = event_id
     return dict(result)

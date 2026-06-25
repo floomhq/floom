@@ -16,6 +16,13 @@ from apps.api.db import workspaces as workspace_repo
 from auth.context import AuthContext
 
 
+@pytest.fixture(autouse=True)
+def _clear_workspace_list_cache():
+    workspace_routes._workspace_cache_clear()
+    yield
+    workspace_routes._workspace_cache_clear()
+
+
 def _request(*, cookie: str | None = None, header: str | None = None) -> Request:
     raw_headers: list[tuple[bytes, bytes]] = []
     if cookie:
@@ -803,6 +810,10 @@ class _FakeTable:
         self.filters.append((key, value))
         return self
 
+    def is_(self, key, value):
+        self.filters.append((key, ("is", value)))
+        return self
+
     def lt(self, key, value):
         self.filters.append((key, ("lt", value)))
         return self
@@ -829,6 +840,13 @@ class _FakeTable:
         for key, value in self.filters:
             if isinstance(value, tuple) and value[0] == "lt":
                 if not int(row.get(key) or 0) < int(value[1]):
+                    return False
+                continue
+            if isinstance(value, tuple) and value[0] == "is":
+                expected = value[1]
+                if expected == "null" and row.get(key) is not None:
+                    return False
+                if expected != "null" and row.get(key) is None:
                     return False
                 continue
             if str(row.get(key)) != str(value):
@@ -894,6 +912,43 @@ class _FakeSupabaseClient:
             "workspace_share_links": [
                 {"id": "wsl_1", "workspace_id": "ws_a", "revoked_at": None},
                 {"id": "wsl_other", "workspace_id": "ws_other", "revoked_at": None},
+            ],
+            "share_links": [
+                {
+                    "id": "sl_batch_active",
+                    "entity_type": "approvals_batch",
+                    "workspace_id": "ws_a",
+                    "owner_id": "owner-1",
+                    "revoked_at": None,
+                },
+                {
+                    "id": "sl_batch_new_owner",
+                    "entity_type": "approvals_batch",
+                    "workspace_id": "ws_a",
+                    "owner_id": "owner-2",
+                    "revoked_at": None,
+                },
+                {
+                    "id": "sl_batch_other_workspace",
+                    "entity_type": "approvals_batch",
+                    "workspace_id": "ws_other",
+                    "owner_id": "owner-1",
+                    "revoked_at": None,
+                },
+                {
+                    "id": "sl_file_share",
+                    "entity_type": "file",
+                    "workspace_id": "ws_a",
+                    "owner_id": "owner-1",
+                    "revoked_at": None,
+                },
+                {
+                    "id": "sl_batch_already_revoked",
+                    "entity_type": "approvals_batch",
+                    "workspace_id": "ws_a",
+                    "owner_id": "owner-1",
+                    "revoked_at": "2026-01-01T00:00:00+00:00",
+                },
             ],
             "workspace_transfer_events": [],
         }
@@ -990,6 +1045,12 @@ def test_transfer_ownership_revokes_workspace_pats_and_records_audit(monkeypatch
     assert result["workspace"]["owner_user_id"] == "owner-2"
     assert result["revoked_api_tokens"] == 2
     assert result["revoked_share_links"] == 1
+    share_links_by_id = {row["id"]: row for row in fake_client.rows["share_links"]}
+    assert share_links_by_id["sl_batch_active"]["revoked_at"] is not None
+    assert share_links_by_id["sl_batch_new_owner"]["revoked_at"] is None
+    assert share_links_by_id["sl_batch_other_workspace"]["revoked_at"] is None
+    assert share_links_by_id["sl_file_share"]["revoked_at"] is None
+    assert share_links_by_id["sl_batch_already_revoked"]["revoked_at"] == "2026-01-01T00:00:00+00:00"
     assert [row["id"] for row in fake_client.rows["api_tokens"]] == ["tok_other"]
     assert fake_client.rows["workspace_share_links"][0]["revoked_at"] is not None
     assert fake_client.rows["workspace_share_links"][1]["revoked_at"] is None
