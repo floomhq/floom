@@ -9,7 +9,6 @@ import { IconSprite } from "@/components/IconSprite";
 import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/layout/sidebar";
 import { DeepLinkRouter } from "@/components/layout/DeepLinkRouter";
-import { CreateWorkerLegacyRedirect } from "@/components/layout/CreateWorkerLegacyRedirect";
 import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { BootSplash } from "@/components/layout/BootSplash";
@@ -82,7 +81,6 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         <IconSprite />
         <Ambient />
         <DeepLinkRouter />
-        <CreateWorkerLegacyRedirect />
         <Sidebar />
         <main className="relative z-10 flex-1 min-w-0 min-h-screen">
           {children}
@@ -100,7 +98,6 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         <IconSprite />
         <Ambient />
         <DeepLinkRouter />
-        <CreateWorkerLegacyRedirect />
         <Sidebar />
         <StandardShellBody fullBleed={fullBleed} isDesktop={isDesktop}>
           {children}

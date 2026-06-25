@@ -4,7 +4,9 @@
  * The AppShell removes the dock and content padding for this route.
  * EmilyChatPage renders its own header + full-height message thread.
  *
- * Create flow: legacy `?mode=create` links redirect to /workers/new.
+ * Create flow: legacy `?mode=create` links redirect to the in-Emily create
+ * flow (`/?create=1`, via createWorkerHref) — see EmilyDock's `?create=1`
+ * effect. They no longer open the separate /workers/new page.
  */
 import { redirect } from "next/navigation";
 import { EmilyChatPage } from "@/components/emily/EmilyChat";
