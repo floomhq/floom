@@ -80,13 +80,17 @@ export function CollectionSkeleton({ rows = 6 }: { rows?: number }) {
         </div>
       </div>
 
-      {/* Control strip: search + filters + actions on grey bar */}
+      {/* Control strip: search/actions row, then filters row. Mirrors CollectionView. */}
       <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
         <div className="c-controlstrip-inner">
-          <Skeleton className="h-9 flex-1 rounded-[var(--radius-button)]" style={{ minWidth: 220 }} />
+          <div className="c-controlstrip-toprow">
+            <Skeleton className="h-9 flex-1 rounded-[var(--radius-button)]" style={{ minWidth: 220 }} />
+            <div className="c-toolbar-actions">
+              <Skeleton className="h-9 w-16 rounded-[var(--radius-button)]" />
+              <Skeleton className="h-9 w-24 rounded-[var(--radius-button)]" />
+            </div>
+          </div>
           <Skeleton className="h-7 w-24 rounded-[var(--radius-pill)]" />
-          <Skeleton className="h-9 w-16 rounded-[var(--radius-button)]" />
-          <Skeleton className="h-9 w-24 rounded-[var(--radius-button)]" />
         </div>
       </div>
 
