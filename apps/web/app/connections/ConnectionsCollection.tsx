@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useConnections, useMembers, useSecrets, useWorkers, useStreamedInitialData, qk } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
-import type { CollectionConfig, CustomDetailTab, DetailTab, TagFamilyKey } from "@/lib/collection/types";
+import type { CollectionConfig, DetailTab, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
@@ -61,19 +61,6 @@ function Logo({ item }: { item: UnifiedConn }) {
     <span className="c-logo">
       {item.kind === "mcp" ? <Server size={16} /> : <KeyRound size={16} />}
     </span>
-  );
-}
-
-function KV({ rows }: { rows: [string, React.ReactNode][] }) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" }}>
-      {rows.map(([k, v], i) => (
-        <span key={i} style={{ display: "contents" }}>
-          <span style={{ color: "var(--muted-foreground)", fontSize: 12.5 }}>{k}</span>
-          <span>{v}</span>
-        </span>
-      ))}
-    </div>
   );
 }
 
@@ -856,38 +843,41 @@ export default function ConnectionsCollection({
         const using = workersUsing(c, workers);
         const related = secretsForConnection(c, secrets);
         const advancedTabs = isEmailConnection ? ["Recent emails"] : [];
-        const baseTabs: CustomDetailTab[] = [
+        const baseTabs: DetailTab[] = [
           {
+            // Synchronous key/value pane → structured (rendered by the engine via
+            // DetailKit), identical content to the prior KV grid.
             key: "Overview",
             label: "Overview",
-            custom: "unmigrated",
-            render: () => (
-              <KV
-                rows={[
-                  ["App", humaniseAppName(c.app_name)],
-                  ["Account", i.account],
-                  ["Auth", "OAuth · managed token (rotates on reconnect)"],
-                  ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
-                  ["Scopes", String(c.scopes?.length ?? 0)],
-                  ["Connected", new Date(c.created_at).toLocaleDateString()],
-                  ["Last used", formatLastUsed(c)],
-                  ["Owner", resolveOwner(c.owner_id, members)],
-                ]}
-              />
-            ),
+            sections: [
+              {
+                key: "overview",
+                label: "Overview",
+                rows: [
+                  { key: "app", label: "App", value: humaniseAppName(c.app_name) },
+                  { key: "account", label: "Account", value: i.account },
+                  { key: "auth", label: "Auth", value: "OAuth · managed token (rotates on reconnect)" },
+                  { key: "status", label: "Status", value: <StatusPill spec={STATUS_PILL[i.statusKey]} /> },
+                  { key: "scopes", label: "Scopes", value: String(c.scopes?.length ?? 0) },
+                  { key: "connected", label: "Connected", value: new Date(c.created_at).toLocaleDateString() },
+                  { key: "last-used", label: "Last used", value: formatLastUsed(c) },
+                  { key: "owner", label: "Owner", value: resolveOwner(c.owner_id, members) },
+                ],
+              },
+            ],
           },
           {
             key: "Tools",
             label: "Tools",
             count: c.scopes?.length,
-            custom: "unmigrated",
+            custom: "tool-list",
             render: () => <OAuthToolsPanel connection={c} />,
           },
           {
             key: "Secrets",
             label: "Secrets",
             count: related.length || undefined,
-            custom: "unmigrated",
+            custom: "secret-form",
             render: () => (
               <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
             ),
@@ -896,22 +886,22 @@ export default function ConnectionsCollection({
             key: "Used by",
             label: "Used by",
             count: using.length || undefined,
-            custom: "unmigrated",
+            custom: "used-by",
             render: () => <UsedByPanel connection={c} workers={workers} />,
           },
           {
             key: "Activity",
             label: "Activity",
-            custom: "unmigrated",
+            custom: "activity-feed",
             render: () => <ActivityPanel connectionId={c.id} />,
           },
         ];
-        const advancedRendered: CustomDetailTab[] = advancedTabs
+        const advancedRendered: DetailTab[] = advancedTabs
           .filter((t) => pinnedTabs.has(t))
           .map((t) => ({
             key: t,
             label: t,
-            custom: "unmigrated" as const,
+            custom: "activity-feed" as const,
             render: () => <EmailPeekPanel connectionId={c.id} />,
           }));
         return {
@@ -930,42 +920,40 @@ export default function ConnectionsCollection({
         const using = workersUsing(c, workers);
         const related = secretsForConnection(c, secrets);
         const advancedTabs = ["Config"];
-        const baseTabs: CustomDetailTab[] = [
+        const baseTabs: DetailTab[] = [
           {
+            // Synchronous key/value pane → structured, identical content to the
+            // prior KV grid. Mono fields use the row `mono` flag.
             key: "Overview",
             label: "Overview",
-            custom: "unmigrated",
-            render: () => (
-              <KV
-                rows={[
-                  ["Server", c.mcp_label || c.app_name],
-                  [
-                    "Endpoint",
-                    <span key="ep" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                      {c.mcp_url || c.mcp_command || "—"}
-                    </span>,
-                  ],
-                  ["Transport", c.mcp_transport || "—"],
-                  ["Secret name", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
-                  ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
-                  ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
-                  ["Last used", formatLastUsed(c)],
-                ]}
-              />
-            ),
+            sections: [
+              {
+                key: "overview",
+                label: "Overview",
+                rows: [
+                  { key: "server", label: "Server", value: c.mcp_label || c.app_name },
+                  { key: "endpoint", label: "Endpoint", value: c.mcp_url || c.mcp_command || "—", mono: true },
+                  { key: "transport", label: "Transport", value: c.mcp_transport || "—" },
+                  { key: "secret-name", label: "Secret name", value: c.mcp_auth_secret || "None", mono: c.mcp_auth_secret != null },
+                  { key: "status", label: "Status", value: <StatusPill spec={STATUS_PILL[i.statusKey]} /> },
+                  { key: "tools", label: "Tools", value: String(c.mcp_allowed_tools?.length ?? 0) },
+                  { key: "last-used", label: "Last used", value: formatLastUsed(c) },
+                ],
+              },
+            ],
           },
           {
             key: "Tools",
             label: "Tools",
             count: c.mcp_allowed_tools?.length,
-            custom: "unmigrated",
+            custom: "tool-list",
             render: () => <McpToolsPanel connection={c} />,
           },
           {
             key: "Secrets",
             label: "Secrets",
             count: related.length || undefined,
-            custom: "unmigrated",
+            custom: "secret-form",
             render: () => (
               <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
             ),
@@ -974,22 +962,22 @@ export default function ConnectionsCollection({
             key: "Used by",
             label: "Used by",
             count: using.length || undefined,
-            custom: "unmigrated",
+            custom: "used-by",
             render: () => <UsedByPanel connection={c} workers={workers} />,
           },
           {
             key: "Activity",
             label: "Activity",
-            custom: "unmigrated",
+            custom: "activity-feed",
             render: () => <ActivityPanel connectionId={c.id} />,
           },
         ];
-        const advancedRendered: CustomDetailTab[] = advancedTabs
+        const advancedRendered: DetailTab[] = advancedTabs
           .filter((t) => pinnedTabs.has(t))
           .map((t) => ({
             key: t,
             label: t,
-            custom: "unmigrated" as const,
+            custom: "file-viewer" as const,
             render: () => (
               <pre style={codeBlock}>
                 {JSON.stringify(
@@ -1017,55 +1005,60 @@ export default function ConnectionsCollection({
         header,
         tabs: ([
           {
+            // Synchronous key/value pane → structured, identical content to the
+            // prior KV grid. Interactive controls (reveal/copy, used-by link) stay
+            // inside the row `value` (ReactNode).
             key: "Overview",
             label: "Overview",
-            custom: "unmigrated",
-            render: () => (
-              <KV
-                rows={[
-                  [
-                    "Name",
-                    <span key="nm" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</span>,
-                  ],
-                  ["Value", <SecretValueField key="val" name={s.name} />],
-                  [
-                    "Status",
-                    <StatusPill
-                      key="st"
-                      spec={
-                        s.status === "set"
-                          ? { tone: "ok", label: "Set" }
-                          : { tone: "err", label: "Not set" }
-                      }
-                    />,
-                  ],
-                  [
-                    "Used by",
-                    usedByCount > 0 ? (
-                      <Link
-                        href={`?tab=Used+by`}
-                        style={{
-                          color: "var(--accent)",
-                          textDecoration: "underline",
-                          textDecorationColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
-                          textUnderlineOffset: 3,
-                        }}
-                      >
-                        {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
-                      </Link>
-                    ) : (
-                      <span style={{ color: "var(--muted-foreground)" }}>None</span>
+            sections: [
+              {
+                key: "overview",
+                label: "Overview",
+                rows: [
+                  { key: "name", label: "Name", value: s.name, mono: true },
+                  { key: "value", label: "Value", value: <SecretValueField name={s.name} /> },
+                  {
+                    key: "status",
+                    label: "Status",
+                    value: (
+                      <StatusPill
+                        spec={
+                          s.status === "set"
+                            ? { tone: "ok", label: "Set" }
+                            : { tone: "err", label: "Not set" }
+                        }
+                      />
                     ),
-                  ],
-                ]}
-              />
-            ),
+                  },
+                  {
+                    key: "used-by",
+                    label: "Used by",
+                    value:
+                      usedByCount > 0 ? (
+                        <Link
+                          href={`?tab=Used+by`}
+                          style={{
+                            color: "var(--accent)",
+                            textDecoration: "underline",
+                            textDecorationColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
+                            textUnderlineOffset: 3,
+                          }}
+                        >
+                          {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
+                        </Link>
+                      ) : (
+                        <span style={{ color: "var(--muted-foreground)" }}>None</span>
+                      ),
+                  },
+                ],
+              },
+            ],
           },
           {
             key: "Used by",
             label: "Used by",
             count: s.used_by?.length,
-            custom: "unmigrated",
+            custom: "used-by",
             render: () => (
               <div className="c-ltable">
                 {(s.used_by ?? []).map((workerName) => {
