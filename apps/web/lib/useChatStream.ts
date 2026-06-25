@@ -879,6 +879,44 @@ function toolCardToolName(card: ToolCard): string | null {
   return "toolName" in card && typeof card.toolName === "string" ? card.toolName : null;
 }
 
+type ToolFollowupEvent =
+  | Extract<ChatSSEEvent, { type: "tool-progress" }>
+  | Extract<ChatSSEEvent, { type: "tool-resource" }>
+  | Extract<ChatSSEEvent, { type: "tool-action-required" }>;
+
+function fallbackToolName(event: ToolFollowupEvent): string {
+  return (
+    event.toolName ??
+    event.card?.title ??
+    (event.type === "tool-progress" ? event.label ?? event.stage : undefined) ??
+    "tool"
+  );
+}
+
+function materializeToolCardFromFollowup(
+  event: ToolFollowupEvent,
+  cardId: string,
+  status: CardStatus
+): GenericToolCard {
+  const toolName = fallbackToolName(event);
+  const title =
+    event.type === "tool-progress"
+      ? toolProgressTitle(event.toolName ?? null, event.card?.title ?? event.label, status) ??
+        getToolCardTitle(toolName, status)
+      : event.card?.title ?? (event.toolName ? getToolCardTitle(event.toolName, status) : "Working");
+
+  return {
+    kind: "generic",
+    callId: event.callId,
+    card_id: cardId,
+    toolName,
+    title,
+    status,
+    ...(event.actions ? { actions: event.actions } : {}),
+    ...(event.streams ? { streams: event.streams } : {}),
+  };
+}
+
 /**
  * Extract the effective card_id from any tool event.
  * The live backend puts id in event.card.id; the enriched v2 protocol also
@@ -987,12 +1025,25 @@ export function reduceSSEEvent(
       const cardId = resolveCardId(event);
       if (!cardId) return prev;
 
-      const newStatus = event.type === "tool-progress" ? normalizeCardStatus(event.status) : undefined;
+      const newStatus =
+        event.type === "tool-progress"
+          ? normalizeCardStatus(event.status)
+          : event.type === "tool-action-required"
+            ? "pending_approval"
+            : event.card?.status
+              ? normalizeCardStatus(event.card.status)
+              : undefined;
 
-      return prev.map((m) => {
+      let matchedCard = false;
+      let hasTargetAssistant = false;
+      const updated = prev.map((m) => {
+        if (m.id === assistantMsgId && m.role === "assistant") {
+          hasTargetAssistant = true;
+        }
         if (m.role !== "assistant" || !m.parts) return m;
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+          matchedCard = true;
           const toolName = toolCardToolName(p.card);
           const updatedCard: ToolCard = {
             ...p.card,
@@ -1009,6 +1060,24 @@ export function reduceSSEEvent(
         });
         return { ...m, parts: updatedParts };
       });
+      if (matchedCard) return updated;
+
+      const materializedStatus = newStatus ?? "running";
+      const newPart: MsgPart = {
+        type: "tool-card",
+        card: materializeToolCardFromFollowup(event, cardId, materializedStatus),
+      };
+      if (hasTargetAssistant) {
+        return updated.map((m) =>
+          m.id === assistantMsgId && m.role === "assistant"
+            ? { ...m, parts: [...(m.parts ?? []), newPart] }
+            : m
+        );
+      }
+      return [
+        ...updated,
+        { id: assistantMsgId, role: "assistant", parts: [newPart] },
+      ];
     }
 
     case "tool-result": {
