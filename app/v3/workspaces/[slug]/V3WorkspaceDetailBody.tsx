@@ -76,7 +76,7 @@ export function V3WorkspaceDetailBody({ w }: { w: Workspace }) {
         >
           <V3HireButton
             label="Hire this workspace"
-            returnPath={`/workspaces/${w.slug}`}
+            createPrompt={`Set up a ${w.name} workspace. ${w.pitch} Workers: ${workers.map((t) => t.name).join(", ")}.`}
             className="inline-flex h-9 items-center whitespace-nowrap rounded-[10px] px-4 text-[13.5px] font-medium text-white"
           />
         </motion.div>

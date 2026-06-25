@@ -66,7 +66,10 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
             transition={{ duration: 0.45, delay: 0.16, ease: EASE }}
             className="mt-6 flex flex-nowrap items-center gap-3"
           >
-            <V3HireButton label="Hire this worker" returnPath={`/templates/${t.slug}`} />
+            <V3HireButton
+              label="Hire this worker"
+              createPrompt={`Set up the ${t.name}. ${t.job} It connects to ${t.tools.join(", ")} and produces ${t.output.toLowerCase()}.`}
+            />
             <span className="flex shrink-0 items-center gap-2">
               {t.tools.slice(0, 4).map((tool) => {
                 const mark = MARKS[tool.toLowerCase()];

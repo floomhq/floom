@@ -1,16 +1,16 @@
 "use client";
 
 /**
- * V3HireButton — session-aware "Hire" CTA. The session cookie is HttpOnly, so
- * we mirror V3Shell (#821): ask /api/session, then route accordingly:
- *   - signed in  -> open the app (no pointless re-login)
- *   - signed out -> /login?next=<this page> so they return here after auth
- * Holds the CTA until the session resolves so signed-in users are not raced
- * through the login path by a fast click.
+ * V3HireButton - session-aware "Hire" CTA that lands in primed worker creation.
+ * The session cookie is HttpOnly, so we mirror V3Shell (#821): ask /api/session,
+ * hold the CTA until the session resolves, then route accordingly:
  *
- * NOTE: this does not yet PROVISION the template into a workspace — that's the
- * engine-coupled import flow (docs/TEMPLATES-IMPORT-FLOW.md). It fixes the
- * "funnels through sign-in even when already logged in" bug.
+ * The dashboard create route opens the worker author pre-filled with a prompt,
+ * so Hire carries a template-derived prompt instead of dumping the user on a
+ * generic overview.
+ *
+ *   - signed in  -> /app/workers/new?prompt=<prompt>
+ *   - signed out -> /login?next=<that>
  */
 
 import { useEffect, useState } from "react";
@@ -20,11 +20,11 @@ type SessionState = "checking" | "authed" | "guest";
 
 export function V3HireButton({
   label,
-  returnPath,
+  createPrompt,
   className = "inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-[10px] px-4 text-[13.5px] font-medium text-white",
 }: {
   label: string;
-  returnPath: string;
+  createPrompt: string;
   className?: string;
 }) {
   const [sessionState, setSessionState] = useState<SessionState>("checking");
@@ -44,8 +44,9 @@ export function V3HireButton({
     };
   }, []);
 
+  const target = `/app/workers/new?prompt=${encodeURIComponent(createPrompt)}`;
   const href =
-    sessionState === "authed" ? "/app/overview" : `/login?next=${encodeURIComponent(returnPath)}`;
+    sessionState === "authed" ? target : `/login?next=${encodeURIComponent(target)}`;
 
   if (sessionState === "checking") {
     return (
