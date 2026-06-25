@@ -176,16 +176,14 @@ const nextConfig: NextConfig = {
         source: "/c/:token",
         destination: `${apiBase}/c/:token`,
       },
-      // Hosted dashboard builds use basePath="/app". Public share links must
-      // remain top-level no-auth URLs, so /s/* is rewritten into the app route
-      // without changing the browser URL.
-      ...(APP_BASE_PATH
-        ? [{
-            source: "/s/:path*",
-            destination: `${APP_BASE_PATH}/s/:path*`,
-            basePath: false as const,
-          }]
-        : []),
+      // /s/* public share links: NOT rewritten here. A dashboard self-rewrite of
+      // a top-level path into the basePath is rejected by Next.js ("rewrites urls
+      // outside of the basePath. Please use a destination that starts with
+      // http(s)://") and broke hosted (basePath="/app") builds. It was also
+      // ineffective: on the hosted host the apex URL `/s/*` reaches the landing,
+      // not this dashboard, so the apex is where `/s/*` must be rewritten into
+      // `/app/s/*` (mirroring how `/app/*` is served). OSS (no basePath) serves
+      // /s/[token] directly with no rewrite.
     ];
   },
   async headers() {
