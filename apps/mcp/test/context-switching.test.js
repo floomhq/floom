@@ -15,7 +15,7 @@ import {
   writeCredentials,
 } from "../dist/lib/credentials.js";
 import { FloomApiClient } from "../dist/lib/api.js";
-import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
+import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand, workspacesShowCommand } from "../dist/commands/workspaces.js";
 import { connectionsAddCommand, connectionsListCommand } from "../dist/commands/connections.js";
 import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
 import { authLogoutCommand, authSwitchCommand } from "../dist/commands/auth.js";
@@ -300,6 +300,54 @@ test("cloud workspace create preserves the existing token", async () => {
       assert.equal(creds.workspace_id, "ws_created");
       assert.equal(creds.workspace_name, "Customer A");
       assert.equal(creds.api_token, "floom_old_workspace_token");
+    }, { cloud: true });
+  });
+});
+
+test("cloud workspace show infers active workspace for env-token credentials", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "pat-token",
+        authed_at: new Date().toISOString(),
+      });
+      const captured = captureStdout();
+      let code;
+      try {
+        code = await workspacesShowCommand({ json: true });
+      } finally {
+        captured.restore();
+      }
+      assert.equal(code, 0);
+      const payload = JSON.parse(captured.text());
+      assert.equal(payload.id, "local-default");
+      assert.equal(payload.name, "Local");
+    }, { cloud: true });
+  });
+});
+
+test("cloud mcp install infers active workspace from /api/workspaces envelope", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "pat-token",
+        authed_at: new Date().toISOString(),
+      });
+      const captured = captureStdout();
+      let code;
+      try {
+        code = await mcpInstallCommand({ target: "generic", showToken: true });
+      } finally {
+        captured.restore();
+      }
+      assert.equal(code, 0);
+      const payload = JSON.parse(captured.text());
+      assert.equal(payload.mcpServers.floom.url, `${base}/mcp/local-default`);
+      assert.equal(payload.mcpServers.floom.headers.Authorization, "Bearer pat-token");
     }, { cloud: true });
   });
 });

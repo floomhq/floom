@@ -140,6 +140,23 @@ function selectFileClients(target: FileTarget): Array<(typeof FILE_CLIENTS)[numb
 
 type McpConfig = { mcpUrl: string; headers: Record<string, string> };
 
+type WorkspaceRow = { id: string; name?: string };
+type WorkspaceListEnvelope = { workspaces?: WorkspaceRow[]; active_id?: string | null };
+
+function resolveWorkspaceFromPayload(payload: unknown): WorkspaceRow | null {
+  const workspaces = Array.isArray(payload)
+    ? payload as WorkspaceRow[]
+    : Array.isArray((payload as WorkspaceListEnvelope | null)?.workspaces)
+      ? (payload as WorkspaceListEnvelope).workspaces!
+      : [];
+  if (workspaces.length === 0) return null;
+  const activeId = !Array.isArray(payload) ? (payload as WorkspaceListEnvelope).active_id : null;
+  if (activeId) {
+    return workspaces.find((workspace) => workspace.id === activeId) || { id: activeId };
+  }
+  return workspaces.length === 1 ? workspaces[0] : null;
+}
+
 async function resolveMcpConfig(
   credentials: NonNullable<Awaited<ReturnType<typeof readCredentials>>>,
   apiBase: string,
@@ -180,11 +197,12 @@ async function resolveMcpConfig(
   if (!workspaceId) {
     const client = new FloomApiClient(apiBase, credentials);
     try {
-      const workspaces = await client.requestJson("GET", "/api/workspaces") as Array<{ id: string; name?: string }>;
-      if (!Array.isArray(workspaces) || workspaces.length === 0) {
+      const payload = await client.requestJson("GET", "/api/workspaces");
+      const workspace = resolveWorkspaceFromPayload(payload);
+      if (!workspace) {
         throw new Error("No workspaces found. Create a workspace first at https://floom.ai");
       }
-      workspaceId = workspaces[0].id;
+      workspaceId = workspace.id;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(

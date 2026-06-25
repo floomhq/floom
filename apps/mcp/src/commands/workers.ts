@@ -51,6 +51,8 @@ type WorkerFilesPayload = {
   files: Array<{ path: string; content: string }>;
 };
 
+const SERVER_WORKER_RUNTIMES = new Set(["python311", "node22", "bash", "skill", "none"]);
+
 function emitError(message: string, hint: string, json?: boolean): number {
   if (json) {
     // In JSON mode: keep stdout clean; write error to stderr only
@@ -440,6 +442,10 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
   const runtime = readRuntime(manifest);
   if (!runtime) {
     errors.push("worker.yml must include a runtime field (runtime, runtime.type, exec.runtime, or exec.runtime.type)");
+  } else if (!SERVER_WORKER_RUNTIMES.has(runtime)) {
+    errors.push(
+      `worker.yml runtime '${runtime}' is not supported by the API; use one of: ${[...SERVER_WORKER_RUNTIMES].join(", ")}`,
+    );
   }
   errors.push(...validateTimezones(manifest));
   errors.push(...validateWorkerContractShape(manifest));
@@ -700,7 +706,7 @@ export async function workersPushCommand(dir: string): Promise<number> {
 export async function workersListCommand(options: { json?: boolean }): Promise<number> {
   try {
     const { client } = await createAuthenticatedClient();
-    const workers = (await client.requestJson("GET", "/workers")) as WorkerSummary[];
+    const workers = (await client.requestJson("GET", "/workers", { query: { shape: "list" } })) as WorkerSummary[];
     if (options.json) {
       printJson(workers);
       return 0;

@@ -37,6 +37,20 @@ function activeWorkspaceId(credentials: StoredCredentials, data: WorkspaceListRe
   return credentials.workspace_id || data.active_id || "";
 }
 
+function inferActiveWorkspace(credentials: StoredCredentials, data: WorkspaceListResponse): WorkspaceRow | null {
+  const workspaceId = activeWorkspaceId(credentials, data);
+  if (workspaceId) {
+    return (data.workspaces || []).find((row) => row.id === workspaceId) || {
+      id: workspaceId,
+      name: credentials.workspace_name || workspaceId,
+    };
+  }
+  if ((data.workspaces || []).length === 1) {
+    return data.workspaces[0];
+  }
+  return null;
+}
+
 export async function workspacesListCommand(options: { json?: boolean }): Promise<number> {
   try {
     const { client, credentials } = await createAuthenticatedClient();
@@ -102,10 +116,17 @@ export async function workspacesCreateCommand(name: string, options: { json?: bo
 
 export async function workspacesShowCommand(options: { json?: boolean }): Promise<number> {
   try {
-    const { credentials } = await createAuthenticatedClient();
+    const { client, credentials } = await createAuthenticatedClient();
+    let active = credentials.workspace_id
+      ? { id: credentials.workspace_id, name: credentials.workspace_name || credentials.workspace_id }
+      : null;
+    if (!active) {
+      const data = await fetchWorkspaces(client);
+      active = inferActiveWorkspace(credentials, data);
+    }
     const payload = {
-      id: credentials.workspace_id || null,
-      name: credentials.workspace_name || null,
+      id: active?.id || null,
+      name: active?.name || null,
       api_base: credentials.api_base,
     };
     if (options.json) {
