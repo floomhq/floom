@@ -25,7 +25,8 @@ import { StackTrace } from "@/components/ai-elements/stack-trace";
 import { Task } from "@/components/ai-elements/task";
 import { OutputRenderer } from "@/components/output-renderer";
 import { GenericOutput } from "@/components/generic-output";
-import { api } from "@/lib/api";
+import { api, getActiveWorkspaceId } from "@/lib/api";
+import { capturePostHogEvent } from "@/lib/posthog";
 import { formatAbsolute } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import {
@@ -84,7 +85,9 @@ export function TrackRunFeedbackIssue({ run }: { run: RunDetail }) {
     if (!feedback || submitting) return;
     setSubmitting(true);
     try {
-      const created = await api.runs.feedback.create(run.id, feedback);
+      const created = await api.runs.feedback.create(run.id, feedback, undefined, {
+        worker_id: run.worker_id,
+      });
       setItems((prev) => [...(prev ?? []), created]);
       toast.success("Feedback saved");
       setNote("");
@@ -886,6 +889,16 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
   };
   const json = JSON.stringify(payload, null, 2);
   const download = () => {
+    // INTENT: user extracted the raw run output for offline use — a quality
+    // signal. Only the run/worker ids and the payload byte size travel; the
+    // JSON body itself is never sent as a property.
+    capturePostHogEvent("run_output_download_clicked", {
+      workspace_id: getActiveWorkspaceId(),
+      run_id: run.id,
+      worker_id: run.worker_id,
+      content_type: "raw_json",
+      byte_size: json.length,
+    });
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -896,6 +909,15 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
   };
   const [copied, setCopied] = useState(false);
   const copy = () => {
+    // INTENT: user copied the raw run output — a quality signal. Body is never
+    // sent; only ids, the copy target, and the payload size.
+    capturePostHogEvent("run_output_copy_clicked", {
+      workspace_id: getActiveWorkspaceId(),
+      run_id: run.id,
+      worker_id: run.worker_id,
+      copy_target: "raw_json",
+      content_length: json.length,
+    });
     navigator.clipboard.writeText(json).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
