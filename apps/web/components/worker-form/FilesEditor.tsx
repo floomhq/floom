@@ -714,12 +714,34 @@ function triggerLabel(value: unknown) {
     : type;
 }
 
+const RUNTIME_DISPLAY: Record<string, string> = {
+  python311: "Python 3.11",
+  python: "Python",
+  node20: "Node.js 20",
+  node: "Node.js",
+};
+
 function runtimeLabel(value: unknown) {
   if (!value) return "";
   if (typeof value === "string") return value;
   if (typeof value !== "object") return "";
   const raw = value as Record<string, unknown>;
-  return [raw.runtime || raw.type, raw.command || raw.entry].filter(Boolean).join(" · ");
+  // Show a meaningful runtime — the mode (agent vs script) plus the runtime
+  // engine — NOT the entrypoint filename. The exec block's `command`/`entry`
+  // often collapses to "SKILL.md"/"run.py", which is a file (already listed in
+  // Files), not a runtime. e.g. "Agent" or "Script · Python 3.11".
+  const mode =
+    raw.mode === "agent"
+      ? "Agent"
+      : raw.mode === "pure-script" || raw.mode === "script"
+        ? "Script"
+        : undefined;
+  const rt = raw.runtime ?? raw.type;
+  const rtLabel = typeof rt === "string" ? (RUNTIME_DISPLAY[rt] ?? rt) : undefined;
+  const label = [mode, rtLabel].filter(Boolean).join(" · ");
+  // Fall back to the old command/entry display only when neither mode nor
+  // runtime is present, so a legacy/odd contract never shows a blank cell.
+  return label || String(raw.command || raw.entry || "");
 }
 
 function itemLabel(value: unknown) {
