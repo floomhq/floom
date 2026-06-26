@@ -1,13 +1,14 @@
-import { redirect } from "next/navigation";
+import RunDetailPageClient from "./RunDetailPageClient";
 
-// Full-page run detail is intentionally gone. The split-pane run detail owns
-// stream recovery (`streamUnavailable`) and refresh wiring (`onRefresh={refresh}`)
-// before this route redirects to `/runs?sel=<id>`.
-export default async function RunDetailRedirect({
+export default async function RunDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
-  redirect(`/runs?sel=${encodeURIComponent(id)}`);
+  const { tab } = await searchParams;
+
+  return <RunDetailPageClient runId={id} initialTab={tab} />;
 }

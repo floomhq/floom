@@ -844,7 +844,7 @@ function runCardFromResult(
                 id: "open_run",
                 label: "View run",
                 method: "GET" as const,
-                href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
+                href: `/runs/${encodeURIComponent(runId)}?tab=logs`,
               },
             ]
           : normalizedTool === "workers.create_from_prompt"
@@ -853,7 +853,7 @@ function runCardFromResult(
                   id: "open_run",
                   label: "View progress",
                   method: "GET" as const,
-                  href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
+                  href: `/runs/${encodeURIComponent(runId)}?tab=logs`,
                 },
               ]
           : event.actions;
@@ -1225,7 +1225,7 @@ export function safeRunPartsStreamPath(path: unknown): string | null {
 
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
   return shouldAutoOpenRunDetails(card) && card.runId
-    ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Logs`
+    ? `/runs/${encodeURIComponent(card.runId)}?tab=logs`
     : null;
 }
 
@@ -1263,9 +1263,9 @@ export function getCardHref(card: ToolCard): string | null {
     case "worker-create":
       return card.workerId ? `/workers?sel=${encodeURIComponent(card.workerId)}` : null;
     case "run":
-      return card.runId ? `/runs?sel=${encodeURIComponent(card.runId)}` : null;
+      return card.runId ? `/runs/${encodeURIComponent(card.runId)}` : null;
     case "artifact":
-      return card.runId ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Output` : null;
+      return card.runId ? `/runs/${encodeURIComponent(card.runId)}?tab=output` : null;
     case "approval":
       return card.approvalId ? `/approvals?sel=${card.approvalId}` : "/approvals";
     case "connect-service":
