@@ -35,7 +35,7 @@ describe("medium issue batch source guards", () => {
     expect(source).toContain('label: "Codex"');
     expect(source).toContain('icon: "claude-code"');
     expect(source).toContain('icon: "codex"');
-    expect(source).toContain('icon: "vscode"');
+    expect(source).toContain('icon: "cursor"');
     expect(source).toContain("BrandLogo");
     expect(source).not.toContain('icon: "anthropic"');
     expect(source).not.toContain('icon: "openai"');
@@ -44,9 +44,13 @@ describe("medium issue batch source guards", () => {
     expect(source).not.toContain("grid-cols-2");
     expect(source).not.toContain("bg-[var(--bg-2)] px-3 py-2.5");
     expect(source).toContain('aria-label="Supported MCP clients"');
-    expect(source).toContain('href="/settings?sel=personal_tokens"');
-    expect(source).toContain("Manage personal tokens");
-    expect(source).toContain('href="/settings?sel=connect&tab=mcp"');
+    // "Agent install" pass (2026-06-25): the panel is now a single token-free
+    // npx snippet (buildMcpJson with no params). The per-token "generate /
+    // manage personal tokens" flow was removed, so those links are
+    // intentionally gone and the panel trimmed to the 3 primary clients.
+    expect(source).toContain("Agent install");
+    expect(source).toContain("buildMcpJson");
+    expect(source).not.toContain('href="/settings?sel=personal_tokens"');
     expect(source).toContain("max-w-full overflow-x-auto");
     expect(source).toContain("min-w-0 overflow-hidden");
   });

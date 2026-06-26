@@ -4,10 +4,10 @@
 //
 // Opened from the sidebar "MCP" item (NOT a page). This is now ONLY the dialog
 // chrome (backdrop, panel, close affordances) around the SHARED <McpInstallPanel/>
-// — the exact same install treatment the Settings → Connect & automate → MCP
-// section renders. Single source of truth: same snippet, same client list, same
-// real-token flow. (Federico: "mcp on left sidebar, why not simply same as mcp
-// says on settings?")
+// (the exact same install treatment the Settings -> Connect & automate -> MCP
+// section renders). Single source of truth: same snippet, same client list, same
+// token-free npx config. (Federico: "mcp on left sidebar, why not simply same as
+// mcp says on settings?")
 import { useEffect } from "react";
 import { X } from "lucide-react";
 
