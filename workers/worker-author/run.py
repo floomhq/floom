@@ -339,6 +339,125 @@ def _load_manifest(yml_string: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+_PROMPT_CONNECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("gmail", re.compile(r"\b(gmail|google\s+mail)\b", re.IGNORECASE)),
+    ("googlecalendar", re.compile(r"\b(google\s+calendar|gcal)\b", re.IGNORECASE)),
+    ("slack", re.compile(r"\bslack\b", re.IGNORECASE)),
+    ("notion", re.compile(r"\bnotion\b", re.IGNORECASE)),
+    ("linear", re.compile(r"\blinear\b(?!\s+(regression|algebra|model|scale|equation))", re.IGNORECASE)),
+    ("github", re.compile(r"\b(github|git\s+hub)\b", re.IGNORECASE)),
+    ("hubspot", re.compile(r"\bhubspot\b", re.IGNORECASE)),
+    ("stripe", re.compile(r"\bstripe\b", re.IGNORECASE)),
+    ("apollo", re.compile(r"\bapollo\b", re.IGNORECASE)),
+    ("salesforce", re.compile(r"\bsalesforce\b", re.IGNORECASE)),
+)
+
+_CREDENTIAL_INPUT_RE = re.compile(
+    r"\b(api[_\s-]*key|access[_\s-]*token|auth[_\s-]*token|bearer[_\s-]*token|"
+    r"client[_\s-]*secret|private[_\s-]*key|password|passwd|credential|secret)\b",
+    re.IGNORECASE,
+)
+
+_GENERIC_CREDENTIAL_RE = re.compile(
+    r"^(api[_\s-]*key|access[_\s-]*token|auth[_\s-]*token|bearer[_\s-]*token|"
+    r"client[_\s-]*secret|private[_\s-]*key|password|passwd|credential|secret)$",
+    re.IGNORECASE,
+)
+
+
+def _slug_to_secret_prefix(slug: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "_", slug.upper()).strip("_")
+
+
+def _secret_name_from_credential_input(item: Dict[str, Any], prompt: str) -> str:
+    raw_name = str(item.get("name") or item.get("label") or "API_KEY")
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", raw_name).strip("_").upper()
+    if cleaned and not _GENERIC_CREDENTIAL_RE.match(cleaned.replace("_", " ")):
+        return cleaned
+    inferred = _infer_connections_from_prompt(prompt)
+    if len(inferred) == 1:
+        return f"{_slug_to_secret_prefix(inferred[0])}_API_KEY"
+    return cleaned or "API_KEY"
+
+
+def _is_credential_input_item(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    name = str(item.get("name") or "")
+    label = str(item.get("label") or "")
+    return bool(_CREDENTIAL_INPUT_RE.search(f"{name} {label}"))
+
+
+def _repair_credential_inputs_to_secrets(manifest: Dict[str, Any], prompt: str) -> None:
+    exec_block = manifest.get("exec")
+    if not isinstance(exec_block, dict):
+        return
+    raw_inputs = exec_block.get("inputs")
+    if not isinstance(raw_inputs, list):
+        return
+
+    kept_inputs: List[Any] = []
+    moved_secret_names: List[str] = []
+    for item in raw_inputs:
+        if _is_credential_input_item(item):
+            moved_secret_names.append(_secret_name_from_credential_input(item, prompt))
+        else:
+            kept_inputs.append(item)
+    if not moved_secret_names:
+        return
+
+    raw_secrets = exec_block.get("secrets")
+    secrets: List[str] = [str(secret) for secret in raw_secrets] if isinstance(raw_secrets, list) else []
+    seen = {secret.upper() for secret in secrets}
+    for secret in moved_secret_names:
+        if secret.upper() not in seen:
+            secrets.append(secret)
+            seen.add(secret.upper())
+
+    exec_block["inputs"] = kept_inputs
+    exec_block["secrets"] = secrets
+
+
+def _connection_app_from_item(item: Any) -> Optional[str]:
+    if isinstance(item, str):
+        return item.strip().lower() or None
+    if isinstance(item, dict):
+        app = item.get("app") or item.get("composio")
+        if isinstance(app, str) and app.strip():
+            return app.strip().lower()
+    return None
+
+
+def _infer_connections_from_prompt(prompt: str) -> List[str]:
+    found: List[str] = []
+    for app, pattern in _PROMPT_CONNECTION_PATTERNS:
+        if pattern.search(prompt or ""):
+            found.append(app)
+    return found
+
+
+def _repair_prompt_declared_connections(manifest: Dict[str, Any], prompt: str) -> None:
+    inferred = _infer_connections_from_prompt(prompt)
+    if not inferred:
+        return
+    existing = manifest.get("connections")
+    if existing is None:
+        connections: List[Any] = []
+    elif isinstance(existing, list):
+        connections = list(existing)
+    else:
+        return
+
+    existing_apps = {
+        app for app in (_connection_app_from_item(item) for item in connections) if app
+    }
+    for app in inferred:
+        if app not in existing_apps:
+            connections.append(app)
+            existing_apps.add(app)
+    manifest["connections"] = connections
+
+
 def _repair_generated_worker_manifest(
     manifest: Dict[str, Any],
     *,
@@ -379,6 +498,8 @@ def _repair_generated_worker_manifest(
             if key in repaired_exec:
                 repaired_exec[key] = _normalize_named_schema_list(repaired_exec[key])
         repaired["exec"] = repaired_exec
+    _repair_credential_inputs_to_secrets(repaired, prompt)
+    _repair_prompt_declared_connections(repaired, prompt)
     return repaired
 
 
@@ -568,6 +689,11 @@ Script-mode run.py rules (these EXACT mistakes crash generated workers — never
 - trigger MUST be a single YAML mapping, never a list. Use `trigger:\n  type: "schedule"` not `trigger:\n- type: "schedule"`.
 - if you include "use_cases", it MUST contain EXACTLY 3 to 5 short items; otherwise omit the field entirely
 - if you include "tags", it MUST contain 8 or fewer flat (no "/") non-empty strings; otherwise omit it
+- inputs are business/runtime parameters only. NEVER declare API keys, tokens,
+  passwords, private keys, client secrets, OAuth credentials, or connection
+  credentials as inputs. Put credential names in exec.secrets instead (for
+  example LINEAR_API_KEY), and put OAuth-style app access in top-level
+  connections (for example connections: ["linear"]).
 - KISS and YAGNI: the smallest bundle that does exactly what was described
 
 Output media_type rule for worker.yml (CRITICAL — wrong media_type makes a correct worker look broken):
