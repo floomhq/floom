@@ -1,8 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { Inbox, AlertTriangle, Search, LayoutGrid, List as ListIcon, Plus } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 
 /**
  * The ONE shared loading / empty / error treatment for every list and
@@ -142,20 +140,35 @@ export function CollectionSkeleton({
             )}
             <div className="c-toolbar-actions">
               {showViewToggle && (
-                <SegmentedControl<"list" | "grid">
-                  ariaLabel="View mode"
-                  value="list"
-                  onChange={() => {}}
-                  options={[
-                    { value: "list", label: "List view", icon: <ListIcon />, iconOnly: true },
-                    { value: "grid", label: "Grid view", icon: <LayoutGrid />, iconOnly: true },
-                  ]}
-                />
+                <div
+                  role="group"
+                  aria-label="View mode"
+                  aria-hidden="true"
+                  className="inline-flex rounded-[var(--radius-button)] bg-[var(--bg-2)] p-0.5"
+                >
+                  <span
+                    aria-label="List view"
+                    aria-pressed="true"
+                    className="inline-flex h-[26px] min-w-[30px] items-center justify-center rounded-[calc(var(--radius-button)-1px)] bg-[var(--bg-card)] px-2.5 text-xs font-medium text-[var(--ink)] [&_svg]:size-3.5"
+                  >
+                    <ListIcon />
+                  </span>
+                  <span
+                    aria-label="Grid view"
+                    aria-pressed="false"
+                    className="inline-flex h-[26px] min-w-[30px] items-center justify-center rounded-[calc(var(--radius-button)-1px)] px-2.5 text-xs font-medium text-[var(--muted-foreground)] [&_svg]:size-3.5"
+                  >
+                    <LayoutGrid />
+                  </span>
+                </div>
               )}
               {actionLabel && (
-                <Button tabIndex={-1} aria-hidden="true">
+                <span
+                  aria-hidden="true"
+                  className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-button)] bg-[var(--primary)] px-2.5 text-sm font-medium text-[var(--solid-fg)] [&_svg]:size-4"
+                >
                   <Plus /> {actionLabel}
-                </Button>
+                </span>
               )}
             </div>
           </div>
