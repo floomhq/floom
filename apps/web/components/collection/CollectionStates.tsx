@@ -119,12 +119,14 @@ export function CollectionSkeleton({
         </div>
       </div>
 
-      {/* Control strip: real-looking (but inert) search box, view toggle and
-          action button — same markup/classes as CollectionView so there is no
-          drift between the skeleton and loaded states. */}
+      {/* Control strip: real-looking but INERT search box, view toggle and
+          action button (same markup/classes as CollectionView so there is no
+          drift between the skeleton and loaded states). `inert` makes the whole
+          row non-focusable + non-clickable during load so users can't tab into
+          or click a control that can't change state yet. */}
       <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
         <div className="c-controlstrip-inner">
-          <div className="c-controlstrip-toprow">
+          <div className="c-controlstrip-toprow" inert>
             {showSearch && (
               <div className="c-srch" aria-hidden="true">
                 <Search size={15} />
