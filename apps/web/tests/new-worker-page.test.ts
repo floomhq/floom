@@ -28,10 +28,11 @@ describe("New worker entry points", () => {
     expect(src("app/workers/WorkersCollection.tsx")).toContain("createWorkerHref()");
   });
 
-  it("/workers/new stays reachable as a real page (direct deep link), not a redirect to Emily", () => {
+  it("/workers/new redirects into the same in-Emily create flow", () => {
     const page = src("app/workers/new/page.tsx");
-    expect(page).toContain("NewWorkerClient");
-    expect(page).not.toContain("redirect(`/?create=1");
+    expect(page).toContain('redirect(`/?${target.toString()}`)');
+    expect(page).not.toContain("NewWorkerClient");
+    expect(page).not.toContain("newFromPrompt");
   });
 
   it("EmilyDock owns the in-place create flow (?create=1 effect)", () => {

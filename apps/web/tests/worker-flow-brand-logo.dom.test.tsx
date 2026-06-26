@@ -32,4 +32,18 @@ describe("WorkerFlow connection chips", () => {
 
     expect(screen.getByText("Internal Crm")).toBeInTheDocument();
   });
+
+  it("renders Linear as a highlighted text chip", () => {
+    const { container } = render(
+      <WorkerFlow
+        workerName="Linear Follow-up"
+        connections={["linear"]}
+      />,
+    );
+
+    const chip = screen.getByText("Linear").closest("span");
+    expect(chip).toBeTruthy();
+    expect(chip?.getAttribute("style")).toContain("color-mix");
+    expect(container.querySelector('use[href="#brand-linear"]')).toBeTruthy();
+  });
 });

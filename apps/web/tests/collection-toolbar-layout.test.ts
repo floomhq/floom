@@ -16,8 +16,13 @@ describe("collection toolbar layout", () => {
   });
 
   it("keeps the resting search input at a compact desktop width", () => {
-    expect(cssSource).toContain("flex: 0 1 420px;");
-    expect(cssSource).toContain("max-width: 420px;");
+    expect(cssSource).toContain("flex: 0 1 360px;");
+    expect(cssSource).toContain("max-width: 360px;");
     expect(cssSource).not.toContain("max-width: 560px;");
+  });
+
+  it("does not draw an underline below the collection controls", () => {
+    const controlStripRule = cssSource.match(/\.c-controlstrip \{[\s\S]*?\}/)?.[0] ?? "";
+    expect(controlStripRule).not.toContain("border-bottom");
   });
 });

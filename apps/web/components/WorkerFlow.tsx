@@ -226,6 +226,30 @@ function ToolChip({ value }: { value: string }) {
   const label = friendlyToolLabel(slug || value);
   const hasLogo = KNOWN_BRAND_SLUGS.has(slug);
 
+  if (slug === "linear") {
+    return (
+      <span
+        aria-label={label}
+        title={label}
+        style={{
+          height: 18,
+          borderRadius: 5,
+          background: "color-mix(in srgb, var(--accent) 12%, var(--bg-card))",
+          color: ink,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "0 7px",
+          fontSize: 9.5,
+          fontWeight: 600,
+        }}
+      >
+        <BrandLogo icon={slug} className="size-[10px]" />
+        {label}
+      </span>
+    );
+  }
+
   if (hasLogo) {
     return (
       <span

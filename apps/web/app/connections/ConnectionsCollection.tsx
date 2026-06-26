@@ -1034,7 +1034,7 @@ export default function ConnectionsCollection({
                     value:
                       usedByCount > 0 ? (
                         <Link
-                          href={`?tab=Used+by`}
+                          href={`?sel=${encodeURIComponent(i.id)}&tab=Used+by`}
                           style={{
                             color: "var(--accent)",
                             textDecoration: "underline",

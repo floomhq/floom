@@ -73,6 +73,7 @@ export interface ListRowSpec {
 
 export interface RowMenuItem {
   label: string;
+  icon?: ReactNode;
   onSelect: () => void;
   danger?: boolean;
   confirm?: Pick<

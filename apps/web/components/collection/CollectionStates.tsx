@@ -174,13 +174,7 @@ export function CollectionSkeleton({
           </div>
         </div>
       </div>
-      {showFilter && (
-        <div className="c-filterstrip" style={{ padding: `0 ${PAGE_X}px` }}>
-          <div>
-            <Skeleton className="h-7 w-24 rounded-[var(--radius-pill)]" />
-          </div>
-        </div>
-      )}
+      {showFilter && <div className="c-filterstrip" style={{ padding: `0 ${PAGE_X}px` }} />}
 
       {/* List: ONLY the content rows are a skeleton (the real header above is
           live). Rows match the real `.c-lrow` footprint so there is no jump. */}
