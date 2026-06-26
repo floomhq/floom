@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { FloomMark } from "@/components/layout/sidebar";
+import { BetaBadge } from "@/components/BetaBadge";
 import { cn } from "@/lib/utils";
 
 export default function NotFound() {
@@ -33,6 +34,7 @@ export default function NotFound() {
         <div className="flex items-center gap-2">
           <FloomMark size={24} />
           <span className="text-base font-semibold tracking-tight">Floom</span>
+          <BetaBadge />
         </div>
 
         <div className="mt-10 space-y-3">

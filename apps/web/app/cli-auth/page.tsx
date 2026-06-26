@@ -7,6 +7,7 @@ import { Check, X } from "lucide-react";
 import { ChevronDown, ShieldCheck, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloomMark } from "@/components/layout/sidebar";
+import { BetaBadge } from "@/components/BetaBadge";
 
 const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 const DEFAULT_CLI_AUTH_ENDPOINT_BASE = `${BASE_PATH}/api/proxy/cli-auth`;
@@ -95,6 +96,7 @@ export function CliAuthContent({
             <div className="mb-7 flex items-center gap-2.5">
               <FloomMark size={22} />
               <span className="text-sm font-semibold tracking-tight">Floom</span>
+              <BetaBadge />
             </div>
 
             {isTerminal ? (

@@ -4,6 +4,7 @@
 // real SVG, never a text-in-circle.
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { BetaBadge } from "@/components/BetaBadge";
 
 /** Fixed share-card body height. All share surfaces match this (spec: 480px). */
 export const SHARE_CARD_BODY_HEIGHT = 480;
@@ -27,7 +28,12 @@ export function FloomMark({ size = 22, label = "Floom" }: { size?: number; label
           fill="#FFFFFF"
         />
       </svg>
-      {label}
+      {label ? (
+        <>
+          <span>{label}</span>
+          <BetaBadge />
+        </>
+      ) : null}
     </Link>
   );
 }

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
+import { BetaBadge } from "@/components/BetaBadge";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { useQueryClient } from "@tanstack/react-query";
@@ -166,8 +167,11 @@ export function WorkspaceMark({
 function MobileWorkspaceName() {
   const name = useActiveWorkspaceName();
   return (
-    <span className="font-semibold text-base tracking-tight truncate">
-      {resolveWorkspaceName(name)}
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="truncate text-base font-semibold tracking-tight">
+        {resolveWorkspaceName(name)}
+      </span>
+      <BetaBadge />
     </span>
   );
 }

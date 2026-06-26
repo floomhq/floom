@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { MessageCircle, Hash, LayoutDashboard } from "lucide-react";
 import { FloomMark } from "@/components/layout/sidebar";
+import { BetaBadge } from "@/components/BetaBadge";
 
 export const metadata = { title: "Start · Floom" };
 
@@ -34,6 +35,7 @@ export default function StartPage() {
       <div className="mb-8 flex items-center gap-2">
         <FloomMark size={22} />
         <span className="text-base font-semibold tracking-tight">Floom</span>
+        <BetaBadge />
       </div>
 
       <h1 className="text-2xl font-semibold tracking-tight">Start where you work.</h1>

@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { Avatar } from "@/components/ui/Avatar";
+import { BetaBadge } from "@/components/BetaBadge";
 import { getWorkspaceActionAvailability, getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
 import { computeIsAdmin } from "@/lib/use-is-admin";
 import type { LocalWorkspace } from "@/lib/types";
@@ -332,7 +333,10 @@ export function WorkspaceSwitcher() {
         >
           {/* Workspace mark: generative avatar, seeded by workspace name */}
           <WorkspaceAvatar id={active.id} name={active.name} size={24} logoUrl={companyLogoUrl(active.name)} />
-          <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="truncate text-left">{resolveWorkspaceName(active.name)}</span>
+            <BetaBadge />
+          </span>
           <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
         {/* V9 (the operator 2026-06-02): "this can also be cleaner." The popover is

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FloomMark } from "@/components/layout/sidebar";
+import { BetaBadge } from "@/components/BetaBadge";
 import { sanitizeRedirect } from "@/lib/redirects";
 import { capturePostHogEvent } from "@/lib/posthog";
 
@@ -19,6 +20,7 @@ function BrandPanel() {
       <div className="flex items-center gap-2.5">
         <FloomMark size={22} />
         <span className="text-sm font-semibold tracking-tight">Floom</span>
+        <BetaBadge />
       </div>
 
       <div className="max-w-xs space-y-3">
@@ -185,6 +187,7 @@ function LoginContent() {
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <FloomMark size={22} />
             <span className="text-sm font-semibold tracking-tight">Floom</span>
+            <BetaBadge />
           </div>
 
           {mode === "loading" ? (
