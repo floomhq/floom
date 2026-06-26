@@ -1,6 +1,6 @@
 // Settings nav, grouped per APP-UI-V4-SPEC section 4:
 //   Workspace · {name} and Account · {user}
-// with a counts strip like "6 workspace · 3 account".
+// with a counts strip like "6 workspace · 2 account".
 //
 // Developer owns all programmatic access: personal tokens, workspace token,
 // REST API, MCP, CLI, and Git sync. Token scope is called out inside that pane
@@ -17,8 +17,7 @@ export interface SettingsNavItem {
     | "versions"
     | "danger"
     | "developer"
-    | "appearance"
-    | "profile";
+    | "appearance";
   label: string;
   scope: SettingsScope;
   description: string;
@@ -33,7 +32,6 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
   { key: "versions", label: "Backups & history", scope: "workspace", description: "Restore points, download a copy, and undo" },
   { key: "danger", label: "Danger zone", scope: "workspace", description: "Irreversible actions" },
   // Account · {user}: per-user controls.
-  { key: "profile", label: "Profile", scope: "account", description: "Display name & avatar" },
   { key: "developer", label: "Developer", scope: "account", description: "API, CLI, MCP, Git & tokens" },
   { key: "appearance", label: "Appearance", scope: "account", description: "Theme (light, dark, system)" },
 ];
@@ -42,7 +40,7 @@ export function settingsGroup(scope: SettingsScope): SettingsNavItem[] {
   return SETTINGS_NAV.filter((i) => i.scope === scope);
 }
 
-/** Count strip, e.g. "6 workspace · 3 account". */
+/** Count strip, e.g. "6 workspace · 2 account". */
 export function settingsCounts(): string {
   const ws = settingsGroup("workspace").length;
   const acct = settingsGroup("account").length;

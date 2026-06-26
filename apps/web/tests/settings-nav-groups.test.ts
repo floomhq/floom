@@ -6,9 +6,9 @@ import {
   groupLabel,
 } from "@/lib/settings/nav-groups";
 
-// Two-group settings nav. Developer consolidates programmatic access
-// (personal tokens, workspace token, API, MCP, CLI, Git) so Settings stays
-// scannable at the top level.
+// Historical 8-item Settings IA: six workspace rows and two account rows.
+// Developer consolidates programmatic access (personal tokens, workspace token,
+// API, MCP, CLI, Git) so Settings stays scannable at the top level.
 
 describe("Settings nav groups", () => {
   it("keeps workspace settings to six top-level rows", () => {
@@ -22,9 +22,8 @@ describe("Settings nav groups", () => {
     ]);
   });
 
-  it("keeps account settings to three top-level rows", () => {
+  it("keeps account settings to two top-level rows", () => {
     expect(settingsGroup("account").map((i) => i.label)).toEqual([
-      "Profile",
       "Developer",
       "Appearance",
     ]);
@@ -37,7 +36,7 @@ describe("Settings nav groups", () => {
   });
 
   it("count strip reflects the live groups", () => {
-    expect(settingsCounts()).toBe("6 workspace · 3 account");
+    expect(settingsCounts()).toBe("6 workspace · 2 account");
   });
 
   it("group labels carry the name when known", () => {

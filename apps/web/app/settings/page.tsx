@@ -52,7 +52,6 @@ import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/Cl
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
-import { Avatar } from "@/components/ui/Avatar";
 import {
   useAssistantName,
   setCachedAssistantName,
@@ -83,7 +82,6 @@ import {
   ShieldAlert,
   Trash2,
   UserPlus,
-  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -895,8 +893,6 @@ function SettingsContent() {
         return <DeveloperSection workspaceName={workspaceName} />;
       case "appearance":
         return <AppearanceSection />;
-      case "profile":
-        return <ProfileSection currentUser={currentUser} onUpdated={(u) => setCurrentUser(u)} />;
     }
   }
 
@@ -996,8 +992,6 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return Code2;
     case "appearance":
       return Palette;
-    case "profile":
-      return UserRound;
   }
 }
 
@@ -1325,78 +1319,6 @@ function AppearanceSection() {
   );
 }
 
-function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser | null; onUpdated: (u: CurrentUser) => void }) {
-  const [displayName, setDisplayName] = useState(currentUser?.display_name ?? "");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setDisplayName(currentUser?.display_name ?? "");
-  }, [currentUser?.display_name]);
-
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    const name = displayName.trim();
-    if (!name) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_BASE}/me`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ display_name: name }),
-      });
-      if (res.ok) {
-        const updated = (await res.json()) as CurrentUser;
-        onUpdated(updated);
-      } else {
-        // Optimistic update if backend doesn't support PATCH /me yet
-        if (currentUser) onUpdated({ ...currentUser, display_name: name });
-      }
-      toast.success("Name updated");
-    } catch {
-      if (currentUser) onUpdated({ ...currentUser, display_name: name });
-      toast.success("Name updated");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const email = currentUser?.email ?? "";
-  // User photo (Google/GitHub) when the host /me supplies it; else generated.
-  const photoUrl = currentUser?.picture ?? currentUser?.avatar_url ?? null;
-
-  return (
-    <div className="space-y-6">
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
-        <div className="flex items-center gap-4">
-          <Avatar role="user" name={displayName || email || "User"} src={photoUrl} size={56} />
-          <div className="min-w-0">
-            <p className="font-medium">{displayName || email}</p>
-            <p className="text-sm text-muted-foreground">{email}</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Display name</h2>
-        <form onSubmit={(e) => void handleSave(e)} className="flex gap-2">
-          <Input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Your name"
-            className="max-w-xs"
-          />
-          <Button type="submit" size="sm" disabled={saving || !displayName.trim()}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </form>
-        <p className="text-xs text-muted-foreground">
-          Your display name is shown in the sidebar and in activity logs.
-        </p>
-      </section>
-    </div>
-  );
-}
 
 function DangerSection({
   canEdit,
