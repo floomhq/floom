@@ -73,7 +73,6 @@ import {
   ExternalLink,
   History,
   Info,
-  KeyRound,
   Mail,
   MessageSquare,
   Palette,
@@ -469,18 +468,15 @@ function isValidSection(value: string | null): value is SectionKey {
 function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
     // Legacy aliases kept for back-compat with old deep-links.
-    value === "api" ? "connect" :
+    value === "api" ? "developer" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
-    value === "git" ? "connect" :
-    // The "developer" section was split into two token panes + a connect pane.
-    // Old ?sel=developer links land on the API/MCP/CLI/Git reference.
-    value === "developer" ? "connect" :
-    // workspace_tokens was a standalone nav item, then briefly a Developer
-    // sub-tab; it is now its own workspace-scoped pane again.
-    value === "workspace_tokens" ? "workspace_token" :
-    // Personal tokens used to live under Developer > Tokens.
-    value === "tokens" ? "personal_tokens" :
+    value === "git" ? "developer" :
+    value === "connect" ? "developer" :
+    value === "workspace_token" ? "developer" :
+    value === "workspace_tokens" ? "developer" :
+    value === "personal_tokens" ? "developer" :
+    value === "tokens" ? "developer" :
     value;
   return isValidSection(candidate) ? candidate : null;
 }
@@ -895,12 +891,8 @@ function SettingsContent() {
             onClearRuns={handleClearRuns}
           />
         );
-      case "workspace_token":
-        return <WorkspaceTokenSection workspaceName={workspaceName} />;
-      case "personal_tokens":
-        return <PersonalTokensSection workspaceName={workspaceName} />;
-      case "connect":
-        return <ConnectSection />;
+      case "developer":
+        return <DeveloperSection workspaceName={workspaceName} />;
       case "appearance":
         return <AppearanceSection />;
       case "profile":
@@ -1000,11 +992,7 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return History;
     case "danger":
       return ShieldAlert;
-    case "workspace_token":
-      return KeyRound;
-    case "personal_tokens":
-      return KeyRound;
-    case "connect":
+    case "developer":
       return Code2;
     case "appearance":
       return Palette;
@@ -1220,55 +1208,36 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
   );
 }
 
-// WorkspaceTokenSection (workspace scope) — re-homes WorkspaceTokensPanel under
-// WORKSPACE with its own scope banner + a cross-link to Account · Personal
-// access tokens. The token CRUD itself is unchanged (same api.workspace.tokens
-// calls); this only re-homes + re-labels it (mockup .pane[data-pane="ws-token"]).
-function WorkspaceTokenSection({ workspaceName }: { workspaceName: string }) {
+// DeveloperSection: one account-scoped home for programmatic access (tokens, API, MCP, CLI, Git).
+function DeveloperSection({ workspaceName }: { workspaceName: string }) {
   return (
-    <div className="space-y-5">
-      <WorkspaceTokensPanel />
-      <ScopeCrossLink
-        title="This is not your personal token."
-        body={`It is shared by everyone in ${workspaceName} and authenticates this workspace's CLI & CI. Rotating it breaks any CI using the old value. For a token tied to just you, see`}
-        linkLabel="Account → Personal access tokens"
-        targetSel="personal_tokens"
-      />
-    </div>
-  );
-}
-
-// PersonalTokensSection (account scope) — re-homes PersonalAccessTokensPanel
-// under ACCOUNT with its own scope banner + a cross-link to Workspace · token.
-// CRUD unchanged (api.tokens.*) (mockup .pane[data-pane="acct-tokens"]).
-function PersonalTokensSection({ workspaceName }: { workspaceName: string }) {
-  return (
-    <div className="space-y-5">
-      <PersonalAccessTokensPanel />
-      <ScopeCrossLink
-        title="These are yours, not the workspace's."
-        body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
-        linkLabel={`Workspace · ${workspaceName} → Access key`}
-        targetSel="workspace_token"
-      />
-    </div>
-  );
-}
-
-// ConnectSection (account scope) — the developer reference snippets that used to
-// share the Developer page with token CRUD: REST API, MCP install, CLI, and Git
-// sync. No token management here anymore (it moved to the two token panes); this
-// is read-only reference plus the Git workspace panel. (#616 GitWorkspacePanel
-// preserved.)
-function ConnectSection() {
-  return (
-    <Tabs defaultValue="api">
+    <Tabs defaultValue="personal-tokens">
       <TabsList>
+        <TabsTrigger value="personal-tokens">Personal tokens</TabsTrigger>
+        <TabsTrigger value="workspace-token">Workspace token</TabsTrigger>
         <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
+      <TabsContent value="personal-tokens" className="space-y-5">
+        <PersonalAccessTokensPanel />
+        <ScopeCrossLink
+          title="These are yours, not the workspace's."
+          body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
+          linkLabel={`Workspace · ${workspaceName} token`}
+          targetSel="developer"
+        />
+      </TabsContent>
+      <TabsContent value="workspace-token" className="space-y-5">
+        <WorkspaceTokensPanel />
+        <ScopeCrossLink
+          title="This is not your personal token."
+          body={`It is shared by everyone in ${workspaceName} and authenticates this workspace's CLI & CI. Rotating it breaks any CI using the old value. For a token tied to just you, see`}
+          linkLabel="Personal tokens"
+          targetSel="developer"
+        />
+      </TabsContent>
       <TabsContent value="api" className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-sm font-medium">REST API</h2>
@@ -1311,7 +1280,7 @@ function ConnectSection() {
             type="button"
             className="font-medium text-[var(--accent)] hover:underline"
             onClick={() => {
-              navigateSettingsSelection("personal_tokens");
+              navigateSettingsSelection("developer");
             }}
           >
             Account · Personal access tokens
@@ -2506,7 +2475,7 @@ function MembersSettingsPanel() {
 // "Backups & history": download a workspace copy, browse the unified git
 // timeline (workers, library, notes), undo recent workspace-note/persona edits,
 // and surface GitHub sync status when connected. Git SHA/branch vocabulary stays
-// out of the UI; connect/setup lives under Account · Connect & automate.
+// out of the UI; connect/setup lives under Account · Developer.
 type UndoScope = "instructions" | "base";
 
 function changelogScopeLabel(assetType: string, assetName: string): string {
@@ -2620,7 +2589,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
           Every save to workers, library folders, and workspace notes appears here.
           {gitStatus?.connected
             ? " Connected repos receive these commits when Floom pushes to GitHub."
-            : " To back up to GitHub, connect a repo under Account · Connect & automate."}
+            : " To back up to GitHub, connect a repo under Account · Developer."}
         </p>
         {gitStatus?.connected && gitStatus.repo_url ? (
           <p className="text-xs text-muted-foreground">
@@ -2644,7 +2613,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
             <button
               type="button"
               className="font-medium text-[var(--accent)] hover:underline"
-              onClick={() => navigateSettingsSelection("connect")}
+              onClick={() => navigateSettingsSelection("developer")}
             >
               Connect GitHub
             </button>

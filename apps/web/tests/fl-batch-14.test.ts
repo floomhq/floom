@@ -22,38 +22,37 @@ describe("#616 Settings Developer section", () => {
     expect(s).toContain('import { GitWorkspacePanel } from "@/components/GitWorkspacePanel"');
   });
 
-  it("defines Connect & automate as the account-scoped home for Git sync", () => {
-    // The Workspace/Account split moved token CRUD into two dedicated panes and
-    // re-homed the developer reference (API/MCP/CLI/Git) under "Connect &
-    // automate". Git still lives there, account-scoped.
+  it("defines Developer as the account-scoped home for programmatic access", () => {
+    // Developer owns personal tokens, workspace token, API, MCP, CLI, and Git
+    // so Settings stays compact at the top level.
     const nav = src("lib/settings/nav-groups.ts");
-    expect(nav).toContain('{ key: "connect", label: "Connect & automate", scope: "account"');
+    expect(nav).toContain('{ key: "developer", label: "Developer", scope: "account"');
     const s = src("app/settings/page.tsx");
-    expect(s).toContain('"connect"');
-    expect(s).toContain("function ConnectSection()");
+    expect(s).toContain('"developer"');
+    expect(s).toContain("function DeveloperSection");
   });
 
-  it("renders GitWorkspacePanel inside the Connect & automate detail", () => {
+  it("renders GitWorkspacePanel inside the Developer detail", () => {
     const s = src("app/settings/page.tsx");
-    const connectSectionIdx = s.indexOf("function ConnectSection()");
-    expect(connectSectionIdx).toBeGreaterThanOrEqual(0);
-    // Window covers the whole ConnectSection body (the API tab sits ahead of the
+    const developerSectionIdx = s.indexOf("function DeveloperSection");
+    expect(developerSectionIdx).toBeGreaterThanOrEqual(0);
+    // Window covers the whole DeveloperSection body (the API tab sits ahead of the
     // Git tab, so the Git panel is further down).
-    expect(s.slice(connectSectionIdx, connectSectionIdx + 5000)).toContain("<GitWorkspacePanel />");
+    expect(s.slice(developerSectionIdx, developerSectionIdx + 5000)).toContain("<GitWorkspacePanel />");
   });
 
   it("uses Bearer auth for account-scoped API snippets", () => {
     const s = src("app/settings/page.tsx");
     const snippetIdx = s.indexOf("const API_CALL_SNIPPET");
-    const connectSectionIdx = s.indexOf("function ConnectSection()");
+    const developerSectionIdx = s.indexOf("function DeveloperSection");
     expect(snippetIdx).toBeGreaterThanOrEqual(0);
-    expect(connectSectionIdx).toBeGreaterThanOrEqual(0);
+    expect(developerSectionIdx).toBeGreaterThanOrEqual(0);
 
     const snippet = s.slice(snippetIdx, snippetIdx + 600);
-    const connectSection = s.slice(connectSectionIdx, connectSectionIdx + 2500);
+    const developerSection = s.slice(developerSectionIdx, developerSectionIdx + 3000);
     expect(snippet).toContain('Authorization: Bearer <your-token>');
     expect(snippet).not.toContain("x-floom-secret");
-    expect(connectSection).toContain("Authorization: Bearer");
+    expect(developerSection).toContain("Authorization: Bearer");
   });
 
   it("keeps GitWorkspacePanel wired to the /system/git API wrappers", () => {
