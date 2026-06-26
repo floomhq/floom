@@ -186,7 +186,7 @@ export function ChipPreviewDialog({
               className="c-vpill ml-auto shrink-0"
               style={{ padding: "4px 9px", textDecoration: "none" }}
             >
-              Open
+              Open connection
             </Link>
           )}
           {target?.kind === "brain" && (
@@ -195,7 +195,7 @@ export function ChipPreviewDialog({
               className="c-vpill ml-auto shrink-0"
               style={{ padding: "4px 9px", textDecoration: "none" }}
             >
-              Open
+              Open folder
             </Link>
           )}
         </DialogHeader>

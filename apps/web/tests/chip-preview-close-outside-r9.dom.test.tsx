@@ -77,6 +77,24 @@ describe("GAP-POPCLOSE: chip preview popover dismissal", () => {
     );
   });
 
+  it("offers explicit links to the full connection and folder pages", async () => {
+    const { ChipPreviewDialog } = await import("@/components/worker/ChipPreviewDialog");
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <ChipPreviewDialog target={{ kind: "integration", app: "gmail" }} onOpenChange={onOpenChange} />,
+    );
+
+    const connectionLink = await screen.findByRole("link", { name: "Open connection" });
+    expect(connectionLink).toHaveAttribute("href", "/connections");
+
+    rerender(
+      <ChipPreviewDialog target={{ kind: "brain", name: "customer notes" }} onOpenChange={onOpenChange} />,
+    );
+
+    const folderLink = await screen.findByRole("link", { name: "Open folder" });
+    expect(folderLink).toHaveAttribute("href", "/contexts?pack=customer%20notes");
+  });
+
   // The realistic reproduction: the chip preview opens from inside the worker
   // detail Dialog (WorkerBrainEditor / WorkerToolsEditor render inside it), so
   // it is a NESTED Base UI dialog. This is where the backdrop-equality branch

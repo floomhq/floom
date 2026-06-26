@@ -248,6 +248,104 @@ def test_worker_author_repairs_single_trigger_list():
     assert manifest["trigger"] == {"type": "schedule", "cron": "30 5 * * *"}
 
 
+def test_worker_author_repairs_linear_prompt_connections():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "linear-triage",
+            "title": "Linear Triage",
+            "description": "Prioritises Linear issues for review.",
+            "version": "0.1.0",
+            "trigger": {"type": "manual"},
+            "exec": {"entry": "SKILL.md", "runner": "e2b"},
+            "connections": [],
+        },
+        prompt="Create a Linear triage worker",
+    )
+
+    assert manifest["connections"] == ["linear"]
+
+
+def test_worker_author_preserves_existing_connection_objects_when_inferring_prompt_apps():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "github-slack-digest",
+            "title": "GitHub Slack Digest",
+            "description": "Sends GitHub activity to Slack.",
+            "version": "0.1.0",
+            "trigger": {"type": "manual"},
+            "exec": {"entry": "SKILL.md", "runner": "e2b"},
+            "connections": [{"app": "github", "allowed_tools": ["GITHUB_LIST_PULL_REQUESTS"]}],
+        },
+        prompt="Create a GitHub PR digest and send it to Slack",
+    )
+
+    assert manifest["connections"] == [
+        {"app": "github", "allowed_tools": ["GITHUB_LIST_PULL_REQUESTS"]},
+        "slack",
+    ]
+
+
+def test_worker_author_moves_api_key_inputs_to_exec_secrets():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "linear-triage",
+            "title": "Linear Triage",
+            "description": "Prioritises Linear issues for review.",
+            "version": "0.1.0",
+            "trigger": {"type": "manual"},
+            "exec": {
+                "entry": "run.py",
+                "runner": "e2b",
+                "inputs": [
+                    {"name": "team_key", "label": "Team key", "type": "string"},
+                    {"name": "linear_api_key", "label": "Linear API key", "type": "string"},
+                ],
+                "secrets": [],
+            },
+        },
+        prompt="Create a Linear triage worker",
+    )
+
+    assert manifest["exec"]["inputs"] == [
+        {"name": "team_key", "label": "Team key", "type": "string"}
+    ]
+    assert manifest["exec"]["secrets"] == ["LINEAR_API_KEY"]
+
+
+def test_worker_author_infers_secret_name_for_generic_api_key_input():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "stripe-alerts",
+            "title": "Stripe Alerts",
+            "description": "Creates Stripe alerts.",
+            "version": "0.1.0",
+            "trigger": {"type": "manual"},
+            "exec": {
+                "entry": "run.py",
+                "runner": "e2b",
+                "inputs": [
+                    {"name": "api_key", "label": "API key", "type": "string"},
+                    {"name": "minimum_amount", "label": "Minimum amount", "type": "number"},
+                ],
+            },
+        },
+        prompt="Create a Stripe alert worker",
+    )
+
+    assert manifest["exec"]["inputs"] == [
+        {"name": "minimum_amount", "label": "Minimum amount", "type": "number"}
+    ]
+    assert manifest["exec"]["secrets"] == ["STRIPE_API_KEY"]
+
+
 def test_worker_author_env_bridge_uses_resolved_model_and_provider_env(monkeypatch):
     from runner_sandbox.e2b_driver import _worker_author_platform_env
 
