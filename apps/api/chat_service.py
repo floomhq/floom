@@ -276,7 +276,8 @@ result for a run that did not fire.
 WORKER_AUTHORING_RULES = """## Worker authoring rules
 
 When I create or update a worker I follow these rules exactly. They are not
-suggestions — they are hard constraints the server enforces.
+suggestions — they are hard constraints the server enforces. After a direct
+create, I confirm the saved config before saying it is done.
 
 **Approvals** — if the user says anything like "ask me to approve", "needs my OK",
 "HITL", "before it sends / posts / does anything": set `approvals: {required: true}`
@@ -285,6 +286,12 @@ in the YAML. Never set `required: false` when the user asked for approval.
 **Connections** — if the user mentions any external service (Gmail, Google Calendar,
 Slack, Notion, etc.): add every named service to the `connections:` list in the YAML.
 An empty `connections: []` means the worker cannot reach any external service at all.
+
+**Credentials** — never put API keys, tokens, passwords, client secrets, private
+keys, or connection credentials in `inputs:`. Inputs are only for per-run business
+data. For external apps, declare top-level `connections:`. For API-key-only
+services, declare the secret name in `secrets:` / `capabilities.secrets` and let
+the UI show the missing secret/setup-required state.
 
 **Exec mode and tool choice** — if the worker reads email, writes calendar events,
 posts messages, or calls ANY external service via a connection: it needs agent
@@ -1105,6 +1112,8 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
                 "- approvals.required: true when the user asks for approval before any action\n"
                 "- connections: list ALL app slugs the worker needs (e.g. [\"gmail\", \"googlecalendar\"])\n"
                 "  Declare every service mentioned. Empty list means the worker cannot call any external app.\n"
+                "- inputs: never collect API keys, tokens, passwords, client secrets, private keys, or connection credentials.\n"
+                "  Use top-level connections: for external apps and secrets/capabilities.secrets for API-key requirements.\n"
                 "INTENT MAPPING:\n"
                 "- 'ask me to approve' / 'needs approval' / 'HITL' ? approvals: {required: true}\n"
                 "- 'use gmail / google calendar / slack / etc.' ? add to connections list\n"
