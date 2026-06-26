@@ -56,18 +56,17 @@ describe("Emily home empty — first-worker zero-state polish", () => {
     const { container } = renderFirstWorker();
     await screen.findByText(/hire your first worker/i);
 
-    // The "Granola → HubSpot" pill is a button whose accessible name is the
+    // The "Create a Linear triage worker" pill is a button whose accessible name is the
     // full prompt text (so seeding still works).
-    const pill = screen.getByRole("button", { name: /Summarise my Granola meetings/i });
+    const pill = screen.getByRole("button", { name: /Create a Linear triage worker/i });
     expect(pill).toBeInTheDocument();
 
     // Inline brand icons: BrandLogo renders an <svg><use href="#brand-..."/>.
-    // Granola + HubSpot are both highlighted inline within that pill.
+    // Linear is highlighted inline within that pill.
     const brandUses = Array.from(container.querySelectorAll("use"))
       .map((u) => u.getAttribute("href") || "")
       .filter((h) => h.startsWith("#brand-"));
-    expect(brandUses).toContain("#brand-granola");
-    expect(brandUses).toContain("#brand-hubspot");
+    expect(brandUses).toContain("#brand-linear");
   });
 
   it("has NO separate 'Uses' / 'Will use' chip-row label", async () => {

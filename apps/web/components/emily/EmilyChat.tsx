@@ -842,6 +842,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 initialData={homeInitialData}
                 onSeed={(text) => setInput(text)}
                 onPickMcp={() => mcpModal.open()}
+                createMode={createMode}
               />
               <div className="mt-6 w-full max-w-2xl px-6">
                 {/* Hero composer (Federico 2026-06-21): the home/create empty
@@ -858,6 +859,9 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
                   variant="landing"
+                  // Only the worker-create flow says "Hire"; the home/normal
+                  // Emily reads "Ask" (it's a chat, not a worker-builder).
+                  ctaLabel={createMode ? "Hire" : "Ask"}
                   large
                   // #1698: "New worker" / ?create=1 must give visible feedback
                   // from ANY route. Focus the composer when entering create mode

@@ -114,17 +114,6 @@ function ScopeChip({ scope, name }: { scope: SettingsScope; name?: string | null
   );
 }
 
-// Pane-level scope banner: a chip + one-line "what this scope means" detail,
-// restated at the top of the content (mockup .pane-scope).
-function ScopeBanner({ scope, name, detail }: { scope: SettingsScope; name?: string | null; detail: string }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <ScopeChip scope={scope} name={name} />
-      <span className="text-xs text-muted-foreground">{detail}</span>
-    </div>
-  );
-}
-
 // Cross-link callout that disambiguates the two token scopes in-place
 // (mockup .note). "This is not your personal token → see …" and vice-versa.
 function navigateSettingsSelection(targetSel: string) {
@@ -809,7 +798,7 @@ function SettingsContent() {
             {item.description}
           </>
         ),
-        status: { tone: "idle", label: item.scope === "workspace" ? "Workspace" : "Account" },
+        status: null,
       }),
       detail: (item) => ({
         header: {
@@ -909,7 +898,7 @@ function SettingsContent() {
       case "workspace_token":
         return <WorkspaceTokenSection workspaceName={workspaceName} />;
       case "personal_tokens":
-        return <PersonalTokensSection accountName={accountName} workspaceName={workspaceName} />;
+        return <PersonalTokensSection workspaceName={workspaceName} />;
       case "connect":
         return <ConnectSection />;
       case "appearance":
@@ -1238,11 +1227,6 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
 function WorkspaceTokenSection({ workspaceName }: { workspaceName: string }) {
   return (
     <div className="space-y-5">
-      <ScopeBanner
-        scope="workspace"
-        name={workspaceName}
-        detail={`Scoped to ${workspaceName} · used by this workspace's CLI & CI`}
-      />
       <WorkspaceTokensPanel />
       <ScopeCrossLink
         title="This is not your personal token."
@@ -1257,14 +1241,9 @@ function WorkspaceTokenSection({ workspaceName }: { workspaceName: string }) {
 // PersonalTokensSection (account scope) — re-homes PersonalAccessTokensPanel
 // under ACCOUNT with its own scope banner + a cross-link to Workspace · token.
 // CRUD unchanged (api.tokens.*) (mockup .pane[data-pane="acct-tokens"]).
-function PersonalTokensSection({ accountName, workspaceName }: { accountName?: string; workspaceName: string }) {
+function PersonalTokensSection({ workspaceName }: { workspaceName: string }) {
   return (
     <div className="space-y-5">
-      <ScopeBanner
-        scope="account"
-        name={accountName}
-        detail="Yours · works across all your workspaces"
-      />
       <PersonalAccessTokensPanel />
       <ScopeCrossLink
         title="These are yours, not the workspace's."
@@ -3013,7 +2992,7 @@ function WhatsAppBindingStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// ChannelsTab — Slack + WhatsApp + Agent install
+// ChannelsTab — Slack + WhatsApp + MCP setup
 // ---------------------------------------------------------------------------
 function EmailChannelStatus() {
   const [status, setStatus] = useState<{ connected: boolean; email?: string | null } | null>(null);
@@ -3065,7 +3044,7 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           <TabsTrigger value="slack">Slack</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
-          <TabsTrigger value="agent-install">Agent install</TabsTrigger>
+          <TabsTrigger value="agent-install">MCP setup</TabsTrigger>
         </TabsList>
         <TabsContent value="slack" className="space-y-4">
           <div className="c-ltable">

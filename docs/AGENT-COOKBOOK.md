@@ -274,7 +274,7 @@ When done, call write_output("brief", "<markdown content>").
 # worker.yml (delta from script mode)
 entrypoint: SKILL.md
 limits:
-  max_tool_iterations: 12
+  max_tool_iterations: 30
   max_output_tokens: 4096
   max_total_tokens: 50000
   timeout_seconds: 300
