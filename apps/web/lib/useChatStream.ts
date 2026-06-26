@@ -348,8 +348,9 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
           const reader = resp.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
+          let sawTerminalEvent = false;
 
-          while (true) {
+          while (!sawTerminalEvent) {
             const { done, value } = await reader.read();
             if (done) break;
 
@@ -390,12 +391,17 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
 
               if (event.type === "error") {
                 setError(sseErrorMessage(event));
+                sawTerminalEvent = true;
                 break;
               }
               if (event.type === "finish") {
+                sawTerminalEvent = true;
                 break;
               }
             }
+          }
+          if (sawTerminalEvent) {
+            await reader.cancel().catch(() => undefined);
           }
         } catch (err: unknown) {
           if (err instanceof DOMException && err.name === "AbortError") {

@@ -42,12 +42,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ActionMenu } from "@/components/ui/action-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import type { CollectionConfig, CustomTabReason, TagFamilyKey } from "@/lib/collection/types";
 import {
   Collection,
@@ -62,11 +56,18 @@ import {
 import { LoadingState } from "@/components/collection/CollectionStates";
 import {
   ArrowRight,
+  Archive,
   Brain,
   ChevronDown,
+  CopyPlus,
+  Edit3,
   Lock,
   Mail,
+  PauseCircle,
+  PlayCircle,
   Plus,
+  RotateCcw,
+  Share2,
   Trash2,
   Webhook,
   X,
@@ -411,15 +412,10 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 // while /runs showed the full history for the same worker. Using the proven
 // worker-scoped list query here makes the two surfaces agree.
 //
-// Module-level cache keyed by worker id so the (synchronously-rendered) tab badge
-// and this tab body read the SAME data — that shared source is what stops the
-// "Runs N" badge flipping 0↔1 across tab clicks.
+// Module-level cache keyed by worker id so returning to a worker's Runs tab is
+// instant and never blanks.
 const workerRunsCache = new Map<string, RunSummary[]>();
 const WORKER_RUNS_LIMIT = 20;
-
-function workerRunsCount(w: WorkerSummary): number | undefined {
-  return w.recent_stats?.runs_7d ?? workerRunsCache.get(w.id)?.length;
-}
 
 function useWorkerRuns(workerId: string): RunSummary[] | undefined {
   const [runs, setRuns] = useState<RunSummary[] | undefined>(() =>
@@ -1790,36 +1786,25 @@ const WORKER_TAB_REASON: Record<WorkerDetailTab, CustomTabReason> = {
   Tools: "tool-list",
 };
 
-/** Compact Developer menu: advanced tabs do not expand the primary row sideways. */
-function DeveloperMenu({
-  active,
-  onSelect,
+/** Developer disclosure: advanced tabs are either visible inline or hidden. */
+function DeveloperToggle({
+  open,
+  onToggle,
 }: {
-  active?: WorkerDetailTab;
-  onSelect: (key: WorkerDetailTab) => void;
+  open: boolean;
+  onToggle: () => void;
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className={`c-dtab-adv inline-flex items-center gap-1${active ? " open" : ""}`}
-        aria-label="Open developer tabs"
-      >
-        Developer
-        <ChevronDown className="size-3.5" aria-hidden="true" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={6} className="w-44 p-1">
-        {ADVANCED_DETAIL_TABS.map((key) => (
-          <DropdownMenuItem
-            key={key}
-            onClick={() => onSelect(key)}
-            className="justify-between"
-          >
-            {WORKER_DETAIL_TAB_LABEL[key]}
-            {active === key && <span className="text-xs text-[var(--muted-foreground)]">Active</span>}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <button
+      type="button"
+      className={`c-dtab-adv inline-flex items-center gap-1${open ? " open" : ""}`}
+      aria-label={open ? "Hide developer tabs" : "Show developer tabs"}
+      aria-pressed={open}
+      onClick={onToggle}
+    >
+      Developer
+      <ChevronDown className={`size-3.5 transition-transform${open ? " rotate-180" : ""}`} aria-hidden="true" />
+    </button>
   );
 }
 
@@ -1893,12 +1878,13 @@ function WorkerDetailActions({
         <ActionMenu
           label="More worker actions"
           items={[
-            { label: "Edit", onSelect: () => setEditOpen(true) },
+            { label: "Edit", icon: <Edit3 className="size-4" />, onSelect: () => setEditOpen(true) },
             // Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
             // (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
             // the schedule, which a raw worker.yml `enabled:` PUT does not do.
             {
               label: w.enabled === false ? "Resume" : "Pause",
+              icon: w.enabled === false ? <PlayCircle className="size-4" /> : <PauseCircle className="size-4" />,
               onSelect: () => {
                 const pausing = w.enabled !== false;
                 const action = pausing ? api.workers.pause : api.workers.resume;
@@ -1913,9 +1899,10 @@ function WorkerDetailActions({
             },
             // Share — opens the real Share modal (company access + grants +
             // anonymous public link with revoke), not a bare copy-link.
-            { label: "Share", onSelect: () => setShareOpen(true) },
+            { label: "Share", icon: <Share2 className="size-4" />, onSelect: () => setShareOpen(true) },
             {
               label: "Duplicate",
+              icon: <CopyPlus className="size-4" />,
               onSelect: () => {
                 api.workers.duplicate(w.id)
                   .then((created) => {
@@ -1928,6 +1915,7 @@ function WorkerDetailActions({
             },
             {
               label: workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live",
+              icon: <RotateCcw className="size-4" />,
               onSelect: () => {
                 const next = workerStageKey(w) === "live" ? "draft" : "live";
                 api.workers.setStage(w.id, next)
@@ -1940,6 +1928,9 @@ function WorkerDetailActions({
             },
             {
               label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+              icon: (w as WorkerSummary & { archived?: boolean }).archived
+                ? <RotateCcw className="size-4" />
+                : <Archive className="size-4" />,
               onSelect: () => {
                 const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
                 const action = isArchived ? api.workers.restore : api.workers.archive;
@@ -1953,6 +1944,7 @@ function WorkerDetailActions({
             },
             {
               label: "Delete",
+              icon: <Trash2 className="size-4" />,
               destructive: true,
               // Replaces window.confirm with the shared ConfirmDialog.
               confirm: {
@@ -2141,14 +2133,14 @@ export default function WorkersCollection({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
-  const [developerTab, setDeveloperTab] = useState<WorkerDetailTab | null>(null);
+  const [developerOpen, setDeveloperOpen] = useState(false);
   // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
   // `tab` URL param to drive the active tab. replace() avoids a history entry.
   const openAdvancedAndSelectWorkerTab = useCallback(
     (workerId: string, key: WorkerDetailTab) => {
       if (ADVANCED_DETAIL_TABS.includes(key)) {
-        setDeveloperTab(key);
-        safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, key);
+        setDeveloperOpen(true);
+        safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "open");
       }
       router.replace(
         `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
@@ -2156,6 +2148,15 @@ export default function WorkersCollection({
     },
     [router],
   );
+
+  useEffect(() => {
+    const saved = safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY);
+    if (saved === "open") setDeveloperOpen(true);
+    else if (saved && ADVANCED_DETAIL_TABS.includes(saved as WorkerDetailTab)) {
+      setDeveloperOpen(true);
+      safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "open");
+    }
+  }, []);
 
   useEffect(() => {
     if (workersQuery.data) {
@@ -2290,11 +2291,12 @@ export default function WorkersCollection({
       ],
       status: workerStatusPill(w),
       menu: [
-        { label: "Open", onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) },
-        { label: "Run", onSelect: () => router.push(`/run/${encodeURIComponent(w.id)}`) },
+        { label: "Open", icon: <ArrowRight className="size-4" />, onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) },
+        { label: "Run", icon: <PlayCircle className="size-4" />, onSelect: () => router.push(`/run/${encodeURIComponent(w.id)}`) },
         ...(canManageWorkers ? [
           {
             label: "Duplicate",
+            icon: <CopyPlus className="size-4" />,
             onSelect: () => {
               api.workers.duplicate(w.id)
                 .then((created) => {
@@ -2307,6 +2309,9 @@ export default function WorkersCollection({
           },
           {
             label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+            icon: (w as WorkerSummary & { archived?: boolean }).archived
+              ? <RotateCcw className="size-4" />
+              : <Archive className="size-4" />,
             onSelect: () => {
               const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
               const action = isArchived ? api.workers.restore : api.workers.archive;
@@ -2320,6 +2325,7 @@ export default function WorkersCollection({
           },
           {
             label: "Delete",
+            icon: <Trash2 className="size-4" />,
             destructive: true,
             confirm: {
               title: `Delete "${w.name}"?`,
@@ -2416,15 +2422,14 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // Primary tabs stay stable. If an advanced tab is active, show only that
-        // selected advanced tab; the rest stay inside the compact Developer menu.
+        // Primary tabs stay stable. Developer is an explicit show/hide
+        // disclosure; when open, every advanced tab is visible inline.
         tabs: (() => {
-          const activeAdvanced = ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab)
-            ? (activeTab as WorkerDetailTab)
-            : developerTab;
+          const activeAdvanced = ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab);
+          const showDeveloperTabs = developerOpen || activeAdvanced;
           const visibleKeys: WorkerDetailTab[] = [
             ...BASE_DETAIL_TABS,
-            ...(activeAdvanced ? [activeAdvanced] : []),
+            ...(showDeveloperTabs ? ADVANCED_DETAIL_TABS : []),
           ];
           return visibleKeys.map((key) => {
             const Tab = WORKER_TAB_COMPONENT[key];
@@ -2435,10 +2440,7 @@ export default function WorkersCollection({
               // editor, file/version/brain editors, run list, tool allowlist) that
               // loads its own data and owns its own state — not a synchronous
               // key/value pane — so each names an accurate custom reason.
-              // #1251 / #1679: badge matches the count listed in the Runs tab.
-              // Both read the SAME worker-scoped runs cache (api.runs.list) so the
-              // badge can no longer disagree with the tab body or flip 0↔1.
-              count: key === "Runs" ? workerRunsCount(w) : undefined,
+              count: undefined,
               custom: WORKER_TAB_REASON[key],
               render: () => key === "Setup"
                 ? <SetupTab w={w} onOpenSource={() => openAdvancedAndSelectWorkerTab(w.id, "Source")} />
@@ -2446,11 +2448,18 @@ export default function WorkersCollection({
             };
           });
         })(),
-        // Developer menu stays compact; it does not expand the tab row sideways.
+        // Developer toggle controls whether advanced tabs are shown inline.
         tabsTrailing: (
-          <DeveloperMenu
-            active={ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab) ? (activeTab as WorkerDetailTab) : undefined}
-            onSelect={(key) => openAdvancedAndSelectWorkerTab(w.id, key)}
+          <DeveloperToggle
+            open={developerOpen || ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab)}
+            onToggle={() => {
+              const next = !(developerOpen || ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab));
+              setDeveloperOpen(next);
+              safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, next ? "open" : "closed");
+              if (!next && ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab)) {
+                openAdvancedAndSelectWorkerTab(w.id, "Overview");
+              }
+            }}
           />
         ),
       };
