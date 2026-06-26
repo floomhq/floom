@@ -11,7 +11,7 @@ No unreleased changes yet.
 
 ## [1.0.0] - 2026-06-19
 
-Initial source-available release of Floom, the self-hosted runtime for AI
+Initial open-source MIT release of Floom, the self-hosted runtime for AI
 workers. This public repository starts from a preserved public history after the preserved
 internal commits of development, hardening, and production testing. See
 [HISTORY.md](HISTORY.md) and [the v1.0.0 release notes](docs/releases/v1.0.0.md)

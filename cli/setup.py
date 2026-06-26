@@ -3,6 +3,7 @@ from setuptools import setup
 setup(
     name="floom-cli",
     version="0.1.0",
+    license="MIT",
     py_modules=["floom"],
     install_requires=[
         "click>=8.0",
