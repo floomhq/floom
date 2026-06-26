@@ -9,7 +9,7 @@ Write a worker in plain English, connect tools like Slack, Gmail, GitHub, or Str
 <p>
   <a href="https://github.com/floomhq/floom/actions/workflows/ci.yml"><img src="https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/floomhq/floom/stargazers"><img src="https://img.shields.io/github/stars/floomhq/floom?style=flat-square&color=111111&label=stars" alt="Stars"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Floom%20Source%20Available-111111?style=flat-square" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/sandboxed-by%20default-111111?style=flat-square" alt="Sandboxed by default">
   <img src="https://img.shields.io/badge/runs%20on-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-111111?style=flat-square" alt="Linux, macOS, Windows">
 </p>
@@ -81,7 +81,7 @@ Sandboxes allow public network egress by default and block private/internal rang
 | **Cost model** | Floom adds **no per-task fee** &mdash; you pay E2B sandbox runtime (per second) plus your model/API provider usage |
 | **Stack** | Next.js + Tailwind UI · FastAPI + SQLite API · MCP server + CLI |
 | **Runs on** | Linux, macOS, Windows (Python 3.11+, Node 20+) |
-| **License** | [Floom Source Available 1.0](LICENSE) · [hosted version](https://floom.dev) |
+| **License** | [MIT](LICENSE) · [hosted version](https://floom.dev) |
 
 ## Who is this for?
 
@@ -176,7 +176,7 @@ data/         SQLite DB + run artifacts
 - [Architecture](ARCHITECTURE.md) &mdash; runtime topology and the sandbox trust model. Read before filing security findings.
 - [API overview](docs/API.md) &mdash; curated endpoint map; full reference at `http://localhost:8000/docs`.
 - [Troubleshooting](docs/TROUBLESHOOTING.md) · [Roadmap](ROADMAP.md) · [Project history](HISTORY.md) · [v1.0.0 release notes](docs/releases/v1.0.0.md)
-- [Licensing](docs/LICENSING.md) &mdash; what the Floom Source Available License allows and what needs a commercial agreement.
+- [Licensing](docs/LICENSING.md) &mdash; Floom's MIT license and third-party dependency license notes.
 
 ## Contributing
 
@@ -195,4 +195,4 @@ To report a vulnerability, follow [SECURITY.md](SECURITY.md) and report it priva
 
 ## License
 
-[Floom Source Available License 1.0](LICENSE) © Floom contributors. Free for internal business use, non-commercial and personal use, building your own products or services, and consulting/integration work for permitted deployments. Offering Floom itself as a hosted service, managed platform, white-label product, or competing commercial service requires a separate commercial agreement.
+[MIT License](LICENSE) (c) 2026 Floom contributors. You may use, copy, modify, merge, publish, distribute, sublicense, and sell copies of Floom, subject to the MIT license notice and warranty disclaimer.

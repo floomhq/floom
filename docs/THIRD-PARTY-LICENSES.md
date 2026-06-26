@@ -1,6 +1,6 @@
 # Third-Party Licenses And SBOM
 
-Floom is source-available under the Floom Source Available License.
+Floom is open source under the MIT License.
 Third-party packages keep their own licenses. This page is the release-time
 inventory policy for dependency license review and SBOM publication.
 
@@ -65,7 +65,7 @@ the release.
 
 Release reviewers should check that:
 
-- No dependency license conflicts with Floom source-available distribution.
+- No dependency license conflicts with Floom MIT distribution.
 - New dependencies are necessary and maintained.
 - High and critical production advisories are resolved or explicitly documented.
 - Generated SBOM files match the release tag, not an uncommitted working tree.

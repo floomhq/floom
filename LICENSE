@@ -1,90 +1,21 @@
-Floom Source Available License
+MIT License
 
-Version 1.0
+Copyright (c) 2026 Floom contributors
 
-Acceptance
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-By using the software, you agree to all of the terms and conditions below.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-Copyright License
-
-The licensor grants you a non-exclusive, royalty-free, worldwide,
-non-sublicensable, non-transferable license to use, copy, distribute, make
-available, and prepare derivative works of the software, in each case subject
-to the limitations below.
-
-Permitted Uses
-
-You may use, copy, modify, and run the software for:
-
-- internal business use;
-- non-commercial or personal use;
-- building, operating, or supporting your own products or services, provided
-  that the software itself, or a substantially similar hosted or managed
-  version of it, is not offered to third parties as the product or service; and
-- paid consulting, integration, implementation, or support work for a customer,
-  provided the customer's use would be permitted under this license.
-
-You may distribute the software or modified copies of the software only under
-this license and only for uses permitted above. You may charge for consulting,
-integration, implementation, or support services related to permitted uses, but
-you may not sell, resell, sublicense, or commercially distribute the software
-itself except under a separate written agreement with the licensor.
-
-Prohibited Uses
-
-You may not, without a separate written agreement with the licensor:
-
-- offer the software, or a substantially similar hosted or managed service, to
-  third parties as a commercial product;
-- operate a managed Floom service, hosted Floom service, white-label
-  Floom service, or competing automation/runtime platform whose core value
-  is substantially similar to the software;
-- sell, resell, rent, lease, sublicense, or commercially distribute the software
-  itself; or
-- remove, alter, or obscure any licensing, copyright, trademark, or other
-  notices of the licensor in the software.
-
-Trademarks
-
-This license does not grant any right to use the licensor's names, logos,
-trademarks, or service marks except as required to preserve notices in the
-software.
-
-Patents
-
-The licensor grants you a license, under any patent claims the licensor can
-license, or becomes able to license, to make, have made, use, sell, offer for
-sale, import and have imported the software, in each case subject to the
-limitations and conditions in this license. This license does not cover any
-patent claims that you cause to be infringed by modifications or additions to
-the software.
-
-Notices
-
-You must ensure that anyone who gets a copy of any part of the software from
-you also gets a copy of these terms.
-
-If you modify the software, you must include in any modified copies of the
-software prominent notices stating that you have modified the software.
-
-No Other Rights
-
-These terms do not imply any licenses other than those expressly granted in
-these terms.
-
-Termination
-
-If you use the software in violation of these terms, your license is
-automatically terminated. If the licensor provides you with a notice of your
-violation and you cease all violation of these terms within 30 days, your
-license will be reinstated retroactively. However, if you violate these terms
-after such reinstatement, any additional violation of these terms will cause
-your license to terminate automatically and permanently.
-
-No Liability
-
-As far as the law allows, the software comes as is, without any warranty or
-condition, and the licensor will not be liable to you for any damages arising
-out of these terms or the use or nature of the software, under any kind of
-legal claim.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

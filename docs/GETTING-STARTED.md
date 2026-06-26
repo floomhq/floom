@@ -1,6 +1,6 @@
 # Getting started
 
-Floom is a source-available runtime for AI workers: small, versioned worker
+Floom is an open-source runtime for AI workers: small, versioned worker
 bundles that can read inputs, use approved tools/connections, run in a sandbox,
 and leave behind logs, outputs, approvals, and history.
 
@@ -20,7 +20,7 @@ The local setup runs the same core pieces used by hosted deployments:
 - Local workspace data, contexts, run logs, approvals, and version history.
 
 Hosted-only concerns such as commercial billing, managed enterprise SSO, and
-SOC 2 evidence collection live outside the source-available runtime. This repo
+SOC 2 evidence collection live outside the open-source runtime. This repo
 provides the core runtime and local/self-hosted path.
 
 ## 1. Run the app

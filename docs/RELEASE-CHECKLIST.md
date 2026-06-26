@@ -1,6 +1,6 @@
 # Release checklist
 
-The repo is in source-available release-candidate shape, but the final public
+The repo is in open-source release-candidate shape, but the final public
 switch should wait for the release gates below. Keep this checklist aligned with
 the current `main` branch rather than aspirational launch state.
 
@@ -10,7 +10,7 @@ _Last updated: 2026-06-21._
 
 - **Security** - P0/P1 issues verified patched; no live secrets and no current
   infrastructure details in git history, so history is safe to publish as-is.
-- **Hygiene** - Floom Source Available License, README badge, CONTRIBUTING, CODE_OF_CONDUCT,
+- **Hygiene** - MIT License, README badge, CONTRIBUTING, CODE_OF_CONDUCT,
   SECURITY, issue/PR templates, clean repo root, and package metadata.
 - **Dependency review** - Dependabot plus third-party license/SBOM policy are
   documented for release review; generated SPDX SBOM lives in `docs/sbom/`.
