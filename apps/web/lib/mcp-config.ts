@@ -20,7 +20,22 @@ export function buildMcpServerConfig(): {
   };
 }
 
-/** Pretty-printed JSON of {@link buildMcpServerConfig} for copy-paste. */
+/**
+ * Pretty-printed JSON for copy-paste, with the `args` array kept INLINE (one
+ * line) to match the compact Agent-install card. Still valid JSON that parses
+ * back to {@link buildMcpServerConfig}.
+ */
 export function buildMcpJson(): string {
-  return JSON.stringify(buildMcpServerConfig(), null, 2);
+  const { command, args } = buildMcpServerConfig().mcpServers.floom;
+  const argsInline = `[${args.map((a) => JSON.stringify(a)).join(", ")}]`;
+  return [
+    "{",
+    '  "mcpServers": {',
+    '    "floom": {',
+    `      "command": ${JSON.stringify(command)},`,
+    `      "args": ${argsInline}`,
+    "    }",
+    "  }",
+    "}",
+  ].join("\n");
 }

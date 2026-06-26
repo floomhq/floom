@@ -1,8 +1,8 @@
 "use client";
 
-// SHARED MCP-install panel — "Add Floom to your AI client". Rendered in BOTH the
-// sidebar "MCP" popup (McpInstallModal wraps this in dialog chrome) and Settings
-// → Connect & automate → MCP setup.
+// SHARED MCP-install panel — "Agent install". Rendered in BOTH the sidebar "MCP"
+// popup (McpInstallModal wraps this in dialog chrome) and Settings → Connect &
+// automate → MCP setup.
 //
 // One clean, token-free npx snippet (from buildMcpJson): the `@floomhq/floom`
 // CLI runs the MCP server over stdio and does its own device-auth login on first
@@ -16,11 +16,8 @@ import { buildMcpJson } from "@/lib/mcp-config";
 
 const MCP_CLIENTS = [
   { label: "Claude Code", icon: "claude-code" },
-  { label: "Cursor", icon: "cursor" },
   { label: "Codex", icon: "codex" },
-  { label: "VS Code", icon: "vscode" },
-  { label: "Windsurf", icon: "windsurf" },
-  { label: "Cline", icon: "cline" },
+  { label: "Cursor", icon: "cursor" },
 ];
 
 const SNIPPET = buildMcpJson();
@@ -39,31 +36,31 @@ export function McpInstallPanel() {
   }, []);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">MCP setup</h2>
-        <p className="mt-3 max-w-[58ch] text-sm leading-6 text-muted-foreground">
+        <h2 className="text-base font-semibold text-foreground">Agent install</h2>
+        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
           Copy this into Claude Code, Cursor, Codex, VS Code, Windsurf, Cline, or
           any MCP client. Floom asks for a workspace token the first time it runs.
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2" aria-label="Supported MCP clients">
+      <div className="flex flex-wrap items-center gap-1.5" aria-label="Supported MCP clients">
         {MCP_CLIENTS.map((client) => (
           <span
             key={client.label}
             title={client.label}
-            className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 text-sm font-medium text-[var(--ink-soft)]"
+            className="inline-flex h-7 items-center gap-1.5 rounded-full bg-[var(--bg-2)] px-2.5 text-[12px] font-medium text-[var(--ink-soft)]"
           >
-            <BrandLogo icon={client.icon} className="size-4 shrink-0" />
+            <BrandLogo icon={client.icon} className="size-3.5 shrink-0" />
             <span>{client.label}</span>
           </span>
         ))}
       </div>
 
-      {/* code block + copy */}
-      <div className="min-w-0 overflow-hidden rounded-[var(--radius-card)] bg-[#0D0F12] shadow-[inset_0_1px_0_rgba(255,255,255,.04)]">
-        <pre className="max-w-full overflow-x-auto p-5 font-mono text-[13px] leading-7 text-[#E8EAED] [scrollbar-width:thin]">
+      {/* light code block (matches the Agent-install card) */}
+      <div className="min-w-0 overflow-hidden rounded-[var(--radius-button)] bg-[var(--bg-2)] ring-1 ring-inset ring-[var(--bd-div)]">
+        <pre className="max-w-full overflow-x-auto p-4 font-mono text-[12px] leading-6 text-foreground [scrollbar-width:thin]">
           <code>{SNIPPET}</code>
         </pre>
       </div>
@@ -71,10 +68,10 @@ export function McpInstallPanel() {
       <button
         type="button"
         onClick={() => void handleCopy()}
-        className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-button)] bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-90"
+        className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-button)] bg-foreground px-3.5 text-[13px] font-medium text-background transition-opacity hover:opacity-90"
         aria-label={copied ? "Copied config" : "Copy config"}
       >
-        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
         {copied ? "Copied" : "Copy config"}
       </button>
     </div>
