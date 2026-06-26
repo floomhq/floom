@@ -1378,7 +1378,7 @@ def _ceiling_from_env(env_key: str, default: int) -> int:
 
 
 class WorkerLimits(BaseModel):
-    max_tool_iterations: int = Field(default=12, ge=1)
+    max_tool_iterations: int = Field(default=30, ge=1)
     max_output_tokens: int = Field(default=1000000, ge=1)
     max_total_tokens: int = Field(default=1000000, ge=1)
     timeout_seconds: int = Field(default=300, ge=1, le=MAX_RUN_TIMEOUT_SECONDS)

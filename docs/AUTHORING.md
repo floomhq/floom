@@ -166,7 +166,7 @@ entrypoint: SKILL.md         # OR `run.py` for script mode
 targets:                     # which runtimes are supported
   - generic
 limits:                      # agent-mode only; ignored for script mode
-  max_tool_iterations: 12
+  max_tool_iterations: 30
   max_output_tokens: 4096
   max_total_tokens: 50000
   timeout_seconds: 300
