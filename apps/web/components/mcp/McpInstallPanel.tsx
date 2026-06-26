@@ -59,7 +59,7 @@ export function McpInstallPanel() {
       </div>
 
       {/* light code block (matches the Agent-install card) */}
-      <div className="min-w-0 overflow-hidden rounded-[var(--radius-button)] bg-[var(--bg-2)] ring-1 ring-inset ring-[var(--bd-div)]">
+      <div className="min-w-0 overflow-hidden rounded-[var(--radius-button)] bg-[var(--bg-2)] [border:var(--bd-div)]">
         <pre className="max-w-full overflow-x-auto p-4 font-mono text-[12px] leading-6 text-foreground [scrollbar-width:thin]">
           <code>{SNIPPET}</code>
         </pre>
