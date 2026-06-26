@@ -161,10 +161,10 @@ function testRunDetailShowsRefreshBanner() {
 }
 
 function testRunPagesWireRefreshCallback() {
-  const runPage = readSrc("app/runs/[id]/page.tsx");
+  const runPage = readSrc("app/runs/[id]/RunDetailPageClient.tsx");
   const workerPage = readSrc("app/workers/[id]/page.tsx");
   assert(runPage.includes("streamUnavailable"), "#587: run detail page must read streamUnavailable from the hook");
-  assert(runPage.includes("onRefresh={refresh}"), "#587: run detail page must wire the refresh callback");
+  assert(runPage.includes("onRefresh={handleRefresh}"), "#587: run detail page must wire the refresh callback");
   assert(workerPage.includes("redirect") && workerPage.includes("/workers?sel="), "#587: legacy worker detail route must redirect to split-pane detail");
   console.log("✓ #587 run page wires the recovery callback; worker detail route redirects to split-pane detail");
 }

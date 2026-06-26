@@ -288,7 +288,7 @@ describe("Emily chat tool cards", () => {
       id: "open_run",
       label: "View progress",
       method: "GET",
-      href: "/runs?sel=run_author_123&tab=Logs",
+      href: "/runs/run_author_123?tab=logs",
     });
   });
 
@@ -316,7 +316,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.toolName).toBe("runs.get");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_123&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_123?tab=logs");
   });
 
   // #1992: creating + running a worker from Emily must not yank the user across
@@ -350,7 +350,7 @@ describe("Emily chat tool cards", () => {
       expect(decideRunAutoOpen(runCard(), false)).toEqual({
         action: "navigate",
         runId: "run_123",
-        href: "/runs?sel=run_123&tab=Logs",
+        href: "/runs/run_123?tab=logs",
       });
     });
 
@@ -416,11 +416,11 @@ describe("Emily chat tool cards", () => {
         id: "open_run",
         label: "View run",
         method: "GET",
-        href: "/runs?sel=run_live_123&tab=Logs",
+        href: "/runs/run_live_123?tab=logs",
       },
     ]);
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_123&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_live_123?tab=logs");
   });
 
   it("keeps run auto-open href stable after finish reconciliation", () => {
@@ -472,7 +472,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.status).toBe("completed");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_456&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_live_456?tab=logs");
   });
 
   it("preserves run stream handles while reconciling worker-run card progress", () => {

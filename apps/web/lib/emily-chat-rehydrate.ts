@@ -155,7 +155,7 @@ function toRunCard(row: ConversationToolCardRow): RunCard | null {
                 id: "open_run",
                 label: "View progress",
                 method: "GET",
-                href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
+                href: `/runs/${encodeURIComponent(runId)}?tab=logs`,
               },
             ]
         : [

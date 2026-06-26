@@ -223,7 +223,7 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
           {activity.map((run) => (
             <Link
               key={run.id}
-              href={`/runs?sel=${encodeURIComponent(run.id)}`}
+              href={`/runs/${encodeURIComponent(run.id)}`}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto", textDecoration: "none" }}
             >

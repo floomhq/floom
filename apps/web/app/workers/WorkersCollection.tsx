@@ -478,7 +478,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
           {runs.map((r) => (
             <Link
               key={r.id}
-              href={`/runs?worker_id=${w.id}&sel=${r.id}`}
+              href={`/runs/${encodeURIComponent(r.id)}`}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto auto", gap: 12, textDecoration: "none", color: "inherit" }}
             >
