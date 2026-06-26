@@ -800,8 +800,8 @@ html.dark .grain {
 .c-srch input { flex:1; border:0; background:none; outline:none; color:var(--ink); font:inherit; min-width:0; }
 .c-srch input::placeholder { color:var(--muted-foreground); }
 .c-controlstrip-toprow .c-srch {
-  flex: 0 1 560px;
-  max-width: 560px;
+  flex: 0 1 420px;
+  max-width: 420px;
   background: var(--bg-card);
   border: var(--bd-card);
 }

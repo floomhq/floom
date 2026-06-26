@@ -451,7 +451,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
         <>
           {!collectionEmpty && (
             <>
-              <div className="c-controlstrip" style={{ padding: `0 ${PAGE_X}px` }}>
+              <div className="c-controlstrip" style={{ padding: `8px ${PAGE_X}px 10px` }}>
                 <div className="c-controlstrip-inner" style={restingFrameStyle}>
                   <div className="c-controlstrip-toprow">
                     {searchBox()}
