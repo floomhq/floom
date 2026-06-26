@@ -65,6 +65,9 @@ from services.uploads import _store_uploaded_blob
 from services.worker_access import _delete_worker_impl
 from services.product_events import emit_approval_decided
 from services.share_links import (
+    _ensure_standalone_share_links_table,
+    _load_standalone_share_row,
+    _revoke_standalone_share_link,
     _standalone_share_url,
 )
 
@@ -150,8 +153,43 @@ def _revoke_approvals_batch_share_link(*, repos: Repositories, token: str, owner
         revoked_at=now_iso(),
     )
     if not revoked:
-        raise HTTPException(status_code=404, detail="Approval batch link not found")
+        legacy_row = _load_standalone_share_row(token)
+        if (
+            not legacy_row
+            or str(legacy_row.get("entity_type") or "") != "approvals_batch"
+            or str(legacy_row.get("owner_id") or "") != owner_id
+        ):
+            raise HTTPException(status_code=404, detail="Approval batch link not found")
+        _coerce_approvals_batch_share_row(legacy_row)
+        legacy_revoked = _revoke_standalone_share_link(
+            entity_type="approvals_batch",
+            entity_id=str(legacy_row.get("entity_id") or ""),
+            owner_id=owner_id,
+        )
+        if not legacy_revoked.get("revoked"):
+            raise HTTPException(status_code=404, detail="Approval batch link not found")
     return {"status": "revoked", "entity_type": "approvals_batch"}
+
+
+def _revoke_legacy_approvals_batch_standalone_links_for_workspace(
+    *,
+    workspace_id: str,
+    owner_id: str,
+) -> int:
+    _ensure_standalone_share_links_table()
+    from db import get_db
+
+    with get_db() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM standalone_share_links
+            WHERE entity_type = 'approvals_batch'
+              AND entity_id = ?
+              AND owner_id = ?
+            """,
+            (workspace_id, owner_id),
+        )
+    return int(cursor.rowcount or 0)
 
 
 def _revoke_all_approvals_batch_share_links_for_workspace(
@@ -172,6 +210,10 @@ def _revoke_all_approvals_batch_share_links_for_workspace(
         workspace_id=workspace_id,
         owner_id=owner_id,
         revoked_at=now_iso(),
+    )
+    revoked += _revoke_legacy_approvals_batch_standalone_links_for_workspace(
+        workspace_id=workspace_id,
+        owner_id=owner_id,
     )
     return {"status": "revoked", "entity_type": "approvals_batch", "revoked": int(revoked)}
 
@@ -617,19 +659,25 @@ def _public_batch_approval_item(approval: Dict[str, Any], repos: Repositories) -
     return public
 
 
+def _coerce_approvals_batch_share_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    workspace_id = _safe_workspace_id(str(row.get("workspace_id") or row.get("entity_id") or ""))
+    owner_id = str(row.get("owner_id") or "")
+    if str(row.get("entity_type") or "approvals_batch") != "approvals_batch":
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    if not workspace_id or not owner_id:
+        raise HTTPException(status_code=404, detail="Approval batch link not found")
+    return {
+        "entity_type": "approvals_batch",
+        "entity_id": workspace_id,
+        "owner_id": owner_id,
+        "created_at": row.get("created_at"),
+    }
+
+
 def _load_approvals_batch_share(token: str, repos: Repositories) -> Dict[str, Any]:
     row = _load_approval_batch_share_row(token, repos)
     if row:
-        workspace_id = _safe_workspace_id(str(row.get("workspace_id") or ""))
-        if not workspace_id:
-            raise HTTPException(status_code=404, detail="Approval batch link not found")
-        return {
-            "entity_type": "approvals_batch",
-            "entity_id": workspace_id,
-            "owner_id": str(row.get("owner_id") or ""),
-            "created_at": row.get("created_at"),
-        }
-
+        return _coerce_approvals_batch_share_row(row)
     raise HTTPException(status_code=404, detail="Approval batch link not found")
 
 
@@ -1080,10 +1128,14 @@ def _public_approvals_batch_payload(
     repos: Repositories,
     *,
     request: Request | None = None,
+    share: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     if request is not None:
         _enforce_public_batch_rate_limit(request, token, action=False)
-    share = _load_approvals_batch_share(token, repos)
+    if share is None:
+        share = _load_approvals_batch_share(token, repos)
+    else:
+        share = _coerce_approvals_batch_share_row(share)
     workspace_id = str(share["entity_id"])
     owner_id = str(share["owner_id"])
     rows = _list_pending_approvals_for_workspace(
