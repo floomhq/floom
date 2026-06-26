@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
-import { useContexts } from "@/lib/query/hooks";
+import { qk, useContexts, useStreamedInitialData } from "@/lib/query/hooks";
 import { reportError } from "@/lib/notify";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -382,7 +382,14 @@ function EmptyStateActions({ onBrowse }: { onBrowse: () => void }) {
   );
 }
 
-export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
+export default function BrainCollection({
+  initialFolders = [],
+  initialFoldersPromise,
+}: {
+  initialFolders?: ContextSummary[];
+  initialFoldersPromise?: Promise<ContextSummary[]>;
+}) {
+  useStreamedInitialData(qk.contexts, initialFoldersPromise);
   const foldersQuery = useContexts(initialFolders.length > 0 ? initialFolders : undefined);
   const folders = foldersQuery.data ?? initialFolders;
   // Show a loading skeleton until the first fetch completes so we never flash
