@@ -4,10 +4,10 @@
 //
 // Opened from the sidebar "MCP" item (NOT a page). This is now ONLY the dialog
 // chrome (backdrop, panel, close affordances) around the SHARED <McpInstallPanel/>
-// — the exact same install treatment the Settings → Connect & automate → MCP
-// section renders. Single source of truth: same snippet, same client list, same
-// real-token flow. (Federico: "mcp on left sidebar, why not simply same as mcp
-// says on settings?")
+// (the exact same install treatment the Settings -> Connect & automate -> MCP
+// section renders). Single source of truth: same snippet, same client list, same
+// token-free npx config. (Federico: "mcp on left sidebar, why not simply same as
+// mcp says on settings?")
 import { useEffect } from "react";
 import { X } from "lucide-react";
 
@@ -41,7 +41,7 @@ export function McpInstallModal({ open, onClose }: { open: boolean; onClose: () 
         className="absolute inset-0 bg-[rgba(16,17,20,.32)] dark:bg-black/55"
       />
       {/* dialog */}
-      <div className="relative z-[1] w-full max-w-[640px] rounded-[var(--radius-card)] bg-[var(--bg-card)] dark:bg-[var(--bg-2)] p-8 shadow-[var(--shadow-pop)]">
+      <div className="relative z-[1] w-full max-w-[440px] rounded-[var(--radius-card)] bg-[var(--bg-card)] dark:bg-[var(--bg-2)] p-6 shadow-[var(--shadow-pop)]">
         <button
           type="button"
           onClick={onClose}

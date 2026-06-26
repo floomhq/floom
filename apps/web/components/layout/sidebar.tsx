@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useModKey } from "@/lib/use-mod-key";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
@@ -304,6 +305,7 @@ function SidebarMcpItem({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
+  const modKey = useModKey();
   const onSearch = () => {
     onNavigate?.();
     openCommandPalette();
@@ -334,7 +336,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
         <Search className="w-4 h-4 opacity-70" />
         <span>Search...</span>
         <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
-          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
+          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>{modKey}</kbd>
           <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 font-mono">K</kbd>
         </span>
       </button>

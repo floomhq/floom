@@ -859,6 +859,9 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
                   variant="landing"
+                  // Only the worker-create flow says "Hire"; the home/normal
+                  // Emily reads "Ask" (it's a chat, not a worker-builder).
+                  ctaLabel={createMode ? "Hire" : "Ask"}
                   large
                   // #1698: "New worker" / ?create=1 must give visible feedback
                   // from ANY route. Focus the composer when entering create mode
