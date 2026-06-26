@@ -292,7 +292,9 @@ def _standalone_share_payload(
         if entity_type == "run":
             return _public_run_share(row, repos)
         if entity_type == "approvals_batch":
-            raise HTTPException(status_code=404, detail="Share link not found")
+            from routers.approvals import _public_approvals_batch_payload
+
+            return _public_approvals_batch_payload(token, repos, request=request, share=row)
         raise HTTPException(status_code=404, detail="Share link not found")
 
     try:
