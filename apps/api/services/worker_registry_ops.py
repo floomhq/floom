@@ -76,8 +76,15 @@ def _is_credential_shaped_input(worker_input: Any) -> bool:
     label = _worker_input_text(worker_input, "label")
     placeholder = _worker_input_text(worker_input, "placeholder")
     description = _worker_input_text(worker_input, "description")
-    direct_text = " ".join([name, label, placeholder, description])
-    if _CREDENTIAL_INPUT_RE.search(direct_text):
+    # The strong credential pattern matches the field IDENTITY only (name +
+    # label), NOT the free-text placeholder/description. A legitimate business
+    # input ("summary", "note", "message") whose help text merely MENTIONS a
+    # credential / password / api key must not be rejected — only a field
+    # literally named or labelled like a credential is. The placeholder and
+    # description feed only the weaker auth-hint heuristic below (the same
+    # identity-vs-hint split the connection branch already relies on).
+    identity_text = " ".join([name, label])
+    if _CREDENTIAL_INPUT_RE.search(identity_text):
         return True
 
     # "Team key" can be business data, but an input shaped like

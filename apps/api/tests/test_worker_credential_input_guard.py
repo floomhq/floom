@@ -90,6 +90,26 @@ def test_allows_business_key_input():
     assert [inp.name for inp in config.inputs] == ["team_key"]
 
 
+def test_allows_business_input_whose_description_mentions_credentials():
+    # Regression: a legitimate business input must NOT be rejected merely because
+    # its help text mentions credentials/password/api key. Only the field
+    # identity (name/label) drives the strong credential match.
+    worker_id, config = _parse_worker_payload(
+        _worker_yml(
+            """
+  inputs:
+    - name: summary
+      type: string
+      label: Summary
+      description: Include the candidate's credentials and skills. Never paste a password or API key here.
+"""
+        )
+    )
+
+    assert worker_id == "linear-triage"
+    assert [inp.name for inp in config.inputs] == ["summary"]
+
+
 def test_allows_declared_secret_instead_of_run_input():
     worker_id, config = _parse_worker_payload(
         _worker_yml(
