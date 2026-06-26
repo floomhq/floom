@@ -383,8 +383,9 @@ function EmptyStateActions({ onBrowse }: { onBrowse: () => void }) {
 }
 
 export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
-  const foldersQuery = useContexts(initialFolders.length > 0 ? initialFolders : undefined);
-  const folders = foldersQuery.data ?? initialFolders;
+  const safeInitialFolders = Array.isArray(initialFolders) ? initialFolders : [];
+  const foldersQuery = useContexts(safeInitialFolders.length > 0 ? safeInitialFolders : undefined);
+  const folders = Array.isArray(foldersQuery.data) ? foldersQuery.data : safeInitialFolders;
   // Show a loading skeleton until the first fetch completes so we never flash
   // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
   // Cached revisits bypass this because the query already has data.

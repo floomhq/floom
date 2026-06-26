@@ -55,6 +55,18 @@ beforeEach(() => {
 });
 
 describe("Library polish — empty state (FIX 1)", () => {
+  it("does not route-crash if initial context data is not an array", async () => {
+    const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
+
+    render(
+      <TestQueryProvider>
+        <BrainCollection initialFolders={{ items: [] } as never} />
+      </TestQueryProvider>,
+    );
+
+    expect(await screen.findByText("Your Library is empty")).toBeInTheDocument();
+  });
+
   it("renders the standard centered empty state WITHOUT the dashed drop-zone box", async () => {
     const { container } = await renderEmptyLibrary();
 
