@@ -103,7 +103,7 @@ async function openRunsTab() {
 }
 
 describe("#1679 per-worker Runs tab uses the worker-scoped /runs query", () => {
-  it("uses the worker summary run count for the tab badge before rows load", async () => {
+  it("does not render a count badge in the Runs tab label", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
     render(
       <QueryProvider>
@@ -127,7 +127,7 @@ describe("#1679 per-worker Runs tab uses the worker-scoped /runs query", () => {
       if (!tab) throw new Error("Runs tab not found");
       return tab;
     });
-    expect(runsTab.textContent).toMatch(/Runs\s*5/);
+    expect(runsTab.textContent?.trim()).toBe("Runs");
     expect(runsTab.textContent).not.toMatch(/Runs\s*1/);
   });
 
