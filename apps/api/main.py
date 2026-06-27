@@ -4861,7 +4861,12 @@ def composio_execute_proxy(
     if not owner_id:
         raise HTTPException(status_code=403, detail="Run owner could not be resolved")
 
-    config = get_worker_config_for_run(worker_id)
+    config = get_worker_config_for_run(
+        worker_id,
+        repos=repos,
+        user_id=owner_id,
+        workspace_id=worker_row.get("workspace_id") or None,
+    )
     declared_connections = declared_composio_connections(config)
     declared_scopes = declared_composio_connection_scopes(config)
     tool_prefix = composio_app_for_tool_slug(tool_slug, declared_connections)
