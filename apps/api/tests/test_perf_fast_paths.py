@@ -568,7 +568,6 @@ def test_workers_shape_list_uses_repository_summary_fast_path(monkeypatch):
     assert captured["starred_ids"] == {"worker-b"}
     assert 'desc="fast"' in response.headers["Server-Timing"]
 
-
 def test_workers_shape_list_fast_path_failure_falls_back(monkeypatch):
     from starlette.responses import Response
     from routers import worker_listing
@@ -641,7 +640,6 @@ def test_context_worker_counts_uses_repository_aggregate():
     )
 
     assert counts == {"pack": 2, "memory": 1}
-
 
 def test_context_worker_counts_times_out_slow_repository_aggregate(monkeypatch):
     from services import context_access

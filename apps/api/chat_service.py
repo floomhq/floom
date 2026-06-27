@@ -286,6 +286,10 @@ in the YAML. Never set `required: false` when the user asked for approval.
 **Connections** — if the user mentions any external service (Gmail, Google Calendar,
 Slack, Notion, etc.): add every named service to the `connections:` list in the YAML.
 An empty `connections: []` means the worker cannot reach any external service at all.
+Before starting worker creation for a job that mentions an external service, check
+whether the matching connection is available. If it is missing, ask the user to
+connect that service and stop instead of starting a worker-author run that cannot
+work.
 
 **Credentials** — never put API keys, tokens, passwords, client secrets, private
 keys, or connection credentials in `inputs:`. Inputs are only for per-run business

@@ -237,7 +237,22 @@ def _parse_last_event_id(value: Optional[str]) -> int:
 def _finish_part_from_run_row(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     status = row["status"]
     if status == RunStatus.COMPLETED.value:
-        return {"type": "finish", "status": "completed"}
+        part: Dict[str, Any] = {"type": "finish", "status": "completed"}
+        try:
+            output = json.loads(row["output_json"] or "{}")
+        except Exception:
+            output = {}
+        if isinstance(output, dict):
+            if output.get("created_worker_id"):
+                part["created_worker_id"] = output["created_worker_id"]
+                smoke = output.get("smoke") if isinstance(output.get("smoke"), dict) else None
+                if smoke:
+                    part["smoke_status"] = smoke.get("status")
+                    if smoke.get("reason") is not None:
+                        part["smoke_reason"] = _redact_public_log_message(str(smoke.get("reason") or ""))
+            if output.get("worker_creation_failed"):
+                part["worker_creation_failed"] = True
+        return part
     if status == RunStatus.FAILED.value:
         part: Dict[str, Any] = {"type": "finish", "status": "failed"}
         if row["error"]:

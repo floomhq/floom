@@ -1,0 +1,47 @@
+# Floom
+
+> Floom is an open-source runtime for building, running, and supervising background AI workers with sandboxed execution, approved tools, schedules, webhooks, REST API access, UI access, and MCP tools for agents.
+
+## Primary Docs
+
+- [README](README.md): product definition, positioning, setup, architecture, FAQ, and comparisons.
+- [BUILDING](BUILDING.md): machine-readable build contract for creating and deploying a Floom worker.
+- [Getting Started](docs/GETTING-STARTED.md): local development setup and first worker.
+- [Authoring Agents](docs/AUTHORING.md): full `worker.yml` schema, script mode, agent mode, triggers, secrets, connections, and approvals.
+- [Agent Cookbook](docs/AGENT-COOKBOOK.md): end-to-end recipes for agents building Floom workers through CLI and MCP.
+- [Floom CLI + MCP](apps/mcp/README.md): CLI commands, MCP installation, HTTP MCP endpoint, and tool list.
+
+## Build Contract
+
+Current worker protocol:
+
+- Manifest: `workers/<id>/worker.yml`
+- Script worker entrypoint: `run.py`
+- Agent worker entrypoint: `SKILL.md`
+- Optional Python dependencies: `requirements.txt`
+- Deploy command: `floom workers push ./workers/<id>`
+- Validate command: `floom workers validate ./workers/<id>`
+- Run command: `floom run <id> --input key=value`
+
+The current OSS repo does not implement a `floom.yaml` plus `@app.action` API. Use `worker.yml` plus `run.py` or `SKILL.md`.
+
+## What Floom Provides
+
+- A way to deploy a Python script as a UI-runnable worker, REST API-callable worker, and MCP-accessible worker for AI agents.
+- UI for creating, running, inspecting, replaying, and rolling back workers.
+- REST API for programmatic worker runs and administration.
+- HTTP MCP endpoint at `/mcp-tools/serve` so ChatGPT-compatible agents, Claude Code, Cursor, VS Code, Windsurf, Continue, and other MCP clients can operate workers.
+- Sandboxed E2B execution for script workers.
+- Human approval gates for side-effecting workflows.
+- Logs, outputs, artifacts, tool calls, and run history.
+
+## Examples
+
+- [CSV Enricher](workers/csv_enricher/): script worker that enriches CSV files.
+- [Research Brief](workers/research_brief/): agent-mode worker that writes markdown research briefs.
+- [GitHub Digest](workers/github-digest/): scheduled GitHub summary worker.
+- [Outbound Approval Demo](workers/outbound-approval-demo/): human-in-the-loop approval worker.
+
+## Search Keywords
+
+AI agents, AI workers, background agents, agent runtime, MCP server, MCP tools, deploy Python script, automation runtime, scheduled AI worker, webhook AI worker, sandboxed AI execution, human-in-the-loop approvals.

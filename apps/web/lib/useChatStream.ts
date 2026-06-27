@@ -184,7 +184,7 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
         const source = new EventSource(apiProxyPath(streamPath, true));
         newSources.push({ cardId, source });
 
-        const applyFinalStatus = (finalStatus: "completed" | "failed") => {
+        const applyFinalPart = (part: RunFinishPart) => {
           subscribedCardIds.current.delete(cardId);
           setMessages((prev) =>
             prev.map((m) => {
@@ -193,16 +193,9 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
                 ...m,
                 parts: m.parts.map((p) => {
                   if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
-                  const tc = p.card as GenericToolCard;
                   return {
                     type: "tool-card" as const,
-                    card: {
-                      ...p.card,
-                      status: finalStatus,
-                      ...("toolName" in tc
-                        ? { title: getToolCardTitle(tc.toolName, finalStatus) }
-                        : {}),
-                    } as ToolCard,
+                    card: reconcileRunCardFinishPart(p.card, part),
                   };
                 }),
               };
@@ -212,10 +205,10 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
 
         source.addEventListener("part", (event) => {
           try {
-            const data = JSON.parse((event as MessageEvent).data) as { type?: string; status?: string };
+            const data = JSON.parse((event as MessageEvent).data) as RunFinishPart & { type?: string };
             if (data.type === "finish") {
               source.close();
-              applyFinalStatus(data.status === "completed" ? "completed" : "failed");
+              applyFinalPart(data);
             }
           } catch { /* ignore malformed SSE frames */ }
         });
@@ -229,7 +222,7 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
             .then((run: { status?: string } | null) => {
               if (!run) return;
               if (run.status === "completed" || run.status === "failed") {
-                applyFinalStatus(run.status as "completed" | "failed");
+                applyFinalPart({ status: run.status });
               }
             })
             .catch(() => { /* network error — leave card as-is */ });
@@ -462,8 +455,105 @@ import type {
   MsgPart,
   GenericToolCard,
   ToolCard,
+  WorkerCreateCard,
   WorkerListCard,
 } from "./emily-chat-types";
+
+export interface RunFinishPart {
+  status?: string;
+  created_worker_id?: string;
+  smoke_status?: "passed" | "failed" | "skipped" | "errored";
+  smoke_reason?: string | null;
+  worker_creation_failed?: boolean;
+}
+
+export function reconcileRunCardFinishPart(card: ToolCard, part: RunFinishPart): ToolCard {
+  const finalStatus = part.status === "completed" ? "completed" : "failed";
+  const createdWorkerId = optionalString(part.created_worker_id);
+  const normalizedTool =
+    "toolName" in card && typeof card.toolName === "string" ? normalizeToolName(card.toolName) : "";
+  const isCreateFromPrompt = normalizedTool === "workers.create_from_prompt";
+  const workerCreationFailed = Boolean(part.worker_creation_failed);
+  const workerCreateSmokeStatus =
+    part.smoke_status === "errored" ? "failed" : part.smoke_status;
+
+  if (card.kind === "worker-create") {
+    if (createdWorkerId && finalStatus === "completed") {
+      return {
+        ...card,
+        status: "completed",
+        step: "ready",
+        workerId: createdWorkerId,
+        workerName: createdWorkerId,
+        result: {
+          ...(asRecord(card.result) ?? {}),
+          created_worker_id: createdWorkerId,
+          ...(part.smoke_status ? { smoke_status: part.smoke_status } : {}),
+          ...(part.smoke_reason ? { smoke_reason: part.smoke_reason } : {}),
+        },
+        smokeStatus: workerCreateSmokeStatus,
+        smokeReason: part.smoke_reason ?? null,
+        title:
+          part.smoke_status === "failed"
+            ? "Worker needs review"
+            : "Worker ready for review",
+        actions: [
+          {
+            id: "open_worker",
+            label: "Open worker",
+            method: "GET" as const,
+            href: `/workers/${encodeURIComponent(createdWorkerId)}?edit=1`,
+          },
+        ],
+      } satisfies WorkerCreateCard;
+    }
+
+    return {
+      ...card,
+      status: finalStatus,
+      step: "failed",
+      title: workerCreationFailed ? "Could not create agent" : "Agent creation failed",
+    } satisfies WorkerCreateCard;
+  }
+
+  if (card.kind === "run" && isCreateFromPrompt && createdWorkerId && finalStatus === "completed") {
+    return {
+      ...card,
+      kind: "run",
+      status: "completed",
+      workerId: createdWorkerId,
+      workerName: createdWorkerId,
+      result: {
+        ...(asRecord(card.result) ?? {}),
+        created_worker_id: createdWorkerId,
+        ...(part.smoke_status ? { smoke_status: part.smoke_status } : {}),
+        ...(part.smoke_reason ? { smoke_reason: part.smoke_reason } : {}),
+      },
+      title:
+        part.smoke_status === "failed"
+          ? "Worker needs review"
+          : "Worker ready for review",
+      actions: [
+        {
+          id: "open_worker",
+          label: "Open worker",
+          method: "GET" as const,
+          href: `/workers/${encodeURIComponent(createdWorkerId)}?edit=1`,
+        },
+      ],
+    } satisfies RunCard;
+  }
+
+  return {
+    ...card,
+    status: finalStatus,
+    ...(workerCreationFailed
+      ? { title: "Could not create worker" }
+      : normalizedTool
+        ? { title: getToolCardTitle(normalizedTool, finalStatus) }
+        : {}),
+  } as ToolCard;
+}
 
 type ToolLabel = {
   running: string;
@@ -874,11 +964,37 @@ function runCardFromResult(
   };
 }
 
+function workerCreateCardFromResult(
+  event: Extract<ChatSSEEvent, { type: "tool-result" }>,
+  existing: ToolCard
+): WorkerCreateCard | null {
+  const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
+  if (normalizedTool !== "workers.create_from_prompt") return null;
+
+  const result = asRecord(event.result);
+  const runId = optionalString(result?.run_id);
+  if (!runId) return null;
+
+  return {
+    kind: "worker-create",
+    callId: existing.callId,
+    card_id: existing.card_id,
+    status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
+    title: "Creating worker",
+    workerName: "Creating worker",
+    step: event.isError ? "failed" : "drafting",
+    actions: event.actions,
+    streams: event.streams,
+    args: existing.args ?? ("preview" in existing ? existing.preview : undefined),
+    result: event.result,
+  };
+}
+
 function toolCardFromResult(
   event: Extract<ChatSSEEvent, { type: "tool-result" }>,
   existing: ToolCard
 ): ToolCard | null {
-  return workerListCardFromResult(event, existing) ?? runCardFromResult(event, existing);
+  return workerListCardFromResult(event, existing) ?? workerCreateCardFromResult(event, existing) ?? runCardFromResult(event, existing);
 }
 
 function toolCardToolName(card: ToolCard): string | null {
@@ -1216,6 +1332,24 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
   );
 }
 
+export function shouldAutoOpenCreatedWorker(card: ToolCard): card is RunCard | WorkerCreateCard {
+  if (card.kind === "worker-create") {
+    return card.status === "completed" && card.step === "ready" && Boolean(card.workerId);
+  }
+  return (
+    card.kind === "run" &&
+    normalizeToolName(card.toolName || "") === "workers.create_from_prompt" &&
+    card.status === "completed" &&
+    Boolean(card.workerId)
+  );
+}
+
+export function getAutoOpenCreatedWorkerHref(card: ToolCard): string | null {
+  return shouldAutoOpenCreatedWorker(card) && card.workerId
+    ? `/workers/${encodeURIComponent(card.workerId)}?edit=1`
+    : null;
+}
+
 export function safeRunPartsStreamPath(path: unknown): string | null {
   if (typeof path !== "string") return null;
   const trimmed = path.trim();
@@ -1261,8 +1395,15 @@ export function decideRunAutoOpen(
 export function getCardHref(card: ToolCard): string | null {
   switch (card.kind) {
     case "worker-create":
-      return card.workerId ? `/workers?sel=${encodeURIComponent(card.workerId)}` : null;
+      return card.workerId ? getAutoOpenCreatedWorkerHref(card) : null;
     case "run":
+      if (
+        normalizeToolName(card.toolName || "") === "workers.create_from_prompt" &&
+        card.status === "completed" &&
+        card.workerId
+      ) {
+        return getAutoOpenCreatedWorkerHref(card);
+      }
       return card.runId ? `/runs/${encodeURIComponent(card.runId)}` : null;
     case "artifact":
       return card.runId ? `/runs/${encodeURIComponent(card.runId)}?tab=output` : null;

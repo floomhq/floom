@@ -44,13 +44,14 @@ describe("medium issue batch source guards", () => {
     expect(source).not.toContain("grid-cols-2");
     expect(source).not.toContain("bg-[var(--bg-2)] px-3 py-2.5");
     expect(source).toContain('aria-label="Supported MCP clients"');
-    // "Agent install" pass (2026-06-25): the panel is now a single token-free
-    // npx snippet (buildMcpJson with no params). The per-token "generate /
-    // manage personal tokens" flow was removed, so those links are
-    // intentionally gone and the panel trimmed to the 3 primary clients.
+    // The install snippet stays token-free, but the modal must also expose the
+    // workspace-token create/copy path so first-run setup is complete.
     expect(source).toContain("Agent install");
     expect(source).toContain("buildMcpJson");
     expect(source).not.toContain('href="/settings?sel=personal_tokens"');
+    expect(source).toContain("api.workspace.tokens.create");
+    expect(source).toContain("Copy token");
+    expect(source).toContain("Manage tokens");
     expect(source).toContain("max-w-full overflow-x-auto");
     expect(source).toContain("min-w-0 overflow-hidden");
   });

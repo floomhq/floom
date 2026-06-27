@@ -2226,6 +2226,7 @@ class Artifact(BaseModel):
 
 class OutputField(BaseModel):
     name: str
+    kind: Optional[str] = None
     type: str  # "markdown", "json", "csv", "text", "file"
     label: str
     value: Any = None

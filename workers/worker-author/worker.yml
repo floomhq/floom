@@ -77,6 +77,11 @@ exec:
       label: "Fork from worker (optional)"
       placeholder: "e.g. github-digest"
   outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+      required: true
+      label: "Summary"
     - name: "bundle"
       kind: "file"
       media_type: "application/json"

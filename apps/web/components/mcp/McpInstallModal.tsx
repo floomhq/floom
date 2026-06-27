@@ -41,7 +41,7 @@ export function McpInstallModal({ open, onClose }: { open: boolean; onClose: () 
         className="absolute inset-0 bg-[rgba(16,17,20,.32)] dark:bg-black/55"
       />
       {/* dialog */}
-      <div className="relative z-[1] w-full max-w-[440px] rounded-[var(--radius-card)] bg-[var(--bg-card)] dark:bg-[var(--bg-2)] p-6 shadow-[var(--shadow-pop)]">
+      <div className="relative z-[1] max-h-[calc(100vh-3rem)] w-full max-w-[440px] overflow-y-auto rounded-[var(--radius-card)] bg-[var(--bg-card)] dark:bg-[var(--bg-2)] p-6 shadow-[var(--shadow-pop)]">
         <button
           type="button"
           onClick={onClose}

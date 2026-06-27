@@ -246,6 +246,7 @@ interface BaseCard {
   callId: string;
   card_id: string;
   status: CardStatus;
+  title?: string;
   actions?: CardAction[];
   streams?: { events: string; parts: string };
   args?: unknown;

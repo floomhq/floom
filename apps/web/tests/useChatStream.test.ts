@@ -4,13 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ChatSSEEvent } from "@/lib/emily-chat-types";
 import {
   decideRunAutoOpen,
+  getAutoOpenCreatedWorkerHref,
   getAutoOpenRunDetailsHref,
   getStreamingActivity,
   getToolCardTitle,
   isInternalToolName,
   normalizeToolName,
+  reconcileRunCardFinishPart,
   reduceSSEEvent,
   safeRunPartsStreamPath,
+  shouldAutoOpenCreatedWorker,
   shouldAutoOpenRunDetails,
   useChatStream,
 } from "@/lib/useChatStream";
@@ -255,7 +258,7 @@ describe("Emily chat tool cards", () => {
     expect(card.toolName).toBe("workers.run");
   });
 
-  it("materializes create-from-prompt results into a progress run card", () => {
+  it("materializes create-from-prompt results into an internal worker-create card", () => {
     const call: ChatSSEEvent = {
       type: "tool-call",
       callId: "call_create_prompt",
@@ -280,16 +283,53 @@ describe("Emily chat tool cards", () => {
     const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
     const card = toolCards(messages)[0]?.card;
 
-    expect(card?.kind).toBe("run");
-    if (card?.kind !== "run") throw new Error("expected run card");
-    expect(card.runId).toBe("run_author_123");
+    expect(card?.kind).toBe("worker-create");
+    if (card?.kind !== "worker-create") throw new Error("expected worker-create card");
     expect(card.workerName).toBe("Creating worker");
-    expect(card.actions?.[0]).toEqual({
-      id: "open_run",
-      label: "View progress",
-      method: "GET",
-      href: "/runs/run_author_123?tab=logs",
+    expect(card.step).toBe("drafting");
+    expect(card.actions).toBeUndefined();
+    expect(card.streams).toBeUndefined();
+  });
+
+  it("turns completed create-from-prompt finishes into open-worker cards", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_create_prompt",
+      toolName: "workers__create_from_prompt",
+      args: { prompt: "Email me a daily summary" },
+      args_preview: { prompt: "Email me a daily summary" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_create_prompt",
+      toolName: "workers__create_from_prompt",
+      isError: false,
+      result: { ok: true, run_id: "run_author_123", worker_id: "worker-author" },
+    };
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+    if (card?.kind !== "worker-create") throw new Error("expected worker-create card");
+
+    const completed = reconcileRunCardFinishPart(card, {
+      status: "completed",
+      created_worker_id: "gmail-summary",
+      smoke_status: "passed",
     });
+
+    expect(completed.kind).toBe("worker-create");
+    if (completed.kind !== "worker-create") throw new Error("expected worker-create card");
+    expect(completed.workerId).toBe("gmail-summary");
+    expect(completed.workerName).toBe("gmail-summary");
+    expect(completed.step).toBe("ready");
+    expect(completed.status).toBe("completed");
+    expect(completed.actions?.[0]).toEqual({
+      id: "open_worker",
+      label: "Open worker",
+      method: "GET",
+      href: "/workers/gmail-summary?edit=1",
+    });
+    expect(shouldAutoOpenCreatedWorker(completed)).toBe(true);
+    expect(getAutoOpenCreatedWorkerHref(completed)).toBe("/workers/gmail-summary?edit=1");
   });
 
   it("marks completed runs.get cards for automatic navigation to run details", () => {
@@ -578,13 +618,13 @@ describe("Emily streaming activity", () => {
         type: "tool-progress",
         callId: "call_workers",
         status: "running",
-        label: "Checking worker runs",
+        label: "Checking agent runs",
       },
       "assistant_1"
     );
     expect(getStreamingActivity(progressed, true)).toEqual({
       kind: "tool",
-      title: "Checking worker runs",
+      title: "Checking agent runs",
     });
   });
 
@@ -597,7 +637,7 @@ describe("Emily streaming activity", () => {
         card_id: "card_run",
         status: "starting",
         stage: "started",
-        label: "Starting worker run",
+        label: "Starting agent run",
       },
       "assistant_1"
     );
@@ -607,10 +647,10 @@ describe("Emily streaming activity", () => {
     if (card?.kind !== "generic") throw new Error("expected generic card");
     expect(card.card_id).toBe("card_run");
     expect(card.status).toBe("starting");
-    expect(card.title).toBe("Starting worker run");
+    expect(card.title).toBe("Starting agent run");
     expect(getStreamingActivity(messages, true)).toEqual({
       kind: "tool",
-      title: "Starting worker run",
+      title: "Starting agent run",
     });
   });
 
