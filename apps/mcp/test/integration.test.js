@@ -513,6 +513,8 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
       arguments: { id: "mcp-test-worker", inputs: { message: "hello" } },
     });
     assert.equal(run.structuredContent.run_id, "run_test");
+    assert.equal(JSON.parse(run.content[0].text).run_id, "run_test");
+    assert.doesNotMatch(run.content[0].text, /Worker run started/);
 
     const listedRuns = await client.callTool({ name: "runs.list", arguments: { worker_id: "mcp-test-worker" } });
     assert.equal(listedRuns.structuredContent.data[0].id, "run_test");
