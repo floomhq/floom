@@ -52,7 +52,6 @@ import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/Cl
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
-import { Avatar } from "@/components/ui/Avatar";
 import {
   useAssistantName,
   setCachedAssistantName,
@@ -73,7 +72,6 @@ import {
   ExternalLink,
   History,
   Info,
-  KeyRound,
   Mail,
   MessageSquare,
   Palette,
@@ -84,7 +82,6 @@ import {
   ShieldAlert,
   Trash2,
   UserPlus,
-  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -111,17 +108,6 @@ function ScopeChip({ scope, name }: { scope: SettingsScope; name?: string | null
       {isWs ? "Workspace" : "Account"}
       {name ? <span className="opacity-70">· {name}</span> : null}
     </span>
-  );
-}
-
-// Pane-level scope banner: a chip + one-line "what this scope means" detail,
-// restated at the top of the content (mockup .pane-scope).
-function ScopeBanner({ scope, name, detail }: { scope: SettingsScope; name?: string | null; detail: string }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <ScopeChip scope={scope} name={name} />
-      <span className="text-xs text-muted-foreground">{detail}</span>
-    </div>
   );
 }
 
@@ -480,18 +466,15 @@ function isValidSection(value: string | null): value is SectionKey {
 function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
     // Legacy aliases kept for back-compat with old deep-links.
-    value === "api" ? "connect" :
+    value === "api" ? "developer" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
-    value === "git" ? "connect" :
-    // The "developer" section was split into two token panes + a connect pane.
-    // Old ?sel=developer links land on the API/MCP/CLI/Git reference.
-    value === "developer" ? "connect" :
-    // workspace_tokens was a standalone nav item, then briefly a Developer
-    // sub-tab; it is now its own workspace-scoped pane again.
-    value === "workspace_tokens" ? "workspace_token" :
-    // Personal tokens used to live under Developer > Tokens.
-    value === "tokens" ? "personal_tokens" :
+    value === "git" ? "developer" :
+    value === "connect" ? "developer" :
+    value === "workspace_token" ? "developer" :
+    value === "workspace_tokens" ? "developer" :
+    value === "personal_tokens" ? "developer" :
+    value === "tokens" ? "developer" :
     value;
   return isValidSection(candidate) ? candidate : null;
 }
@@ -809,7 +792,7 @@ function SettingsContent() {
             {item.description}
           </>
         ),
-        status: { tone: "idle", label: item.scope === "workspace" ? "Workspace" : "Account" },
+        status: null,
       }),
       detail: (item) => ({
         header: {
@@ -906,16 +889,10 @@ function SettingsContent() {
             onClearRuns={handleClearRuns}
           />
         );
-      case "workspace_token":
-        return <WorkspaceTokenSection workspaceName={workspaceName} />;
-      case "personal_tokens":
-        return <PersonalTokensSection accountName={accountName} workspaceName={workspaceName} />;
-      case "connect":
-        return <ConnectSection />;
+      case "developer":
+        return <DeveloperSection workspaceName={workspaceName} />;
       case "appearance":
         return <AppearanceSection />;
-      case "profile":
-        return <ProfileSection currentUser={currentUser} onUpdated={(u) => setCurrentUser(u)} />;
     }
   }
 
@@ -1011,16 +988,10 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return History;
     case "danger":
       return ShieldAlert;
-    case "workspace_token":
-      return KeyRound;
-    case "personal_tokens":
-      return KeyRound;
-    case "connect":
+    case "developer":
       return Code2;
     case "appearance":
       return Palette;
-    case "profile":
-      return UserRound;
   }
 }
 
@@ -1193,11 +1164,11 @@ floom run <worker>`;
 // → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
 // hardcoded host. Account-scoped PATs authenticate as bearer tokens; the OSS
 // x-floom-secret examples live in CliCommandPanel.
-const API_CALL_SNIPPET = `# List your workers
+const API_CALL_SNIPPET = `# List your agents
 curl -sS ${API_BASE}/workers?shape=list \\
   -H "Authorization: Bearer <your-token>"
 
-# Run a worker
+# Run an agent
 curl -sS -X POST ${API_BASE}/workers/<worker>/runs \\
   -H "Authorization: Bearer <your-token>" \\
   -H "content-type: application/json" \\
@@ -1231,65 +1202,36 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
   );
 }
 
-// WorkspaceTokenSection (workspace scope) — re-homes WorkspaceTokensPanel under
-// WORKSPACE with its own scope banner + a cross-link to Account · Personal
-// access tokens. The token CRUD itself is unchanged (same api.workspace.tokens
-// calls); this only re-homes + re-labels it (mockup .pane[data-pane="ws-token"]).
-function WorkspaceTokenSection({ workspaceName }: { workspaceName: string }) {
+// DeveloperSection: one account-scoped home for programmatic access (tokens, API, MCP, CLI, Git).
+function DeveloperSection({ workspaceName }: { workspaceName: string }) {
   return (
-    <div className="space-y-5">
-      <ScopeBanner
-        scope="workspace"
-        name={workspaceName}
-        detail={`Scoped to ${workspaceName} · used by this workspace's CLI & CI`}
-      />
-      <WorkspaceTokensPanel />
-      <ScopeCrossLink
-        title="This is not your personal token."
-        body={`It is shared by everyone in ${workspaceName} and authenticates this workspace's CLI & CI. Rotating it breaks any CI using the old value. For a token tied to just you, see`}
-        linkLabel="Account → Personal access tokens"
-        targetSel="personal_tokens"
-      />
-    </div>
-  );
-}
-
-// PersonalTokensSection (account scope) — re-homes PersonalAccessTokensPanel
-// under ACCOUNT with its own scope banner + a cross-link to Workspace · token.
-// CRUD unchanged (api.tokens.*) (mockup .pane[data-pane="acct-tokens"]).
-function PersonalTokensSection({ accountName, workspaceName }: { accountName?: string; workspaceName: string }) {
-  return (
-    <div className="space-y-5">
-      <ScopeBanner
-        scope="account"
-        name={accountName}
-        detail="Yours · works across all your workspaces"
-      />
-      <PersonalAccessTokensPanel />
-      <ScopeCrossLink
-        title="These are yours, not the workspace's."
-        body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
-        linkLabel={`Workspace · ${workspaceName} → Access key`}
-        targetSel="workspace_token"
-      />
-    </div>
-  );
-}
-
-// ConnectSection (account scope) — the developer reference snippets that used to
-// share the Developer page with token CRUD: REST API, MCP install, CLI, and Git
-// sync. No token management here anymore (it moved to the two token panes); this
-// is read-only reference plus the Git workspace panel. (#616 GitWorkspacePanel
-// preserved.)
-function ConnectSection() {
-  return (
-    <Tabs defaultValue="api">
+    <Tabs defaultValue="personal-tokens">
       <TabsList>
+        <TabsTrigger value="personal-tokens">Personal tokens</TabsTrigger>
+        <TabsTrigger value="workspace-token">Workspace token</TabsTrigger>
         <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
+      <TabsContent value="personal-tokens" className="space-y-5">
+        <PersonalAccessTokensPanel />
+        <ScopeCrossLink
+          title="These are yours, not the workspace's."
+          body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
+          linkLabel={`Workspace · ${workspaceName} token`}
+          targetSel="developer"
+        />
+      </TabsContent>
+      <TabsContent value="workspace-token" className="space-y-5">
+        <WorkspaceTokensPanel />
+        <ScopeCrossLink
+          title="This is not your personal token."
+          body={`It is shared by everyone in ${workspaceName} and authenticates this workspace's CLI & CI. Rotating it breaks any CI using the old value. For a token tied to just you, see`}
+          linkLabel="Personal tokens"
+          targetSel="developer"
+        />
+      </TabsContent>
       <TabsContent value="api" className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-sm font-medium">REST API</h2>
@@ -1332,7 +1274,7 @@ function ConnectSection() {
             type="button"
             className="font-medium text-[var(--accent)] hover:underline"
             onClick={() => {
-              navigateSettingsSelection("personal_tokens");
+              navigateSettingsSelection("developer");
             }}
           >
             Account · Personal access tokens
@@ -1377,78 +1319,6 @@ function AppearanceSection() {
   );
 }
 
-function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser | null; onUpdated: (u: CurrentUser) => void }) {
-  const [displayName, setDisplayName] = useState(currentUser?.display_name ?? "");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setDisplayName(currentUser?.display_name ?? "");
-  }, [currentUser?.display_name]);
-
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    const name = displayName.trim();
-    if (!name) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_BASE}/me`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ display_name: name }),
-      });
-      if (res.ok) {
-        const updated = (await res.json()) as CurrentUser;
-        onUpdated(updated);
-      } else {
-        // Optimistic update if backend doesn't support PATCH /me yet
-        if (currentUser) onUpdated({ ...currentUser, display_name: name });
-      }
-      toast.success("Name updated");
-    } catch {
-      if (currentUser) onUpdated({ ...currentUser, display_name: name });
-      toast.success("Name updated");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const email = currentUser?.email ?? "";
-  // User photo (Google/GitHub) when the host /me supplies it; else generated.
-  const photoUrl = currentUser?.picture ?? currentUser?.avatar_url ?? null;
-
-  return (
-    <div className="space-y-6">
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
-        <div className="flex items-center gap-4">
-          <Avatar role="user" name={displayName || email || "User"} src={photoUrl} size={56} />
-          <div className="min-w-0">
-            <p className="font-medium">{displayName || email}</p>
-            <p className="text-sm text-muted-foreground">{email}</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Display name</h2>
-        <form onSubmit={(e) => void handleSave(e)} className="flex gap-2">
-          <Input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Your name"
-            className="max-w-xs"
-          />
-          <Button type="submit" size="sm" disabled={saving || !displayName.trim()}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </form>
-        <p className="text-xs text-muted-foreground">
-          Your display name is shown in the sidebar and in activity logs.
-        </p>
-      </section>
-    </div>
-  );
-}
 
 function DangerSection({
   canEdit,
@@ -1543,7 +1413,7 @@ const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] =
   {
     key: "approval_default",
     title: "Require approval by default",
-    description: "New workers pause for review before taking external actions.",
+    description: "New agents pause for review before taking external actions.",
   },
   {
     // MUST be "auto_pause_enabled" — run_service._auto_pause_on_consecutive_
@@ -1551,7 +1421,7 @@ const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] =
     // "auto_pause", which the runner never read — dead toggle).
     key: "auto_pause_enabled",
     title: "Auto-pause on repeated failures",
-    description: "Pause a worker automatically after consecutive failed runs.",
+    description: "Pause an agent automatically after consecutive failed runs.",
   },
   {
     // Canonical key per #794's proposal; enforcement is tracked there.
@@ -2527,7 +2397,7 @@ function MembersSettingsPanel() {
 // "Backups & history": download a workspace copy, browse the unified git
 // timeline (workers, library, notes), undo recent workspace-note/persona edits,
 // and surface GitHub sync status when connected. Git SHA/branch vocabulary stays
-// out of the UI; connect/setup lives under Account · Connect & automate.
+// out of the UI; connect/setup lives under Account · Developer.
 type UndoScope = "instructions" | "base";
 
 function changelogScopeLabel(assetType: string, assetName: string): string {
@@ -2625,7 +2495,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
           <div className="min-w-0">
             <h2 className="text-sm font-medium">Download a copy</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Downloads your workers and knowledge as a zip. Secrets and connections are not included; you&apos;ll reconnect those after restoring.
+              Downloads your agents and knowledge as a zip. Secrets and connections are not included; you&apos;ll reconnect those after restoring.
             </p>
           </div>
           <Button variant="outline" onClick={() => void handleDownload()} disabled={exporting}>
@@ -2641,7 +2511,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
           Every save to workers, library folders, and workspace notes appears here.
           {gitStatus?.connected
             ? " Connected repos receive these commits when Floom pushes to GitHub."
-            : " To back up to GitHub, connect a repo under Account · Connect & automate."}
+            : " To back up to GitHub, connect a repo under Account · Developer."}
         </p>
         {gitStatus?.connected && gitStatus.repo_url ? (
           <p className="text-xs text-muted-foreground">
@@ -2665,7 +2535,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
             <button
               type="button"
               className="font-medium text-[var(--accent)] hover:underline"
-              onClick={() => navigateSettingsSelection("connect")}
+              onClick={() => navigateSettingsSelection("developer")}
             >
               Connect GitHub
             </button>
@@ -3013,7 +2883,7 @@ function WhatsAppBindingStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// ChannelsTab — Slack + WhatsApp + Agent install
+// ChannelsTab — Slack + WhatsApp + MCP setup
 // ---------------------------------------------------------------------------
 function EmailChannelStatus() {
   const [status, setStatus] = useState<{ connected: boolean; email?: string | null } | null>(null);
@@ -3065,7 +2935,7 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           <TabsTrigger value="slack">Slack</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
-          <TabsTrigger value="agent-install">Agent install</TabsTrigger>
+          <TabsTrigger value="agent-install">MCP setup</TabsTrigger>
         </TabsList>
         <TabsContent value="slack" className="space-y-4">
           <div className="c-ltable">
@@ -3155,9 +3025,9 @@ interface ChannelCapRow {
 }
 
 const CHANNEL_CAPS: ChannelCapRow[] = [
-  { capability: "Run worker",    web: "yes",     emily: "yes",     slack: "yes",     whatsapp: "yes"     },
+  { capability: "Run agent",     web: "yes",     emily: "yes",     slack: "yes",     whatsapp: "yes"     },
   { capability: "Approve run",   web: "yes",     emily: "partial", slack: "partial", whatsapp: "partial" },
-  { capability: "Create worker", web: "yes",     emily: "no",      slack: "no",      whatsapp: "no"      },
+  { capability: "Create agent",  web: "yes",     emily: "no",      slack: "no",      whatsapp: "no"      },
   { capability: "Notify on run", web: "partial", emily: "yes",     slack: "yes",     whatsapp: "yes"     },
 ];
 

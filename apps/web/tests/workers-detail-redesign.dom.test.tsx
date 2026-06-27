@@ -183,7 +183,7 @@ describe("Workers detail redesign register", () => {
 
     fireEvent.click(screen.getByRole("link", { name: /View as YAML/i }));
 
-    expect(window.localStorage.getItem("workeros:worker-advanced-open")).toBe("true");
+    expect(window.localStorage.getItem("workeros:worker-advanced-open")).toBe("open");
     expect(router.replace).toHaveBeenCalledWith(`/workers?sel=${encodeURIComponent(WORKER_ID)}&tab=Source`);
   }, TEST_TIMEOUT);
 });

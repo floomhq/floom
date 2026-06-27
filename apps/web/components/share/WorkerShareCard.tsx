@@ -3,16 +3,16 @@
 // v6 Worker share card. ONE fixed-height card that flips: the FRONT face is the
 // employee summary (name, one-line what-it-does, trigger, tools as real brand
 // logos, example/last result via the GENERIC renderer); the BACK face is a TOP
-// TAB BAR that swaps file content in a single pane (no scroll-through). A pinned
+// TAB BAR that swaps file/setup content in a single pane (no scroll-through). A pinned
 // "Add to workspace" CTA sits at the bottom of both faces.
 //
 // The data is the strict allow-list `PublicWorker` (no source, no secrets). The
 // back-face "files" are therefore SYNTHESIZED from the public fields
-// (SKILL.md from the description/use-cases/how-it-works, worker.yml from the
-// trigger + tools + contexts) plus an Output tab that renders the example
-// result through the same GenericOutput primitive used on the run page. The old
-// `npx ... add <token>` install artifact is intentionally dropped.
-import { useState } from "react";
+// (SKILL.md from the description/use-cases/how-it-works, a readable setup view
+// from trigger + tools + I/O) plus an Output tab that renders the example result
+// through the same GenericOutput primitive used on the run page. The old `npx
+// ... add <token>` install artifact is intentionally dropped.
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
@@ -21,7 +21,6 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 import { Avatar } from "@/components/ui/Avatar";
 import { GenericOutput } from "@/components/generic-output";
 import { SHARE_CARD_BODY_HEIGHT } from "@/components/share/ShareCardShell";
-import { sanitizeOutputText } from "@/lib/strip-citations";
 import type { PublicWorker } from "@/lib/types";
 
 const SLUG_ALIASES: Record<string, string> = {
@@ -80,22 +79,106 @@ function buildSkillMd(worker: PublicWorker): string {
   return lines.join("\n").trim();
 }
 
-function buildWorkerYml(worker: PublicWorker): string {
-  const tools = (worker.connections ?? []).map(normalizeSlug);
-  const lines: string[] = [`name: ${worker.name}`, `trigger:`, `  type: ${worker.trigger_type}`];
-  if (worker.runtime) lines.push(`runtime: ${worker.runtime}`);
-  if (tools.length > 0) {
-    lines.push("tools:");
-    for (const t of tools) lines.push(`  - ${t}`);
-  }
-  if (worker.outputs.length > 0) {
-    lines.push("outputs:");
-    for (const out of worker.outputs) lines.push(`  - ${out.name}: ${out.type}`);
-  }
-  return lines.join("\n");
+function formatField(field: { label?: string; name: string; type: string; required?: boolean }) {
+  const label = field.label || field.name;
+  const required = field.required ? "Required" : "Optional";
+  return { label, meta: `${field.type}${field.required == null ? "" : ` · ${required}`}` };
 }
 
-type FileTab = "skill" | "yaml" | "output";
+function SetupSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--ink-faint)]">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function SetupLine({
+  label,
+  meta,
+  icon,
+}: {
+  label: string;
+  meta?: string;
+  icon?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-[10px] bg-[var(--bg-2)] px-3 py-2 text-sm">
+      {icon ? <span className="grid size-5 shrink-0 place-items-center text-[var(--ink-soft)]">{icon}</span> : null}
+      <span className="min-w-0 flex-1 truncate text-[var(--ink)]">{label}</span>
+      {meta ? <span className="shrink-0 text-xs text-[var(--ink-soft)]">{meta}</span> : null}
+    </div>
+  );
+}
+
+function WorkerSetupSummary({
+  worker,
+  tools,
+  triggerLabel,
+  TriggerIcon,
+}: {
+  worker: PublicWorker;
+  tools: string[];
+  triggerLabel: string;
+  TriggerIcon: typeof Clock;
+}) {
+  return (
+    <div className="space-y-4 px-5 py-4">
+      <SetupSection title="Trigger">
+        <SetupLine label={triggerLabel} meta={worker.trigger_type} icon={<TriggerIcon className="size-3.5" />} />
+      </SetupSection>
+
+      <SetupSection title="Tools">
+        {tools.length > 0 ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {tools.map((slug) => (
+              <SetupLine
+                key={slug}
+                label={slug.replace(/-/g, " ")}
+                icon={<BrandLogo icon={slug} className="size-3.5" />}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-[10px] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink-soft)]">
+            No external tool connection required.
+          </p>
+        )}
+      </SetupSection>
+
+      {worker.inputs.length > 0 && (
+        <SetupSection title="Inputs">
+          <div className="space-y-2">
+            {worker.inputs.map((input) => {
+              const field = formatField(input);
+              return <SetupLine key={input.name} label={field.label} meta={field.meta} />;
+            })}
+          </div>
+        </SetupSection>
+      )}
+
+      {worker.outputs.length > 0 && (
+        <SetupSection title="Outputs">
+          <div className="space-y-2">
+            {worker.outputs.map((output) => {
+              const field = formatField(output);
+              return <SetupLine key={output.name} label={field.label} meta={field.meta} />;
+            })}
+          </div>
+        </SetupSection>
+      )}
+    </div>
+  );
+}
+
+type FileTab = "skill" | "setup" | "output";
 
 export function WorkerShareCard({ worker, authed = false, token }: { worker: PublicWorker; authed?: boolean; token?: string }) {
   const router = useRouter();
@@ -121,7 +204,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
 
   // CTA element differs: authed users get an import button; guests go to login.
   const ctaHref = authed ? undefined : "/login";
-  const ctaLabel = importedId ? "View worker" : importing ? "Importing..." : "Add to workspace";
+  const ctaLabel = importedId ? "View agent" : importing ? "Importing..." : "Add to workspace";
 
   const importButton = authed && token ? (
     <button
@@ -184,7 +267,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
         <div className="flex shrink-0 [border-bottom:var(--bd-div)]">
           {([
             ["skill", "SKILL.md"],
-            ["yaml", "worker.yml"],
+            ["setup", "Setup"],
             ...(hasExample ? ([["output", "output"]] as const) : []),
           ] as [FileTab, string][]).map(([key, labelText]) => (
             <button
@@ -207,12 +290,13 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
           {tab === "skill" && (
             <GenericOutput type="markdown" value={buildSkillMd(worker)} className="px-5 py-4" />
           )}
-          {tab === "yaml" && (
-            <pre className="overflow-x-auto px-5 py-4 font-mono text-[11px] leading-relaxed text-[var(--ink-soft)]">
-              {/* worker.yml is synthesized from public fields; sanitize for
-                  consistency so no internal marker can ever render here (#1752). */}
-              {sanitizeOutputText(buildWorkerYml(worker))}
-            </pre>
+          {tab === "setup" && (
+            <WorkerSetupSummary
+              worker={worker}
+              tools={tools}
+              triggerLabel={triggerLabel}
+              TriggerIcon={TriggerIcon}
+            />
           )}
           {tab === "output" && hasExample && (
             <GenericOutput type={exampleType(worker)} value={worker.example_output} className="px-5 py-4" />
@@ -224,8 +308,8 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
           {authed
-            ? "Import this worker into your workspace and connect its tools."
-            : "Add this worker to your workspace and connect its tools."}
+            ? "Import this agent into your workspace and connect its tools."
+            : "Add this agent to your workspace and connect its tools."}
         </p>
         {importButton}
       </div>

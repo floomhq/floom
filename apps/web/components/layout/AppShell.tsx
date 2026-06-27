@@ -27,8 +27,10 @@ import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 // the one page reachable while logged out, see middleware.ts).
 const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login", "/run", "/preview", "/cli-auth"];
 
-// The full-page /chat route renders its own Emily header; no dock needed there.
-const noDockPrefixes = ["/chat"];
+// `/chat` uses the same persistent Emily dock/fullscreen surface as the rest of
+// the app. Keeping one mounted stream instance prevents route navigation from
+// aborting an active Emily response.
+const noDockPrefixes: string[] = [];
 
 // Collection pages manage their own internal layout (header + split detail that
 // must reach the bottom of the viewport). They render inside the standard

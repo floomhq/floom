@@ -827,10 +827,7 @@ export function createServer(): McpServer {
     },
     async ({ id, inputs, trigger_source }) =>
       callTool(async () =>
-        jsonResult(
-          await request("POST", `/workers/${encodeURIComponent(id)}/runs`, { inputs, trigger_source }),
-          "Worker run started.",
-        ),
+        jsonResult(await request("POST", `/workers/${encodeURIComponent(id)}/runs`, { inputs, trigger_source })),
       ),
   );
 

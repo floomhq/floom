@@ -1,8 +1,8 @@
-// Federico 2026-06-19: "The bespoke 'Hire a new worker' screen should not exist!
+// Federico 2026-06-19: "The bespoke 'Hire a new agent' screen should not exist!
 // Consistent Emily chat." Create is now visually the SAME as the home empty
 // state — greeting + pills (EmilyHomeEmpty) ABOVE a CENTERED real composer — NOT
-// a bespoke create-worker hero. This test pins create-mode to that consistency:
-//   - it renders the home empty state (greeting + pills), no "Hire a new worker"
+// a bespoke create-agent hero. This test pins create-mode to that consistency:
+//   - it renders the home empty state (greeting + pills), no "Hire a new agent"
 //     heading, no "ADD SOURCES"/source pills, no create-specific example pills
 //   - the composer is the real PromptInput (a <textarea>), centered, with the
 //     generic "Message Emily…" placeholder (consistent with home)
@@ -69,21 +69,22 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-describe("new worker = the consistent Emily empty state (no bespoke hero)", () => {
-  it("does NOT render the bespoke 'Hire a new worker' screen", () => {
+describe("new agent = the consistent Emily empty state (no bespoke hero)", () => {
+  it("does NOT render the bespoke 'Hire a new agent' screen", () => {
     render(<EmilyChatCore fullPage createMode />);
-    expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Hire a new agent" })).not.toBeInTheDocument();
     // No bespoke create chrome: no ADD SOURCES row, no create-specific examples.
     expect(screen.queryByText(/Add sources/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Score new CRM contacts against a job brief/i)).not.toBeInTheDocument();
   });
 
-  it("renders the SAME home empty state (greeting + pills)", async () => {
+  it("renders the Emily empty shell with agent-creation pills", async () => {
     render(<EmilyChatCore fullPage createMode />);
-    // Active-workspace pulse from the home empty state.
-    expect(await screen.findByText(/done this week/i)).toBeInTheDocument();
-    // Home active pills.
-    expect(screen.getByRole("button", { name: /What ran overnight/i })).toBeInTheDocument();
+    expect(await screen.findByText(/What should this agent do/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create a Linear triage agent/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Daily GitHub PR digest/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /What ran overnight/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show me this week's runs/i })).not.toBeInTheDocument();
   });
 
   it("renders the real PromptInput composer, centered, with the generic placeholder", async () => {
@@ -92,17 +93,17 @@ describe("new worker = the consistent Emily empty state (no bespoke hero)", () =
     // Exactly one composer (centered in the empty state, no bottom clone).
     expect(composers).toHaveLength(1);
     expect(composers[0].tagName).toBe("TEXTAREA");
-    // #1706: the landing send CTA is now aria-label="Hire worker" (canonical action name).
+    // #1706: the landing send CTA is now aria-label="Hire agent" (canonical action name).
     // Assert the bespoke hero HEADING is absent, not the action button.
-    expect(screen.queryByRole("heading", { name: /hire a new worker/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /hire a new agent/i })).not.toBeInTheDocument();
   });
 
-  it("clicking a home pill primes the composer with that prompt", async () => {
+  it("clicking a create pill primes the composer with that prompt", async () => {
     const user = userEvent.setup();
     render(<EmilyChatCore fullPage createMode />);
     const composer = (await screen.findByPlaceholderText("Message Emily...")) as HTMLTextAreaElement;
     expect(composer.value).toBe("");
-    await user.click(screen.getByRole("button", { name: /What ran overnight/i }));
-    expect(composer.value).toBe("What ran overnight?");
+    await user.click(screen.getByRole("button", { name: /Create a Linear triage agent/i }));
+    expect(composer.value).toBe("Create a Linear triage agent");
   });
 });

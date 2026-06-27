@@ -15,7 +15,7 @@ export default function PrivacyPage() {
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>
-          Floom is source-available software that runs AI workers on
+          Floom is MIT-licensed software that runs AI workers on
           infrastructure operated by whoever deploys it. This instance is a
           single-tenant deployment: it stores data for one account owner and
           is not a multi-user service collecting third-party personal data.
@@ -30,7 +30,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Secrets</strong>: API keys and credentials you add are
-            stored on the server so workers can use them. They are write-only
+            stored on the server so agents can use them. They are write-only
             through the API: values are never returned to the browser.
           </li>
           <li>

@@ -56,11 +56,18 @@ import {
 import { LoadingState } from "@/components/collection/CollectionStates";
 import {
   ArrowRight,
+  Archive,
   Brain,
   ChevronDown,
+  CopyPlus,
+  Edit3,
   Lock,
   Mail,
+  PauseCircle,
+  PlayCircle,
   Plus,
+  RotateCcw,
+  Share2,
   Trash2,
   Webhook,
   X,
@@ -405,9 +412,8 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 // while /runs showed the full history for the same worker. Using the proven
 // worker-scoped list query here makes the two surfaces agree.
 //
-// Module-level cache keyed by worker id so the (synchronously-rendered) tab badge
-// and this tab body read the SAME data — that shared source is what stops the
-// "Runs N" badge flipping 0↔1 across tab clicks.
+// Module-level cache keyed by worker id so returning to a worker's Runs tab is
+// instant and never blanks.
 const workerRunsCache = new Map<string, RunSummary[]>();
 const WORKER_RUNS_LIMIT = 20;
 
@@ -472,7 +478,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
           {runs.map((r) => (
             <Link
               key={r.id}
-              href={`/runs?worker_id=${w.id}&sel=${r.id}`}
+              href={`/runs/${encodeURIComponent(r.id)}`}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto auto", gap: 12, textDecoration: "none", color: "inherit" }}
             >
@@ -577,7 +583,7 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
         onOpenChange={(open) => {
           if (!open && !busy) setRestoreId(null);
         }}
-        title={restoreId ? `Restore worker to ${restoreId.slice(0, 7)}?` : "Restore worker version?"}
+        title={restoreId ? `Restore agent to ${restoreId.slice(0, 7)}?` : "Restore agent version?"}
         body="This commits a new version with the selected source files."
         confirmLabel="Restore"
         loading={busy}
@@ -730,7 +736,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
         <DialogContent className="max-h-[90vh] sm:max-w-6xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit source</DialogTitle>
-            <DialogDescription>Update this worker&apos;s source files.</DialogDescription>
+            <DialogDescription>Update this agent&apos;s source files.</DialogDescription>
           </DialogHeader>
           <FilesEditor
             mode="edit"
@@ -1284,7 +1290,7 @@ function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
           <DetailError />
         ) : alerts.length === 0 ? (
           <DetailEmpty>
-            No alerts yet. Add one below to be notified when this worker&apos;s runs
+            No alerts yet. Add one below to be notified when this agent&apos;s runs
             fail or complete.
           </DetailEmpty>
         ) : (
@@ -1714,7 +1720,7 @@ function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => 
       {/* Visual-editor-of-worker.yml framing + View-as-YAML deep-link, now in the
           panel body below the rows (not between them). */}
       <div className="c-ops-frame">
-        <span>Visual worker editor</span>
+        <span>Visual agent editor</span>
         <Link
           href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`}
           className="ml-auto normal-case"
@@ -1780,13 +1786,8 @@ const WORKER_TAB_REASON: Record<WorkerDetailTab, CustomTabReason> = {
   Tools: "tool-list",
 };
 
-/**
- * Inline "Developer" disclosure button — sits directly after the operator tabs
- * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Brain, Tools).
- * One click reveals all; clicking again collapses all. No dropdown, no pin, no
- * per-item checkmark. Replaces the pick-one dropdown (kills the #1680 bug class).
- */
-function DeveloperDisclosure({
+/** Developer disclosure: advanced tabs are either visible inline or hidden. */
+function DeveloperToggle({
   open,
   onToggle,
 }: {
@@ -1798,15 +1799,11 @@ function DeveloperDisclosure({
       type="button"
       className={`c-dtab-adv inline-flex items-center gap-1${open ? " open" : ""}`}
       aria-label={open ? "Hide developer tabs" : "Show developer tabs"}
-      aria-expanded={open}
+      aria-pressed={open}
       onClick={onToggle}
     >
       Developer
-      <ChevronDown
-        className="size-3.5"
-        aria-hidden="true"
-        style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms" }}
-      />
+      <ChevronDown className={`size-3.5 transition-transform${open ? " rotate-180" : ""}`} aria-hidden="true" />
     </button>
   );
 }
@@ -1840,7 +1837,7 @@ function WorkerDetailActions({
     const nextName = name.trim();
     const nextDescription = description.trim();
     if (!nextName) {
-      toast.error("Worker name is required.");
+      toast.error("Agent name is required.");
       return;
     }
     setSaving(true);
@@ -1851,10 +1848,10 @@ function WorkerDetailActions({
       const updated = await persistYml(d, yaml);
       applyDetail(updated);
       onUpdated({ ...w, name: updated.name, description: updated.description });
-      toast.success("Worker updated");
+      toast.success("Agent updated");
       setEditOpen(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update worker");
+      toast.error(err instanceof Error ? err.message : "Could not update agent");
     } finally {
       setSaving(false);
     }
@@ -1872,21 +1869,22 @@ function WorkerDetailActions({
           // output-first run panel), the same standalone runnable surface — no
           // Dialog, no third page. See feedback/round-09/run-detail-real.md.
           onClick={() => router.push(`/run/${encodeURIComponent(w.id)}`)}
-          title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
+          title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This agent is paused; it may not run as expected" : undefined}
         >
           Run
         </button>
       )}
       {(canManage || can("edit", w)) && (
         <ActionMenu
-          label="More worker actions"
+          label="More agent actions"
           items={[
-            { label: "Edit", onSelect: () => setEditOpen(true) },
+            { label: "Edit", icon: <Edit3 className="size-4" />, onSelect: () => setEditOpen(true) },
             // Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
             // (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
             // the schedule, which a raw worker.yml `enabled:` PUT does not do.
             {
               label: w.enabled === false ? "Resume" : "Pause",
+              icon: w.enabled === false ? <PlayCircle className="size-4" /> : <PauseCircle className="size-4" />,
               onSelect: () => {
                 const pausing = w.enabled !== false;
                 const action = pausing ? api.workers.pause : api.workers.resume;
@@ -1894,28 +1892,30 @@ function WorkerDetailActions({
                   .then((updated) => {
                     applyDetail(updated);
                     onUpdated({ ...w, enabled: !pausing });
-                    toast.success(pausing ? "Worker paused" : "Worker resumed");
+                    toast.success(pausing ? "Agent paused" : "Agent resumed");
                   })
-                  .catch((err: Error) => toast.error(err.message || "Could not update worker"));
+                  .catch((err: Error) => toast.error(err.message || "Could not update agent"));
               },
             },
             // Share — opens the real Share modal (company access + grants +
             // anonymous public link with revoke), not a bare copy-link.
-            { label: "Share", onSelect: () => setShareOpen(true) },
+            { label: "Share", icon: <Share2 className="size-4" />, onSelect: () => setShareOpen(true) },
             {
               label: "Duplicate",
+              icon: <CopyPlus className="size-4" />,
               onSelect: () => {
                 api.workers.duplicate(w.id)
                   .then((created) => {
                     onUpdated(detailToSummary(created));
                     router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
-                    toast.success("Worker duplicated");
+                    toast.success("Agent duplicated");
                   })
-                  .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
+                  .catch((err: Error) => toast.error(err.message || "Could not duplicate agent"));
               },
             },
             {
               label: workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live",
+              icon: <RotateCcw className="size-4" />,
               onSelect: () => {
                 const next = workerStageKey(w) === "live" ? "draft" : "live";
                 api.workers.setStage(w.id, next)
@@ -1928,19 +1928,23 @@ function WorkerDetailActions({
             },
             {
               label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+              icon: (w as WorkerSummary & { archived?: boolean }).archived
+                ? <RotateCcw className="size-4" />
+                : <Archive className="size-4" />,
               onSelect: () => {
                 const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
                 const action = isArchived ? api.workers.restore : api.workers.archive;
                 action(w.id)
                   .then(() => {
-                    toast.success(isArchived ? "Worker restored" : "Worker archived");
+                    toast.success(isArchived ? "Agent restored" : "Agent archived");
                     onUpdated({ ...w });
                   })
-                  .catch((err: Error) => toast.error(err.message || "Could not update worker"));
+                  .catch((err: Error) => toast.error(err.message || "Could not update agent"));
               },
             },
             {
               label: "Delete",
+              icon: <Trash2 className="size-4" />,
               destructive: true,
               // Replaces window.confirm with the shared ConfirmDialog.
               confirm: {
@@ -1952,10 +1956,10 @@ function WorkerDetailActions({
               onSelect: () => {
                 api.workers.delete(w.id)
                   .then(() => {
-                    toast.success("Worker deleted");
+                    toast.success("Agent deleted");
                     onUpdated({ ...w, _deleted: true } as WorkerSummary & { _deleted?: boolean });
                   })
-                  .catch((err: Error) => toast.error(err.message || "Could not delete worker"));
+                  .catch((err: Error) => toast.error(err.message || "Could not delete agent"));
               },
             },
           ]}
@@ -1993,8 +1997,8 @@ function WorkerDetailActions({
         <DialogContent className="sm:max-w-lg">
           <form onSubmit={(event) => void submitEdit(event)} className="space-y-4">
             <DialogHeader>
-              <DialogTitle>Edit worker</DialogTitle>
-              <DialogDescription>Update the worker identity without leaving the split detail.</DialogDescription>
+              <DialogTitle>Edit agent</DialogTitle>
+              <DialogDescription>Update the agent identity without leaving the split detail.</DialogDescription>
             </DialogHeader>
             {d === undefined ? (
               <Loading />
@@ -2076,7 +2080,7 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
         type="submit"
         disabled={!value.trim()}
         className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
-        aria-label="Create worker"
+        aria-label="Create agent"
       >
         <ArrowRight className="size-3.5" />
       </button>
@@ -2129,26 +2133,14 @@ export default function WorkersCollection({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
-  // Developer disclosure — single boolean persisted to localStorage so the
-  // user's preference (expanded / collapsed) survives page reloads.
   const [developerOpen, setDeveloperOpen] = useState(false);
-  useEffect(() => {
-    setDeveloperOpen(safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY) === "true");
-  }, []);
-  const toggleDeveloper = useCallback(() => {
-    setDeveloperOpen((prev) => {
-      const next = !prev;
-      safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, next ? "true" : "false");
-      return next;
-    });
-  }, []);
   // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
   // `tab` URL param to drive the active tab. replace() avoids a history entry.
   const openAdvancedAndSelectWorkerTab = useCallback(
     (workerId: string, key: WorkerDetailTab) => {
       if (ADVANCED_DETAIL_TABS.includes(key)) {
         setDeveloperOpen(true);
-        safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "true");
+        safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "open");
       }
       router.replace(
         `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
@@ -2156,6 +2148,15 @@ export default function WorkersCollection({
     },
     [router],
   );
+
+  useEffect(() => {
+    const saved = safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY);
+    if (saved === "open") setDeveloperOpen(true);
+    else if (saved && ADVANCED_DETAIL_TABS.includes(saved as WorkerDetailTab)) {
+      setDeveloperOpen(true);
+      safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "open");
+    }
+  }, []);
 
   useEffect(() => {
     if (workersQuery.data) {
@@ -2171,7 +2172,7 @@ export default function WorkersCollection({
   const loading = workersQuery.isLoading && workers.length === 0;
   const error =
     workersQuery.isError && workers.length === 0
-      ? "Could not load workers. Check your connection and try again."
+      ? "Could not load agents. Check your connection and try again."
       : null;
 
   useEffect(() => {
@@ -2211,13 +2212,13 @@ export default function WorkersCollection({
   const visible = useMemo(() => workers.filter((w) => !isSystemWorker(w)), [workers]);
 
   const config: CollectionConfig<WorkerSummary> = {
-    title: "Workers",
-    subtitle: "Your AI workers.",
+    title: "Agents",
+    subtitle: "Your AI agents.",
     items: sortWorkersByRecentActivity(visible),
     loading,
     error,
     idOf: (w) => w.id,
-    invalidSelectionMessage: "Worker not found. It may have been deleted or you may not have access.",
+    invalidSelectionMessage: "Agent not found. It may have been deleted or you may not have access.",
     // #1558: the workers list is cache-first (staleTime 30s) and filters system
     // workers, so a deep-link / Emily "Open worker" to an id not in the loaded
     // list (e.g. one just created) would false-toast "not found". Hydrate it by
@@ -2232,7 +2233,7 @@ export default function WorkersCollection({
         return null;
       }
     },
-    searchPlaceholder: "Search workers or tags…",
+    searchPlaceholder: "Search agents or tags...",
     searchOf: (w) => `${w.name} ${displayBrandCopy(w.description)} ${(w.tags ?? []).join(" ")}`,
     tagsOf: (w) =>
       workerTags(w, { starred: favorites.has(w.id), now }) as Partial<Record<TagFamilyKey, string[]>>,
@@ -2258,7 +2259,7 @@ export default function WorkersCollection({
       content: contentTagOptions(visible),
     },
     counts: [
-      { value: visible.length, label: "workers" },
+      { value: visible.length, label: "agents" },
       // P2-1 (#1565): the header count must agree with the per-card stage badge.
       // The badge is the *stage* axis (Draft vs Live), but this count used the
       // *health* axis (status healthy/ready) — so "5 active" could sit next to a
@@ -2274,7 +2275,7 @@ export default function WorkersCollection({
     view: { default: "list", grid: true },
     columns: {
       template: "1.9fr 1fr 1fr 130px 40px", // #895: wireframe pageWorkers grid
-      headers: ["Worker", "Tools", "Last run", "Status", ""],
+      headers: ["Agent", "Tools", "Last run", "Status", ""],
     },
     row: (w) => ({
       // V4 SPEC rule 3: no avatar for workers.
@@ -2290,36 +2291,41 @@ export default function WorkersCollection({
       ],
       status: workerStatusPill(w),
       menu: [
-        { label: "Open", onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) },
-        { label: "Run", onSelect: () => router.push(`/run/${encodeURIComponent(w.id)}`) },
+        { label: "Open", icon: <ArrowRight className="size-4" />, onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) },
+        { label: "Run", icon: <PlayCircle className="size-4" />, onSelect: () => router.push(`/run/${encodeURIComponent(w.id)}`) },
         ...(canManageWorkers ? [
           {
             label: "Duplicate",
+            icon: <CopyPlus className="size-4" />,
             onSelect: () => {
               api.workers.duplicate(w.id)
                 .then((created) => {
                   setWorkers((prev) => [detailToSummary(created), ...prev]);
                   router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
-                  toast.success("Worker duplicated");
+                  toast.success("Agent duplicated");
                 })
-                .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
+                .catch((err: Error) => toast.error(err.message || "Could not duplicate agent"));
             },
           },
           {
             label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+            icon: (w as WorkerSummary & { archived?: boolean }).archived
+              ? <RotateCcw className="size-4" />
+              : <Archive className="size-4" />,
             onSelect: () => {
               const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
               const action = isArchived ? api.workers.restore : api.workers.archive;
               action(w.id)
                 .then((updated) => {
                   setWorkers((prev) => prev.map((item) => (item.id === w.id ? { ...item, ...detailToSummary(updated) } : item)));
-                  toast.success(isArchived ? "Worker restored" : "Worker archived");
+                  toast.success(isArchived ? "Agent restored" : "Agent archived");
                 })
-                .catch((err: Error) => toast.error(err.message || "Could not update worker"));
+                .catch((err: Error) => toast.error(err.message || "Could not update agent"));
             },
           },
           {
             label: "Delete",
+            icon: <Trash2 className="size-4" />,
             destructive: true,
             confirm: {
               title: `Delete "${w.name}"?`,
@@ -2331,9 +2337,9 @@ export default function WorkersCollection({
               api.workers.delete(w.id)
                 .then(() => {
                   setWorkers((prev) => prev.filter((item) => item.id !== w.id));
-                  toast.success("Worker deleted");
+                  toast.success("Agent deleted");
                 })
-                .catch((err: Error) => toast.error(err.message || "Could not delete worker"));
+                .catch((err: Error) => toast.error(err.message || "Could not delete agent"));
             },
           },
         ] : []),
@@ -2372,7 +2378,7 @@ export default function WorkersCollection({
         quickActions: [],
       };
     },
-    detail: (w) => {
+    detail: (w, activeTab) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const stage = workerStageKey(w);
       const actions = (
@@ -2416,14 +2422,14 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // Inline disclosure: BASE_DETAIL_TABS always visible; ADVANCED_DETAIL_TABS
-        // appear after them when developerOpen=true. CollectionView already handles
-        // the "active tab no longer in tab set" case by falling back to tabs[0],
-        // so collapsing while an advanced tab is active gracefully switches to Overview.
+        // Primary tabs stay stable. Developer is an explicit show/hide
+        // disclosure; when open, every advanced tab is visible inline.
         tabs: (() => {
+          const activeAdvanced = ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab);
+          const showDeveloperTabs = developerOpen || activeAdvanced;
           const visibleKeys: WorkerDetailTab[] = [
             ...BASE_DETAIL_TABS,
-            ...(developerOpen ? ADVANCED_DETAIL_TABS : []),
+            ...(showDeveloperTabs ? ADVANCED_DETAIL_TABS : []),
           ];
           return visibleKeys.map((key) => {
             const Tab = WORKER_TAB_COMPONENT[key];
@@ -2434,15 +2440,7 @@ export default function WorkersCollection({
               // editor, file/version/brain editors, run list, tool allowlist) that
               // loads its own data and owns its own state — not a synchronous
               // key/value pane — so each names an accurate custom reason.
-              // #1251 / #1679: badge matches the count listed in the Runs tab.
-              // Both read the SAME worker-scoped runs cache (api.runs.list) so the
-              // badge can no longer disagree with the tab body or flip 0↔1: until
-              // that fetch resolves the badge stays on the summary's last_run
-              // fallback, then settles to the real worker-scoped count.
-              count: key === "Runs"
-                ? (workerRunsCache.get(w.id)?.length
-                    ?? (w.last_run ? 1 : undefined))
-                : undefined,
+              count: undefined,
               custom: WORKER_TAB_REASON[key],
               render: () => key === "Setup"
                 ? <SetupTab w={w} onOpenSource={() => openAdvancedAndSelectWorkerTab(w.id, "Source")} />
@@ -2450,21 +2448,29 @@ export default function WorkersCollection({
             };
           });
         })(),
-        // Developer disclosure sits inline directly after the operator tabs —
-        // no far-right spacer. One click reveals ALL advanced tabs; clicking
-        // again collapses them. Replaces the pick-one dropdown (#1680 bug class).
+        // Developer toggle controls whether advanced tabs are shown inline.
         tabsTrailing: (
-          <DeveloperDisclosure open={developerOpen} onToggle={toggleDeveloper} />
+          <DeveloperToggle
+            open={developerOpen || ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab)}
+            onToggle={() => {
+              const next = !(developerOpen || ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab));
+              setDeveloperOpen(next);
+              safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, next ? "open" : "closed");
+              if (!next && ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab)) {
+                openAdvancedAndSelectWorkerTab(w.id, "Overview");
+              }
+            }}
+          />
         ),
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) },
+    add: { label: "New agent", onSelect: () => router.push(createWorkerHref()) },
     states: {
       // #1364 — improved help text + action CTA driving the in-Emily create flow
       empty: {
-        title: "No workers yet",
-        help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
+        title: "No agents yet",
+        help: "Agents run on a schedule, webhook, or on demand, powered by your connected apps.",
         action: (
           <WorkersEmptyPrompt
             onSubmit={(prompt) => router.push(createWorkerHref(prompt))}
@@ -2490,7 +2496,7 @@ export default function WorkersCollection({
   const activeExtra = extraViews.find((v) => v.key === activeView);
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="c-dtabs px-4 pt-3" role="tablist" aria-label="Workers views">
+      <div className="c-dtabs px-4 pt-3" role="tablist" aria-label="Agents views">
         <button
           type="button"
           role="tab"
@@ -2498,7 +2504,7 @@ export default function WorkersCollection({
           className={`c-dtab ${activeView === WORKERS_VIEW_KEY ? "on" : ""}`}
           onClick={() => setActiveView(WORKERS_VIEW_KEY)}
         >
-          Workers
+          Agents
         </button>
         {extraViews.map((v) => (
           <button

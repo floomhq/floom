@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ChatSSEEvent } from "@/lib/emily-chat-types";
 import {
   decideRunAutoOpen,
@@ -10,6 +12,7 @@ import {
   reduceSSEEvent,
   safeRunPartsStreamPath,
   shouldAutoOpenRunDetails,
+  useChatStream,
 } from "@/lib/useChatStream";
 
 function toolCards(messages: ChatMessage[]) {
@@ -19,6 +22,38 @@ function toolCards(messages: ChatMessage[]) {
 }
 
 describe("Emily chat tool cards", () => {
+  it("stops streaming after a terminal finish event even if the response body stays open", async () => {
+    const encoder = new TextEncoder();
+    const cancel = vi.fn(async () => undefined);
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce({
+        done: false,
+        value: encoder.encode('data: {"type":"finish"}\n\n'),
+      })
+      .mockImplementation(() => new Promise(() => undefined));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: { getReader: () => ({ read, cancel }) },
+      }),
+    );
+
+    const { result } = renderHook(() => useChatStream({ ephemeral: true }));
+
+    act(() => {
+      result.current.sendMessage("What workers do I have?");
+    });
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(result.current.isStreaming).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
+
   it("allowlists only run parts SSE stream paths from tool cards", () => {
     expect(safeRunPartsStreamPath("/runs/run_123/stream")).toBe("/runs/run_123/stream");
     expect(safeRunPartsStreamPath(" /runs/run-abc_123/stream ")).toBe("/runs/run-abc_123/stream");
@@ -63,13 +98,13 @@ describe("Emily chat tool cards", () => {
     const runningCard = toolCards(runningMessages)[0]?.card;
     expect(runningCard?.kind).toBe("generic");
     if (runningCard?.kind !== "generic") throw new Error("expected generic card");
-    expect(runningCard?.title).toBe("Listing your workers");
+    expect(runningCard?.title).toBe("Listing your agents");
 
     const completedMessages = reduceSSEEvent(runningMessages, result, "assistant_1");
     const completedCard = toolCards(completedMessages)[0]?.card;
     if (completedCard?.kind !== "generic") throw new Error("expected generic card");
     expect(completedCard?.status).toBe("completed");
-    expect(completedCard?.title).toBe("Listed your workers");
+    expect(completedCard?.title).toBe("Listed your agents");
   });
 
   it("keeps generic tool inputs separate from outputs after completion", () => {
@@ -103,7 +138,7 @@ describe("Emily chat tool cards", () => {
     expect(getToolCardTitle("approvals.list pending", "running")).toBe("Checking approvals");
     expect(getToolCardTitle("runs.list", "running")).toBe("Reviewing runs");
     expect(getToolCardTitle("runs.list", "completed")).toBe("Reviewed runs");
-    expect(getToolCardTitle("workers__create_from_prompt", "running")).toBe("Creating worker");
+    expect(getToolCardTitle("workers__create_from_prompt", "running")).toBe("Creating agent");
     expect(getToolCardTitle("cancel_run POST", "running")).toBe("Cancelling run");
   });
 
@@ -248,12 +283,12 @@ describe("Emily chat tool cards", () => {
     expect(card?.kind).toBe("run");
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.runId).toBe("run_author_123");
-    expect(card.workerName).toBe("Creating worker");
+    expect(card.workerName).toBe("Creating agent");
     expect(card.actions?.[0]).toEqual({
       id: "open_run",
       label: "View progress",
       method: "GET",
-      href: "/runs?sel=run_author_123&tab=Logs",
+      href: "/runs/run_author_123?tab=logs",
     });
   });
 
@@ -281,7 +316,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.toolName).toBe("runs.get");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_123&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_123?tab=logs");
   });
 
   // #1992: creating + running a worker from Emily must not yank the user across
@@ -315,7 +350,7 @@ describe("Emily chat tool cards", () => {
       expect(decideRunAutoOpen(runCard(), false)).toEqual({
         action: "navigate",
         runId: "run_123",
-        href: "/runs?sel=run_123&tab=Logs",
+        href: "/runs/run_123?tab=logs",
       });
     });
 
@@ -381,11 +416,11 @@ describe("Emily chat tool cards", () => {
         id: "open_run",
         label: "View run",
         method: "GET",
-        href: "/runs?sel=run_live_123&tab=Logs",
+        href: "/runs/run_live_123?tab=logs",
       },
     ]);
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_123&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_live_123?tab=logs");
   });
 
   it("keeps run auto-open href stable after finish reconciliation", () => {
@@ -437,7 +472,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.status).toBe("completed");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_456&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_live_456?tab=logs");
   });
 
   it("preserves run stream handles while reconciling worker-run card progress", () => {
@@ -522,7 +557,7 @@ describe("Emily streaming activity", () => {
     );
     expect(getStreamingActivity(messages, true)).toEqual({
       kind: "tool",
-      title: "Listing your workers",
+      title: "Listing your agents",
     });
   });
 
@@ -543,13 +578,96 @@ describe("Emily streaming activity", () => {
         type: "tool-progress",
         callId: "call_workers",
         status: "running",
-        label: "Checking worker runs",
+        label: "Checking agent runs",
       },
       "assistant_1"
     );
     expect(getStreamingActivity(progressed, true)).toEqual({
       kind: "tool",
-      title: "Checking worker runs",
+      title: "Checking agent runs",
+    });
+  });
+
+  it("materializes progress-only streams into visible activity", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-progress",
+        callId: "call_run",
+        card_id: "card_run",
+        status: "starting",
+        stage: "started",
+        label: "Starting agent run",
+      },
+      "assistant_1"
+    );
+
+    const card = toolCards(messages)[0]?.card;
+    expect(card?.kind).toBe("generic");
+    if (card?.kind !== "generic") throw new Error("expected generic card");
+    expect(card.card_id).toBe("card_run");
+    expect(card.status).toBe("starting");
+    expect(card.title).toBe("Starting agent run");
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Starting agent run",
+    });
+  });
+
+  it("appends progress-only tool cards to an existing assistant message", () => {
+    const assistantText = reduceSSEEvent(
+      [],
+      {
+        type: "text",
+        text: "I will check.",
+        conversation_id: "conv_1",
+      },
+      "assistant_1"
+    );
+    const messages = reduceSSEEvent(
+      assistantText,
+      {
+        type: "tool-progress",
+        callId: "call_approvals",
+        card_id: "card_approvals",
+        toolName: "approvals.list_pending",
+        status: "running",
+        label: "Checking approvals",
+      },
+      "assistant_1"
+    );
+
+    expect(messages).toHaveLength(1);
+    const assistant = messages[0];
+    expect(assistant.role).toBe("assistant");
+    expect(assistant.parts?.map((part) => part.type)).toEqual(["text", "tool-card"]);
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Checking approvals",
+    });
+  });
+
+  it("materializes action-required events without assuming stream handles", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-action-required",
+        callId: "call_approval",
+        card_id: "card_approval",
+        reason: "approval_required",
+        actions: [{ id: "approve", method: "POST", href: "/runs/run_1/approve" }],
+      },
+      "assistant_1"
+    );
+
+    const card = toolCards(messages)[0]?.card;
+    expect(card?.kind).toBe("generic");
+    if (card?.kind !== "generic") throw new Error("expected generic card");
+    expect(card.status).toBe("pending_approval");
+    expect(card.actions).toEqual([{ id: "approve", method: "POST", href: "/runs/run_1/approve" }]);
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Working",
     });
   });
 

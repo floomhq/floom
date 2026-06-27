@@ -34,7 +34,7 @@ import type { WorkerSummary } from "@/lib/types";
 
 const NAV = [
   { href: "/overview", label: "Overview", icon: Activity, keywords: "home dashboard" },
-  { href: "/workers", label: "Workers", icon: Box, keywords: "list jobs" },
+  { href: "/workers", label: "Agents", icon: Box, keywords: "list jobs workers" },
   { href: "/runs", label: "Runs", icon: Clock, keywords: "history executions" },
   { href: "/library", label: "Library", icon: Brain, keywords: "library brain context folders files knowledge resources" },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, keywords: "review pending actions" },
@@ -127,7 +127,7 @@ export function CommandPalette() {
         {visibleWorkers.length > 0 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="Workers">
+            <CommandGroup heading="Agents">
               {visibleWorkers.map((worker) => (
                 <CommandItem
                   key={worker.id}
@@ -148,18 +148,18 @@ export function CommandPalette() {
         <CommandSeparator />
         <CommandGroup heading="Actions">
           <CommandItem
-            value="action new worker create add"
+            value="action new agent worker create add"
             onSelect={() => go(createWorkerHref())}
           >
             <Plus />
-            New worker
+            New agent
           </CommandItem>
           <CommandItem
-            value="action reload workers rescan refresh"
+            value="action reload agents workers rescan refresh"
             onSelect={runReload}
           >
             <RefreshCcw />
-            Reload workers
+            Reload agents
           </CommandItem>
           {/* FL10: clearing all runs is destructive, so it must not read as a
               one-click action sitting next to the search bar. It stays

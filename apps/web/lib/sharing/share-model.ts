@@ -34,7 +34,7 @@ export const GENERAL_ACCESS_OPTIONS: GeneralAccessOption[] = [
     value: "workspace",
     label: "Workspace",
     description:
-      "Transfers this worker to the workspace. Members can view and run it; admins configure secrets and connections.",
+      "Transfers this agent to the workspace. Members can view and run it; admins configure secrets and connections.",
   },
 ];
 
@@ -85,6 +85,9 @@ export function publicLinkScope(type: ShareAssetType): string {
       return "Anyone with this link can review, approve, or reject this pending approval.";
     case "worker":
     default:
-      return "They can view the worker, inspect its files, and duplicate it.";
+      return (
+        "They can view the worker, inspect its non-secret files, and duplicate it. " +
+        "Secrets, connection credentials, API keys, tokens, and private environment values are never included."
+      );
   }
 }

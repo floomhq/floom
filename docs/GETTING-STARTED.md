@@ -1,6 +1,6 @@
 # Getting started
 
-Floom is a source-available runtime for AI workers: small, versioned worker
+Floom is an open-source runtime for AI agents: small, versioned worker
 bundles that can read inputs, use approved tools/connections, run in a sandbox,
 and leave behind logs, outputs, approvals, and history.
 
@@ -15,12 +15,12 @@ The local setup runs the same core pieces used by hosted deployments:
 
 - FastAPI backend with SQLite persistence.
 - Next.js web app.
-- E2B sandbox execution for script workers.
-- Agent-mode workers powered by the configured LLM provider.
+- E2B sandbox execution for script agents.
+- Agent-mode bundles powered by the configured LLM provider.
 - Local workspace data, contexts, run logs, approvals, and version history.
 
 Hosted-only concerns such as commercial billing, managed enterprise SSO, and
-SOC 2 evidence collection live outside the source-available runtime. This repo
+SOC 2 evidence collection live outside the open-source runtime. This repo
 provides the core runtime and local/self-hosted path.
 
 ## 1. Run the app
@@ -30,7 +30,7 @@ Prerequisites:
 - Python 3.11 or newer.
 - Node.js 20 or newer.
 - Git.
-- `OPENAI_API_KEY` for Emily, agent workers, and worker generation.
+- `OPENAI_API_KEY` for Emily, agent-mode runs, and agent generation.
 - `E2B_API_KEY` for sandboxed script-worker execution.
 
 Linux / macOS:
@@ -191,7 +191,7 @@ That shared parent becomes a local git repo with no remote. Set
 `WORKEROS_GIT_REMOTE` only if you want to push workspace history to your own git
 host.
 
-## 3. Build your first worker
+## 3. Build your first agent
 
 Create a folder:
 
@@ -206,7 +206,7 @@ workers/hello-worker/
 ```yaml
 schema_version: "0.3"
 name: hello-worker
-title: Hello Worker
+title: Hello Agent
 description: Greets a person from an input.
 version: 0.1.0
 entrypoint: run.py
@@ -254,10 +254,10 @@ Path("result.json").write_text(
 )
 ```
 
-Reload workers in the UI or restart the dev server, then run `Hello Worker` from
-the Workers page.
+Reload agents in the UI or restart the dev server, then run `Hello Agent` from
+the Agents page.
 
-For the full schema, agent workers, approvals, triggers, secrets, and
+For the full schema, agent mode, approvals, triggers, secrets, and
 connections, read [AUTHORING.md](AUTHORING.md).
 
 ### CLI deploy loop
@@ -270,7 +270,7 @@ floom workers push ./workers/<id>
 floom run <id> --inputs-file inputs.json
 ```
 
-### Example workers
+### Example agents
 
 Browse [`workers/`](../workers/) for the full set. A few useful examples:
 
@@ -308,7 +308,7 @@ Production hardening checklist:
 
 - Terminate TLS at a reverse proxy or load balancer.
 - Store secrets in your platform secret manager, not in committed files.
-- Use E2B for untrusted worker execution; do not add an in-process runner.
+- Use E2B for untrusted script execution; do not add an in-process runner.
 - Restrict network access to the API and logs.
 - Run the relevant tests before upgrading.
 

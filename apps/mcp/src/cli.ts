@@ -67,6 +67,14 @@ import {
   mcpTestCommand,
   mcpUninstallCommand,
 } from "./commands/mcp.js";
+import {
+  feedbackCommand,
+  supportAckCommand,
+  supportFileCommand,
+  supportGetCommand,
+  supportListCommand,
+  supportReplyCommand,
+} from "./commands/support.js";
 import { completionCommand, type CompletionShell } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { main as runServer } from "./server.js";
@@ -415,6 +423,56 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
     .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
       runAction(mcpUninstallCommand(options)));
+
+  // #806 — support tickets (cloud-only). 1:1 with the member API; `feedback`
+  // is `support file` plus the local session transcript.
+  const support = program.command("support").description("File and track support tickets");
+  support.command("file")
+    .description("File a support ticket")
+    .requiredOption("--subject <subject>", "Ticket subject")
+    .option("--body <body>", "First message body")
+    .option("--severity <severity>", "low | normal | high")
+    .option("--operation <op>", "Operation that failed (added to the first message)")
+    .option("--error-code <code>", "Error code (added to the first message)")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { subject?: string; body?: string; severity?: string; operation?: string; errorCode?: string; json?: boolean }) =>
+      runAction(supportFileCommand(options)));
+  support.command("list")
+    .description("List your support tickets")
+    .option("--status <status>", "Filter by status: open | resolved")
+    .option("--limit <n>", "Max rows (1-100)", (value: string) => Number(value))
+    .option("--json", "Print raw JSON")
+    .action(async (options: { status?: string; limit?: number; json?: boolean }) =>
+      runAction(supportListCommand(options)));
+  support.command("get")
+    .description("Show a ticket and its message thread")
+    .argument("<ticketId>", "Ticket id")
+    .option("--json", "Print raw JSON")
+    .action(async (ticketId: string, options: { json?: boolean }) =>
+      runAction(supportGetCommand(ticketId, options)));
+  support.command("reply")
+    .description("Reply to a ticket (reopens a resolved ticket)")
+    .argument("<ticketId>", "Ticket id")
+    .requiredOption("--body <body>", "Reply text")
+    .option("--json", "Print raw JSON")
+    .action(async (ticketId: string, options: { body?: string; json?: boolean }) =>
+      runAction(supportReplyCommand(ticketId, options)));
+  support.command("ack")
+    .description("Clear the unread flag on a ticket")
+    .argument("<ticketId>", "Ticket id")
+    .option("--json", "Print raw JSON")
+    .action(async (ticketId: string, options: { json?: boolean }) =>
+      runAction(supportAckCommand(ticketId, options)));
+
+  program.command("feedback")
+    .description("Send feedback (files a support ticket with your session transcript attached)")
+    .requiredOption("--message <message>", "Your feedback")
+    .option("--severity <severity>", "low | normal | high")
+    .option("--transcript <path>", "Path to the session transcript to attach")
+    .option("--no-transcript", "Do not attach the session transcript")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { message?: string; severity?: string; transcript?: string | boolean; json?: boolean }) =>
+      runAction(feedbackCommand(options)));
 
   program.command("completion")
     .description("Print shell completion script")

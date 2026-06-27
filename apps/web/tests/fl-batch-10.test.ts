@@ -115,19 +115,14 @@ function test556OverviewComputesMissingForAllWorkers(): void {
 // ---------------------------------------------------------------------------
 
 function test556SidebarBadgeSetupItems(): void {
-  const overview = src("lib/useSelfOverviewItems.ts");
   const sidebar = src("components/layout/sidebar.tsx");
   assert(
-    overview.includes("api.system.overview()") && overview.includes("needs_attention"),
-    "Nav badge counts must derive from the overview needs_attention payload",
+    sidebar.includes('badge: "approvals"'),
+    "Sidebar must surface pending approvals as the only contextual nav badge",
   );
   assert(
-    overview.includes("connection_expired") && overview.includes("failure_cluster"),
-    "Nav badge counts must preserve the actionable overview item filters",
-  );
-  assert(
-    sidebar.includes('badge: "connections"') && sidebar.includes('badge: "runs"'),
-    "Sidebar must surface contextual badges on Connections and Runs",
+    !sidebar.includes('badge: "connections"') && !sidebar.includes('badge: "runs"'),
+    "Sidebar must not surface noisy contextual badges on Connections or Runs",
   );
 }
 

@@ -10,7 +10,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-const { pathname } = vi.hoisted(() => ({ pathname: vi.fn(() => "/") }));
+const { pathname, newSession } = vi.hoisted(() => ({
+  pathname: vi.fn(() => "/"),
+  newSession: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }),
@@ -29,7 +32,7 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
       isHydrating: false,
       error: null,
       sendMessage: vi.fn(),
-      newSession: vi.fn(),
+      newSession,
       loadConversation: vi.fn(),
     }),
   };
@@ -62,6 +65,7 @@ import { EmilyFullscreenProvider } from "@/components/emily/emily-fullscreen";
 describe("Emily fullscreen is route-scoped to home (P0)", () => {
   beforeEach(() => {
     pathname.mockReturnValue("/");
+    newSession.mockClear();
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
@@ -90,5 +94,6 @@ describe("Emily fullscreen is route-scoped to home (P0)", () => {
     // <main> and the Workers list is visible. No fullscreen dock remains.
     expect(await screen.findByLabelText(/emily dock \(rail\)/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/emily dock \(fullscreen\)/i)).not.toBeInTheDocument();
+    expect(newSession).not.toHaveBeenCalled();
   });
 });

@@ -762,6 +762,37 @@ class SqliteWorkerRepository:
         _recipe_cache.set(cache)
         return records
 
+    def context_worker_counts(self, *, user_id: str) -> dict[str, int]:
+        """Map mounted context name to visible-worker count."""
+        from contexts import context_mount_names
+
+        counts: dict[str, int] = {}
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    w.id,
+                    w.trigger_type,
+                    w.cron_expr,
+                    w.cron_timezone,
+                    sv.manifest_json,
+                    sv.bundle_path
+                FROM workers w
+                JOIN skill_versions sv ON sv.id = w.skill_version_id
+                WHERE w.owner_id = ?
+                """,
+                (user_id,),
+            ).fetchall()
+        for row in rows:
+            try:
+                config = _config_from_manifest_row(row)
+                contexts = config.model_dump(mode="json").get("contexts") if config else []
+                for ctx_name in context_mount_names(contexts):
+                    counts[ctx_name] = counts.get(ctx_name, 0) + 1
+            except Exception:
+                continue
+        return counts
+
     def get(self, *, user_id: str, worker_id: str, role: str | None = None) -> dict[str, Any] | None:
         """Get a single worker, respecting visibility rules.
 

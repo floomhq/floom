@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
-import { useContexts } from "@/lib/query/hooks";
+import { qk, useContexts, useStreamedInitialData } from "@/lib/query/hooks";
 import { reportError } from "@/lib/notify";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -341,7 +341,7 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
           ))}
         </div>
       ) : (
-        <DetailEmpty>No workers use this folder yet.</DetailEmpty>
+        <DetailEmpty>No agents use this folder yet.</DetailEmpty>
       )}
     </DetailGroup>
   );
@@ -382,9 +382,17 @@ function EmptyStateActions({ onBrowse }: { onBrowse: () => void }) {
   );
 }
 
-export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
-  const foldersQuery = useContexts(initialFolders.length > 0 ? initialFolders : undefined);
-  const folders = foldersQuery.data ?? initialFolders;
+export default function BrainCollection({
+  initialFolders = [],
+  initialFoldersPromise,
+}: {
+  initialFolders?: ContextSummary[];
+  initialFoldersPromise?: Promise<ContextSummary[]>;
+}) {
+  useStreamedInitialData(qk.contexts, initialFoldersPromise);
+  const safeInitialFolders = Array.isArray(initialFolders) ? initialFolders : [];
+  const foldersQuery = useContexts(safeInitialFolders.length > 0 ? safeInitialFolders : undefined);
+  const folders = Array.isArray(foldersQuery.data) ? foldersQuery.data : safeInitialFolders;
   // Show a loading skeleton until the first fetch completes so we never flash
   // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
   // Cached revisits bypass this because the query already has data.
@@ -478,7 +486,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
 
   const config: CollectionConfig<ContextSummary> = {
     title: "Library",
-    subtitle: "Reusable folders of files your workers can read before they act.",
+    subtitle: "Reusable folders of files your agents can read before they act.",
     items: folders,
     loading,
     // No banner and no prominent toolbar addButton: dropping files is the
@@ -583,7 +591,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       empty: {
         icon: Upload,
         title: "Your Library is empty",
-        help: "Drag any docs onto this page and a folder is created for them automatically. Your workers read these before they act.",
+        help: "Drag any docs onto this page and a folder is created for them automatically. Your agents read these before they act.",
         action: <EmptyStateActions onBrowse={openBrowse} />,
       },
     },

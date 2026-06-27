@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -567,6 +568,60 @@ def test_workers_shape_list_uses_repository_summary_fast_path(monkeypatch):
     assert captured["starred_ids"] == {"worker-b"}
     assert 'desc="fast"' in response.headers["Server-Timing"]
 
+def test_workers_shape_list_fast_path_failure_falls_back(monkeypatch):
+    from starlette.responses import Response
+    from routers import worker_listing
+
+    class WorkersRepo:
+        def list_summaries(self, **_kwargs):
+            raise RuntimeError("prod row shape drift")
+
+        def list(self, **_kwargs):
+            return [
+                {
+                    "id": "worker-a",
+                    "name": "Worker A",
+                    "status": "healthy",
+                    "trigger_type": "manual",
+                    "runner": "e2b",
+                    "created_at": "2026-06-18T00:00:00+00:00",
+                    "updated_at": "2026-06-18T00:00:00+00:00",
+                    "description": "Slow summary row",
+                    "enabled": True,
+                    "owner_id": "user-a",
+                    "visibility": "private",
+                    "manifest": {},
+                    "config": {"inputs": [], "connections": [], "runtime": {"type": "python311"}},
+                }
+            ]
+
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.setattr(worker_listing.hot_cache, "get", lambda _key: None)
+    monkeypatch.setattr(worker_listing.hot_cache, "set", lambda _key, _value: None)
+    monkeypatch.setattr(worker_listing, "_starred_worker_ids", lambda _user_id: set())
+    monkeypatch.setattr(worker_listing, "_get_stats_batch", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(worker_listing, "_get_last_run_for_worker", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(worker_listing, "_available_secret_names_for_user", lambda *_args, **_kwargs: set())
+    monkeypatch.setattr(worker_listing, "_available_connection_slugs_for_user", lambda *_args, **_kwargs: set())
+    monkeypatch.setattr(worker_listing, "_safe_worker_config_for_listing", lambda _worker_id: None)
+
+    response = Response()
+    result = worker_listing.list_workers(
+        response=response,
+        shape="list",
+        auth=SimpleNamespace(
+            user_id="user-a",
+            username="user-a@example.com",
+            role="member",
+            auth_method="token",
+        ),
+        repos=SimpleNamespace(workers=WorkersRepo()),
+    )
+
+    assert [row.id for row in result] == ["worker-a"]
+    assert result[0].description == "Slow summary row"
+    assert 'desc="miss"' in response.headers["Server-Timing"]
+
 
 def test_context_worker_counts_uses_repository_aggregate():
     from services import context_access
@@ -585,6 +640,50 @@ def test_context_worker_counts_uses_repository_aggregate():
     )
 
     assert counts == {"pack": 2, "memory": 1}
+
+def test_context_worker_counts_times_out_slow_repository_aggregate(monkeypatch):
+    from services import context_access
+
+    monkeypatch.setenv("WORKEROS_CONTEXT_LIST_COUNT_TIMEOUT_SECONDS", "0.05")
+
+    class WorkersRepo:
+        def context_worker_counts(self, *, user_id):
+            assert user_id == "user-a"
+            time.sleep(0.5)
+            return {"pack": 2}
+
+        def list(self, **_kwargs):
+            raise AssertionError("full worker list path was used after aggregate timeout")
+
+    started = time.monotonic()
+    counts = context_access._context_worker_counts(
+        SimpleNamespace(workers=WorkersRepo()),
+        "user-a",
+    )
+
+    assert counts == {}
+    assert time.monotonic() - started < 0.25
+
+
+def test_context_worker_counts_times_out_slow_repository_list_fallback(monkeypatch):
+    from services import context_access
+
+    monkeypatch.setenv("WORKEROS_CONTEXT_LIST_COUNT_TIMEOUT_SECONDS", "0.05")
+
+    class WorkersRepo:
+        def list(self, *, user_id):
+            assert user_id == "user-a"
+            time.sleep(0.5)
+            return [{"config": {"contexts": ["pack"]}}]
+
+    started = time.monotonic()
+    counts = context_access._context_worker_counts(
+        SimpleNamespace(workers=WorkersRepo()),
+        "user-a",
+    )
+
+    assert counts == {}
+    assert time.monotonic() - started < 0.25
 
 
 def test_context_write_refreshes_summary_metadata(monkeypatch, tmp_path):

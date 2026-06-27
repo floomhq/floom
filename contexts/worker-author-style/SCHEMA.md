@@ -218,7 +218,7 @@ exec:
 
 ```yaml
 limits:
-  max_tool_iterations: 12      # default
+  max_tool_iterations: 30      # default
   max_output_tokens: 4096      # default
   max_total_tokens: 50000      # default
   timeout_seconds: 300         # default

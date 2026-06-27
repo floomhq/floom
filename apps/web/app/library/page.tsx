@@ -1,4 +1,4 @@
-// Library — reusable folders of files workers read before they act.
+// Library: reusable folders of files workers read before they act.
 import nextDynamic from "next/dynamic";
 import { fetchBrainFolders } from "@/lib/server-api";
 
@@ -8,12 +8,12 @@ const BrainCollection = nextDynamic(() => import("@/app/brain/BrainCollection"))
 // shell shared across requests.
 export const dynamic = "force-dynamic";
 
-export default async function LibraryPage() {
-  let initialFolders: import("@/lib/types").ContextSummary[] = [];
-  try {
-    initialFolders = await fetchBrainFolders();
-  } catch {
-    // Fall through — BrainCollection will fetch on the client side
-  }
-  return <BrainCollection initialFolders={initialFolders} />;
+// Match Workers/Runs/Connections: do not block the RSC render on the list fetch.
+// The client collection renders cache-first, then this promise seeds the cache
+// on a true cold start.
+export default function LibraryPage() {
+  const initialFoldersPromise = fetchBrainFolders().catch(
+    () => [] as import("@/lib/types").ContextSummary[],
+  );
+  return <BrainCollection initialFoldersPromise={initialFoldersPromise} />;
 }

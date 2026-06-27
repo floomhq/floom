@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("floom.chat")
@@ -63,6 +64,54 @@ def _caller_is_workspace_admin(user_id: str) -> bool:
 # Tool implementations
 # ---------------------------------------------------------------------------
 
+_WORKER_CREATE_CONNECTION_HINTS = (
+    (
+        "gmail",
+        "Gmail",
+        re.compile(r"\b(gmail|google\s+mail)\b", re.IGNORECASE),
+    ),
+    (
+        "googlecalendar",
+        "Google Calendar",
+        re.compile(r"\b(google\s+calendar|gcal)\b", re.IGNORECASE),
+    ),
+    ("slack", "Slack", re.compile(r"\bslack\b", re.IGNORECASE)),
+    ("notion", "Notion", re.compile(r"\bnotion\b", re.IGNORECASE)),
+    ("hubspot", "HubSpot", re.compile(r"\bhubspot\b", re.IGNORECASE)),
+    ("linkedin", "LinkedIn", re.compile(r"\blinkedin\b", re.IGNORECASE)),
+)
+
+
+def _normalize_connection_app_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _required_worker_connections_from_prompt(prompt: str) -> List[Dict[str, str]]:
+    required: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for app_name, label, pattern in _WORKER_CREATE_CONNECTION_HINTS:
+        if app_name in seen or not pattern.search(prompt):
+            continue
+        seen.add(app_name)
+        required.append({"app_name": app_name, "label": label})
+    return required
+
+
+def _missing_required_worker_connection(
+    prompt: str,
+    connections: List[Dict[str, Any]],
+) -> Optional[Dict[str, str]]:
+    active_apps = {
+        _normalize_connection_app_name(row.get("app_name"))
+        for row in connections
+        if str(row.get("status") or "").lower() in {"active", "valid", "connected"}
+    }
+    for required in _required_worker_connections_from_prompt(prompt):
+        if _normalize_connection_app_name(required["app_name"]) not in active_apps:
+            return required
+    return None
+
+
 def _tool_workers_create_from_prompt(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from chat_service import _current_chat_conversation_id, _idempotent_worker_author_run
     prompt = str(args.get("prompt") or "").strip()
@@ -76,6 +125,24 @@ def _tool_workers_create_from_prompt(args: Dict[str, Any], user_id: str) -> Dict
     conversation_id = _current_chat_conversation_id.get()
     if not conversation_id:
         return {"ok": False, "error": "conversation context unavailable"}
+    from db import get_repositories
+    repos = get_repositories()
+    missing_connection = _missing_required_worker_connection(
+        prompt,
+        repos.connections.list(user_id=user_id),
+    )
+    if missing_connection:
+        label = missing_connection["label"]
+        app_name = missing_connection["app_name"]
+        return {
+            "ok": False,
+            "error": f"missing_connection: Connect {label} before I create this worker.",
+            "error_code": "missing_connection",
+            "app_name": app_name,
+            "connection": app_name,
+            "required_connection": app_name,
+            "message": f"Connect {label} before I create this worker.",
+        }
     return _idempotent_worker_author_run(
         user_id=user_id,
         conversation_id=conversation_id,

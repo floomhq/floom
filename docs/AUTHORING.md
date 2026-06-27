@@ -1,24 +1,24 @@
-# Authoring Workers
+# Authoring Agents
 
 > **If you are an agent (Claude Code / Cursor) authoring via the MCP, read [AGENT-COOKBOOK.md](AGENT-COOKBOOK.md) first** - it has the per-tool examples + end-to-end recipes. This doc is the schema + concept reference.
 
-This is the canonical guide for writing, deploying, and updating workers on Floom. It covers:
+This is the canonical guide for writing, deploying, and updating agents on Floom. It covers:
 
-1. What a worker is
+1. What an agent is
 2. The two execution modes (script vs agent / SKILL.md)
 3. The `worker.yml` schema (every field, with examples)
 4. Inputs, outputs, secrets, connections, triggers, approvals
-5. Deploying a Claude-style skill bundle as a worker
+5. Deploying a Claude-style skill bundle as an agent
 6. The CLI + MCP authoring flows
-7. The agent-side "write a worker from a prompt" contract
+7. The agent-side "write an agent from a prompt" contract
 
-Treat this as the source of truth. The README's worker section is a stub; everything operational lives here.
+Treat this as the source of truth. The README's agent section is a stub; everything operational lives here.
 
 ---
 
-## 1. What a worker is
+## 1. What an agent is
 
-A **worker** is a folder under `workers/<name>/` containing exactly:
+An **agent** is a folder under `workers/<name>/` containing exactly:
 
 ```
 workers/<name>/
@@ -166,7 +166,7 @@ entrypoint: SKILL.md         # OR `run.py` for script mode
 targets:                     # which runtimes are supported
   - generic
 limits:                      # agent-mode only; ignored for script mode
-  max_tool_iterations: 12
+  max_tool_iterations: 30
   max_output_tokens: 4096
   max_total_tokens: 50000
   timeout_seconds: 300
@@ -490,6 +490,10 @@ When `approvals.required: true`, runs use a **two-phase respawn model**:
    `decision_required` to `result.json` before exiting. The engine intercepts this,
    lands the run as `PENDING_APPROVAL`, and creates an approval record in the database.
    **Run 1 must NOT perform the real side-effect** (send email, delete data, spend money).
+   Declared secrets are available to Run 1 so the worker can render an accurate
+   preview. Scope those credentials accordingly: use read-only, dry-run, or
+   proposal-specific tokens when the worker only needs to inspect or validate
+   external state before approval.
 
 2. **Human decision.** The `/approvals` page (or the inline card on `/runs/[id]`) shows
    the pending approval. The reviewer can Approve, Edit-then-approve, or Reject.
@@ -497,6 +501,8 @@ When `approvals.required: true`, runs use a **two-phase respawn model**:
 3. **Run 2 - execute.** On approval, the engine spawns a fresh run of the same worker
    with the original inputs merged with `{decision: "approved", approved_output: <edited or original output>}`.
    Run 2 reads `inputs.decision` and `inputs.approved_output` and performs the real action.
+   Action-capable tokens should be reserved for this phase whenever the provider
+   lets you separate read/preview permissions from write/send/delete permissions.
 
 #### result.json shape for Run 1
 

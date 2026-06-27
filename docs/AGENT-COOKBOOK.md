@@ -1,6 +1,6 @@
-# Agent Cookbook - Building & Deploying Workers
+# Agent Cookbook - Building & Deploying Agents
 
-For agents (Claude Code / Cursor / custom) installing the `@floomhq/floom` MCP and producing real workers from prompts. This is the **read-this-first** recipe book.
+For agents (Claude Code / Cursor / custom) installing the `@floomhq/floom` MCP and producing real Floom agents from prompts. This is the **read-this-first** recipe book.
 
 If you only have time for one doc, read this. If you want the full schema reference, see [AUTHORING.md](AUTHORING.md).
 
@@ -9,7 +9,7 @@ If you only have time for one doc, read this. If you want the full schema refere
 ## 0. Fresh-agent path
 
 Use this path when you have a blank shell, a Floom secret, and a prompt to
-create or edit a worker.
+create or edit an agent.
 
 ### 0.1 Install + verify MCP
 
@@ -66,8 +66,8 @@ Credentials live in `~/.config/floom/credentials.json`. Existing `~/.config/work
 
 ### 0.2 Create, edit, deploy, and run from a local bundle
 
-For a local worker directory, the deploy command is `floom workers push`.
-It creates the worker when the id is new and updates it when the id already
+For a local agent directory, the deploy command is `floom workers push`.
+It creates the agent when the id is new and updates it when the id already
 exists on an API that supports in-place source updates.
 
 ```bash
@@ -87,7 +87,7 @@ instead of using the Floom proxy.
 
 When `workers push` reports that the API does not support in-place source
 updates, the local source is valid but the target API cannot overwrite that
-worker id. Use a new worker id on that deployment or upgrade the API.
+agent id. Use a new agent id on that deployment or upgrade the API.
 
 ### 0.3 Create and run through MCP
 
@@ -119,7 +119,7 @@ input defaults, capabilities, and webhook secret rotation; it does not replace
 
 ## 1. Recipe: "Write me a Markdown summarizer"
 
-The shortest possible worker. Plain Python, OpenAI summarization, one input, one output.
+The shortest possible agent. Plain Python, OpenAI summarization, one input, one output.
 
 ### 1.1 Author the bundle
 
@@ -274,7 +274,7 @@ When done, call write_output("brief", "<markdown content>").
 # worker.yml (delta from script mode)
 entrypoint: SKILL.md
 limits:
-  max_tool_iterations: 12
+  max_tool_iterations: 30
   max_output_tokens: 4096
   max_total_tokens: 50000
   timeout_seconds: 300

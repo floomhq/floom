@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
+import { Check, ChevronDown, Copy, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useConnections, useMembers, useSecrets, useWorkers, useStreamedInitialData, qk } from "@/lib/query/hooks";
@@ -105,39 +105,13 @@ function CopyIconButton({ value, label }: { value: string; label?: string }) {
 }
 
 /**
- * Masked secret value field: dots + eye toggle + copy affordance.
- * Reveal calls the backend name-only test endpoint to surface the masked
- * value from env; if no reveal endpoint exists, shows dots with copy only.
- * Per v4 spec: monospace, reveal button, copy button inline.
+ * Masked secret value field: values are write-only and never revealed.
  */
 function SecretValueField({ name }: { name: string }) {
-  const [revealed, setRevealed] = useState(false);
   const MASKED = "••••••••••••";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "var(--font-mono)", fontSize: 12.5 }}>
-      <span style={{ letterSpacing: revealed ? undefined : "0.08em" }}>{MASKED}</span>
-      <button
-        type="button"
-        onClick={() => setRevealed((v: boolean) => !v)}
-        title={revealed ? "Hide" : "Reveal: values are write-only and not returned by the API"}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 22,
-          height: 22,
-          borderRadius: "var(--radius-pill)",
-          border: "var(--bd-pill)",
-          background: "var(--bg-2)",
-          color: "var(--muted-foreground)",
-          cursor: "pointer",
-          flexShrink: 0,
-        }}
-      >
-        {revealed
-          ? <EyeOff style={{ width: 11, height: 11 }} />
-          : <Eye style={{ width: 11, height: 11 }} />}
-      </button>
+      <span style={{ letterSpacing: "0.08em" }} title="Secret values are write-only and not returned by the API">{MASKED}</span>
       <CopyIconButton value={name} label="Copy secret name" />
     </span>
   );
@@ -249,7 +223,7 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
           {activity.map((run) => (
             <Link
               key={run.id}
-              href={`/runs?sel=${encodeURIComponent(run.id)}`}
+              href={`/runs/${encodeURIComponent(run.id)}`}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto", textDecoration: "none" }}
             >
@@ -331,7 +305,7 @@ function McpToolsPanel({ connection }: { connection: ConnectionItem }) {
 
   return (
     <div>
-      <ToolSection label="Allowed for workers" items={allowed} />
+      <ToolSection label="Allowed for agents" items={allowed} />
       {unreachable ? (
         <DetailGroup label="Available but not allowed">
           <DetailEmpty>
@@ -376,7 +350,7 @@ function OAuthToolsPanel({ connection }: { connection: ConnectionItem }) {
   return (
     <div>
       <DetailGroup label="Scope">
-        <p className="c-dctx">Default tool scope for new workers. Each worker can narrow this further.</p>
+        <p className="c-dctx">Default tool scope for new agents. Each agent can narrow this further.</p>
         <div style={{ display: "inline-flex", gap: 2, alignSelf: "flex-start", background: "var(--bg-2)", padding: 3, borderRadius: "var(--radius-pill)" }}>
           {TOOL_PRESET_SCOPES.map((s) => (
             <button
@@ -393,7 +367,7 @@ function OAuthToolsPanel({ connection }: { connection: ConnectionItem }) {
       </DetailGroup>
       {scope === "Custom" ? (
         <DetailGroup label="Granted scopes">
-          <DetailEmpty>Configure the exact tool list on each worker (Setup → Tools).</DetailEmpty>
+          <DetailEmpty>Configure the exact tool list on each agent (Setup → Tools).</DetailEmpty>
         </DetailGroup>
       ) : (
         <ToolSection label="Granted scopes" items={shown} mono={false} />
@@ -565,7 +539,7 @@ function UsedByPanel({ connection, workers }: { connection: ConnectionItem; work
     <DetailGroup label="Used by">
       {using.length > 0 && (
         <p className="c-dctx">
-          Disconnecting stops {using.length} worker{using.length !== 1 ? "s" : ""} that depend on this connection.
+          Disconnecting stops {using.length} agent{using.length !== 1 ? "s" : ""} that depend on this connection.
         </p>
       )}
       {using.length > 0 ? (
@@ -586,7 +560,7 @@ function UsedByPanel({ connection, workers }: { connection: ConnectionItem; work
           ))}
         </div>
       ) : (
-        <DetailEmpty>No workers use this connection yet.</DetailEmpty>
+        <DetailEmpty>No agents use this connection yet.</DetailEmpty>
       )}
     </DetailGroup>
   );
@@ -744,7 +718,7 @@ export default function ConnectionsCollection({
 
   const config: CollectionConfig<UnifiedConn> = {
     title: "Connections",
-    subtitle: "Apps, MCP servers and secrets your workers can use.",
+    subtitle: "Apps, MCP servers and secrets your agents can use.",
     restingMaxWidth: 1120,
     items,
     loading,
@@ -1060,7 +1034,7 @@ export default function ConnectionsCollection({
                     value:
                       usedByCount > 0 ? (
                         <Link
-                          href={`?tab=Used+by`}
+                          href={`?sel=${encodeURIComponent(i.id)}&tab=Used+by`}
                           style={{
                             color: "var(--accent)",
                             textDecoration: "underline",
@@ -1068,7 +1042,7 @@ export default function ConnectionsCollection({
                             textUnderlineOffset: 3,
                           }}
                         >
-                          {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
+                          {usedByCount} {usedByCount === 1 ? "agent" : "agents"}
                         </Link>
                       ) : (
                         <span style={{ color: "var(--muted-foreground)" }}>None</span>
@@ -1114,7 +1088,7 @@ export default function ConnectionsCollection({
                     })}
                   </div>
                 ) : (
-                  <DetailEmpty>Not used by any worker yet.</DetailEmpty>
+                  <DetailEmpty>Not used by any agent yet.</DetailEmpty>
                 )}
               </DetailGroup>
             ),
@@ -1155,7 +1129,7 @@ export default function ConnectionsCollection({
     states: {
       empty: {
         title: "No connections yet",
-        help: "Connect an app, add an MCP server, or store a secret your workers can use.",
+        help: "Connect an app, add an MCP server, or store a secret your agents can use.",
       },
       errorRetry: () => {
         setTimedOut(false);

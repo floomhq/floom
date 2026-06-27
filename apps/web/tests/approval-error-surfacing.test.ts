@@ -9,10 +9,11 @@ function source(path: string): string {
 }
 
 describe("approval fetch and decision surfacing", () => {
-  it("redirects legacy run detail routes into the Runs split-pane", () => {
+  it("keeps run detail routes on the dedicated run detail surface", () => {
     const page = source("app/runs/[id]/page.tsx");
 
-    expect(page).toContain("redirect(`/runs?sel=${encodeURIComponent(id)}`)");
+    expect(page).toContain("<RunDetailPageClient runId={id} initialTab={tab} />");
+    expect(page).not.toContain("redirect(");
     expect(page).not.toContain("approvalLoadError");
   });
 

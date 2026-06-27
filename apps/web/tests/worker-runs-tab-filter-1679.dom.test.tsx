@@ -77,9 +77,6 @@ vi.mock("@/lib/useApprovalsSync", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Reset module state so WorkersCollection's module-level caches (detailCache /
-  // workerRunsCache) don't leak between the two cases below.
-  vi.resetModules();
   runsListMock.mockResolvedValue(workerScopedRuns);
   window.localStorage.clear();
 });
@@ -97,7 +94,7 @@ async function openRunsTab() {
   const runsTab = await waitFor(() => {
     const tab = screen
       .getAllByRole("tab")
-      .find((t) => /^Runs\b/.test((t.textContent ?? "").trim()));
+      .find((t) => /^Runs/.test((t.textContent ?? "").trim()));
     if (!tab) throw new Error("Runs tab not found");
     return tab;
   });
@@ -106,6 +103,34 @@ async function openRunsTab() {
 }
 
 describe("#1679 per-worker Runs tab uses the worker-scoped /runs query", () => {
+  it("does not render a count badge in the Runs tab label", async () => {
+    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
+    render(
+      <QueryProvider>
+        <WorkersCollection initialWorkers={[{
+          ...worker,
+          last_run: {
+            id: "last-run",
+            worker_id: WORKER_ID,
+            status: "completed",
+            trigger_source: "manual",
+            created_at: "2026-06-18T10:00:00Z",
+          },
+        } as never]} />
+      </QueryProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Shared Reporter/i }));
+    const runsTab = await waitFor(() => {
+      const tab = screen
+        .getAllByRole("tab")
+        .find((t) => /^Runs/.test((t.textContent ?? "").trim()));
+      if (!tab) throw new Error("Runs tab not found");
+      return tab;
+    });
+    expect(runsTab.textContent?.trim()).toBe("Runs");
+    expect(runsTab.textContent).not.toMatch(/Runs\s*1/);
+  });
+
   it("queries api.runs.list scoped to the worker (not the detail recent_runs field)", async () => {
     await openRunsTab();
     await waitFor(() =>

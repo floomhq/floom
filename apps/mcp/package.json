@@ -42,5 +42,5 @@
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   },
-  "license": "SEE LICENSE IN LICENSE"
+  "license": "MIT"
 }

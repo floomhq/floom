@@ -6,13 +6,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useModKey } from "@/lib/use-mod-key";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
-import { useNavBadgeCounts } from "@/lib/useSelfOverviewItems";
 import { useQueryClient } from "@tanstack/react-query";
 import { prefetchRouteData, prefetchIdleRoutes, prefetchMainRoutesEager } from "@/lib/query/prefetch";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
@@ -180,11 +180,9 @@ function MobileWorkspaceName() {
 // nav has no room for a permanent subtitle without a redesign, so the
 // employee-model microcopy ("Workers run on triggers") lives in the tooltip
 // instead (the operator 2026-06-02).
-// Each badge is sourced from one shared, polled fetch (see below):
-//  - approvals  → pending-approvals count   (neutral tone)
-//  - connections → connections needing re-auth / expired (amber attention)
-//  - runs       → recent failed runs        (amber attention)
-type NavBadgeKey = "approvals" | "connections" | "runs";
+// Sidebar badges are reserved for pending approvals only. Runs and connections
+// status belong on their own pages, not as persistent nav noise.
+type NavBadgeKey = "approvals";
 
 type NavItem = {
   href: string;
@@ -197,51 +195,32 @@ type NavItem = {
 // Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is gone,
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
-// Connections. (Agent setup is a pinned item above the profile footer, see below.)
+// Connections. (MCP setup is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
-  { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
+  { href: "/workers", label: "Agents", icon: Box, hint: "Your AI agents" },
   { href: "/library", label: "Library", icon: Library },
-  { href: "/runs", label: "Runs", icon: Clock, badge: "runs" },
+  { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: "approvals" },
-  { href: "/connections", label: "Connections", icon: Plug, badge: "connections" },
+  { href: "/connections", label: "Connections", icon: Plug },
 ];
-
-// Subtle amber attention treatment (Floom DS: red is NOT a Floom color — amber
-// #C98A1A == var(--warning)). Mirrors the .c-pill.err token in globals.css.
-const AMBER_BADGE_CLASS =
-  "bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] text-[color-mix(in_srgb,var(--warning)_82%,var(--ink))]";
 
 /** Resolve a nav item's badge count + tone from the shared badge sources.
  *  Pure helper (no hooks) so it is safe to call inside the nav .map(). */
 function resolveNavBadge(key: NavBadgeKey | undefined, counts: NavBadgeCounts) {
   if (!key) return null;
-  if (key === "approvals") {
-    return counts.pendingApprovals > 0
-      ? { count: counts.pendingApprovals, tone: "neutral" as const }
-      : null;
-  }
-  if (key === "connections") {
-    return counts.connectionsExpired > 0
-      ? { count: counts.connectionsExpired, tone: "amber" as const }
-      : null;
-  }
-  return counts.failedRuns > 0
-    ? { count: counts.failedRuns, tone: "amber" as const }
+  return counts.pendingApprovals > 0
+    ? { count: counts.pendingApprovals }
     : null;
 }
 
 type NavBadgeCounts = {
   pendingApprovals: number;
-  connectionsExpired: number;
-  failedRuns: number;
 };
 
-/** Pull all three badge counts from one shared overview fetch + the shared
- *  approvals source. Used by both the expanded nav and the collapsed rail. */
+/** Pull the pending-approvals badge count for expanded nav and collapsed rail. */
 function useNavBadgeSources(): NavBadgeCounts {
   const pendingApprovals = useApprovalsCount();
-  const { connectionsExpired, failedRuns } = useNavBadgeCounts();
-  return { pendingApprovals, connectionsExpired, failedRuns };
+  return { pendingApprovals };
 }
 
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
@@ -286,12 +265,9 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
             {item.label}
             {badge && (
               <Badge
-                variant={badge.tone === "amber" ? "default" : "secondary"}
+                variant="secondary"
                 aria-hidden="true"
-                className={cn(
-                  "ml-auto h-4 min-w-4 px-1 text-[10px] font-semibold leading-none tabular-nums",
-                  badge.tone === "amber" && AMBER_BADGE_CLASS,
-                )}
+                className="ml-auto h-4 min-w-4 px-1 text-[10px] font-semibold leading-none tabular-nums"
               >
                 {badge.count > 99 ? "99+" : badge.count}
               </Badge>
@@ -303,7 +279,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   );
 }
 
-// Agent setup item, pinned LOW, just above the profile footer (Emily-home redesign).
+// MCP setup item, pinned LOW, just above the profile footer (Emily-home redesign).
 // Opens the MCP-install POPUP modal (not a page). The badge mirrors the v6
 // "12" affordance but is informational chrome only; the count is omitted here
 // since the OSS engine has no live "installed clients" count to show honestly.
@@ -322,13 +298,14 @@ function SidebarMcpItem({ onNavigate }: { onNavigate?: () => void }) {
         className="flex h-9 w-full items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
       >
         <Terminal className="w-4 h-4" />
-        Agent setup
+        MCP setup
       </button>
     </div>
   );
 }
 
 export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
+  const modKey = useModKey();
   const onSearch = () => {
     onNavigate?.();
     openCommandPalette();
@@ -345,7 +322,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
         className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
         <Plus className="w-4 h-4" />
-        <span>New worker</span>
+        <span>New agent</span>
       </Link>
       {/* #1315: differentiated grey background (var(--bg-2)) so the Search box
           reads as an input, not a plain nav link. kbd chips sit on the lighter
@@ -359,7 +336,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
         <Search className="w-4 h-4 opacity-70" />
         <span>Search...</span>
         <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
-          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
+          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>{modKey}</kbd>
           <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 font-mono">K</kbd>
         </span>
       </button>
@@ -531,7 +508,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
             <Link
               href={createWorkerHref()}
-              title="New worker"
+              title="New agent"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] bg-[var(--primary)] text-[var(--primary-text)] transition-[background,opacity] duration-150 hover:opacity-90"
             >
               <Plus className="w-4 h-4" />
@@ -559,12 +536,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                   {badge && (
                     <span
                       aria-hidden="true"
-                      className={cn(
-                        "absolute -top-0.5 -right-0.5 size-3.5 rounded-[var(--radius-pill)] flex items-center justify-center text-[8px] font-bold",
-                        badge.tone === "amber"
-                          ? AMBER_BADGE_CLASS
-                          : "bg-[var(--bg-2)] text-[var(--ink-soft)]",
-                      )}
+                      className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--bg-2)] text-[8px] font-bold text-[var(--ink-soft)]"
                     >
                       {badge.count > 9 ? "9+" : badge.count}
                     </span>
@@ -574,7 +546,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             })}
             {/* Settings icon at bottom */}
             <div className="flex-1" />
-            {/* Agent setup, opens the install popup modal (above Settings). */}
+            {/* MCP setup, opens the install popup modal (above Settings). */}
             <button
               type="button"
               onClick={() => mcpModal.open()}

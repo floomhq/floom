@@ -51,6 +51,70 @@ _SENSITIVE_FILE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".crt", ".
 from models import DraftFile  # re-export: DraftFile now lives in models.py
 
 
+_CREDENTIAL_INPUT_RE = re.compile(
+    r"(?i)(^|[_\-\s.])("
+    r"api[_\-\s]?key|apikey|access[_\-\s]?token|refresh[_\-\s]?token|auth[_\-\s]?token|"
+    r"bearer[_\-\s]?token|client[_\-\s]?secret|client[_\-\s]?token|private[_\-\s]?key|"
+    r"secret|password|passwd|credential|credentials"
+    r")($|[_\-\s.])"
+)
+_CONNECTION_INPUT_RE = re.compile(r"(?i)(^|[_\-\s.])connection($|[_\-\s.])")
+_AUTH_HINT_RE = re.compile(
+    r"(?i)\b(authenticate|authentication|authorization|api requests?|credentials?|token|secret|api key)\b"
+)
+
+
+def _worker_input_text(worker_input: Any, attr: str) -> str:
+    value = getattr(worker_input, attr, None)
+    if value is None and isinstance(worker_input, dict):
+        value = worker_input.get(attr)
+    return str(value or "")
+
+
+def _is_credential_shaped_input(worker_input: Any) -> bool:
+    name = _worker_input_text(worker_input, "name")
+    label = _worker_input_text(worker_input, "label")
+    placeholder = _worker_input_text(worker_input, "placeholder")
+    description = _worker_input_text(worker_input, "description")
+    # The strong credential pattern matches the field IDENTITY only (name +
+    # label), NOT the free-text placeholder/description. A legitimate business
+    # input ("summary", "note", "message") whose help text merely MENTIONS a
+    # credential / password / api key must not be rejected — only a field
+    # literally named or labelled like a credential is. The placeholder and
+    # description feed only the weaker auth-hint heuristic below (the same
+    # identity-vs-hint split the connection branch already relies on).
+    identity_text = " ".join([name, label])
+    if _CREDENTIAL_INPUT_RE.search(identity_text):
+        return True
+
+    # "Team key" can be business data, but an input shaped like
+    # "<service> connection" plus auth copy is a credential setup field.
+    if _CONNECTION_INPUT_RE.search(" ".join([name, label])) and _AUTH_HINT_RE.search(
+        " ".join([placeholder, description])
+    ):
+        return True
+    return False
+
+
+def _validate_no_credential_inputs(config: Any) -> None:
+    bad_inputs = [
+        _worker_input_text(worker_input, "name") or _worker_input_text(worker_input, "label") or "<unnamed>"
+        for worker_input in (getattr(config, "inputs", None) or [])
+        if _is_credential_shaped_input(worker_input)
+    ]
+    if not bad_inputs:
+        return
+    names = ", ".join(sorted(set(bad_inputs)))
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"inputs must not collect credentials or connection secrets: {names}. "
+            "Declare external service access with top-level connections: [...] and "
+            "API-key requirements with secrets/capabilities.secrets instead."
+        ),
+    )
+
+
 def _git_join(*parts: str) -> str:
     """Join path parts, skipping empty segments (handles empty prefix in hosted mode)."""
     return "/".join(p for p in parts if p)
@@ -330,6 +394,8 @@ def _parse_worker_payload(
     except Exception as exc:
         logger.info("Worker schema validation failed: %s", exc)
         raise HTTPException(status_code=400, detail="Schema validation failed") from exc
+
+    _validate_no_credential_inputs(config)
 
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")

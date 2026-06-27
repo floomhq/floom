@@ -348,8 +348,9 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
           const reader = resp.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
+          let sawTerminalEvent = false;
 
-          while (true) {
+          while (!sawTerminalEvent) {
             const { done, value } = await reader.read();
             if (done) break;
 
@@ -390,12 +391,17 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
 
               if (event.type === "error") {
                 setError(sseErrorMessage(event));
+                sawTerminalEvent = true;
                 break;
               }
               if (event.type === "finish") {
+                sawTerminalEvent = true;
                 break;
               }
             }
+          }
+          if (sawTerminalEvent) {
+            await reader.cancel().catch(() => undefined);
           }
         } catch (err: unknown) {
           if (err instanceof DOMException && err.name === "AbortError") {
@@ -584,36 +590,36 @@ const TOOL_LABELS: Record<string, ToolLabel> = {
     completed: "Searched the web",
   },
   "workers.create": {
-    running: "Creating worker",
-    completed: "Created worker",
+    running: "Creating agent",
+    completed: "Created agent",
   },
   "workers.create_from_prompt": {
-    running: "Creating worker",
-    completed: "Created worker",
+    running: "Creating agent",
+    completed: "Created agent",
   },
   "workers.delete": {
-    running: "Deleting worker",
-    completed: "Deleted worker",
+    running: "Deleting agent",
+    completed: "Deleted agent",
   },
   "workers.get": {
-    running: "Opening worker details",
-    completed: "Opened worker details",
+    running: "Opening agent details",
+    completed: "Opened agent details",
   },
   "workers.list": {
-    running: "Listing your workers",
-    completed: "Listed your workers",
+    running: "Listing your agents",
+    completed: "Listed your agents",
   },
   "workers.list_all": {
-    running: "Listing your workers",
-    completed: "Listed your workers",
+    running: "Listing your agents",
+    completed: "Listed your agents",
   },
   "workers.run": {
-    running: "Starting worker run",
-    completed: "Started worker run",
+    running: "Starting agent run",
+    completed: "Started agent run",
   },
   "workers.update": {
-    running: "Updating worker",
-    completed: "Updated worker",
+    running: "Updating agent",
+    completed: "Updated agent",
   },
 };
 
@@ -826,7 +832,7 @@ function runCardFromResult(
     optionalString(args?.id);
   const workerName =
     optionalString(resource?.worker_name) ??
-    (normalizedTool === "workers.create_from_prompt" ? "Creating worker" : workerId ?? "Worker run");
+    (normalizedTool === "workers.create_from_prompt" ? "Creating agent" : workerId ?? "Agent run");
   const actions =
     event.actions && event.actions.length > 0
       ? event.actions
@@ -838,7 +844,7 @@ function runCardFromResult(
                 id: "open_run",
                 label: "View run",
                 method: "GET" as const,
-                href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
+                href: `/runs/${encodeURIComponent(runId)}?tab=logs`,
               },
             ]
           : normalizedTool === "workers.create_from_prompt"
@@ -847,7 +853,7 @@ function runCardFromResult(
                   id: "open_run",
                   label: "View progress",
                   method: "GET" as const,
-                  href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
+                  href: `/runs/${encodeURIComponent(runId)}?tab=logs`,
                 },
               ]
           : event.actions;
@@ -877,6 +883,44 @@ function toolCardFromResult(
 
 function toolCardToolName(card: ToolCard): string | null {
   return "toolName" in card && typeof card.toolName === "string" ? card.toolName : null;
+}
+
+type ToolFollowupEvent =
+  | Extract<ChatSSEEvent, { type: "tool-progress" }>
+  | Extract<ChatSSEEvent, { type: "tool-resource" }>
+  | Extract<ChatSSEEvent, { type: "tool-action-required" }>;
+
+function fallbackToolName(event: ToolFollowupEvent): string {
+  return (
+    event.toolName ??
+    event.card?.title ??
+    (event.type === "tool-progress" ? event.label ?? event.stage : undefined) ??
+    "tool"
+  );
+}
+
+function materializeToolCardFromFollowup(
+  event: ToolFollowupEvent,
+  cardId: string,
+  status: CardStatus
+): GenericToolCard {
+  const toolName = fallbackToolName(event);
+  const title =
+    event.type === "tool-progress"
+      ? toolProgressTitle(event.toolName ?? null, event.card?.title ?? event.label, status) ??
+        getToolCardTitle(toolName, status)
+      : event.card?.title ?? (event.toolName ? getToolCardTitle(event.toolName, status) : "Working");
+
+  return {
+    kind: "generic",
+    callId: event.callId,
+    card_id: cardId,
+    toolName,
+    title,
+    status,
+    ...(event.actions ? { actions: event.actions } : {}),
+    ...("streams" in event && event.streams ? { streams: event.streams } : {}),
+  };
 }
 
 /**
@@ -987,12 +1031,25 @@ export function reduceSSEEvent(
       const cardId = resolveCardId(event);
       if (!cardId) return prev;
 
-      const newStatus = event.type === "tool-progress" ? normalizeCardStatus(event.status) : undefined;
+      const newStatus =
+        event.type === "tool-progress"
+          ? normalizeCardStatus(event.status)
+          : event.type === "tool-action-required"
+            ? "pending_approval"
+            : event.card?.status
+              ? normalizeCardStatus(event.card.status)
+              : undefined;
 
-      return prev.map((m) => {
+      let matchedCard = false;
+      let hasTargetAssistant = false;
+      const updated = prev.map((m) => {
+        if (m.id === assistantMsgId && m.role === "assistant") {
+          hasTargetAssistant = true;
+        }
         if (m.role !== "assistant" || !m.parts) return m;
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+          matchedCard = true;
           const toolName = toolCardToolName(p.card);
           const updatedCard: ToolCard = {
             ...p.card,
@@ -1009,6 +1066,24 @@ export function reduceSSEEvent(
         });
         return { ...m, parts: updatedParts };
       });
+      if (matchedCard) return updated;
+
+      const materializedStatus = newStatus ?? "running";
+      const newPart: MsgPart = {
+        type: "tool-card",
+        card: materializeToolCardFromFollowup(event, cardId, materializedStatus),
+      };
+      if (hasTargetAssistant) {
+        return updated.map((m) =>
+          m.id === assistantMsgId && m.role === "assistant"
+            ? { ...m, parts: [...(m.parts ?? []), newPart] }
+            : m
+        );
+      }
+      return [
+        ...updated,
+        { id: assistantMsgId, role: "assistant", parts: [newPart] },
+      ];
     }
 
     case "tool-result": {
@@ -1150,7 +1225,7 @@ export function safeRunPartsStreamPath(path: unknown): string | null {
 
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
   return shouldAutoOpenRunDetails(card) && card.runId
-    ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Logs`
+    ? `/runs/${encodeURIComponent(card.runId)}?tab=logs`
     : null;
 }
 
@@ -1188,9 +1263,9 @@ export function getCardHref(card: ToolCard): string | null {
     case "worker-create":
       return card.workerId ? `/workers?sel=${encodeURIComponent(card.workerId)}` : null;
     case "run":
-      return card.runId ? `/runs?sel=${encodeURIComponent(card.runId)}` : null;
+      return card.runId ? `/runs/${encodeURIComponent(card.runId)}` : null;
     case "artifact":
-      return card.runId ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Output` : null;
+      return card.runId ? `/runs/${encodeURIComponent(card.runId)}?tab=output` : null;
     case "approval":
       return card.approvalId ? `/approvals?sel=${card.approvalId}` : "/approvals";
     case "connect-service":

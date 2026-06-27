@@ -325,7 +325,7 @@ export function RunDetailSplitPane({
       <ConfirmDialog
         open={replayConfirmOpen}
         onOpenChange={setReplayConfirmOpen}
-        title="Re-run this worker?"
+        title="Re-run this agent?"
         body="It will run again with the same inputs."
         confirmLabel="Re-run"
         onConfirm={() => {

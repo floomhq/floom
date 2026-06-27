@@ -18,7 +18,14 @@ function spdxId(name, version) {
   return `SPDXRef-Package-${sha1(`${name}@${version || "unknown"}`)}`;
 }
 
-function addPackage(packages, seen, name, version, supplier = "NOASSERTION") {
+function addPackage(
+  packages,
+  seen,
+  name,
+  version,
+  supplier = "NOASSERTION",
+  licenseDeclared = "NOASSERTION",
+) {
   if (!name) return;
   const normalizedVersion = version || "NOASSERTION";
   const key = `${name}@${normalizedVersion}`;
@@ -31,8 +38,8 @@ function addPackage(packages, seen, name, version, supplier = "NOASSERTION") {
     supplier,
     downloadLocation: "NOASSERTION",
     filesAnalyzed: false,
-    licenseConcluded: "NOASSERTION",
-    licenseDeclared: "NOASSERTION",
+    licenseConcluded: licenseDeclared,
+    licenseDeclared,
     copyrightText: "NOASSERTION",
   });
 }
@@ -62,7 +69,7 @@ fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 const rootPackage = readJson("package.json");
 const packages = [];
 const seen = new Set();
-addPackage(packages, seen, rootPackage.name, rootPackage.version, "Organization: Floom");
+addPackage(packages, seen, rootPackage.name, rootPackage.version, "Organization: Floom", rootPackage.license);
 collectNpm(packages, seen, "apps/web/package-lock.json");
 collectNpm(packages, seen, "apps/mcp/package-lock.json");
 collectPip(packages, seen, "apps/api/requirements.txt");

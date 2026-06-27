@@ -31,6 +31,7 @@ export function PromptInput({
   disabled,
   sendDisabled,
   variant = "default",
+  ctaLabel = "Hire",
   large = false,
   autoFocus = false,
   /** Bumps on each fresh ?create=1 entry so autoFocus re-runs on repeat clicks. */
@@ -62,6 +63,12 @@ export function PromptInput({
    * landing variant simply drops the separate Uses-row to stay clean.
    */
   variant?: "default" | "landing";
+  /**
+   * Send-button label for the "landing" variant. Defaults to "Hire" (the
+   * worker-create composer). The home/normal Emily passes "Ask" so ONLY the
+   * create flow reads "Hire".
+   */
+  ctaLabel?: string;
   /**
    * Hero sizing (Federico 2026-06-21): the home empty-state composer is the
    * primary call-to-action, so it gets a taller min-height, larger text, and
@@ -237,9 +244,9 @@ export function PromptInput({
               disabled={!canSend}
               style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
               type="button"
-              aria-label="Hire worker"
+              aria-label={ctaLabel === "Hire" ? "Hire worker" : "Send message"}
             >
-              Hire
+              {ctaLabel}
               <ArrowUp className="size-3.5" />
             </Button>
           ) : (
