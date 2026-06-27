@@ -30,7 +30,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Secrets</strong>: API keys and credentials you add are
-            stored on the server so workers can use them. They are write-only
+            stored on the server so agents can use them. They are write-only
             through the API: values are never returned to the browser.
           </li>
           <li>

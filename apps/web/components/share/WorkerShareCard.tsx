@@ -204,7 +204,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
 
   // CTA element differs: authed users get an import button; guests go to login.
   const ctaHref = authed ? undefined : "/login";
-  const ctaLabel = importedId ? "View worker" : importing ? "Importing..." : "Add to workspace";
+  const ctaLabel = importedId ? "View agent" : importing ? "Importing..." : "Add to workspace";
 
   const importButton = authed && token ? (
     <button
@@ -308,8 +308,8 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
           {authed
-            ? "Import this worker into your workspace and connect its tools."
-            : "Add this worker to your workspace and connect its tools."}
+            ? "Import this agent into your workspace and connect its tools."
+            : "Add this agent to your workspace and connect its tools."}
         </p>
         {importButton}
       </div>

@@ -302,7 +302,7 @@ export function ApprovalReviewBody({
         </div>
         <h2 className="c-appr-title">{actionLine}</h2>
         <p className="c-appr-meta">
-          Requested {formatRelative(approval.created_at)} by worker <b>{worker}</b>
+          Requested {formatRelative(approval.created_at)} by agent <b>{worker}</b>
           {cost && (
             <>
               {" · "}
@@ -328,7 +328,7 @@ export function ApprovalReviewBody({
           />
           {comment.trim() && !approveKeepsComment && (
             <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
-              This worker approves via a tool callback that cannot store a comment. Your note is sent only if you reject.
+              This agent approves via a tool callback that cannot store a comment. Your note is sent only if you reject.
             </p>
           )}
           {onAttach && (
@@ -338,7 +338,7 @@ export function ApprovalReviewBody({
           )}
 
           <dl className="c-appr-kv">
-            <dt>Worker</dt>
+            <dt>Agent</dt>
             <dd>{workerLink ?? worker}</dd>
             <dt>Run</dt>
             <dd>{runLink ?? `#${approval.run_id}`}</dd>

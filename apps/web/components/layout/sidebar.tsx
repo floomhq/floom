@@ -197,7 +197,7 @@ type NavItem = {
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
 // Connections. (MCP setup is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
-  { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
+  { href: "/workers", label: "Agents", icon: Box, hint: "Your AI agents" },
   { href: "/library", label: "Library", icon: Library },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: "approvals" },
@@ -322,7 +322,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
         className={cn(buttonVariants({ size: "lg" }), "w-full")}
       >
         <Plus className="w-4 h-4" />
-        <span>New worker</span>
+        <span>New agent</span>
       </Link>
       {/* #1315: differentiated grey background (var(--bg-2)) so the Search box
           reads as an input, not a plain nav link. kbd chips sit on the lighter
@@ -508,7 +508,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
             <Link
               href={createWorkerHref()}
-              title="New worker"
+              title="New agent"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] bg-[var(--primary)] text-[var(--primary-text)] transition-[background,opacity] duration-150 hover:opacity-90"
             >
               <Plus className="w-4 h-4" />

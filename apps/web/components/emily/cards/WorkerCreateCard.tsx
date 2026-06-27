@@ -22,7 +22,7 @@ function stepStatusFromCard(card: WorkerCreateCardType): Step[] {
     { key: "drafting", label: "Drafting manifest", status: idx > 0 ? "completed" : idx === 0 ? "running" : "pending" },
     { key: "generating", label: "Generating code", status: idx > 1 ? "completed" : idx === 1 ? "running" : "pending" },
     { key: "smoke", label: "Running smoke test", status: idx > 2 ? (card.smokeStatus === "failed" ? "failed" : "completed") : idx === 2 ? "running" : "pending" },
-    { key: "ready", label: "Worker ready", status: step === "ready" ? "completed" : step === "failed" ? "failed" : "pending" },
+    { key: "ready", label: "Agent ready", status: step === "ready" ? "completed" : step === "failed" ? "failed" : "pending" },
   ];
 }
 

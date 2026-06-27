@@ -5,10 +5,10 @@ import { CollectionRouteLoading } from "@/components/collection/CollectionRouteL
 export default function Loading() {
   return (
     <CollectionRouteLoading
-      title="Workers"
-      subtitle="Your AI workers."
-      actionLabel="New worker"
-      searchPlaceholder="Search workers or tags…"
+      title="Agents"
+      subtitle="Your AI agents."
+      actionLabel="New agent"
+      searchPlaceholder="Search agents or tags..."
     />
   );
 }

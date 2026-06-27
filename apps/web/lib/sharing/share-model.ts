@@ -34,7 +34,7 @@ export const GENERAL_ACCESS_OPTIONS: GeneralAccessOption[] = [
     value: "workspace",
     label: "Workspace",
     description:
-      "Transfers this worker to the workspace. Members can view and run it; admins configure secrets and connections.",
+      "Transfers this agent to the workspace. Members can view and run it; admins configure secrets and connections.",
   },
 ];
 
