@@ -298,7 +298,12 @@ function MessageCopyAction({ text }: { text: string }) {
 // stay visible and actionable in the thread — never buried inside a collapsed
 // "N tool calls" summary. Everything else is intermediate tool spam that
 // collapses (#FIX1).
-const INTERACTIVE_CARD_KINDS = new Set<ToolCard["kind"]>(["approval", "connect-service"]);
+const INTERACTIVE_CARD_KINDS = new Set<ToolCard["kind"]>([
+  "approval",
+  "connect-service",
+  "run",
+  "worker-create",
+]);
 
 function cardIsInFlight(card: ToolCard): boolean {
   return (
