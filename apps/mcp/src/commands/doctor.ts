@@ -28,7 +28,10 @@ async function checkApiReachable(apiBase: string): Promise<Check> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(`${apiBase}/health`, {
+    const hostedHealth =
+      apiBase.includes("workeros-api.floom.dev") || Boolean(process.env.WORKEROS_API_TOKEN?.trim());
+    const healthPath = hostedHealth ? "/api/health" : "/health";
+    const response = await fetch(`${apiBase.replace(/\/+$/, "")}${healthPath}`, {
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
     if (response.ok) {

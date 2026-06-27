@@ -13,6 +13,7 @@ CONTEXTS_DIR / DB) between cases, so binding them at module load would pin this
 from __future__ import annotations
 
 import collections
+import concurrent.futures
 import logging
 import os
 import re
@@ -34,6 +35,13 @@ if TYPE_CHECKING:
     from db import Repositories
 
 logger = logging.getLogger("floom.api")
+
+
+def _context_list_count_timeout_seconds() -> float:
+    try:
+        return max(0.05, float(os.environ.get("WORKEROS_CONTEXT_LIST_COUNT_TIMEOUT_SECONDS", "2.0")))
+    except ValueError:
+        return 2.0
 
 
 def _block_secrets_in_contexts() -> bool:
@@ -246,10 +254,20 @@ def _context_worker_counts(repos: Optional[Repositories], user_id: str) -> dict[
         return counts
     count_fn = getattr(repos.workers, "context_worker_counts", None)
     if callable(count_fn):
+        executor: concurrent.futures.ThreadPoolExecutor | None = None
         try:
-            return {str(k): int(v) for k, v in count_fn(user_id=user_id).items()}
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(count_fn, user_id=user_id)
+            raw_counts = future.result(timeout=_context_list_count_timeout_seconds())
+            return {str(k): int(v) for k, v in raw_counts.items()}
+        except concurrent.futures.TimeoutError:
+            logger.warning("context worker count aggregate timed out; returning zero counts")
+            return counts
         except Exception:
             logger.debug("context worker count aggregate failed", exc_info=True)
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=False, cancel_futures=True)
     try:
         workers = repos.workers.list(user_id=user_id)
     except Exception:
