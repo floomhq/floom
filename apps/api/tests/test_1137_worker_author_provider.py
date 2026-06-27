@@ -319,6 +319,34 @@ connections: []
     assert worker_author._validate_generated_bundle(parsed, "Every hour, pull my latest Gmail.") is None
 
 
+def test_worker_author_repairs_missing_operator_output():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "gmail-missed-opportunities",
+            "title": "Gmail Missed Opportunities",
+            "description": "Summarises missed opportunities from Gmail.",
+            "version": "0.1.0",
+            "trigger": {"type": "schedule"},
+            "exec": {"entry": "SKILL.md", "runner": "e2b"},
+            "connections": [],
+        },
+        prompt="Every Monday 9am, pull my latest Gmail and summarize missed opportunities.",
+    )
+
+    outputs = manifest["exec"]["outputs"]
+    assert outputs == [
+        {
+            "name": "summary",
+            "kind": "scalar",
+            "type": "markdown",
+            "required": True,
+            "label": "Summary",
+        }
+    ]
+
+
 def test_worker_author_repairs_known_integration_tools_generically():
     worker_author = _load_worker_author_module()
     manifest = worker_author._repair_generated_worker_manifest(
