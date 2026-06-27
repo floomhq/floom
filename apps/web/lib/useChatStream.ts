@@ -455,6 +455,7 @@ import type {
   MsgPart,
   GenericToolCard,
   ToolCard,
+  WorkerCreateCard,
   WorkerListCard,
 } from "./emily-chat-types";
 
@@ -473,6 +474,47 @@ export function reconcileRunCardFinishPart(card: ToolCard, part: RunFinishPart):
     "toolName" in card && typeof card.toolName === "string" ? normalizeToolName(card.toolName) : "";
   const isCreateFromPrompt = normalizedTool === "workers.create_from_prompt";
   const workerCreationFailed = Boolean(part.worker_creation_failed);
+  const workerCreateSmokeStatus =
+    part.smoke_status === "errored" ? "failed" : part.smoke_status;
+
+  if (card.kind === "worker-create") {
+    if (createdWorkerId && finalStatus === "completed") {
+      return {
+        ...card,
+        status: "completed",
+        step: "ready",
+        workerId: createdWorkerId,
+        workerName: createdWorkerId,
+        result: {
+          ...(asRecord(card.result) ?? {}),
+          created_worker_id: createdWorkerId,
+          ...(part.smoke_status ? { smoke_status: part.smoke_status } : {}),
+          ...(part.smoke_reason ? { smoke_reason: part.smoke_reason } : {}),
+        },
+        smokeStatus: workerCreateSmokeStatus,
+        smokeReason: part.smoke_reason ?? null,
+        title:
+          part.smoke_status === "failed"
+            ? "Agent needs review"
+            : "Agent ready for review",
+        actions: [
+          {
+            id: "open_worker",
+            label: "Open agent",
+            method: "GET" as const,
+            href: `/workers/${encodeURIComponent(createdWorkerId)}?edit=1`,
+          },
+        ],
+      } satisfies WorkerCreateCard;
+    }
+
+    return {
+      ...card,
+      status: finalStatus,
+      step: "failed",
+      title: workerCreationFailed ? "Could not create agent" : "Agent creation failed",
+    } satisfies WorkerCreateCard;
+  }
 
   if (card.kind === "run" && isCreateFromPrompt && createdWorkerId && finalStatus === "completed") {
     return {
@@ -922,11 +964,37 @@ function runCardFromResult(
   };
 }
 
+function workerCreateCardFromResult(
+  event: Extract<ChatSSEEvent, { type: "tool-result" }>,
+  existing: ToolCard
+): WorkerCreateCard | null {
+  const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
+  if (normalizedTool !== "workers.create_from_prompt") return null;
+
+  const result = asRecord(event.result);
+  const runId = optionalString(result?.run_id);
+  if (!runId) return null;
+
+  return {
+    kind: "worker-create",
+    callId: existing.callId,
+    card_id: existing.card_id,
+    status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
+    title: "Creating agent",
+    workerName: "Creating agent",
+    step: event.isError ? "failed" : "drafting",
+    actions: event.actions,
+    streams: event.streams,
+    args: existing.args ?? ("preview" in existing ? existing.preview : undefined),
+    result: event.result,
+  };
+}
+
 function toolCardFromResult(
   event: Extract<ChatSSEEvent, { type: "tool-result" }>,
   existing: ToolCard
 ): ToolCard | null {
-  return workerListCardFromResult(event, existing) ?? runCardFromResult(event, existing);
+  return workerListCardFromResult(event, existing) ?? workerCreateCardFromResult(event, existing) ?? runCardFromResult(event, existing);
 }
 
 function toolCardToolName(card: ToolCard): string | null {
@@ -1264,7 +1332,10 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
   );
 }
 
-export function shouldAutoOpenCreatedWorker(card: ToolCard): card is RunCard {
+export function shouldAutoOpenCreatedWorker(card: ToolCard): card is RunCard | WorkerCreateCard {
+  if (card.kind === "worker-create") {
+    return card.status === "completed" && card.step === "ready" && Boolean(card.workerId);
+  }
   return (
     card.kind === "run" &&
     normalizeToolName(card.toolName || "") === "workers.create_from_prompt" &&
@@ -1324,7 +1395,7 @@ export function decideRunAutoOpen(
 export function getCardHref(card: ToolCard): string | null {
   switch (card.kind) {
     case "worker-create":
-      return card.workerId ? `/workers?sel=${encodeURIComponent(card.workerId)}` : null;
+      return card.workerId ? getAutoOpenCreatedWorkerHref(card) : null;
     case "run":
       if (
         normalizeToolName(card.toolName || "") === "workers.create_from_prompt" &&

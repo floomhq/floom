@@ -258,7 +258,7 @@ describe("Emily chat tool cards", () => {
     expect(card.toolName).toBe("workers.run");
   });
 
-  it("materializes create-from-prompt results into a progress run card", () => {
+  it("materializes create-from-prompt results into an internal worker-create card", () => {
     const call: ChatSSEEvent = {
       type: "tool-call",
       callId: "call_create_prompt",
@@ -283,19 +283,15 @@ describe("Emily chat tool cards", () => {
     const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
     const card = toolCards(messages)[0]?.card;
 
-    expect(card?.kind).toBe("run");
-    if (card?.kind !== "run") throw new Error("expected run card");
-    expect(card.runId).toBe("run_author_123");
+    expect(card?.kind).toBe("worker-create");
+    if (card?.kind !== "worker-create") throw new Error("expected worker-create card");
     expect(card.workerName).toBe("Creating agent");
-    expect(card.actions?.[0]).toEqual({
-      id: "open_run",
-      label: "View progress",
-      method: "GET",
-      href: "/runs/run_author_123?tab=logs",
-    });
+    expect(card.step).toBe("drafting");
+    expect(card.actions).toBeUndefined();
+    expect(card.streams).toBeUndefined();
   });
 
-  it("turns completed create-from-prompt run finishes into open-worker cards", () => {
+  it("turns completed create-from-prompt finishes into open-worker cards", () => {
     const call: ChatSSEEvent = {
       type: "tool-call",
       callId: "call_create_prompt",
@@ -312,7 +308,7 @@ describe("Emily chat tool cards", () => {
     };
     const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
     const card = toolCards(messages)[0]?.card;
-    if (card?.kind !== "run") throw new Error("expected run card");
+    if (card?.kind !== "worker-create") throw new Error("expected worker-create card");
 
     const completed = reconcileRunCardFinishPart(card, {
       status: "completed",
@@ -320,13 +316,15 @@ describe("Emily chat tool cards", () => {
       smoke_status: "passed",
     });
 
-    expect(completed.kind).toBe("run");
-    if (completed.kind !== "run") throw new Error("expected run card");
+    expect(completed.kind).toBe("worker-create");
+    if (completed.kind !== "worker-create") throw new Error("expected worker-create card");
     expect(completed.workerId).toBe("gmail-summary");
+    expect(completed.workerName).toBe("gmail-summary");
+    expect(completed.step).toBe("ready");
     expect(completed.status).toBe("completed");
     expect(completed.actions?.[0]).toEqual({
       id: "open_worker",
-      label: "Open worker",
+      label: "Open agent",
       method: "GET",
       href: "/workers/gmail-summary?edit=1",
     });
