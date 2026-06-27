@@ -26,6 +26,51 @@ from fastapi import HTTPException
 from core.utils import row_to_dict
 from services.public_view import _operator_error_message
 
+_REDACTED_RUN_INPUT_VALUE = "[REDACTED]"
+_SENSITIVE_RUN_INPUT_KEY_PARTS = (
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "api_key",
+    "apikey",
+    "credential",
+    "private_key",
+    "bearer",
+)
+
+
+def _is_sensitive_run_input_key(key: Any) -> bool:
+    key_text = str(key or "").strip().lower().replace("-", "_")
+    compact = key_text.replace("_", "")
+    return any(
+        part in key_text or part.replace("_", "") in compact
+        for part in _SENSITIVE_RUN_INPUT_KEY_PARTS
+    )
+
+
+def _redact_run_inputs(value: Any) -> Any:
+    """Redact secret-like run input fields before exposing run history.
+
+    Run inputs are persisted as operational audit data, but historical workers
+    sometimes accepted fallback credential fields. Redact by key on every read
+    surface so run history cannot become a durable secret store.
+    """
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, nested in value.items():
+            key_text = str(key)
+            redacted[key_text] = (
+                _REDACTED_RUN_INPUT_VALUE
+                if _is_sensitive_run_input_key(key_text)
+                else _redact_run_inputs(nested)
+            )
+        return redacted
+    if isinstance(value, list):
+        return [_redact_run_inputs(item) for item in value]
+    return value
+
+
 def _resolve_run_status_filters(raw_status: Optional[str]) -> List[str]:
     if not raw_status:
         return []
@@ -193,7 +238,7 @@ def _make_run_summary(row: Any) -> "RunSummary":
                 else _raw_input_json
             )
             if isinstance(_parsed_input, dict):
-                run_input = _parsed_input
+                run_input = _redact_run_inputs(_parsed_input)
         except Exception:
             run_input = {}
     return RunSummary(
