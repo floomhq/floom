@@ -2,7 +2,7 @@
 
 **Create AI workers that run on schedules, webhooks, and tool calls.**
 
-Floom turns recurring work into workers: durable jobs that run on a schedule, webhook, or button click with approvals, logs, outputs, and every run on the record.
+Floom turns recurring work into durable AI workers: scheduled, tool-using jobs with approvals, logs, outputs, and every run on the record.
 A worker is the complete job package: readable YAML (`worker.yml`) plus optional `run.py`, `SKILL.md`, attached memory, scoped secrets, and approved tools.
 
 [Get started](docs/GETTING-STARTED.md) · [Try the hosted version](https://floom.dev) · [Read the docs](docs/)
