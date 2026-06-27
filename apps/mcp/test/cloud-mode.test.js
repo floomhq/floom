@@ -277,7 +277,7 @@ async function startMockDoctorApi() {
   const seen = [];
   const server = createServer((req, res) => {
     seen.push({ method: req.method, url: req.url, headers: req.headers });
-    if (req.url === "/health") {
+    if (req.url === "/api/health") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ version: "test" }));
       return;
@@ -448,6 +448,9 @@ test("doctor accepts cloud PAT credentials and uses shared client headers", asyn
       assert.equal(runsCall.headers["x-floom-token"], "floom_pat_doctor");
       assert.equal(runsCall.headers["x-workeros-workspace"], "ws_doctor");
       assert.equal(runsCall.headers["x-floom-secret"], undefined);
+
+      const healthCall = api.seen.find((r) => r.url === "/api/health");
+      assert.ok(healthCall, "expected hosted /api/health probe");
     } finally {
       process.stdout.write = originalStdout;
       api.server.close();

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -640,6 +641,51 @@ def test_context_worker_counts_uses_repository_aggregate():
     )
 
     assert counts == {"pack": 2, "memory": 1}
+
+
+def test_context_worker_counts_times_out_slow_repository_aggregate(monkeypatch):
+    from services import context_access
+
+    monkeypatch.setenv("WORKEROS_CONTEXT_LIST_COUNT_TIMEOUT_SECONDS", "0.05")
+
+    class WorkersRepo:
+        def context_worker_counts(self, *, user_id):
+            assert user_id == "user-a"
+            time.sleep(0.5)
+            return {"pack": 2}
+
+        def list(self, **_kwargs):
+            raise AssertionError("full worker list path was used after aggregate timeout")
+
+    started = time.monotonic()
+    counts = context_access._context_worker_counts(
+        SimpleNamespace(workers=WorkersRepo()),
+        "user-a",
+    )
+
+    assert counts == {}
+    assert time.monotonic() - started < 0.25
+
+
+def test_context_worker_counts_times_out_slow_repository_list_fallback(monkeypatch):
+    from services import context_access
+
+    monkeypatch.setenv("WORKEROS_CONTEXT_LIST_COUNT_TIMEOUT_SECONDS", "0.05")
+
+    class WorkersRepo:
+        def list(self, *, user_id):
+            assert user_id == "user-a"
+            time.sleep(0.5)
+            return [{"config": {"contexts": ["pack"]}}]
+
+    started = time.monotonic()
+    counts = context_access._context_worker_counts(
+        SimpleNamespace(workers=WorkersRepo()),
+        "user-a",
+    )
+
+    assert counts == {}
+    assert time.monotonic() - started < 0.25
 
 
 def test_context_write_refreshes_summary_metadata(monkeypatch, tmp_path):

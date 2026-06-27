@@ -82,6 +82,7 @@ from services.run_serialize import (
     _make_run_summary,
     _parse_tool_calls_from_transcript,
     _read_transcript_rows,
+    _redact_run_inputs,
     _resolve_run_status_filters,
 )
 from services.share_links import (
@@ -1132,6 +1133,8 @@ def get_run(
             run_input = json.loads(_raw_input_json) if isinstance(_raw_input_json, str) else _raw_input_json
             if not isinstance(run_input, dict):
                 run_input = {}
+            else:
+                run_input = _redact_run_inputs(run_input)
         except Exception:
             run_input = {}
     if _has_sensitive_run_artifacts:

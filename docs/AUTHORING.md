@@ -490,6 +490,10 @@ When `approvals.required: true`, runs use a **two-phase respawn model**:
    `decision_required` to `result.json` before exiting. The engine intercepts this,
    lands the run as `PENDING_APPROVAL`, and creates an approval record in the database.
    **Run 1 must NOT perform the real side-effect** (send email, delete data, spend money).
+   Declared secrets are available to Run 1 so the worker can render an accurate
+   preview. Scope those credentials accordingly: use read-only, dry-run, or
+   proposal-specific tokens when the worker only needs to inspect or validate
+   external state before approval.
 
 2. **Human decision.** The `/approvals` page (or the inline card on `/runs/[id]`) shows
    the pending approval. The reviewer can Approve, Edit-then-approve, or Reject.
@@ -497,6 +501,8 @@ When `approvals.required: true`, runs use a **two-phase respawn model**:
 3. **Run 2 - execute.** On approval, the engine spawns a fresh run of the same worker
    with the original inputs merged with `{decision: "approved", approved_output: <edited or original output>}`.
    Run 2 reads `inputs.decision` and `inputs.approved_output` and performs the real action.
+   Action-capable tokens should be reserved for this phase whenever the provider
+   lets you separate read/preview permissions from write/send/delete permissions.
 
 #### result.json shape for Run 1
 

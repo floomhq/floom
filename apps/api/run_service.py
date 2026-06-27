@@ -3068,39 +3068,32 @@ def execute_run(
             log_fn(message, level="error")
             return
 
-        if approval_propose_phase:
-            # Approval proposal runs may draft a preview, but must not receive
-            # action-capable credentials. Secrets are released only to the
-            # engine-approved follow-up run after the human approval row binds
-            # follow_up_run_id to this run.
-            secrets = {}
-            log_fn("Withholding secrets until approval", level="debug")
-            perf.mark("secrets")
-            perf.mark("withholding_secrets_log")
-        else:
-            run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
-            perf.mark("secrets")
-            log_fn("Loading secrets", level="debug")
-            perf.mark("loading_secrets_log")
-            secrets = run_secrets
-            missing = [s for s in config.secrets if s not in secrets]
-            if missing:
-                err = f"Missing secrets: {', '.join(missing)}"
-                update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
-                publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
-                log_fn(err, level="error")
-                if _maybe_pause_scheduled_worker_after_setup_failure(
-                    worker_id=worker_id,
-                    run_id=run_id,
-                    user_id=owner_id,
-                    error_code="missing_secret",
-                    repos=repos_obj,
-                ):
-                    log_fn(
-                        "Paused scheduled worker after repeated missing-secret setup failures",
-                        level="warning",
-                    )
-                return
+        run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+        perf.mark("secrets")
+        log_fn("Loading secrets", level="debug")
+        perf.mark("loading_secrets_log")
+        secrets = run_secrets
+        declared_secret_names = set(config.secrets if config else [])
+        if config is not None and getattr(config, "capabilities", None) is not None:
+            declared_secret_names.update(config.capabilities.secrets or [])
+        missing = sorted(s for s in declared_secret_names if s not in secrets)
+        if missing:
+            err = f"Missing secrets: {', '.join(missing)}"
+            update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
+            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
+            log_fn(err, level="error")
+            if _maybe_pause_scheduled_worker_after_setup_failure(
+                worker_id=worker_id,
+                run_id=run_id,
+                user_id=owner_id,
+                error_code="missing_secret",
+                repos=repos_obj,
+            ):
+                log_fn(
+                    "Paused scheduled worker after repeated missing-secret setup failures",
+                    level="warning",
+                )
+            return
         perf.mark("check_secrets")
 
         # Resolve Composio connections declared in worker.yml.
