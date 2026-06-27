@@ -347,6 +347,25 @@ def test_worker_author_repairs_missing_operator_output():
     ]
 
 
+def test_worker_author_does_not_add_missing_output_to_script_workers():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "script-worker",
+            "title": "Script Worker",
+            "description": "Runs Python code.",
+            "version": "0.1.0",
+            "trigger": {"type": "manual"},
+            "exec": {"entry": "run.py", "runner": "e2b"},
+            "connections": [],
+        },
+        prompt="Run a Python worker.",
+    )
+
+    assert "outputs" not in manifest["exec"]
+
+
 def test_worker_author_repairs_known_integration_tools_generically():
     worker_author = _load_worker_author_module()
     manifest = worker_author._repair_generated_worker_manifest(
