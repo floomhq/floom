@@ -11,6 +11,7 @@ if str(API_DIR) not in sys.path:
 
 import run_service  # noqa: E402
 from services.run_authoring import _register_authored_worker  # noqa: E402
+from services.sse_streaming import _finish_part_from_run_row  # noqa: E402
 
 
 def test_worker_author_smoke_runs_only_after_worker_id_exists():
@@ -38,3 +39,24 @@ def test_worker_author_registration_logs_missing_bundle_artifact():
     assert any("worker-author registration: entered" in message for _level, message in logs)
     assert any("worker-author produced no bundle.json" in message for _level, message in logs)
     assert any("exists=False" in message for _level, message in logs)
+
+
+def test_worker_author_finish_replay_includes_created_worker_id():
+    row = {
+        "status": "completed",
+        "output_json": (
+            '{"created_worker_id":"gmail-summary",'
+            '"smoke":{"status":"passed","reason":"ok"}}'
+        ),
+        "error": None,
+    }
+
+    part = _finish_part_from_run_row(row)  # type: ignore[arg-type]
+
+    assert part == {
+        "type": "finish",
+        "status": "completed",
+        "created_worker_id": "gmail-summary",
+        "smoke_status": "passed",
+        "smoke_reason": "ok",
+    }

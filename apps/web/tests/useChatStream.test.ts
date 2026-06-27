@@ -4,13 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ChatSSEEvent } from "@/lib/emily-chat-types";
 import {
   decideRunAutoOpen,
+  getAutoOpenCreatedWorkerHref,
   getAutoOpenRunDetailsHref,
   getStreamingActivity,
   getToolCardTitle,
   isInternalToolName,
   normalizeToolName,
+  reconcileRunCardFinishPart,
   reduceSSEEvent,
   safeRunPartsStreamPath,
+  shouldAutoOpenCreatedWorker,
   shouldAutoOpenRunDetails,
   useChatStream,
 } from "@/lib/useChatStream";
@@ -290,6 +293,45 @@ describe("Emily chat tool cards", () => {
       method: "GET",
       href: "/runs/run_author_123?tab=logs",
     });
+  });
+
+  it("turns completed create-from-prompt run finishes into open-worker cards", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_create_prompt",
+      toolName: "workers__create_from_prompt",
+      args: { prompt: "Email me a daily summary" },
+      args_preview: { prompt: "Email me a daily summary" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_create_prompt",
+      toolName: "workers__create_from_prompt",
+      isError: false,
+      result: { ok: true, run_id: "run_author_123", worker_id: "worker-author" },
+    };
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+    if (card?.kind !== "run") throw new Error("expected run card");
+
+    const completed = reconcileRunCardFinishPart(card, {
+      status: "completed",
+      created_worker_id: "gmail-summary",
+      smoke_status: "passed",
+    });
+
+    expect(completed.kind).toBe("run");
+    if (completed.kind !== "run") throw new Error("expected run card");
+    expect(completed.workerId).toBe("gmail-summary");
+    expect(completed.status).toBe("completed");
+    expect(completed.actions?.[0]).toEqual({
+      id: "open_worker",
+      label: "Open worker",
+      method: "GET",
+      href: "/workers/gmail-summary?edit=1",
+    });
+    expect(shouldAutoOpenCreatedWorker(completed)).toBe(true);
+    expect(getAutoOpenCreatedWorkerHref(completed)).toBe("/workers/gmail-summary?edit=1");
   });
 
   it("marks completed runs.get cards for automatic navigation to run details", () => {

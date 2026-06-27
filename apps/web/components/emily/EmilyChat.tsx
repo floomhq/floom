@@ -33,7 +33,9 @@ import {
 import { Task } from "@/components/ai-elements/task";
 import {
   decideRunAutoOpen,
+  getAutoOpenCreatedWorkerHref,
   getStreamingActivity,
+  shouldAutoOpenCreatedWorker,
   useChatStream,
   type StreamingActivity,
 } from "@/lib/useChatStream";
@@ -655,6 +657,17 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
       if (msg.role !== "assistant" || !msg.parts) continue;
       for (const part of msg.parts) {
         if (part.type !== "tool-card") continue;
+        if (shouldAutoOpenCreatedWorker(part.card)) {
+          const href = getAutoOpenCreatedWorkerHref(part.card);
+          const workerId = part.card.workerId;
+          if (!href || !workerId) continue;
+          const key = `worker:${workerId}`;
+          if (openedRunDetailsRef.current.has(key)) continue;
+          openedRunDetailsRef.current.add(key);
+          router.push(href);
+          return;
+        }
+        if (fullPage) continue;
         // #1992: decide once whether this run card should auto-open. During an
         // Emily create/run flow the decision is "suppress" — we mark the run
         // handled (so it can't fire late once create mode ends) but DON'T

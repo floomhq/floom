@@ -3648,7 +3648,24 @@ def execute_run(
                 quality_warning="; ".join(quality_warnings),
             )
             log_fn(f"Quality warning: {'; '.join(quality_warnings)}", level="warning")
-        publish_run_part(run_id, {"type": "finish", "status": "completed"})
+        finish_part = {"type": "finish", "status": "completed"}
+        if worker_id == _WORKER_AUTHOR_WORKER_ID and isinstance(outputs, dict):
+            if outputs.get("created_worker_id"):
+                finish_part["created_worker_id"] = outputs["created_worker_id"]
+                _smoke_finish = outputs.get("smoke") if isinstance(outputs.get("smoke"), dict) else None
+                if _smoke_finish:
+                    finish_part["smoke_status"] = _smoke_finish.get("status")
+                    try:
+                        import main as _main
+
+                        finish_part["smoke_reason"] = _main.humanize_smoke_reason(
+                            _smoke_finish.get("reason")
+                        )
+                    except Exception:
+                        finish_part["smoke_reason"] = None
+            if outputs.get("worker_creation_failed"):
+                finish_part["worker_creation_failed"] = True
+        publish_run_part(run_id, finish_part)
         log_fn("Output generated")
         log_fn("Run completed")
 
