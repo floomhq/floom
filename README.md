@@ -1,15 +1,20 @@
-# Floom
+<h1 align="center">Floom</h1>
 
-**Create AI workers that run on schedules, webhooks, and tool calls.**
+<p align="center"><strong>Create AI workers that run on schedules, webhooks, and tool calls.</strong></p>
 
-Floom turns recurring work into durable AI workers: scheduled, tool-using jobs with approvals, logs, outputs, and every run on the record.
-A worker is the complete job package: readable YAML (`worker.yml`) plus optional `run.py`, `SKILL.md`, attached memory, scoped secrets, and approved tools.
+<p align="center">
+  Floom turns recurring work into durable AI workers: scheduled, tool-using jobs with approvals, logs, outputs, and every run on the record.<br>
+  A worker is the complete job package: readable YAML (<code>worker.yml</code>) plus optional <code>run.py</code>, <code>SKILL.md</code>, attached memory, scoped secrets, and approved tools.
+</p>
 
-Describe an agent in plain English, connect tools like Slack, Gmail, GitHub, or Stripe, and let it run in a sandbox with approvals, logs, outputs, and every run on the record.
+<p align="center">
+  <a href="docs/GETTING-STARTED.md">Get started</a> &middot;
+  <a href="BUILDING.md">Build a worker</a> &middot;
+  <a href="https://floom.dev">Try the hosted version</a> &middot;
+  <a href="docs/">Read the docs</a>
+</p>
 
-[Get started](docs/GETTING-STARTED.md) · [Build a worker](BUILDING.md) · [Try the hosted version](https://floom.dev) · [Read the docs](docs/)
-
-<p>
+<p align="center">
   <a href="https://github.com/floomhq/floom/actions/workflows/ci.yml"><img src="https://github.com/floomhq/floom/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/floomhq/floom/stargazers"><img src="https://img.shields.io/github/stars/floomhq/floom?style=flat-square&color=111111&label=stars" alt="Stars"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="License"></a>
@@ -186,18 +191,9 @@ Not ready to self-host? [**floom.dev**](https://floom.dev) is the hosted version
 
 ## How a run works
 
-```mermaid
-flowchart LR
-  Trigger["Trigger<br/>manual · schedule · webhook · Composio"] --> Worker["Agent<br/>worker.yml + SKILL.md / run.py"]
-  Worker --> Runner{"Runner"}
-  Runner -->|".py / .sh / .js"| Sandbox["E2B sandbox microVM<br/>isolated, secrets withheld"]
-  Runner -->|"SKILL.md (agent)"| Driver["AgentDriver<br/>declared tools only"]
-  Sandbox --> Side{"Side effect?"}
-  Driver --> Side
-  Side -->|yes| Approval["Human approval<br/>/approvals"]
-  Side -->|no| Record
-  Approval --> Record["Run record<br/>logs · tool calls · outputs · replay · rollback"]
-```
+<p align="center">
+  <img src="docs/media/worker-runtime-overview.png" alt="Floom worker runtime flow from trigger to worker, runner, sandbox or agent driver, side-effect approval, and run record" width="920">
+</p>
 
 ## Core concepts
 
