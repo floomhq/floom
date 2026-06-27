@@ -356,13 +356,13 @@ export function RunDetailSplitPane({
       {/* R4: the split pane was unbounded — long transcripts/logs grew the
           whole page so it scrolled "into infinity". Cap the pane at a
           viewport-relative height and let each pane scroll WITHIN itself. */}
-      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] flex-col gap-0 overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] md:flex-row">
+      <div className="flex min-h-[320px] max-h-[calc(100vh-12rem)] flex-col gap-0 overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] md:flex-row">
         {/* R5 (2026-05-30): the timeline pane previously had `md:resize-x` (a
             CSS textarea-style drag handle showed in its corner) and
             `md:max-h-none`, which stretched a short timeline into a huge empty
             box reserving dead vertical height. Drop the resize affordance and
             let the pane size to its content (self-scroll only when long). */}
-        <aside className="max-h-44 w-full shrink-0 self-start overflow-y-auto [border-bottom:var(--bd-div)] bg-muted/25 md:max-h-[calc(100vh-13rem)] md:w-[320px] md:min-w-[240px] md:max-w-[460px] md:[border-right:var(--bd-div)] md:[border-bottom:0]">
+        <aside className="max-h-44 w-full shrink-0 overflow-y-auto [border-bottom:var(--bd-div)] bg-muted/25 md:max-h-[calc(100vh-12rem)] md:w-[280px] md:min-w-[220px] md:max-w-[320px] md:[border-right:var(--bd-div)] md:[border-bottom:0]">
           {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
               The timeline IS the panel; the label was dead weight (ChatGPT
               audit P-1). */}
@@ -458,7 +458,7 @@ function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
   const durationValue =
     run.duration_ms != null ? formatDuration(run.duration_ms) : status === "unknown" ? "Unknown" : "Running";
   return (
-    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-7">
+    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
       <RunMetric label="Status" value={statusLabel(status)} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
       <RunMetric label="Duration" value={durationValue} />
