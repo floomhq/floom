@@ -951,8 +951,8 @@ def test_shared_worker_runs_are_actor_scoped_for_detail_and_replay(monkeypatch, 
 
     own_a = runs_router.get_run(run_a_id, auth=auth_a, repos=repos)
     own_b = runs_router.get_run(run_b_id, auth=auth_b, repos=repos)
-    assert own_a.input == {"secret": "from-a"}
-    assert own_b.input == {"secret": "from-b"}
+    assert own_a.input == {"secret": "[REDACTED]"}
+    assert own_b.input == {"secret": "[REDACTED]"}
 
     with pytest.raises(HTTPException) as cross_detail_a:
         runs_router.get_run(run_a_id, auth=auth_b, repos=repos)
