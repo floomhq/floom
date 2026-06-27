@@ -56,7 +56,7 @@ describe("WorkersCollection extra views (#1006)", () => {
     render(<WorkersCollection initialWorkers={[worker as never]} />, { wrapper: createWrapper() });
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     // No top-level tablist in OSS mode.
-    expect(screen.queryByRole("tablist", { name: "Agents views" })).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Workers views" })).toBeNull();
   });
 
   it("renders a switcher and swaps to the injected view on click", async () => {
@@ -71,10 +71,10 @@ describe("WorkersCollection extra views (#1006)", () => {
     render(<WorkersCollection initialWorkers={[worker as never]} extraViews={extraViews} />, { wrapper: createWrapper() });
 
     // Switcher is present with both tabs.
-    expect(await screen.findByRole("tab", { name: "Agents" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Workers" })).toBeInTheDocument();
     const adminTab = screen.getByRole("tab", { name: "All members" });
 
-    // Default view is the agents Collection; the injected panel is hidden.
+    // Default view is the workers Collection; the injected panel is hidden.
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     expect(screen.queryByText("WORKSPACE ADMIN PANEL")).toBeNull();
 

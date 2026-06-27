@@ -1,8 +1,9 @@
 # Floom
 
-**Create AI agents and background AI workers that run on schedules, webhooks, and tool calls.**
+**Create AI workers that run on schedules, webhooks, and tool calls.**
 
-Floom is an open-source AI agent runtime that lets you build, deploy, and supervise background workers from Python scripts or plain-English prompts, with sandboxed execution, approvals, UI, REST API, and MCP access.
+Floom turns recurring work into durable AI workers: scheduled, tool-using jobs with approvals, logs, outputs, and every run on the record.
+A worker is the complete job package: readable YAML (`worker.yml`) plus optional `run.py`, `SKILL.md`, attached memory, scoped secrets, and approved tools.
 
 Describe an agent in plain English, connect tools like Slack, Gmail, GitHub, or Stripe, and let it run in a sandbox with approvals, logs, outputs, and every run on the record.
 
@@ -22,7 +23,7 @@ Describe an agent in plain English, connect tools like Slack, Gmail, GitHub, or 
 
 ---
 
-Most "AI automation" is a chat window you babysit, or a no-code graph that bills you per task and can't be audited. Floom is the missing middle: a real runtime where an agent is a folder you can read, it runs without you watching - script workers isolated in a sandbox - and every execution leaves logs, outputs, tool calls, approvals, and a replay you can trust.
+Most "AI automation" is a chat window you babysit, or a no-code graph that bills you per task and can't be audited. Floom is the missing middle: a real runtime where a worker is a package you can read, it runs without you watching - script workers isolated in a sandbox - and every execution leaves logs, outputs, tool calls, approvals, and a replay you can trust.
 
 ## Deploy A Python Script As An App, REST API, And MCP Tool
 
@@ -47,7 +48,7 @@ floom run my-worker --input key=value
 
 Read [BUILDING.md](BUILDING.md) for the full copy-paste worker contract.
 
-## What Floom Is: AI Agent Runtime For Background AI Workers
+## What Floom Is: Worker Runtime For Background AI Workers
 
 Floom turns repeatable knowledge-work automations into background AI workers. A worker can run manually, on a schedule, from a webhook, or from an app event. The runtime keeps the worker definition, input schema, output schema, logs, tool calls, approvals, and run history inspectable.
 
@@ -55,7 +56,7 @@ Use Floom when you want an AI agent to do recurring work without turning that wo
 
 ## Build And Deploy An AI Worker From A Folder
 
-Agents and developers can build a Floom worker from a folder:
+AI agents and developers can build a Floom worker from a folder:
 
 ```text
 workers/<worker-id>/
@@ -72,11 +73,11 @@ floom workers push ./workers/<worker-id>
 floom run <worker-id> --input key=value
 ```
 
-After deployment, Floom exposes the worker in the UI, through REST endpoints, and through the Floom MCP server for agent clients. For the complete copy-paste build contract, read [BUILDING.md](BUILDING.md).
+After deployment, Floom exposes the worker in the UI, through REST endpoints, and through the Floom MCP server for AI clients. For the complete copy-paste build contract, read [BUILDING.md](BUILDING.md).
 
-## What An AI Agent Worker Looks Like
+## What A Worker Looks Like
 
-An agent is a folder. Describe the work in plain English (`SKILL.md`) or hand it a script (`run.py`), declare its tools and trigger in `worker.yml`, and Floom runs it.
+A worker is a folder-backed job definition. Describe the work in plain English (`SKILL.md`) or hand it a script (`run.py`), declare its tools, trigger, memory, and secrets in `worker.yml`, and Floom runs it.
 
 ```yaml
 # workers/github-digest/worker.yml  (abbreviated)
@@ -119,7 +120,7 @@ The full manifest adds `schema_version`, `title`, `version`, and declared `outpu
 
 Sandboxes allow public network egress by default and block private/internal ranges; a stricter allowlist is optional. Full trust model: [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## AI Agent Runtime At A Glance
+## Worker Runtime At A Glance
 
 | | |
 |:---|:---|

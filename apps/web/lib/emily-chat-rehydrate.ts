@@ -132,7 +132,7 @@ function toRunCard(row: ConversationToolCardRow): RunCard | null {
     optionalString(row.worker_id) ?? optionalString(nestedRun?.worker_id);
   const workerName =
     optionalString(nestedRun?.worker_name) ??
-    (normalized === "workers.create_from_prompt" ? "Creating agent" : workerId ?? "Agent run");
+    (normalized === "workers.create_from_prompt" ? "Creating worker" : workerId ?? "Worker run");
   const callId = row.callId || row.id;
   return {
     kind: "run",

@@ -176,13 +176,13 @@ function SecretsContent() {
     return (
       <IntegrationsShell
         title="Secrets"
-        subtitle="Manage environment secrets for your agents. Values are write-only."
+        subtitle="Manage environment secrets for your workers. Values are write-only."
       >
         <Card className="[border:var(--bd-card)] shadow-none bg-card">
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
             <KeyRound className="mx-auto mb-3 h-5 w-5 opacity-60" />
-            Secret names and agent mappings are restricted to workspace owners
-            and admins. Ask an admin if an agent is missing a credential.
+            Secret names and worker mappings are restricted to workspace owners
+            and admins. Ask an admin if a worker is missing a credential.
           </CardContent>
         </Card>
       </IntegrationsShell>
@@ -204,7 +204,7 @@ function SecretsContent() {
   return (
     <IntegrationsShell
       title="Secrets"
-      subtitle="Manage environment secrets for your agents. Values are write-only."
+      subtitle="Manage environment secrets for your workers. Values are write-only."
       actions={addSecretAction}
     >
       {/* Secrets lives under /connections/secrets (P2-9) and shares the
@@ -266,7 +266,7 @@ function SecretsContent() {
             <ListEmpty
               icon={KeyRound}
               title="No secrets yet"
-              help="Agents that call external APIs require secrets. Add them here and reference them in your worker YAML."
+              help="Workers that call external APIs require secrets. Add them here and reference them in your worker YAML."
               action={
                 <Button
                   size="sm"
@@ -460,7 +460,7 @@ function SecretsContent() {
       <p className="text-sm text-muted-foreground">
         Secret values are write-only; they are never returned by the API. Changes to{" "}
         <code className="bg-muted px-1 py-0.5 text-xs">.env</code>{" "}
-        take effect immediately without restarting agents.
+        take effect immediately without restarting workers.
       </p>
     </IntegrationsShell>
   );

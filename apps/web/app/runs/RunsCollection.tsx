@@ -537,7 +537,7 @@ export default function RunsCollection({
     api.workers
       .list()
       .then(setWorkers)
-      .catch((err) => reportError("Could not load agents for run filters.", err));
+      .catch((err) => reportError("Could not load workers for run filters.", err));
   }, []);
 
   // worker_id → its content tags, for tag filtering + the shared vocabulary.
@@ -720,7 +720,7 @@ export default function RunsCollection({
     ),
     columns: {
       template: "1.6fr 1fr .8fr 130px 1fr",
-      headers: ["Agent", "Trigger", "Duration", "Status", "Started"],
+      headers: ["Worker", "Trigger", "Duration", "Status", "Started"],
       statusColumn: false,
       // gap N2: re-enable the trailing ⋯ row-action slot so in-progress runs can
       // be cancelled directly from the list. Terminal runs render no menu.
@@ -772,7 +772,7 @@ export default function RunsCollection({
           <>
             {/* SPEC §4: ↑ worker link (worker_id on every run — BUILT). */}
             <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
-              ↑ Open agent
+              ↑ Open worker
             </Link>
             {/* #765: run share link — opens the real Share modal. */}
             <RunShareButton r={r} />
@@ -782,7 +782,7 @@ export default function RunsCollection({
               className="c-vpill"
               style={{ padding: "6px 11px" }}
               onClick={() => {
-                if (!window.confirm("Re-run this agent with the same inputs?")) return;
+                if (!window.confirm("Re-run this worker with the same inputs?")) return;
                 void replay(r);
               }}
             >
@@ -814,14 +814,14 @@ export default function RunsCollection({
       // #1365 — add action CTA to runs empty state
       empty: {
         title: "No runs yet",
-        help: "Runs appear here when your agents execute.",
+        help: "Runs appear here when your workers execute.",
         action: (
           <Link
             href={createWorkerHref()}
             className="c-addbtn"
             style={{ display: "inline-block", marginTop: 8, padding: "6px 16px", fontSize: 13 }}
           >
-            Create your first agent →
+            Create your first worker →
           </Link>
         ),
       },
