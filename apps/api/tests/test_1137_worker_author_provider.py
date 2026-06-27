@@ -394,6 +394,17 @@ def test_worker_author_manifest_declares_humane_summary_output():
     assert outputs["bundle"]["kind"] == "file"
 
 
+def test_worker_author_manifest_example_shows_summary_before_bundle():
+    manifest_path = REPO_ROOT / "workers" / "worker-author" / "worker.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    example = manifest["example_output"]
+
+    assert '"summary"' in example
+    assert "Worker id:" in example
+    assert '"bundle": "out/bundle.json"' in example
+    assert '"worker_yml"' not in example
+
+
 def test_worker_author_bundle_summary_is_operator_readable():
     worker_author = _load_worker_author_module()
     summary = worker_author._bundle_summary(
@@ -408,3 +419,22 @@ def test_worker_author_bundle_summary_is_operator_readable():
     assert "Worker id: `gmail-intake-brief`" in summary
     assert "Summarize unread Gmail each morning." in summary
     assert "out/bundle.json" not in summary
+
+
+def test_worker_author_prompt_requires_operator_facing_outputs():
+    worker_author = _load_worker_author_module()
+    prompt = worker_author.SYSTEM_PROMPT_HEADER
+
+    assert "operator-facing output" in prompt
+    assert "Gmail/email/CRM/digest/report workers" in prompt
+    assert "Never make the only visible output a raw bundle path" in prompt
+
+
+def test_worker_author_style_uses_scalar_for_readable_outputs():
+    style_path = REPO_ROOT / "contexts" / "worker-author-style" / "STYLE.md"
+    style = style_path.read_text(encoding="utf-8")
+
+    assert 'kind: "file" for everything' not in style
+    assert "operator-facing output" in style
+    assert "Gmail/email/CRM/digest workers" in style
+    assert 'kind: "scalar"' in style
