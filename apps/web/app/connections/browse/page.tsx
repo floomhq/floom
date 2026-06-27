@@ -101,7 +101,7 @@ const CATEGORY_OPTIONS = [
 // Outcome-oriented copy: what can a worker DO with this integration?
 // Falls back to the Composio description, then a generic phrase.
 const OUTCOME_OVERRIDES: Record<string, string> = {
-  gmail: "Read, send and organize email on behalf of any agent.",
+  gmail: "Read, send and organize email on behalf of any worker.",
   slack: "Post messages, read channels and react to mentions.",
   notion: "Create, search and update pages and databases.",
   github: "Open issues, review PRs and push code changes.",
@@ -123,7 +123,7 @@ function outcomeText(item: IntegrationCatalogItem): string {
   const override = OUTCOME_OVERRIDES[item.slug.toLowerCase()];
   if (override) return override;
   if (item.description && item.description.length > 0) return item.description;
-  return `Connect ${item.name} so your agents can take action.`;
+  return `Connect ${item.name} so your workers can take action.`;
 }
 
 // Module-level cache: fetched tools per slug, shared across detail instances.
@@ -204,7 +204,7 @@ function CatalogToolsPanel({ item }: { item: IntegrationCatalogItem }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "var(--muted-foreground)" }}>
-        These are the things an agent can do with {item.name} once connected,
+        These are the things a worker can do with {item.name} once connected,
         grouped by what they&rsquo;re for.
       </p>
       <div className="c-srch" style={{ maxWidth: "none", padding: "8px 11px" }}>
@@ -556,7 +556,7 @@ export default function ConnectionsBrowsePage() {
 
   const config: CollectionConfig<IntegrationCatalogItem> = {
     title: "Browse apps",
-    subtitle: "Connect the apps your agents need to take action.",
+    subtitle: "Connect the apps your workers need to take action.",
     restingMaxWidth: 1120,
     // Back to the unified Connections list (Browse apps is reached from the
     // Connections "Add" button, not a section tab).
@@ -703,7 +703,7 @@ export default function ConnectionsBrowsePage() {
           trimmedSearch.length > 0 ? (
             <div style={{ marginTop: 4, display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
               <p style={{ margin: 0, fontSize: 12, color: "var(--muted-foreground)" }}>
-                Does {trimmedSearch} expose an API key? Add it as a secret and any agent can use it.
+                Does {trimmedSearch} expose an API key? Add it as a secret and any worker can use it.
               </p>
               <Link
                 href={`/connections/secrets?prefill=${encodeURIComponent(trimmedSearch.toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}

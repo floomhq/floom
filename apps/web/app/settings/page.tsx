@@ -1164,11 +1164,11 @@ floom run <worker>`;
 // → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
 // hardcoded host. Account-scoped PATs authenticate as bearer tokens; the OSS
 // x-floom-secret examples live in CliCommandPanel.
-const API_CALL_SNIPPET = `# List your agents
+const API_CALL_SNIPPET = `# List your workers
 curl -sS ${API_BASE}/workers?shape=list \\
   -H "Authorization: Bearer <your-token>"
 
-# Run an agent
+# Run a worker
 curl -sS -X POST ${API_BASE}/workers/<worker>/runs \\
   -H "Authorization: Bearer <your-token>" \\
   -H "content-type: application/json" \\
@@ -1413,7 +1413,7 @@ const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] =
   {
     key: "approval_default",
     title: "Require approval by default",
-    description: "New agents pause for review before taking external actions.",
+    description: "New workers pause for review before taking external actions.",
   },
   {
     // MUST be "auto_pause_enabled" — run_service._auto_pause_on_consecutive_
@@ -1421,7 +1421,7 @@ const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] =
     // "auto_pause", which the runner never read — dead toggle).
     key: "auto_pause_enabled",
     title: "Auto-pause on repeated failures",
-    description: "Pause an agent automatically after consecutive failed runs.",
+    description: "Pause a worker automatically after consecutive failed runs.",
   },
   {
     // Canonical key per #794's proposal; enforcement is tracked there.
@@ -2495,7 +2495,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
           <div className="min-w-0">
             <h2 className="text-sm font-medium">Download a copy</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Downloads your agents and knowledge as a zip. Secrets and connections are not included; you&apos;ll reconnect those after restoring.
+              Downloads your workers and knowledge as a zip. Secrets and connections are not included; you&apos;ll reconnect those after restoring.
             </p>
           </div>
           <Button variant="outline" onClick={() => void handleDownload()} disabled={exporting}>
@@ -3025,9 +3025,9 @@ interface ChannelCapRow {
 }
 
 const CHANNEL_CAPS: ChannelCapRow[] = [
-  { capability: "Run agent",     web: "yes",     emily: "yes",     slack: "yes",     whatsapp: "yes"     },
+  { capability: "Run worker",    web: "yes",     emily: "yes",     slack: "yes",     whatsapp: "yes"     },
   { capability: "Approve run",   web: "yes",     emily: "partial", slack: "partial", whatsapp: "partial" },
-  { capability: "Create agent",  web: "yes",     emily: "no",      slack: "no",      whatsapp: "no"      },
+  { capability: "Create worker", web: "yes",     emily: "no",      slack: "no",      whatsapp: "no"      },
   { capability: "Notify on run", web: "partial", emily: "yes",     slack: "yes",     whatsapp: "yes"     },
 ];
 

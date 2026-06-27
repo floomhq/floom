@@ -101,7 +101,7 @@ export function WorkerBrainEditor({
             </span>
             {!busy && (
               <span className="block text-xs text-muted-foreground">
-                Give this agent a writeable <span className="font-mono">{memoryFolderName}</span> folder it
+                Give this worker a writeable <span className="font-mono">{memoryFolderName}</span> folder it
                 can read and write across runs.
               </span>
             )}
@@ -135,7 +135,7 @@ export function WorkerBrainEditor({
               {isPinnedMemory ? (
                 <span
                   className="c-vpill"
-                  title="This agent's memory is always read & write. Disable the agent's memory to remove it."
+                  title="This worker's memory is always read & write. Disable the worker's memory to remove it."
                 >
                   Read &amp; write
                 </span>

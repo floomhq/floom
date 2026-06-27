@@ -6,7 +6,7 @@ export default function Loading() {
   return (
     <CollectionRouteLoading
       title="Connections"
-      subtitle="Apps, MCP servers and secrets your agents can use."
+      subtitle="Apps, MCP servers and secrets your workers can use."
       actionLabel="Add"
       showViewToggle
     />

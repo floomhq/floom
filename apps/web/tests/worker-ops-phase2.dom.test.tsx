@@ -120,7 +120,7 @@ describe("R9 Phase 2 FIX 1 — default-inputs persistence (gap #1)", () => {
 describe("R9 Phase 2 FIX 3 — Pause/Resume real endpoints (gap #6)", () => {
   it("the header Pause action calls api.workers.pause, not a YAML PUT", async () => {
     await openDetail();
-    fireEvent.click(await screen.findByRole("button", { name: /More agent actions/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /More worker actions/i }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /^Pause$/i }));
     await waitFor(() => expect(pause).toHaveBeenCalledWith(WORKER_ID));
     expect(resume).not.toHaveBeenCalled();

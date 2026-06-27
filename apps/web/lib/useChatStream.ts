@@ -590,36 +590,36 @@ const TOOL_LABELS: Record<string, ToolLabel> = {
     completed: "Searched the web",
   },
   "workers.create": {
-    running: "Creating agent",
-    completed: "Created agent",
+    running: "Creating worker",
+    completed: "Created worker",
   },
   "workers.create_from_prompt": {
-    running: "Creating agent",
-    completed: "Created agent",
+    running: "Creating worker",
+    completed: "Created worker",
   },
   "workers.delete": {
-    running: "Deleting agent",
-    completed: "Deleted agent",
+    running: "Deleting worker",
+    completed: "Deleted worker",
   },
   "workers.get": {
-    running: "Opening agent details",
-    completed: "Opened agent details",
+    running: "Opening worker details",
+    completed: "Opened worker details",
   },
   "workers.list": {
-    running: "Listing your agents",
-    completed: "Listed your agents",
+    running: "Listing your workers",
+    completed: "Listed your workers",
   },
   "workers.list_all": {
-    running: "Listing your agents",
-    completed: "Listed your agents",
+    running: "Listing your workers",
+    completed: "Listed your workers",
   },
   "workers.run": {
-    running: "Starting agent run",
-    completed: "Started agent run",
+    running: "Starting worker run",
+    completed: "Started worker run",
   },
   "workers.update": {
-    running: "Updating agent",
-    completed: "Updated agent",
+    running: "Updating worker",
+    completed: "Updated worker",
   },
 };
 
@@ -832,7 +832,7 @@ function runCardFromResult(
     optionalString(args?.id);
   const workerName =
     optionalString(resource?.worker_name) ??
-    (normalizedTool === "workers.create_from_prompt" ? "Creating agent" : workerId ?? "Agent run");
+    (normalizedTool === "workers.create_from_prompt" ? "Creating worker" : workerId ?? "Worker run");
   const actions =
     event.actions && event.actions.length > 0
       ? event.actions

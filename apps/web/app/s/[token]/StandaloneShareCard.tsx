@@ -452,7 +452,7 @@ function PackView({
 
       {/* Sticky CTA */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 [border-top:var(--bd-div)] bg-[var(--bg-2)] px-5 py-3">
-        <p className="text-xs text-[var(--ink-soft)]">Add this folder so your agents can use it.</p>
+        <p className="text-xs text-[var(--ink-soft)]">Add this folder so your workers can use it.</p>
         <Link
           href={ctaHref}
           className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"

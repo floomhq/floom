@@ -7,7 +7,7 @@ export function WorkerListCard({ card }: { card: WorkerListCardType }) {
   if (!workers || workers.length === 0) {
     return (
       <div className="rounded-lg bg-card px-3.5 py-3 text-xs text-muted-foreground">
-        No agents found.
+        No workers found.
       </div>
     );
   }
@@ -17,7 +17,7 @@ export function WorkerListCard({ card }: { card: WorkerListCardType }) {
       <div className="flex items-center gap-2 px-3.5 py-2.5 bg-muted/40">
         <Box className="size-3.5 text-muted-foreground" />
         <span className="font-medium text-xs text-muted-foreground uppercase tracking-wide">
-          Agents ({workers.length})
+          Workers ({workers.length})
         </span>
       </div>
       <ul>
