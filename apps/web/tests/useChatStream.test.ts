@@ -101,13 +101,13 @@ describe("Emily chat tool cards", () => {
     const runningCard = toolCards(runningMessages)[0]?.card;
     expect(runningCard?.kind).toBe("generic");
     if (runningCard?.kind !== "generic") throw new Error("expected generic card");
-    expect(runningCard?.title).toBe("Listing your agents");
+    expect(runningCard?.title).toBe("Listing your workers");
 
     const completedMessages = reduceSSEEvent(runningMessages, result, "assistant_1");
     const completedCard = toolCards(completedMessages)[0]?.card;
     if (completedCard?.kind !== "generic") throw new Error("expected generic card");
     expect(completedCard?.status).toBe("completed");
-    expect(completedCard?.title).toBe("Listed your agents");
+    expect(completedCard?.title).toBe("Listed your workers");
   });
 
   it("keeps generic tool inputs separate from outputs after completion", () => {
@@ -141,7 +141,7 @@ describe("Emily chat tool cards", () => {
     expect(getToolCardTitle("approvals.list pending", "running")).toBe("Checking approvals");
     expect(getToolCardTitle("runs.list", "running")).toBe("Reviewing runs");
     expect(getToolCardTitle("runs.list", "completed")).toBe("Reviewed runs");
-    expect(getToolCardTitle("workers__create_from_prompt", "running")).toBe("Creating agent");
+    expect(getToolCardTitle("workers__create_from_prompt", "running")).toBe("Creating worker");
     expect(getToolCardTitle("cancel_run POST", "running")).toBe("Cancelling run");
   });
 
@@ -285,7 +285,7 @@ describe("Emily chat tool cards", () => {
 
     expect(card?.kind).toBe("worker-create");
     if (card?.kind !== "worker-create") throw new Error("expected worker-create card");
-    expect(card.workerName).toBe("Creating agent");
+    expect(card.workerName).toBe("Creating worker");
     expect(card.step).toBe("drafting");
     expect(card.actions).toBeUndefined();
     expect(card.streams).toBeUndefined();
@@ -324,7 +324,7 @@ describe("Emily chat tool cards", () => {
     expect(completed.status).toBe("completed");
     expect(completed.actions?.[0]).toEqual({
       id: "open_worker",
-      label: "Open agent",
+      label: "Open worker",
       method: "GET",
       href: "/workers/gmail-summary?edit=1",
     });
@@ -597,7 +597,7 @@ describe("Emily streaming activity", () => {
     );
     expect(getStreamingActivity(messages, true)).toEqual({
       kind: "tool",
-      title: "Listing your agents",
+      title: "Listing your workers",
     });
   });
 

@@ -237,7 +237,7 @@ export default function RunWorkerPage() {
         if (cancelled) return;
         clearTimeout(slowTimer);
         const msg =
-          err instanceof Error ? err.message : "Failed to load agent";
+          err instanceof Error ? err.message : "Failed to load worker";
         setLoadError(msg);
         setLoading(false);
       },
@@ -321,7 +321,7 @@ export default function RunWorkerPage() {
     return (
       <RunPageShell backHref={backHref}>
         <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
-          {loadSlow ? "Waking the agent... one moment" : "Loading agent..."}
+          {loadSlow ? "Waking the worker… one moment" : "Loading worker…"}
         </div>
       </RunPageShell>
     );
@@ -359,7 +359,7 @@ export default function RunWorkerPage() {
           {isUnauthed ? (
             <>
               <p className="text-sm text-[var(--ink)]">
-                Sign in to run this agent.
+                Sign in to run this worker.
               </p>
               <Link href={`/login?next=${encodeURIComponent(`/run/${id}${token ? `?token=${token}` : ""}`)}`}>
                 <Button>Sign in</Button>
@@ -367,7 +367,7 @@ export default function RunWorkerPage() {
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              {loadError ?? "Agent not found."}
+              {loadError ?? "Worker not found."}
             </p>
           )}
         </div>
@@ -406,14 +406,14 @@ export default function RunWorkerPage() {
               className="w-full"
               onClick={handleRun}
               disabled={running || !isEnabled}
-              title={!isEnabled ? "This agent is paused" : undefined}
+              title={!isEnabled ? "This worker is paused" : undefined}
             >
-              {running ? "Starting…" : "Run agent"}
+              {running ? "Starting…" : "Run worker"}
             </Button>
 
             {!isEnabled && (
               <p className="text-xs text-muted-foreground text-center">
-                This agent is currently paused.
+                This worker is currently paused.
               </p>
             )}
           </div>
@@ -455,7 +455,7 @@ function RunPageShell({
         <div className="flex items-center gap-3 [border-bottom:var(--bd-div)] px-5 py-3 shrink-0">
           <Link
             href={backHref}
-            aria-label="Back to agent"
+            aria-label="Back to worker"
             className="inline-flex items-center gap-1.5 text-sm text-muted-foreground no-underline transition-colors hover:text-[var(--ink)]"
           >
             <ArrowLeft className="size-4" />

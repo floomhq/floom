@@ -305,7 +305,7 @@ function McpToolsPanel({ connection }: { connection: ConnectionItem }) {
 
   return (
     <div>
-      <ToolSection label="Allowed for agents" items={allowed} />
+      <ToolSection label="Allowed for workers" items={allowed} />
       {unreachable ? (
         <DetailGroup label="Available but not allowed">
           <DetailEmpty>
@@ -350,7 +350,7 @@ function OAuthToolsPanel({ connection }: { connection: ConnectionItem }) {
   return (
     <div>
       <DetailGroup label="Scope">
-        <p className="c-dctx">Default tool scope for new agents. Each agent can narrow this further.</p>
+        <p className="c-dctx">Default tool scope for new workers. Each worker can narrow this further.</p>
         <div style={{ display: "inline-flex", gap: 2, alignSelf: "flex-start", background: "var(--bg-2)", padding: 3, borderRadius: "var(--radius-pill)" }}>
           {TOOL_PRESET_SCOPES.map((s) => (
             <button
@@ -367,7 +367,7 @@ function OAuthToolsPanel({ connection }: { connection: ConnectionItem }) {
       </DetailGroup>
       {scope === "Custom" ? (
         <DetailGroup label="Granted scopes">
-          <DetailEmpty>Configure the exact tool list on each agent (Setup → Tools).</DetailEmpty>
+          <DetailEmpty>Configure the exact tool list on each worker (Setup → Tools).</DetailEmpty>
         </DetailGroup>
       ) : (
         <ToolSection label="Granted scopes" items={shown} mono={false} />
@@ -539,7 +539,7 @@ function UsedByPanel({ connection, workers }: { connection: ConnectionItem; work
     <DetailGroup label="Used by">
       {using.length > 0 && (
         <p className="c-dctx">
-          Disconnecting stops {using.length} agent{using.length !== 1 ? "s" : ""} that depend on this connection.
+          Disconnecting stops {using.length} worker{using.length !== 1 ? "s" : ""} that depend on this connection.
         </p>
       )}
       {using.length > 0 ? (
@@ -560,7 +560,7 @@ function UsedByPanel({ connection, workers }: { connection: ConnectionItem; work
           ))}
         </div>
       ) : (
-        <DetailEmpty>No agents use this connection yet.</DetailEmpty>
+        <DetailEmpty>No workers use this connection yet.</DetailEmpty>
       )}
     </DetailGroup>
   );
@@ -718,7 +718,7 @@ export default function ConnectionsCollection({
 
   const config: CollectionConfig<UnifiedConn> = {
     title: "Connections",
-    subtitle: "Apps, MCP servers and secrets your agents can use.",
+    subtitle: "Apps, MCP servers and secrets your workers can use.",
     restingMaxWidth: 1120,
     items,
     loading,
@@ -1042,7 +1042,7 @@ export default function ConnectionsCollection({
                             textUnderlineOffset: 3,
                           }}
                         >
-                          {usedByCount} {usedByCount === 1 ? "agent" : "agents"}
+                          {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
                         </Link>
                       ) : (
                         <span style={{ color: "var(--muted-foreground)" }}>None</span>
@@ -1088,7 +1088,7 @@ export default function ConnectionsCollection({
                     })}
                   </div>
                 ) : (
-                  <DetailEmpty>Not used by any agent yet.</DetailEmpty>
+                  <DetailEmpty>Not used by any worker yet.</DetailEmpty>
                 )}
               </DetailGroup>
             ),
@@ -1129,7 +1129,7 @@ export default function ConnectionsCollection({
     states: {
       empty: {
         title: "No connections yet",
-        help: "Connect an app, add an MCP server, or store a secret your agents can use.",
+        help: "Connect an app, add an MCP server, or store a secret your workers can use.",
       },
       errorRetry: () => {
         setTimedOut(false);

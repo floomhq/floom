@@ -1,6 +1,6 @@
-// Emily home polish (Federico 2026-06-21) — first-agent zero-state pills.
+// Emily home polish (Federico 2026-06-21) — first-worker zero-state pills.
 //
-// Three guarantees for the "Let's hire your first agent" home empty state:
+// Three guarantees for the "Let's hire your first worker" home empty state:
 //   1. Example prompts highlight their tool names INLINE, each with the tool's
 //      real brand icon (BrandLogo sprite) — the same register as the marketing
 //      landing prompt box, NOT a separate "Uses [pill] [pill]" row.
@@ -49,16 +49,16 @@ function renderFirstWorker() {
 describe("Emily home empty — first-worker zero-state polish", () => {
   it("renders the first-worker hero heading", async () => {
     renderFirstWorker();
-    expect(await screen.findByText(/hire your first agent/i)).toBeInTheDocument();
+    expect(await screen.findByText(/hire your first worker/i)).toBeInTheDocument();
   });
 
   it("example pills highlight tool names inline with brand icons", async () => {
     const { container } = renderFirstWorker();
-    await screen.findByText(/hire your first agent/i);
+    await screen.findByText(/hire your first worker/i);
 
-    // The "Create a Linear bug triage agent" pill is a button whose accessible name is the
+    // The "Create a Linear triage worker" pill is a button whose accessible name is the
     // full prompt text (so seeding still works).
-    const pill = screen.getByRole("button", { name: /Create a Linear bug triage agent/i });
+    const pill = screen.getByRole("button", { name: /Create a Linear triage worker/i });
     expect(pill).toBeInTheDocument();
 
     // Inline brand icons: BrandLogo renders an <svg><use href="#brand-..."/>.
@@ -75,14 +75,14 @@ describe("Emily home empty — first-worker zero-state polish", () => {
 
   it("has NO separate 'Uses' / 'Will use' chip-row label", async () => {
     renderFirstWorker();
-    await screen.findByText(/hire your first agent/i);
+    await screen.findByText(/hire your first worker/i);
     expect(screen.queryByText(/^Uses$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Will use$/)).not.toBeInTheDocument();
   });
 
   it("removes the decorative radar mark above the heading", async () => {
     const { container } = renderFirstWorker();
-    const heading = await screen.findByText(/hire your first agent/i);
+    const heading = await screen.findByText(/hire your first worker/i);
     // The radar mark was a full 48x48 viewBox SVG sibling above the heading.
     // After the change, any remaining inline SVG (e.g. pill capability glyphs)
     // must NOT be the 48-viewBox radar mark.
@@ -160,7 +160,7 @@ describe("Emily home composer - bigger, borderless, no Uses row", () => {
   it("Uses chip renders the unified inline token treatment (matches landing)", () => {
     const { container } = render(
       <PromptInput
-        value="Create a Stripe alert agent"
+        value="Create a Stripe alert worker"
         onChange={() => {}}
         onSubmit={() => {}}
         onFilesChange={() => {}}

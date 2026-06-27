@@ -85,7 +85,7 @@ export function WorkerInputForm({
   if (inputs.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        This agent takes no inputs.
+        This worker takes no inputs.
       </p>
     );
   }

@@ -1,7 +1,7 @@
 # Floom Web App
 
 This is the Next.js frontend for Floom. It talks to the FastAPI backend in
-`apps/api` and provides the UI for agents, runs, approvals, connections,
+`apps/api` and provides the UI for workers, runs, approvals, connections,
 contexts, and settings.
 
 ## Local Development

@@ -779,7 +779,7 @@ function ContextsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Reusable folders of files your agents can read before they act.
+            Reusable folders of files your workers can read before they act.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -871,7 +871,7 @@ function ContextsPage() {
                       New folder
                     </span>
                     <span className="mt-1 block text-xs text-muted-foreground">
-                      Company facts, ICP, and brand voice your agents read before they act.
+                      Company facts, ICP, and brand voice your workers read before they act.
                     </span>
                   </button>
                 </div>
@@ -1228,7 +1228,7 @@ function PackRow({
         {!compact && (
           <span className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
             <span>
-              {ctx.file_count} {ctx.file_count === 1 ? "file" : "files"} · {ctx.worker_count} {ctx.worker_count === 1 ? "agent" : "agents"}
+              {ctx.file_count} {ctx.file_count === 1 ? "file" : "files"} · {ctx.worker_count} {ctx.worker_count === 1 ? "worker" : "workers"}
             </span>
             {/* Shared-with-workspace indicator (operator packs only). STEP 4. */}
             {!ctx.read_only && ctx.visibility === "workspace" && (
@@ -1310,11 +1310,11 @@ export function ContextEmptyState({
     >
       <div className="w-full max-w-md text-center space-y-4">
         <div className="space-y-1.5">
-          <h2 className="text-base font-semibold">Give your agents knowledge</h2>
+          <h2 className="text-base font-semibold">Give your workers knowledge</h2>
           <p className="text-sm text-muted-foreground">
-            A folder is a small set of files your agents read before they act:
+            A folder is a small set of files your workers read before they act:
             company facts, your ICP, product details, and brand voice. Attach a folder to a
-            agent and it uses those files on every run.
+            worker and it uses those files on every run.
           </p>
         </div>
         {/* Persistent dashed drop-zone box: drag-drop and "New folder" wired
@@ -1485,7 +1485,7 @@ export function PackDetailPane({
         )}
         {readOnly && (
           <p className="mt-2 text-xs text-muted-foreground">
-            This is a Floom engine folder. It shapes how agents are generated and is read-only.
+            This is a Floom engine folder. It shapes how workers are generated and is read-only.
           </p>
         )}
         {detail.description ? (

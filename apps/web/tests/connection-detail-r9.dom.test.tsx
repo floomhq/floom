@@ -101,18 +101,18 @@ describe("R9 connection detail (real component)", () => {
     expect(screen.getByRole("link", { name: /Reconnect/i })).toBeInTheDocument();
   });
 
-  it("OAuth Tools tab is honest about per-agent scope", async () => {
+  it("OAuth Tools tab is honest about per-worker scope", async () => {
     await openDetail(/^Gmail$/);
     fireEvent.click(await screen.findByRole("tab", { name: /^Tools/ }));
-    expect(await screen.findByText(/Default tool scope for new agents/i)).toBeInTheDocument();
-    expect(screen.getByText(/Each agent can narrow this further/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Default tool scope for new workers/i)).toBeInTheDocument();
+    expect(screen.getByText(/Each worker can narrow this further/i)).toBeInTheDocument();
   });
 
-  it("OAuth Used-by lists the agent that declares the connection", async () => {
+  it("OAuth Used-by lists the worker that declares the connection", async () => {
     await openDetail(/^Gmail$/);
     fireEvent.click(await screen.findByRole("tab", { name: /^Used by/ }));
     expect(await screen.findByText("Inbox Triage")).toBeInTheDocument();
-    expect(screen.getByText(/Disconnecting stops 1 agent/i)).toBeInTheDocument();
+    expect(screen.getByText(/Disconnecting stops 1 worker/i)).toBeInTheDocument();
   });
 
   it("MCP connection shows the same spine and dials live tools", async () => {
@@ -121,8 +121,8 @@ describe("R9 connection detail (real component)", () => {
       expect(await screen.findByRole("tab", { name: new RegExp(`^${tab}`) })).toBeInTheDocument();
     }
     fireEvent.click(await screen.findByRole("tab", { name: /^Tools/ }));
-    // Allowed-for-agents + the live "available but not allowed" split.
-    expect(await screen.findByText(/Allowed for agents/i)).toBeInTheDocument();
+    // Allowed-for-workers + the live "available but not allowed" split.
+    expect(await screen.findByText(/Allowed for workers/i)).toBeInTheDocument();
     expect(await screen.findByText(/Available but not allowed/i)).toBeInTheDocument();
     // search_issues is live-only (not in mcp_allowed_tools) -> available section.
     expect(await screen.findByText("search_issues")).toBeInTheDocument();

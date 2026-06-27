@@ -167,14 +167,14 @@ function Pill({
 }
 
 const CREATE_PILLS = [
-  "Create a Linear bug triage agent",
+  "Create a Linear triage worker",
   "Daily GitHub PR digest",
   "Daily Slack standup reminder",
 ] as const;
 
 const ACTIVE_PILLS = [
   "What ran overnight?",
-  "Create a Linear bug triage agent",
+  "Create a Linear triage worker",
   "Show me this week's runs",
 ] as const;
 
@@ -249,7 +249,7 @@ export function EmilyHomeEmpty({
       {showCreatePrompts ? (
         <div className="flex flex-col items-center pb-[22px]">
           <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
-            {isFirstWorker ? "Let's hire your first agent" : "What should this agent do?"}
+            {isFirstWorker ? "Let's hire your first worker" : "What should this worker do?"}
           </div>
           <div className="mt-[7px] max-w-[360px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
             Describe what you want automated. {assistantName} builds it, connects the

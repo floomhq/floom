@@ -120,7 +120,7 @@ export function SlackConnect() {
           <h2 className="text-sm font-medium">Connect to Slack</h2>
           {/* M41: Emily is a personal Chief-of-Staff, not a generic workspace bot. */}
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Your personal AI assistant: DM Emily or @mention her in a channel. She can run agents, surface approvals, and answer questions.
+            Your personal AI assistant: DM Emily or @mention her in a channel. She can run workers, surface approvals, and answer questions.
           </p>
         </div>
         <Button
