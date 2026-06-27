@@ -68,12 +68,12 @@ _WORKER_CREATE_CONNECTION_HINTS = (
     (
         "gmail",
         "Gmail",
-        re.compile(r"\b(gmail|email|e-mail|inbox|mailbox)\b", re.IGNORECASE),
+        re.compile(r"\b(gmail|google\s+mail)\b", re.IGNORECASE),
     ),
     (
         "googlecalendar",
         "Google Calendar",
-        re.compile(r"\b(google\s+calendar|calendar)\b", re.IGNORECASE),
+        re.compile(r"\b(google\s+calendar|gcal)\b", re.IGNORECASE),
     ),
     ("slack", "Slack", re.compile(r"\bslack\b", re.IGNORECASE)),
     ("notion", "Notion", re.compile(r"\bnotion\b", re.IGNORECASE)),
@@ -104,7 +104,7 @@ def _missing_required_worker_connection(
     active_apps = {
         _normalize_connection_app_name(row.get("app_name"))
         for row in connections
-        if str(row.get("status") or "").lower() == "active"
+        if str(row.get("status") or "").lower() in {"active", "valid", "connected"}
     }
     for required in _required_worker_connections_from_prompt(prompt):
         if _normalize_connection_app_name(required["app_name"]) not in active_apps:

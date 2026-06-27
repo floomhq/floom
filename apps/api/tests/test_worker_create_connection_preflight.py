@@ -26,7 +26,7 @@ def test_create_from_prompt_requires_gmail_connection_for_email_worker(monkeypat
     try:
         result = chat_tool_impls._tool_workers_create_from_prompt(
             {
-                "prompt": "Every Monday at 9am, pull my latest email and summarize missed opportunities.",
+                "prompt": "Every Monday at 9am, pull my latest Gmail and summarize missed opportunities.",
                 "idempotency_key": "key_1",
             },
             "user_1",
@@ -59,7 +59,35 @@ def test_create_from_prompt_allows_email_worker_with_active_gmail(monkeypatch):
     try:
         result = chat_tool_impls._tool_workers_create_from_prompt(
             {
-                "prompt": "Every Monday at 9am, pull my latest email and summarize missed opportunities.",
+                "prompt": "Every Monday at 9am, pull my latest Gmail and summarize missed opportunities.",
+                "idempotency_key": "key_1",
+            },
+            "user_1",
+        )
+    finally:
+        chat_service._current_chat_conversation_id.reset(token)
+
+    assert result["ok"] is True
+    assert result["run_id"] == "run_1"
+
+
+def test_create_from_prompt_does_not_preflight_generic_email_language(monkeypatch):
+    _set_repos(monkeypatch, [])
+    monkeypatch.setattr(
+        chat_service,
+        "_idempotent_worker_author_run",
+        lambda **kwargs: {
+            "ok": True,
+            "run_id": "run_1",
+            "worker_id": "worker-author",
+            "status": "running",
+        },
+    )
+    token = chat_service._current_chat_conversation_id.set("conv_1")
+    try:
+        result = chat_tool_impls._tool_workers_create_from_prompt(
+            {
+                "prompt": "Email me a weekly content calendar every Monday morning.",
                 "idempotency_key": "key_1",
             },
             "user_1",
