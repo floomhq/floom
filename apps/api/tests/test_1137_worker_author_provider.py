@@ -381,3 +381,30 @@ def test_worker_author_manifest_does_not_require_byo_ai_key():
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
 
     assert (manifest.get("exec") or {}).get("secrets") == []
+
+
+def test_worker_author_manifest_declares_humane_summary_output():
+    manifest_path = REPO_ROOT / "workers" / "worker-author" / "worker.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    outputs = {field["name"]: field for field in (manifest.get("exec") or {}).get("outputs", [])}
+
+    assert outputs["summary"]["kind"] == "scalar"
+    assert outputs["summary"]["type"] == "markdown"
+    assert outputs["summary"]["required"] is True
+    assert outputs["bundle"]["kind"] == "file"
+
+
+def test_worker_author_bundle_summary_is_operator_readable():
+    worker_author = _load_worker_author_module()
+    summary = worker_author._bundle_summary(
+        {
+            "suggested_id": "gmail-intake-brief",
+            "worker_yml": 'title: "Gmail Intake Brief"\ndescription: "Summarize unread Gmail each morning."\n',
+        },
+        "create",
+    )
+
+    assert "## Gmail Intake Brief" in summary
+    assert "Worker id: `gmail-intake-brief`" in summary
+    assert "Summarize unread Gmail each morning." in summary
+    assert "out/bundle.json" not in summary
