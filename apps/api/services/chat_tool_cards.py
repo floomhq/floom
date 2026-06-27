@@ -160,6 +160,10 @@ def _tool_resource(tool_name: str, payload: Any) -> Optional[Dict[str, Any]]:
     from chat_service import _APPROVALS_BASE_URL, _approval_public_token
     if not isinstance(payload, dict):
         return None
+    code = str(payload.get("error_code") or payload.get("error") or "").lower()
+    if "missing_connection" in code or ("connection" in code and not payload.get("ok", True)):
+        app_name = str(payload.get("app_name") or payload.get("connection") or "").strip()
+        return {"kind": "connection", "app_name": app_name or None, "status": "missing"}
     nested_run = payload.get("run") if isinstance(payload.get("run"), dict) else {}
     worker_id = (
         payload.get("worker_id")
