@@ -268,10 +268,19 @@ def _context_worker_counts(repos: Optional[Repositories], user_id: str) -> dict[
         finally:
             if executor is not None:
                 executor.shutdown(wait=False, cancel_futures=True)
+    executor = None
     try:
-        workers = repos.workers.list(user_id=user_id)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(repos.workers.list, user_id=user_id)
+        workers = future.result(timeout=_context_list_count_timeout_seconds())
+    except concurrent.futures.TimeoutError:
+        logger.warning("context worker list fallback timed out; returning zero counts")
+        return counts
     except Exception:
         return counts
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
     for worker in workers:
         try:
             contexts = (worker.get("config") or {}).get("contexts") or []
