@@ -54,6 +54,20 @@ function toolIsError(card: ToolCard): boolean {
   return card.status === "failed" || card.status === "error" || card.status === "cancelled";
 }
 
+function toolDefaultOpen(card: ToolCard): boolean {
+  if (card.kind !== "run" && card.kind !== "worker-create") return false;
+  return (
+    card.status === "running" ||
+    card.status === "starting" ||
+    card.status === "queued" ||
+    card.status === "drafting" ||
+    card.status === "generating" ||
+    card.status === "smoke" ||
+    card.status === "pending_approval" ||
+    card.status === "loading"
+  );
+}
+
 export function ToolCardRenderer({ card }: { card: ToolCard }) {
   const body = renderCard(card);
   if (!body) return null;
@@ -76,6 +90,7 @@ export function ToolCardRenderer({ card }: { card: ToolCard }) {
           callId={card.callId}
           status={card.status}
           duration={card.duration}
+          defaultOpen={toolDefaultOpen(card)}
         >
           {body}
         </Tool>

@@ -186,18 +186,22 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
 
         const applyFinalPart = (part: RunFinishPart) => {
           subscribedCardIds.current.delete(cardId);
+          const completionText = workerCreateFinishText(card, part);
           setMessages((prev) =>
             prev.map((m) => {
               if (m.role !== "assistant" || !m.parts) return m;
+              let matched = false;
+              const nextParts = m.parts.map((p) => {
+                if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+                matched = true;
+                return {
+                  type: "tool-card" as const,
+                  card: reconcileRunCardFinishPart(p.card, part),
+                };
+              });
               return {
                 ...m,
-                parts: m.parts.map((p) => {
-                  if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
-                  return {
-                    type: "tool-card" as const,
-                    card: reconcileRunCardFinishPart(p.card, part),
-                  };
-                }),
+                parts: matched && completionText ? appendTextPartOnce(nextParts, completionText) : nextParts,
               };
             })
           );
@@ -454,6 +458,7 @@ import type {
   RunCard,
   MsgPart,
   GenericToolCard,
+  ConnectServiceCard,
   ToolCard,
   WorkerCreateCard,
   WorkerListCard,
@@ -553,6 +558,33 @@ export function reconcileRunCardFinishPart(card: ToolCard, part: RunFinishPart):
         ? { title: getToolCardTitle(normalizedTool, finalStatus) }
         : {}),
   } as ToolCard;
+}
+
+function workerCreateFinishText(card: ToolCard, part: RunFinishPart): string | null {
+  const createdWorkerId = optionalString(part.created_worker_id);
+  const normalizedTool =
+    "toolName" in card && typeof card.toolName === "string" ? normalizeToolName(card.toolName) : "";
+  const isWorkerCreate =
+    card.kind === "worker-create" || normalizedTool === "workers.create_from_prompt";
+
+  if (!isWorkerCreate) return null;
+  if (createdWorkerId && part.status === "completed") {
+    if (part.smoke_status === "failed") {
+      return "I drafted the worker, but the smoke check needs review. Open it and review before running.";
+    }
+    return "I drafted the worker. Review it before running.";
+  }
+  if (part.worker_creation_failed || part.status === "failed") {
+    return "I could not create that worker. Open the progress run to inspect what failed.";
+  }
+  return null;
+}
+
+function appendTextPartOnce(parts: MsgPart[], text: string): MsgPart[] {
+  if (parts.some((part) => part.type === "text" && part.text.trim() === text)) {
+    return parts;
+  }
+  return [...parts, { type: "text" as const, text, streaming: false }];
 }
 
 type ToolLabel = {
@@ -1015,11 +1047,53 @@ function fallbackToolName(event: ToolFollowupEvent): string {
   );
 }
 
+const CONNECTION_LABELS: Record<string, string> = {
+  gmail: "Gmail",
+  github: "GitHub",
+  google: "Google",
+  "google-calendar": "Google Calendar",
+  "google-drive": "Google Drive",
+  hubspot: "HubSpot",
+  linear: "Linear",
+  slack: "Slack",
+  stripe: "Stripe",
+};
+
+function connectionLabel(appName: string): string {
+  const normalized = appName.trim().toLowerCase();
+  if (!normalized) return "this service";
+  return CONNECTION_LABELS[normalized] ?? sentenceCase(normalized.replace(/[-_]+/g, " "));
+}
+
+function connectionCardFromActionRequired(
+  event: ToolFollowupEvent,
+  cardId: string,
+): ConnectServiceCard | null {
+  const resource = "resource" in event ? event.resource : undefined;
+  if (!resource || resource.kind !== "connection") return null;
+  const appName = optionalString(resource.app_name);
+  if (!appName) return null;
+  return {
+    kind: "connect-service",
+    callId: event.callId,
+    card_id: cardId,
+    status: "pending_approval",
+    title: `Connect ${connectionLabel(appName)}`,
+    appName,
+    label: connectionLabel(appName),
+    connected: false,
+    actions: event.actions,
+  };
+}
+
 function materializeToolCardFromFollowup(
   event: ToolFollowupEvent,
   cardId: string,
   status: CardStatus
-): GenericToolCard {
+): ToolCard {
+  const connectionCard = connectionCardFromActionRequired(event, cardId);
+  if (connectionCard) return connectionCard;
+
   const toolName = fallbackToolName(event);
   const title =
     event.type === "tool-progress"
@@ -1166,6 +1240,10 @@ export function reduceSSEEvent(
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
           matchedCard = true;
+          const connectionCard = connectionCardFromActionRequired(event, cardId);
+          if (connectionCard) {
+            return { type: "tool-card" as const, card: connectionCard };
+          }
           const toolName = toolCardToolName(p.card);
           const updatedCard: ToolCard = {
             ...p.card,
@@ -1320,7 +1398,14 @@ export function getStreamingActivity(
   );
   if (hasStreamingText) return { kind: "writing" };
 
-  return { kind: "thinking" };
+  const hasCompletedTool = lastAssistant.parts.some(
+    (part) =>
+      part.type === "tool-card" &&
+      (part.card.status === "completed" || part.card.status === "failed" || part.card.status === "error"),
+  );
+  if (hasCompletedTool) return { kind: "tool", title: "Preparing next steps" };
+
+  return { kind: "tool", title: "Preparing response" };
 }
 
 export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
