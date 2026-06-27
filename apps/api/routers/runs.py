@@ -1076,6 +1076,7 @@ def get_run(
         for out in output_config.outputs:
             output_schema.append(OutputField(
                 name=out.name,
+                kind=getattr(out, "kind", None),
                 label=out.label,
                 type=out.type,
                 value=raw_output.get(out.name),

@@ -6,7 +6,7 @@ describe("run output file-only fields", () => {
   it("detects file outputs already represented by artifacts", () => {
     expect(
       isFileOnlyOutputField(
-        { name: "bundle", label: "Worker bundle", type: "file", value: "out/bundle.json" },
+        { name: "bundle", kind: "file", label: "Worker bundle", type: "json", value: "out/bundle.json" },
         [
           {
             id: "artifact-1",

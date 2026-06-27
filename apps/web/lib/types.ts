@@ -218,6 +218,7 @@ export type RunPart =
 
 export interface OutputField {
   name: string;
+  kind?: string | null;
   type: string;  // "markdown" | "json" | "csv" | "text" | "file"
   label: string;
   value: string | number | boolean | Record<string, unknown> | unknown[] | null;

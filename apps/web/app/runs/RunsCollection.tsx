@@ -105,7 +105,7 @@ export function isFileOnlyOutputField(
   field: import("@/lib/types").OutputField,
   artifacts?: import("@/lib/types").Artifact[],
 ): boolean {
-  if (field.type !== "file" || typeof field.value !== "string") return false;
+  if ((field.kind !== "file" && field.type !== "file") || typeof field.value !== "string") return false;
   const value = field.value.replace(/\\/g, "/");
   return (artifacts ?? []).some((artifact) => {
     const name = artifact.name.replace(/\\/g, "/");
