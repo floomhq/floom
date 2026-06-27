@@ -531,6 +531,30 @@ def _repair_prompt_declared_connections(manifest: Dict[str, Any], prompt: str) -
     manifest["connections"] = connections
 
 
+def _repair_missing_operator_output(manifest: Dict[str, Any]) -> None:
+    """Every worker needs at least one useful Output-tab field.
+
+    Some creator attempts produce a plausible SKILL.md but forget ``outputs`` in
+    worker.yml. That is a deterministic contract miss, not a semantic choice, so
+    add the minimal operator-facing markdown summary before verifier review.
+    """
+    if _declared_output_names(manifest):
+        return
+    exec_block = manifest.get("exec")
+    if not isinstance(exec_block, dict):
+        exec_block = {}
+        manifest["exec"] = exec_block
+    exec_block["outputs"] = [
+        {
+            "name": "summary",
+            "kind": "scalar",
+            "type": "markdown",
+            "required": True,
+            "label": "Summary",
+        }
+    ]
+
+
 def _agent_skill_tool_instructions(manifest: Dict[str, Any], prompt: str) -> str:
     inferred = _infer_connections_from_prompt(prompt)
     lines: List[str] = []
@@ -750,6 +774,7 @@ def _repair_generated_worker_manifest(
         repaired["exec"] = repaired_exec
     _repair_credential_inputs_to_secrets(repaired, prompt)
     _repair_prompt_declared_connections(repaired, prompt)
+    _repair_missing_operator_output(repaired)
     return repaired
 
 
