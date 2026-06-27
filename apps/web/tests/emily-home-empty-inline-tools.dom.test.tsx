@@ -56,9 +56,9 @@ describe("Emily home empty — first-worker zero-state polish", () => {
     const { container } = renderFirstWorker();
     await screen.findByText(/hire your first agent/i);
 
-    // The "Create a Linear triage agent" pill is a button whose accessible name is the
+    // The "Create a Linear bug triage agent" pill is a button whose accessible name is the
     // full prompt text (so seeding still works).
-    const pill = screen.getByRole("button", { name: /Create a Linear triage agent/i });
+    const pill = screen.getByRole("button", { name: /Create a Linear bug triage agent/i });
     expect(pill).toBeInTheDocument();
 
     // Inline brand icons: BrandLogo renders an <svg><use href="#brand-..."/>.
@@ -67,6 +67,10 @@ describe("Emily home empty — first-worker zero-state polish", () => {
       .map((u) => u.getAttribute("href") || "")
       .filter((h) => h.startsWith("#brand-"));
     expect(brandUses).toContain("#brand-linear");
+    expect(brandUses).toContain("#brand-github");
+    expect(brandUses).toContain("#brand-slack");
+    expect(brandUses).not.toContain("#brand-stripe");
+    expect(screen.queryByRole("button", { name: /Stripe/i })).not.toBeInTheDocument();
   });
 
   it("has NO separate 'Uses' / 'Will use' chip-row label", async () => {
@@ -104,7 +108,7 @@ describe("Emily home composer - bigger, borderless, no Uses row", () => {
       />,
     );
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
-    const wrapper = textarea.parentElement as HTMLElement;
+    const wrapper = textarea.closest(".rounded-xl") as HTMLElement;
     // Borderless (landing): no divider outline; grey bg-2 fill for discoverability.
     expect(wrapper.className).not.toContain("[border:var(--bd-div)]");
     expect(wrapper.className).toContain("bg-[var(--bg-2)]");
@@ -117,6 +121,17 @@ describe("Emily home composer - bigger, borderless, no Uses row", () => {
     // the prompt clearly references Granola + HubSpot.
     expect(container.textContent).not.toContain("Uses");
     expect(container.textContent).not.toContain("Will use");
+    // But the tools are still highlighted inline in the prompt itself with the
+    // same BrandLogo token treatment as the landing examples.
+    const brandUses = Array.from(container.querySelectorAll("use"))
+      .map((u) => u.getAttribute("href") || "")
+      .filter((h) => h.startsWith("#brand-"));
+    expect(brandUses).toContain("#brand-granola");
+    expect(brandUses).toContain("#brand-hubspot");
+    const token = container.querySelector("span.bg-\\[var\\(--bg-3\\)\\]");
+    expect(token).not.toBeNull();
+    expect(token!.textContent).toContain("Granola");
+    expect(token!.parentElement?.className).toContain("ph-no-capture");
   });
 
   it("default conversation composer keeps the Uses chip row", () => {
@@ -131,7 +146,7 @@ describe("Emily home composer - bigger, borderless, no Uses row", () => {
       />,
     );
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
-    const wrapper = textarea.parentElement as HTMLElement;
+    const wrapper = textarea.closest(".rounded-xl") as HTMLElement;
     expect(wrapper.className).toContain("bg-[var(--bg-2)]");
     expect(wrapper.className).not.toContain("[border:var(--bd-div)]");
     // The default composer still surfaces the detected tools as the "Uses" row.

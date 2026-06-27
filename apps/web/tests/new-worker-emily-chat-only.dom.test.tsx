@@ -81,7 +81,7 @@ describe("new agent = the consistent Emily empty state (no bespoke hero)", () =>
   it("renders the Emily empty shell with agent-creation pills", async () => {
     render(<EmilyChatCore fullPage createMode />);
     expect(await screen.findByText(/What should this agent do/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Create a Linear triage agent/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create a Linear bug triage agent/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Daily GitHub PR digest/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /What ran overnight/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Show me this week's runs/i })).not.toBeInTheDocument();
@@ -103,7 +103,7 @@ describe("new agent = the consistent Emily empty state (no bespoke hero)", () =>
     render(<EmilyChatCore fullPage createMode />);
     const composer = (await screen.findByPlaceholderText("Message Emily...")) as HTMLTextAreaElement;
     expect(composer.value).toBe("");
-    await user.click(screen.getByRole("button", { name: /Create a Linear triage agent/i }));
-    expect(composer.value).toBe("Create a Linear triage agent");
+    await user.click(screen.getByRole("button", { name: /Create a Linear bug triage agent/i }));
+    expect(composer.value).toBe("Create a Linear bug triage agent");
   });
 });

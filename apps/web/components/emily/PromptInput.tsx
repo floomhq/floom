@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ArrowUp, Paperclip, SendHorizonal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { InlineToolToken } from "@/components/InlineToolToken";
 import { PromptChips } from "@/components/PromptChips";
 import { FileChip } from "./FileChip";
 import { api } from "@/lib/api";
+import { tokenisePrompt } from "@/lib/prompt-detect";
 import { cn } from "@/lib/utils";
 import type { AttachedFile } from "@/lib/emily-chat-types";
 
@@ -20,6 +22,25 @@ const ACCEPTED_TYPES = [
 ];
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+function PromptInlineMirror({ text }: { text: string }) {
+  const displayText = text.endsWith("\n") ? `${text} ` : text;
+  const segments = useMemo(() => tokenisePrompt(displayText), [displayText]);
+  if (segments.length === 0) return <>{displayText}</>;
+
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.kind === "plain") return <span key={i}>{seg.text}</span>;
+        return (
+          <InlineToolToken key={i} brand={seg.brand} className="mx-px text-[inherit] leading-[inherit]">
+            {seg.text}
+          </InlineToolToken>
+        );
+      })}
+    </>
+  );
+}
 
 export function PromptInput({
   value,
@@ -58,9 +79,9 @@ export function PromptInput({
    * Used by Emily's HOME/CREATE empty state so the in-app first prompt reads the
    * same as the landing's. The "default" variant (the bottom-anchored
    * conversation composer) keeps its existing flat-but-outlined box + icon send.
-   * NOTE: rendering the detected tools as rich INLINE chips inside the editable
-   * textarea (as the landing does within static prompt text) is a follow-up; the
-   * landing variant simply drops the separate Uses-row to stay clean.
+   * For live tool mentions, the landing variant mirrors the textarea text with
+   * the shared inline token treatment behind the transparent textarea. This
+   * keeps the prompt clean while still highlighting brands such as HubSpot.
    */
   variant?: "default" | "landing";
   /**
@@ -185,26 +206,46 @@ export function PromptInput({
           large && "p-2",
         )}
       >
-        <textarea
-          ref={textareaRef}
-          // a11y #1711: explicit accessible name (the textarea has no visible
-          // <label>; the placeholder is not an accessible name).
-          aria-label={textareaLabel}
-          className={cn(
-            "w-full resize-none bg-transparent px-2 pt-1.5 outline-none placeholder:text-muted-foreground overflow-auto",
-            // Hero (large): bigger type + taller min-height so the home composer
-            // reads as the primary input. Standard: compact body text.
-            large
-              ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px]"
-              : "text-sm min-h-[24px] max-h-[120px]",
-          )}
-          placeholder={placeholder ?? "Message Emily..."}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKey}
-          rows={1}
-          disabled={disabled}
-        />
+        <div className="relative">
+          {isLanding && value ? (
+            <div
+              aria-hidden="true"
+              className={cn(
+                "ph-no-capture pointer-events-none absolute inset-0 whitespace-pre-wrap break-words px-2 pt-1.5 text-foreground",
+                large
+                  ? "min-h-[60px] max-h-[200px] overflow-hidden text-[15px] leading-relaxed"
+                  : "min-h-[24px] max-h-[120px] overflow-hidden text-sm",
+              )}
+            >
+              <PromptInlineMirror text={value} />
+            </div>
+          ) : null}
+          <textarea
+            ref={textareaRef}
+            // a11y #1711: explicit accessible name (the textarea has no visible
+            // <label>; the placeholder is not an accessible name).
+            aria-label={textareaLabel}
+            className={cn(
+              "relative w-full resize-none bg-transparent px-2 pt-1.5 outline-none placeholder:text-muted-foreground overflow-auto",
+              // Hero (large): bigger type + taller min-height so the home composer
+              // reads as the primary input. Standard: compact body text.
+              large
+                ? "text-[15px] leading-relaxed min-h-[60px] max-h-[200px]"
+                : "text-sm min-h-[24px] max-h-[120px]",
+            )}
+            placeholder={placeholder ?? "Message Emily..."}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKey}
+            rows={1}
+            disabled={disabled}
+            style={
+              isLanding && value
+                ? { color: "transparent", caretColor: "var(--text-primary)", WebkitTextFillColor: "transparent" }
+                : undefined
+            }
+          />
+        </div>
 
         <input
           ref={fileInputRef}

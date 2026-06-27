@@ -167,14 +167,14 @@ function Pill({
 }
 
 const CREATE_PILLS = [
-  "Create a Linear triage agent",
+  "Create a Linear bug triage agent",
   "Daily GitHub PR digest",
-  "Alert me on big Stripe charges",
+  "Daily Slack standup reminder",
 ] as const;
 
 const ACTIVE_PILLS = [
   "What ran overnight?",
-  "Create a Linear triage agent",
+  "Create a Linear bug triage agent",
   "Show me this week's runs",
 ] as const;
 
