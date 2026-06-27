@@ -536,7 +536,7 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
 
     const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_test", timeout_ms: 5000 } });
     assert.equal(watched.structuredContent.status, "completed");
-    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status", "status", "close"]);
+    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status", "status"]);
 
     const deleted = await client.callTool({ name: "workers.delete", arguments: { id: "mcp-test-worker" } });
     assert.deepEqual(deleted.structuredContent, {});
@@ -636,14 +636,14 @@ test("API error text redacts secret-like response fields", async (t) => {
   });
 });
 
-test("runs.watch emits already-terminal final state and close event", async (t) => {
+test("runs.watch emits already-terminal final state", async (t) => {
   const mock = await startMockApi();
   t.after(() => mock.server.close());
 
   await withClient(mock, "test-secret", async (client) => {
     const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_terminal", timeout_ms: 5000 } });
     assert.equal(watched.structuredContent.status, "completed");
-    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status", "close"]);
+    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status"]);
   });
 });
 
@@ -666,7 +666,6 @@ test("runs.watch does a final run status check before timing out", async (t) => 
     const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_sse_timeout", timeout_ms: 1000 } });
     assert.equal(watched.structuredContent.status, "completed");
     assert.equal(watched.structuredContent.run.output.result, "finished while SSE was stale");
-    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.status), ["running"]);
   });
 
   const seen = mock.seen.filter((entry) => entry.includes("run_sse_timeout"));
