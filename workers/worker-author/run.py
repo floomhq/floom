@@ -697,6 +697,13 @@ Script-mode run.py rules (these EXACT mistakes crash generated workers — never
 - KISS and YAGNI: the smallest bundle that does exactly what was described
 
 Output media_type rule for worker.yml (CRITICAL — wrong media_type makes a correct worker look broken):
+- Every generated worker MUST declare at least one operator-facing output that
+  reads well in the Output tab. For Gmail/email/CRM/digest/report workers, this
+  is usually a markdown/text field such as `summary`, `digest`, `report`, or
+  `notification` containing the actual result the operator asked for.
+- Raw files, JSON bundles, CSV exports, attachments, and logs are secondary
+  artifacts. Never make the only visible output a raw bundle path, a log path, or
+  a JSON file unless the user explicitly asked for file conversion/export.
 - For a structured/JSON result (e.g. stats like {"min":1,"max":9,"mean":5}, parsed
   records, key-value summaries, any object/array the worker writes via json.dumps),
   the output MUST declare media_type: "application/json" and a path under out/

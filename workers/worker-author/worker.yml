@@ -6,8 +6,9 @@ title: "Worker Author"
 description: "Generates a new worker bundle from a natural-language prompt. The first worker every operator gets."
 long_description: |
   Turns a one-paragraph description of a job into a runnable Floom worker bundle.
-  Outputs worker.yml + run.py/SKILL.md + a sample input. Either returns a draft
-  for the operator to review, or creates the worker directly when mode=create.
+  Returns a readable summary for the Output tab plus a downloadable bundle with
+  worker.yml, run.py/SKILL.md, and a sample input. Either returns a draft for the
+  operator to review, or creates the worker directly when mode=create.
 
   Edit contexts/worker-author-style/ to shape every future worker this generates.
 use_cases:
@@ -19,10 +20,8 @@ example_input:
   mode: "draft"
 example_output: |
   {
-    "worker_yml": "schema_version: \"0.3\"\nname: ...",
-    "skill_md": "# Weekly GitHub Digest\n...",
-    "suggested_id": "github-weekly-digest",
-    "run_code": null
+    "summary": "## Weekly GitHub Digest\n\nWorker id: `github-weekly-digest`\n\nSends a weekly Slack summary of recent GitHub PRs.",
+    "bundle": "out/bundle.json"
   }
 how_it_works: |
   Prompt + mode

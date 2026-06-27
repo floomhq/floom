@@ -654,7 +654,7 @@ function OutputSummary({ run }: { run: RunDetail }) {
   const exportEntries = allScalar.filter(([key]) => isExportSuccessKey(key));
   const metricEntries = allScalar.filter(([key]) => !isExportSuccessKey(key)).slice(0, 8);
   const schemaFields = (run.output_schema || []).filter((field) => field.value != null && field.value !== "");
-  const fileFields = schemaFields.filter((field) => typeof field.value === "string" && field.value.includes("/"));
+  const fileFields = schemaFields.filter((field) => isFilePathOutputField(field));
 
   if (metricEntries.length === 0 && exportEntries.length === 0 && schemaFields.length === 0) {
     return (
@@ -717,8 +717,71 @@ function OutputSummary({ run }: { run: RunDetail }) {
   );
 }
 
+function isWorkerAuthorRun(run: RunDetail): boolean {
+  return run.worker_id === "worker-author" || run.worker_name === "worker-author";
+}
+
+function normalizeRunPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.?\//, "");
+}
+
+function isFilePathOutputField(field: RunDetail["output_schema"][number]): boolean {
+  if (typeof field.value !== "string") return false;
+  return field.kind === "file" || field.type === "file" || normalizeRunPath(field.value).includes("/");
+}
+
+function isArtifactBackedOutputField(run: RunDetail, field: RunDetail["output_schema"][number]): boolean {
+  if (!isFilePathOutputField(field) || typeof field.value !== "string") return false;
+  const value = normalizeRunPath(field.value);
+  return run.artifacts.some((artifact) => {
+    const name = normalizeRunPath(artifact.name || "");
+    const path = normalizeRunPath(artifact.relative_path || artifact.path || "");
+    return value === path || path.endsWith(`/${value}`) || value.endsWith(`/${name}`) || name === value.split("/").at(-1);
+  });
+}
+
+function visibleOutputSchemaFields(run: RunDetail): RunDetail["output_schema"] {
+  return (run.output_schema || []).filter((field) => !isArtifactBackedOutputField(run, field));
+}
+
+function WorkerAuthorOutputFallback({ run, fileFields }: { run: RunDetail; fileFields: RunDetail["output_schema"] }) {
+  const bundleField = fileFields.find((field) => String(field.value || "").includes("bundle")) || fileFields[0];
+  const suggestedId = typeof run.output?.created_worker_id === "string"
+    ? run.output.created_worker_id
+    : typeof run.output?.suggested_id === "string"
+      ? run.output.suggested_id
+      : null;
+  return (
+    <div className="space-y-5">
+      <section className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/20 p-4">
+        <p className="text-xs font-medium uppercase text-muted-foreground">Worker draft</p>
+        <h2 className="mt-1 text-base font-semibold">Worker bundle generated</h2>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          The worker-author run produced a draft bundle for review. Open the created worker from the creation card, or download the bundle below to inspect the generated files.
+        </p>
+        {suggestedId && (
+          <p className="mt-3 text-sm">
+            Worker id: <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{suggestedId}</code>
+          </p>
+        )}
+      </section>
+      {bundleField && (
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">Generated files</h3>
+          <OutputFileLink run={run} label={bundleField.label || bundleField.name || "Worker bundle"} path={String(bundleField.value)} />
+        </section>
+      )}
+    </div>
+  );
+}
+
 function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; path: string }) {
-  const artifact = run.artifacts.find((candidate) => candidate.name === path);
+  const normalizedPath = normalizeRunPath(path);
+  const artifact = run.artifacts.find((candidate) => {
+    const name = normalizeRunPath(candidate.name || "");
+    const artifactPath = normalizeRunPath(candidate.relative_path || candidate.path || "");
+    return normalizedPath === artifactPath || artifactPath.endsWith(`/${normalizedPath}`) || normalizedPath.endsWith(`/${name}`);
+  });
   const href = artifact ? api.runs.artifactUrl(run.id, artifact.id) : api.runs.bundleUrl(run.id, path);
   return (
     <a
@@ -818,11 +881,38 @@ function OutputView({ run }: { run: RunDetail }) {
     return <StackTrace error={run.error} />;
   }
   if (hasSchema) {
+    const visibleFields = visibleOutputSchemaFields(run);
+    const fileFields = run.output_schema.filter((field) => isArtifactBackedOutputField(run, field));
+    if (visibleFields.length === 0) {
+      if (isWorkerAuthorRun(run) && fileFields.length > 0) {
+        return <WorkerAuthorOutputFallback run={run} fileFields={fileFields} />;
+      }
+      return (
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Output is available in the generated files below.</p>
+          <div className="grid gap-2 lg:grid-cols-2">
+            {fileFields.map((field) => (
+              <OutputFileLink key={field.name} run={run} label={field.label || field.name} path={String(field.value)} />
+            ))}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="space-y-6">
-        {run.output_schema.map((field) => (
+        {visibleFields.map((field) => (
           <OutputRenderer key={field.name} field={field} runId={run.id} />
         ))}
+        {fileFields.length > 0 && (
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">Generated files</h3>
+            <div className="grid gap-2 lg:grid-cols-2">
+              {fileFields.map((field) => (
+                <OutputFileLink key={field.name} run={run} label={field.label || field.name} path={String(field.value)} />
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     );
   }
