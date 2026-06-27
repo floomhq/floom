@@ -13,7 +13,14 @@ if str(API_DIR) not in sys.path:
 def test_required_approval_proposal_gets_declared_secrets_but_not_connections(monkeypatch):
     import run_service
     import runner_utils
-    from models import WorkerApprovals, WorkerConfig, WorkerResult, WorkerRuntime, WorkerTrigger
+    from models import (
+        WorkerApprovals,
+        WorkerConfig,
+        WorkerContractCapabilities,
+        WorkerResult,
+        WorkerRuntime,
+        WorkerTrigger,
+    )
 
     config = WorkerConfig(
         id="approval-worker",
@@ -22,7 +29,8 @@ def test_required_approval_proposal_gets_declared_secrets_but_not_connections(mo
         runtime=WorkerRuntime(type="python", runner="e2b", mode="pure-script"),
         inputs=[],
         outputs=[],
-        secrets=["REAL_API_KEY"],
+        secrets=[],
+        capabilities=WorkerContractCapabilities(secrets=["REAL_API_KEY"]),
         connections=["github"],
         approvals=WorkerApprovals(required=True, label="Approve first"),
     )

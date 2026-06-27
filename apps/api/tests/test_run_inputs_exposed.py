@@ -108,6 +108,57 @@ def test_run_inputs_are_exposed_in_list_and_detail(client_and_main):
     assert body["inputs"] == body["input"]
 
 
+def test_secret_shaped_run_inputs_are_redacted_in_list_and_detail(client_and_main):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    repos.runs.create(
+        user_id=OWNER,
+        run_id="run_input_secret_1",
+        worker_id="input-log-worker",
+        status=main.RunStatus.COMPLETED.value,
+        trigger_source="manual",
+        runner="e2b",
+        input_json={
+            "mandate": "publish draft",
+            "buffer_token": "buf-secret-token",
+            "apiKey": "api-secret-key",
+            "nested": {
+                "password": "password-secret",
+                "items": [{"accessToken": "nested-token"}],
+            },
+        },
+        output_json={"ok": True},
+    )
+
+    listed = client.get("/runs?worker_id=input-log-worker")
+    assert listed.status_code == 200, listed.text
+    run_summary = next(item for item in listed.json() if item["id"] == "run_input_secret_1")
+    assert "buf-secret-token" not in listed.text
+    assert "api-secret-key" not in listed.text
+    assert "password-secret" not in listed.text
+    assert "nested-token" not in listed.text
+    assert run_summary["input"] == {
+        "mandate": "publish draft",
+        "buffer_token": "[REDACTED]",
+        "apiKey": "[REDACTED]",
+        "nested": {
+            "password": "[REDACTED]",
+            "items": [{"accessToken": "[REDACTED]"}],
+        },
+    }
+    assert run_summary["inputs"] == run_summary["input"]
+
+    detail = client.get("/runs/run_input_secret_1")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert "buf-secret-token" not in detail.text
+    assert "api-secret-key" not in detail.text
+    assert "password-secret" not in detail.text
+    assert "nested-token" not in detail.text
+    assert body["input"] == run_summary["input"]
+    assert body["inputs"] == body["input"]
+
+
 def test_run_detail_redacts_legacy_persisted_output_secrets(client_and_main):
     client, main = client_and_main
     repos = main.get_repositories()
