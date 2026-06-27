@@ -30,6 +30,14 @@ onto its inputs **before execution**:
   (optionally edited) proposed output. The worker fires the side effect here,
   exactly once.
 
+Proposal runs receive declared worker secrets so they can build accurate
+previews against external services. This is a trust contract, not a permission
+sandbox: any credential available during propose can technically be used before
+approval. Worker authors MUST scope proposal-visible credentials to the minimum
+permissions needed to prepare the preview. Prefer read-only, dry-run, or
+proposal-specific tokens for Run 1, and reserve action-capable tokens for the
+approved execute phase whenever the external service supports that split.
+
 The phase is determined authoritatively from the approval record
 (`follow_up_run_id`), never from caller-supplied inputs or `trigger_source`. A
 caller cannot bypass the gate by sending `decision: "approved"` — the engine
