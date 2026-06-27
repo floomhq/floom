@@ -7,7 +7,7 @@ export default function Loading() {
   return (
     <CollectionRouteLoading
       title="Library"
-      subtitle="Reusable folders of files your workers can read before they act."
+      subtitle="Reusable folders of files your agents can read before they act."
       showViewToggle
     />
   );

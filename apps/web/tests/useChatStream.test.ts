@@ -98,13 +98,13 @@ describe("Emily chat tool cards", () => {
     const runningCard = toolCards(runningMessages)[0]?.card;
     expect(runningCard?.kind).toBe("generic");
     if (runningCard?.kind !== "generic") throw new Error("expected generic card");
-    expect(runningCard?.title).toBe("Listing your workers");
+    expect(runningCard?.title).toBe("Listing your agents");
 
     const completedMessages = reduceSSEEvent(runningMessages, result, "assistant_1");
     const completedCard = toolCards(completedMessages)[0]?.card;
     if (completedCard?.kind !== "generic") throw new Error("expected generic card");
     expect(completedCard?.status).toBe("completed");
-    expect(completedCard?.title).toBe("Listed your workers");
+    expect(completedCard?.title).toBe("Listed your agents");
   });
 
   it("keeps generic tool inputs separate from outputs after completion", () => {
@@ -138,7 +138,7 @@ describe("Emily chat tool cards", () => {
     expect(getToolCardTitle("approvals.list pending", "running")).toBe("Checking approvals");
     expect(getToolCardTitle("runs.list", "running")).toBe("Reviewing runs");
     expect(getToolCardTitle("runs.list", "completed")).toBe("Reviewed runs");
-    expect(getToolCardTitle("workers__create_from_prompt", "running")).toBe("Creating worker");
+    expect(getToolCardTitle("workers__create_from_prompt", "running")).toBe("Creating agent");
     expect(getToolCardTitle("cancel_run POST", "running")).toBe("Cancelling run");
   });
 
@@ -283,7 +283,7 @@ describe("Emily chat tool cards", () => {
     expect(card?.kind).toBe("run");
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.runId).toBe("run_author_123");
-    expect(card.workerName).toBe("Creating worker");
+    expect(card.workerName).toBe("Creating agent");
     expect(card.actions?.[0]).toEqual({
       id: "open_run",
       label: "View progress",
@@ -557,7 +557,7 @@ describe("Emily streaming activity", () => {
     );
     expect(getStreamingActivity(messages, true)).toEqual({
       kind: "tool",
-      title: "Listing your workers",
+      title: "Listing your agents",
     });
   });
 
@@ -578,13 +578,13 @@ describe("Emily streaming activity", () => {
         type: "tool-progress",
         callId: "call_workers",
         status: "running",
-        label: "Checking worker runs",
+        label: "Checking agent runs",
       },
       "assistant_1"
     );
     expect(getStreamingActivity(progressed, true)).toEqual({
       kind: "tool",
-      title: "Checking worker runs",
+      title: "Checking agent runs",
     });
   });
 
@@ -597,7 +597,7 @@ describe("Emily streaming activity", () => {
         card_id: "card_run",
         status: "starting",
         stage: "started",
-        label: "Starting worker run",
+        label: "Starting agent run",
       },
       "assistant_1"
     );
@@ -607,10 +607,10 @@ describe("Emily streaming activity", () => {
     if (card?.kind !== "generic") throw new Error("expected generic card");
     expect(card.card_id).toBe("card_run");
     expect(card.status).toBe("starting");
-    expect(card.title).toBe("Starting worker run");
+    expect(card.title).toBe("Starting agent run");
     expect(getStreamingActivity(messages, true)).toEqual({
       kind: "tool",
-      title: "Starting worker run",
+      title: "Starting agent run",
     });
   });
 

@@ -430,7 +430,7 @@ export function TriggersEditor({
       <div>
         <h2 className="text-sm font-medium text-foreground">Triggers</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Decide when this worker runs. Click a trigger to edit it, then save.
+          Decide when this agent runs. Click a trigger to edit it, then save.
         </p>
       </div>
 

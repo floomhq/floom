@@ -353,7 +353,7 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
   const selected = files.find((f) => f.path === selectedPath) || null;
 
   if (files.length === 0) {
-    return <p className="text-sm text-muted-foreground">No files found for this worker.</p>;
+    return <p className="text-sm text-muted-foreground">No files found for this agent.</p>;
   }
 
   // S29t (score walk): file rail was w-52 (208px) wrapping path names; right

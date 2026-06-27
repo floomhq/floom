@@ -341,7 +341,7 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
           ))}
         </div>
       ) : (
-        <DetailEmpty>No workers use this folder yet.</DetailEmpty>
+        <DetailEmpty>No agents use this folder yet.</DetailEmpty>
       )}
     </DetailGroup>
   );
@@ -486,7 +486,7 @@ export default function BrainCollection({
 
   const config: CollectionConfig<ContextSummary> = {
     title: "Library",
-    subtitle: "Reusable folders of files your workers can read before they act.",
+    subtitle: "Reusable folders of files your agents can read before they act.",
     items: folders,
     loading,
     // No banner and no prominent toolbar addButton: dropping files is the
@@ -591,7 +591,7 @@ export default function BrainCollection({
       empty: {
         icon: Upload,
         title: "Your Library is empty",
-        help: "Drag any docs onto this page and a folder is created for them automatically. Your workers read these before they act.",
+        help: "Drag any docs onto this page and a folder is created for them automatically. Your agents read these before they act.",
         action: <EmptyStateActions onBrowse={openBrowse} />,
       },
     },

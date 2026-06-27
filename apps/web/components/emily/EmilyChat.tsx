@@ -191,15 +191,15 @@ function ChatControls({
 // ── Suggestion pills ──────────────────────────────────────────────────────────
 
 const SUGGESTIONS = [
-  "What workers do I have?",
-  "Create a Stripe alert worker",
+  "What agents do I have?",
+  "Create a Stripe alert agent",
   "Show me yesterday's runs",
 ];
 
 // #1363 — Action-oriented suggestions shown when the workspace has no workers yet.
 const FIRST_RUN_SUGGESTIONS = [
-  "Build me a worker that sends a daily email digest",
-  "Build me a worker that posts Slack alerts for new HubSpot deals",
+  "Build me an agent that sends a daily email digest",
+  "Build me an agent that posts Slack alerts for new HubSpot deals",
 ];
 
 /** Compact pill row — shown above the composer when chat is active (not streaming). */
@@ -426,14 +426,14 @@ function ChatEmptyState({
   const assistantName = useAssistantName();
   // #1363 — First-run opener: proactive builder message + action-oriented pills
   const headline = isNewWorkspace
-    ? "Hi, describe what you want to automate and I’ll build the worker for you right now."
+    ? "Hi, describe what you want to automate and I’ll build the agent for you right now."
     // Brand call made by Federico (2026-06-16): the assistant is the "chief of
     // staff", not "COO". Greeting follows the persona ("I'm Emily, your chief of
     // staff") instead of the old hardcoded COO string.
     : `I am ${assistantName}, your chief of staff`;
   const sub = isNewWorkspace
     ? null
-    : "Ask me to create workers, check runs, or manage connections.";
+    : "Ask me to create agents, check runs, or manage connections.";
   const pills = isNewWorkspace ? FIRST_RUN_SUGGESTIONS : SUGGESTIONS;
 
   return (
@@ -1345,7 +1345,7 @@ export function EmilyDock({ className }: { className?: string }) {
                 className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
               >
                 <Plus className="size-4" />
-                New worker
+                New agent
               </DropdownMenuItem>
               <DropdownMenuSeparator className="-mx-1 my-1" />
               <DropdownMenuItem
@@ -1453,10 +1453,10 @@ export function EmilyDock({ className }: { className?: string }) {
             }
           }
         }}
-        title="Start a new worker chat?"
-        body="Your current Emily conversation will be saved in Recent chats, and this view will switch to a fresh worker-building chat."
+        title="Start a new agent chat?"
+        body="Your current Emily conversation will be saved in Recent chats, and this view will switch to a fresh agent-building chat."
         cancelLabel="Keep current chat"
-        confirmLabel="Start new worker chat"
+        confirmLabel="Start new agent chat"
         onConfirm={() => {
           setConfirmReplaceOpen(false);
           beginCreateFlow(pendingCreatePrime.current);

@@ -502,7 +502,7 @@ export default function McpConnectionsPage() {
   return (
     <IntegrationsShell
       title="MCP"
-      subtitle="Use Floom as an MCP server in your AI client, or register MCP servers your workers can call."
+      subtitle="Use Floom as an MCP server in your AI client, or register MCP servers your agents can call."
     >
       {/* ============================================================= */}
       {/* Concept A — Use Floom Workers IN your AI client (secondary)   */}
@@ -565,7 +565,7 @@ export default function McpConnectionsPage() {
       {/* ============================================================= */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-base font-medium">MCP servers your workers can use</h2>
+          <h2 className="text-base font-medium">MCP servers your agents can use</h2>
           <p className="text-sm text-muted-foreground">
             Third-party MCP tool servers exposed to your agent workers at run time.
           </p>
@@ -903,7 +903,7 @@ export default function McpConnectionsPage() {
         <ListEmpty
           icon={Server}
           title="No MCP servers yet"
-          help="Add a server to give your workers extra tools."
+          help="Add a server to give your agents extra tools."
           action={
             !formOpen ? (
               <Button type="button" size="sm" variant="outline" onClick={() => openForm("json")}>

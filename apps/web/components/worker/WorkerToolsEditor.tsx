@@ -165,7 +165,7 @@ export function WorkerToolsEditor({
                         style={{ maxWidth: 360, padding: "6px 10px", display: "inline-flex", alignItems: "center", gap: 6 }}
                         disabled={busy}
                         onClick={() => (isOpen ? closeAllowlist(true) : openAllowlist(app, tools))}
-                        title={`Restrict which ${app} tools this worker may use`}
+                        title={`Restrict which ${app} tools this agent may use`}
                       >
                         <span style={{ textTransform: "capitalize" }}>{`Restrict ${app} tools`}</span>
                         <ChevronDown size={13} className="shrink-0" />

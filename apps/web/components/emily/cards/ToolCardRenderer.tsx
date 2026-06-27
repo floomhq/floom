@@ -34,11 +34,11 @@ function toolTitle(card: ToolCard): string {
     case "generic":
       return card.title || card.toolName;
     case "run":
-      return card.workerName || (card.toolName ? getToolCardTitle(card.toolName, card.status) : "Worker run");
+      return card.workerName || (card.toolName ? getToolCardTitle(card.toolName, card.status) : "Agent run");
     case "worker-create":
       return card.workerName;
     case "worker-list":
-      return `Workers (${card.workers.length})`;
+      return `Agents (${card.workers.length})`;
     case "connect-service":
       return card.connected ? card.label : `Connect ${card.label}`;
     case "runs-list":
