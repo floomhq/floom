@@ -12,7 +12,7 @@ function card(extra: Partial<ToolCard> & { kind: ToolCard["kind"] }): ToolCard {
 describe("getCardHref", () => {
   it("worker-create → split-pane worker detail (null without id)", () => {
     expect(getCardHref(card({ kind: "worker-create", workerName: "W", workerId: "w_1", step: "ready" }))).toBe(
-      "/workers?sel=w_1"
+      "/workers/w_1?edit=1"
     );
     expect(getCardHref(card({ kind: "worker-create", workerName: "W", step: "drafting" }))).toBeNull();
   });

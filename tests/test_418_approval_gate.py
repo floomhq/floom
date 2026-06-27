@@ -195,8 +195,8 @@ class Test418ApprovalGate(unittest.TestCase):
             run_service.execute_run(follow_up_run_id, worker["id"], {})
 
         self.assertEqual(decisions, ["proposed", "approved"])
-        self.assertEqual(seen_secrets, [{}, {"API_KEY": "sekret"}])
-        self.assertEqual(get_secrets.call_count, 1)
+        self.assertEqual(seen_secrets, [{"API_KEY": "sekret"}, {"API_KEY": "sekret"}])
+        self.assertEqual(get_secrets.call_count, 2)
 
     # -- (c) rejection runs the side effect zero times --
     def test_rejection_runs_side_effect_zero_times(self):

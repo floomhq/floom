@@ -56,6 +56,11 @@ beforeEach(() => {
 describe("McpInstallPanel", () => {
   it("creates and copies a workspace token from the agent install panel", async () => {
     const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     const { McpInstallPanel } = await import("@/components/mcp/McpInstallPanel");
 
     render(<McpInstallPanel />);
@@ -72,6 +77,6 @@ describe("McpInstallPanel", () => {
     expect(await screen.findByText("wst_test_token")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Copy token" }));
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("wst_test_token");
+    expect(writeText).toHaveBeenCalledWith("wst_test_token");
   });
 });
