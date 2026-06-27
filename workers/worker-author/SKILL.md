@@ -46,7 +46,7 @@ Call these tools in order at the start of every run:
 8. Draft the bundle in memory
 9. **`validate_worker_yml(yml_string)`** — validate before returning; fix errors if any
 10. If `mode == "create"`: **`create_worker(worker_yml, skill_md_or_run_code, skill_md)`** then populate `created_worker_id`
-11. **`finish_with_outputs({"bundle": "<json_string>"})`** where json_string is the serialized bundle object
+11. **`finish_with_outputs({"summary": "<markdown summary>", "bundle": "<json_string>"})`** where json_string is the serialized bundle object
 
 ## Execution mode decision
 
@@ -163,6 +163,12 @@ copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
   output for each and compute ALL of them. A worker that runs green but only
   fills the first output is an under-implemented no-op — produce the complete
   result the prompt described.
+- **Always include a human-readable primary output.** File outputs are
+  attachments, not the operator-facing result. For workers that produce files,
+  also declare and fill a scalar markdown `summary` that explains what happened,
+  what is in the file, and any next action. Gmail-style workers should show the
+  useful email summary, matched messages, draft replies, or decisions directly
+  in the Output tab; raw email JSON belongs in an artifact only when needed.
 - No unbounded loops; bound any retry/iteration and set a timeout on network calls.
 - End the module with `if __name__ == "__main__": main()`.
 

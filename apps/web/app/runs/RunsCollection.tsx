@@ -101,6 +101,19 @@ export function useRunDetail(id: string, status?: string): RunDetail | undefined
 // output_schema renders per field; otherwise each output key is rendered by its
 // inferred type. A Preview/Raw toggle (rule #1 — same content, two view modes,
 // NOT a separate tab) flips this humane view to the raw JSON source in place.
+export function isFileOnlyOutputField(
+  field: import("@/lib/types").OutputField,
+  artifacts?: import("@/lib/types").Artifact[],
+): boolean {
+  if (field.type !== "file" || typeof field.value !== "string") return false;
+  const value = field.value.replace(/\\/g, "/");
+  return (artifacts ?? []).some((artifact) => {
+    const name = artifact.name.replace(/\\/g, "/");
+    const path = (artifact.relative_path || artifact.path || "").replace(/\\/g, "/");
+    return value === path || value.endsWith(`/${name}`) || path.endsWith(`/${value}`);
+  });
+}
+
 function ResultPreview({ d }: { d: RunDetail }) {
   const output = d.output ?? {};
   const hasSchema = (d.output_schema?.length ?? 0) > 0;
@@ -109,9 +122,13 @@ function ResultPreview({ d }: { d: RunDetail }) {
     return <div style={muted}>Run completed with no structured output.</div>;
   }
   if (hasSchema) {
+    const visibleFields = d.output_schema.filter((field) => !isFileOnlyOutputField(field, d.artifacts));
+    if (visibleFields.length === 0) {
+      return <div style={muted}>Output is available in the file section above.</div>;
+    }
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-        {d.output_schema.map((field) => (
+        {visibleFields.map((field) => (
           <OutputRenderer key={field.name} field={field} runId={d.id} />
         ))}
       </div>

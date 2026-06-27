@@ -11,7 +11,7 @@ Protocol (matches the E2B pure-script contract, e.g. gmail_intake_brief):
   3. Call the configured platform provider to draft worker.yml + SKILL.md / run.py,
      validate the YAML.
   4. Write the bundle to ``out/bundle.json``.
-  5. Write ``result.json`` with ``{"status", "outputs": {"bundle": "out/bundle.json"},
+  5. Write ``result.json`` with ``{"status", "outputs": {"summary": "...", "bundle": "out/bundle.json"},
      "artifacts": [...]}`` so the driver surfaces the result to the UI.
 
 Earlier this file defined a ``run(inputs, context)`` function that was never
@@ -828,6 +828,39 @@ def _write_error(error: str) -> None:
     )
 
 
+def _bundle_summary(bundle: Dict[str, Any], mode: str) -> str:
+    worker_yml = str(bundle.get("worker_yml") or "")
+    suggested_id = str(bundle.get("suggested_id") or "").strip() or "new-worker"
+    error = str(bundle.get("error") or "").strip()
+    title = suggested_id.replace("-", " ").strip().title() or "New Worker"
+    description = ""
+    for line in worker_yml.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("title:"):
+            title = stripped.split(":", 1)[1].strip().strip("\"'") or title
+        elif stripped.startswith("description:") and not description:
+            description = stripped.split(":", 1)[1].strip().strip("\"'")
+
+    lines = [
+        f"## {title}",
+        "",
+        f"Worker id: `{suggested_id}`",
+    ]
+    if description:
+        lines.extend(["", description])
+    lines.extend(
+        [
+            "",
+            "Generated a runnable worker bundle. Review the bundle file below, then open the worker from Workers to edit or run it.",
+        ]
+    )
+    if mode == "create":
+        lines.append("The platform will register this worker automatically when the run completes.")
+    if error:
+        lines.extend(["", f"Generation warning: {error}"])
+    return "\n".join(lines)
+
+
 def main() -> None:
     try:
         inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
@@ -858,9 +891,13 @@ def main() -> None:
     bundle_json = json.dumps(bundle, ensure_ascii=False, indent=2)
     Path("out/bundle.json").write_text(bundle_json, encoding="utf-8")
 
+    mode = str(inputs.get("mode") or "draft").strip().lower()
     result = {
         "status": "success",
-        "outputs": {"bundle": "out/bundle.json"},
+        "outputs": {
+            "summary": _bundle_summary(bundle, mode),
+            "bundle": "out/bundle.json",
+        },
         "artifacts": [
             {
                 "name": "bundle.json",
