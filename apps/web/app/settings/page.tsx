@@ -368,7 +368,7 @@ export function WorkspaceTokensPanel() {
       ) : tokens === null ? null : (
         <>
           <p className="text-sm text-muted-foreground">
-            One shared token (prefix <code className="font-mono text-xs">fl_wt_</code>) that
+            One shared token (prefix <code className="font-mono text-xs">wst_</code>) that
             authenticates this workspace&apos;s CLI runs and CI. It is not tied to you
             personally and gives API access to workspace-shared workers only, not
             private workers. Admins only. Token values are shown once; store them
@@ -1202,10 +1202,27 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
   );
 }
 
+type DeveloperSubTabKey = "personal-tokens" | "workspace-token" | "api" | "mcp" | "cli" | "git";
+
+function developerDefaultTabFromLocation(): DeveloperSubTabKey {
+  if (typeof window === "undefined") return "personal-tokens";
+  const params = new URLSearchParams(window.location.search);
+  const sel = params.get("sel");
+  const tab = params.get("tab");
+  if (sel === "workspace_token" || sel === "workspace_tokens") return "workspace-token";
+  if (sel === "personal_tokens" || sel === "tokens") return "personal-tokens";
+  if (tab === "workspace-token" || tab === "personal-tokens" || tab === "api" || tab === "mcp" || tab === "cli" || tab === "git") {
+    return tab;
+  }
+  return "personal-tokens";
+}
+
 // DeveloperSection: one account-scoped home for programmatic access (tokens, API, MCP, CLI, Git).
 function DeveloperSection({ workspaceName }: { workspaceName: string }) {
+  const [defaultTab] = useState<DeveloperSubTabKey>(() => developerDefaultTabFromLocation());
+
   return (
-    <Tabs defaultValue="personal-tokens">
+    <Tabs defaultValue={defaultTab}>
       <TabsList>
         <TabsTrigger value="personal-tokens">Personal tokens</TabsTrigger>
         <TabsTrigger value="workspace-token">Workspace token</TabsTrigger>

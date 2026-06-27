@@ -68,7 +68,7 @@ describe("McpInstallPanel", () => {
     expect(await screen.findByText(/Existing tokens: 1/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Manage tokens" })).toHaveAttribute(
       "href",
-      "/settings?sel=developer",
+      "/settings?sel=workspace_token",
     );
 
     await user.click(screen.getByRole("button", { name: "Create token" }));
