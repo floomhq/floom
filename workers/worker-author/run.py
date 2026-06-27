@@ -340,7 +340,14 @@ def _load_manifest(yml_string: str) -> Optional[Dict[str, Any]]:
 
 
 _PROMPT_CONNECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("gmail", re.compile(r"\b(gmail|google\s+mail)\b", re.IGNORECASE)),
+    (
+        "gmail",
+        re.compile(
+            r"\b(gmail|google\s+mail|inbox|mailbox|latest\s+email|latest\s+mail|"
+            r"my\s+email|my\s+mail|unread\s+email|unread\s+mail)\b",
+            re.IGNORECASE,
+        ),
+    ),
     ("googlecalendar", re.compile(r"\b(google\s+calendar|gcal)\b", re.IGNORECASE)),
     ("slack", re.compile(r"\bslack\b", re.IGNORECASE)),
     ("notion", re.compile(r"\bnotion\b", re.IGNORECASE)),
@@ -351,6 +358,37 @@ _PROMPT_CONNECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("apollo", re.compile(r"\bapollo\b", re.IGNORECASE)),
     ("salesforce", re.compile(r"\bsalesforce\b", re.IGNORECASE)),
 )
+
+_PROMPT_CONNECTION_READ_TOOLS: Dict[str, List[str]] = {
+    # Compact mirror of apps/api/models.py READ_ONLY_TOOL_PRESETS. worker-author
+    # runs inside E2B and cannot import API modules, so keep the common
+    # integration defaults here too. Unknown integrations still get declared,
+    # then the verifier forces the model to explain how the worker will use them.
+    "gmail": [
+        "GMAIL_FETCH_EMAILS",
+        "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+        "GMAIL_LIST_THREADS",
+        "GMAIL_GET_PROFILE",
+    ],
+    "googlecalendar": [
+        "GOOGLECALENDAR_EVENTS_LIST",
+        "GOOGLECALENDAR_FIND_EVENT",
+        "GOOGLECALENDAR_LIST_CALENDARS",
+        "GOOGLECALENDAR_FREE_BUSY_QUERY",
+    ],
+    "github": [
+        "GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS",
+        "GITHUB_LIST_PULL_REQUESTS",
+        "GITHUB_GET_A_PULL_REQUEST",
+        "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+    ],
+    "slack": [
+        "SLACK_FETCH_CONVERSATION_HISTORY",
+        "SLACK_SEARCH_MESSAGES",
+        "SLACK_LIST_ALL_CHANNELS",
+        "SLACK_FETCH_CONVERSATION_REPLIES",
+    ],
+}
 
 _CREDENTIAL_INPUT_RE = re.compile(
     r"\b(api[_\s-]*key|access[_\s-]*token|auth[_\s-]*token|bearer[_\s-]*token|"
@@ -428,6 +466,31 @@ def _connection_app_from_item(item: Any) -> Optional[str]:
     return None
 
 
+def _connection_item_with_tools(app: str, tools: List[str]) -> Any:
+    return {"app": app, "allowed_tools": tools} if tools else app
+
+
+def _merge_connection_tools(item: Any, app: str, tools: List[str]) -> Any:
+    if not tools:
+        return item
+    if isinstance(item, str):
+        return {"app": app, "allowed_tools": tools}
+    if not isinstance(item, dict):
+        return item
+    merged = dict(item)
+    existing = merged.get("allowed_tools")
+    allowed = [str(t) for t in existing] if isinstance(existing, list) else []
+    seen = {tool.upper() for tool in allowed}
+    for tool in tools:
+        if tool.upper() not in seen:
+            allowed.append(tool)
+            seen.add(tool.upper())
+    merged["allowed_tools"] = allowed
+    if not merged.get("app") and not merged.get("composio"):
+        merged["app"] = app
+    return merged
+
+
 def _infer_connections_from_prompt(prompt: str) -> List[str]:
     found: List[str] = []
     for app, pattern in _PROMPT_CONNECTION_PATTERNS:
@@ -448,14 +511,201 @@ def _repair_prompt_declared_connections(manifest: Dict[str, Any], prompt: str) -
     else:
         return
 
-    existing_apps = {
-        app for app in (_connection_app_from_item(item) for item in connections) if app
-    }
+    existing_apps = {}
+    for idx, item in enumerate(connections):
+        app = _connection_app_from_item(item)
+        if not app:
+            continue
+        existing_apps[app] = idx
+        tools = _PROMPT_CONNECTION_READ_TOOLS.get(app, [])
+        if tools:
+            connections[idx] = _merge_connection_tools(item, app, tools)
     for app in inferred:
-        if app not in existing_apps:
-            connections.append(app)
-            existing_apps.add(app)
+        tools = _PROMPT_CONNECTION_READ_TOOLS.get(app, [])
+        if app in existing_apps:
+            idx = existing_apps[app]
+            connections[idx] = _merge_connection_tools(connections[idx], app, tools)
+        else:
+            connections.append(_connection_item_with_tools(app, tools))
+            existing_apps[app] = len(connections) - 1
     manifest["connections"] = connections
+
+
+def _agent_skill_tool_instructions(manifest: Dict[str, Any], prompt: str) -> str:
+    inferred = _infer_connections_from_prompt(prompt)
+    lines: List[str] = []
+    connections = manifest.get("connections")
+    if not isinstance(connections, list):
+        return ""
+    for item in connections:
+        app = _connection_app_from_item(item)
+        if not app or (inferred and app not in inferred):
+            continue
+        tools: List[str] = []
+        if isinstance(item, dict) and isinstance(item.get("allowed_tools"), list):
+            tools = [str(t) for t in item.get("allowed_tools") if str(t).strip()]
+        if not tools:
+            tools = _PROMPT_CONNECTION_READ_TOOLS.get(app, [])
+        if tools:
+            tool_list = ", ".join(f"`{tool}`" for tool in tools)
+            lines.append(
+                f"- Use `composio__{app}__execute` with allowed tool(s): {tool_list}."
+            )
+        else:
+            lines.append(
+                f"- Use `composio__{app}__execute` for the {app} connection. "
+                "Use only tools exposed by the runtime; do not invent tool names."
+            )
+    if not lines:
+        return ""
+    return "\n\n## Runtime tools\n" + "\n".join(lines) + "\n"
+
+
+def _repair_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Dict[str, Any]:
+    worker_yml = parsed.get("worker_yml")
+    if not isinstance(worker_yml, str) or not worker_yml.strip():
+        return parsed
+    manifest = _load_manifest(worker_yml)
+    if not isinstance(manifest, dict):
+        return parsed
+    repaired_manifest = _repair_generated_worker_manifest(
+        manifest,
+        prompt=prompt,
+        suggested_id=str(parsed.get("suggested_id") or ""),
+    )
+    out = dict(parsed)
+    try:
+        import yaml as pyyaml
+
+        out["worker_yml"] = pyyaml.safe_dump(
+            repaired_manifest,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+    except Exception:
+        pass
+
+    if _entry(repaired_manifest).lower().endswith(".md"):
+        skill_md = out.get("skill_md")
+        if isinstance(skill_md, str):
+            instructions = _agent_skill_tool_instructions(repaired_manifest, prompt)
+            missing_instruction = any(
+                f"composio__{app}__execute" not in skill_md.lower()
+                or (
+                    _PROMPT_CONNECTION_READ_TOOLS.get(app)
+                    and not any(tool in skill_md for tool in _PROMPT_CONNECTION_READ_TOOLS[app])
+                )
+                for app in _infer_connections_from_prompt(prompt)
+            )
+            if instructions and missing_instruction:
+                out["skill_md"] = skill_md.rstrip() + instructions
+    return out
+
+
+def _bundle_verifier_payload(parsed: Dict[str, Any], prompt: str) -> Dict[str, Any]:
+    return {
+        "prompt": prompt,
+        "worker_yml": parsed.get("worker_yml"),
+        "skill_md": parsed.get("skill_md"),
+        "run_code": parsed.get("run_code"),
+        "sample_input_json": parsed.get("sample_input_json"),
+    }
+
+
+def _deterministic_verifier_issues(parsed: Dict[str, Any], prompt: str) -> List[str]:
+    issues: List[str] = []
+    worker_yml = parsed.get("worker_yml")
+    manifest = _load_manifest(worker_yml) if isinstance(worker_yml, str) else None
+    if not isinstance(manifest, dict):
+        return ["worker_yml is not parseable YAML"]
+    manifest = _repair_generated_worker_manifest(
+        manifest,
+        prompt=prompt,
+        suggested_id=str(parsed.get("suggested_id") or ""),
+    )
+
+    inferred = _infer_connections_from_prompt(prompt)
+    connections = manifest.get("connections")
+    connection_apps = {
+        app for app in (_connection_app_from_item(item) for item in connections or []) if app
+    } if isinstance(connections, list) else set()
+    for app in inferred:
+        if app not in connection_apps:
+            issues.append(f"prompt requires {app}, but worker.yml does not declare that connection")
+
+    entry = _entry(manifest).lower()
+    if entry.endswith(".md"):
+        skill_md = str(parsed.get("skill_md") or "")
+        lower_skill = skill_md.lower()
+        for app in inferred:
+            if f"composio__{app}__execute" not in lower_skill:
+                issues.append(f"SKILL.md does not tell the agent to call composio__{app}__execute")
+            known_tools = _PROMPT_CONNECTION_READ_TOOLS.get(app, [])
+            if known_tools and not any(tool in skill_md for tool in known_tools):
+                issues.append(f"SKILL.md does not name any known {app} runtime tool")
+    elif entry.endswith(".py"):
+        run_code = str(parsed.get("run_code") or "")
+        for app in inferred:
+            if app in _PROMPT_CONNECTION_READ_TOOLS and not any(
+                tool in run_code for tool in _PROMPT_CONNECTION_READ_TOOLS[app]
+            ):
+                issues.append(f"run_code does not call any known {app} tool")
+
+    if any(t == "schedule" for t in _trigger_types(manifest)):
+        exec_block = _exec_block(manifest)
+        missing_defaults: List[str] = []
+        raw_inputs = exec_block.get("inputs")
+        if isinstance(raw_inputs, list):
+            for item in raw_inputs:
+                if isinstance(item, dict) and item.get("required") is True and "default" not in item:
+                    missing_defaults.append(str(item.get("name") or "<unnamed>"))
+        if missing_defaults:
+            issues.append("scheduled worker has required inputs without defaults: " + ", ".join(missing_defaults))
+
+    if not _declared_output_names(manifest):
+        issues.append("worker.yml declares no outputs")
+    return issues
+
+
+def _verify_bundle_with_model(parsed: Dict[str, Any], prompt: str, log: Any) -> List[str]:
+    """Independent LLM reviewer for semantic worker quality.
+
+    Deterministic validation catches hard contract bugs; this reviewer catches
+    under-specified or nonsensical workers before create-mode persists them. It
+    returns issue strings only. Any provider failure is logged and treated as an
+    empty reviewer result so worker-author remains available during provider
+    incidents; deterministic issues still gate the bundle.
+    """
+    verifier_prompt = (
+        "You are verifying a Floom worker bundle generated by another model. "
+        "Return ONLY JSON: {\"ok\": boolean, \"issues\": string[]}.\n"
+        "Check that the worker does exactly the user prompt, declares every "
+        "required integration, names real runtime tool calls in SKILL.md or "
+        "run.py, has schedule defaults, has useful operator-facing outputs, "
+        "and contains no placeholders or invented capabilities.\n\n"
+        + json.dumps(_bundle_verifier_payload(parsed, prompt), ensure_ascii=True)[:12000]
+    )
+    try:
+        resp = _codegen_chat(
+            messages=[
+                {"role": "system", "content": "You are a strict reviewer. Output JSON only."},
+                {"role": "user", "content": verifier_prompt},
+            ],
+            temperature=0.0,
+            max_output_tokens=1200,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        result = _extract_json_object(raw)
+        raw_issues = result.get("issues")
+        if result.get("ok") is True:
+            return []
+        if isinstance(raw_issues, list):
+            return [str(issue).strip() for issue in raw_issues if str(issue).strip()]
+        return ["verifier returned ok=false without structured issues"]
+    except Exception as exc:  # noqa: BLE001 - verifier must not hard-fail generation
+        log(f"worker-author verifier skipped after provider error: {exc}", level="warning")
+        return []
 
 
 def _repair_generated_worker_manifest(
@@ -640,6 +890,13 @@ def _validate_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Optional[
         skill_md = parsed.get("skill_md")
         if not isinstance(skill_md, str) or len(skill_md.strip()) < 40:
             return "exec.entry is SKILL.md, but skill_md is empty or too thin"
+        for app in _infer_connections_from_prompt(prompt):
+            tools = _PROMPT_CONNECTION_READ_TOOLS.get(app, [])
+            lower_skill = skill_md.lower()
+            if f"composio__{app}__execute" not in lower_skill:
+                return f"skill_md must instruct the agent to call composio__{app}__execute"
+            if tools and not any(tool in skill_md for tool in tools):
+                return f"skill_md must name at least one known {app} runtime tool"
 
     return None
 
@@ -664,6 +921,12 @@ Rules:
 - worker_yml must be schema_version "0.3", include version: "0.1.0", be valid YAML (all strings double-quoted), and use exec.runner: "e2b"
 - Agent mode (entry: SKILL.md): set skill_md, leave run_code null
 - Script mode (entry: run.py): set run_code, leave skill_md null; always add exec.command
+- A separate verifier will reject bundles that merely look plausible. If the
+  prompt names an integration, worker.yml must declare it in top-level
+  connections, and SKILL.md/run.py must explicitly describe the runtime tool
+  call path, for example `composio__<app>__execute` plus concrete allowed tool
+  slugs when known. Do not create workers that cannot actually reach the
+  integration they claim to use.
 
 Script-mode run.py rules (these EXACT mistakes crash generated workers — never make them):
 - Use ONLY the Python standard library unless you ALSO list the package in
@@ -901,11 +1164,28 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
             last_error = f"LLM returned non-JSON: {exc}"
             log(f"worker-author: attempt {attempt} JSON parse error: {exc}", level="warning")
             continue
+        parsed = _repair_generated_bundle(parsed, prompt)
 
         worker_yml = parsed.get("worker_yml", "")
         if not worker_yml:
             last_error = "worker_yml is empty"
             log(f"worker-author: attempt {attempt} empty worker_yml", level="warning")
+            continue
+
+        verifier_issues = _deterministic_verifier_issues(parsed, prompt)
+        if not verifier_issues:
+            verifier_issues.extend(_verify_bundle_with_model(parsed, prompt, log))
+        if verifier_issues:
+            # De-dupe while preserving order so the next creator attempt gets a
+            # concise, actionable punch list.
+            seen_issues: set[str] = set()
+            unique_issues = []
+            for issue in verifier_issues:
+                if issue not in seen_issues:
+                    unique_issues.append(issue)
+                    seen_issues.add(issue)
+            last_error = "Verifier rejected bundle: " + "; ".join(unique_issues[:8])
+            log(f"worker-author: attempt {attempt} verifier failed: {last_error}", level="warning")
             continue
 
         validation_error = _validate_generated_bundle(parsed, prompt)
