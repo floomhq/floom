@@ -2014,7 +2014,10 @@ class SqliteRunRepository:
         workspace_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         from core.config import _INTERNAL_WORKER_ID_PREFIXES, _SYSTEM_WORKER_IDS
-        from services.run_access import _OPERATOR_TRIGGER_SOURCES
+        from services.run_access import (
+            _OPERATOR_RUN_HISTORY_SYSTEM_WORKER_IDS,
+            _OPERATOR_TRIGGER_SOURCES,
+        )
 
         with get_db() as conn:
             has_actor_user_id = self._has_actor_user_id_column(conn)
@@ -2045,9 +2048,10 @@ class SqliteRunRepository:
             where.append("(r.created_at < ? OR (r.created_at = ? AND r.id < ?))")
             params.extend([before_created_at, before_created_at, before_id])
 
-        if _SYSTEM_WORKER_IDS:
-            where.append(f"r.worker_id NOT IN ({', '.join('?' for _ in _SYSTEM_WORKER_IDS)})")
-            params.extend(sorted(_SYSTEM_WORKER_IDS))
+        hidden_system_ids = sorted(set(_SYSTEM_WORKER_IDS) - set(_OPERATOR_RUN_HISTORY_SYSTEM_WORKER_IDS))
+        if hidden_system_ids:
+            where.append(f"r.worker_id NOT IN ({', '.join('?' for _ in hidden_system_ids)})")
+            params.extend(hidden_system_ids)
         where.append("r.worker_id NOT LIKE '.%'")
         for prefix in sorted(_INTERNAL_WORKER_ID_PREFIXES):
             where.append("r.worker_id NOT LIKE ?")

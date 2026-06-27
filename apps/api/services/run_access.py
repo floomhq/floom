@@ -43,15 +43,23 @@ def _run_visible_to_api(row: Any, *, user_id: str, repos: "Repositories") -> boo
     worker_id = str(row_to_dict(row).get("worker_id") or "")
     if not worker_id:
         return False
-    # Always hide runs for system/infra workers — they're high-volume background
-    # workers whose runs would flood the operator view and are never user-initiated.
+    actor_user_id = row_to_dict(row).get("actor_user_id")
+    if (
+        worker_id in _OPERATOR_RUN_HISTORY_SYSTEM_WORKER_IDS
+        and actor_user_id is not None
+        and str(actor_user_id) == str(user_id)
+    ):
+        return True
+    # Hide system/infra workers by default — they're high-volume background
+    # workers whose runs would flood the operator view. `worker-author` is the
+    # exception: it is user-initiated by the prompt-to-worker flow and belongs in
+    # Run history for auditability.
     if worker_id in _SYSTEM_WORKER_IDS:
         return False
     if worker_id.startswith(".") or any(worker_id.startswith(p) for p in _INTERNAL_WORKER_ID_PREFIXES):
         return False
     if _worker_hidden_from_api(worker_id):
         return False
-    actor_user_id = row_to_dict(row).get("actor_user_id")
     if actor_user_id is not None and str(actor_user_id) == str(user_id):
         return True
     # A run is visible if its worker is owned by the requesting user — regardless
@@ -150,6 +158,7 @@ def _artifact_file_response(row: Any) -> StreamingResponse:
 
 
 _OPERATOR_REACHABLE_HIDDEN_WORKER_IDS = frozenset({"worker-author"})
+_OPERATOR_RUN_HISTORY_SYSTEM_WORKER_IDS = frozenset({"worker-author"})
 
 
 def _get_run_by_explicit_id(
@@ -167,9 +176,9 @@ def _get_run_by_explicit_id(
         from the product UI.
 
     The system/audit visibility filter (``_run_visible_to_api`` ->
-    ``_worker_hidden_from_api``) is for the LIST view: it keeps meta/system runs
-    out of the operator's default /runs listing. But the /workers/new generation
-    UI already holds the precise worker-author ``run_id`` (returned by POST
+    ``_worker_hidden_from_api``) keeps infra runs out of the operator's default
+    /runs listing. The /workers/new generation UI also holds the precise
+    worker-author ``run_id`` (returned by POST
     /workers/new/from-prompt) and must be able to read its
     detail/logs/output/stream/events to drive the GeneratingPanel. Filtering
     those out returned a spurious 404 and hung generation (regression from PR
