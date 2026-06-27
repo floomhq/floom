@@ -2,7 +2,8 @@
 
 **Create AI workers that run on schedules, webhooks, and tool calls.**
 
-Floom is an open-source worker runtime that lets you build, deploy, and supervise background AI workers from Python scripts or plain-English prompts, with sandboxed execution, approvals, UI, REST API, and MCP access.
+Floom turns recurring work into durable AI workers: scheduled, tool-using jobs with approvals, logs, outputs, and every run on the record.
+A worker is the complete job package: readable YAML (`worker.yml`) plus optional `run.py`, `SKILL.md`, attached memory, scoped secrets, and approved tools.
 
 Describe an agent in plain English, connect tools like Slack, Gmail, GitHub, or Stripe, and let it run in a sandbox with approvals, logs, outputs, and every run on the record.
 
