@@ -178,6 +178,10 @@ export async function supportListCommand(options: {
     log.err(`--status must be one of: ${VALID_STATUS.join(", ")}.`);
     return 1;
   }
+  if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)) {
+    log.err("--limit must be an integer between 1 and 100.");
+    return 1;
+  }
   try {
     const { client } = await createAuthenticatedClient();
     const result = (await client.requestJson("GET", "/support/tickets", {
@@ -384,6 +388,10 @@ export async function feedbackCommand(options: {
   const message = (options.message || "").trim();
   if (!message) {
     log.err("--message is required.");
+    return 1;
+  }
+  if (message.length > MAX_BODY_LEN) {
+    log.err(`--message must be <= ${MAX_BODY_LEN} characters.`);
     return 1;
   }
   if (options.severity !== undefined && !validSeverity(options.severity)) {

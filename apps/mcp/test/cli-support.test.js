@@ -208,6 +208,31 @@ test("support list renders a table and the unread count", async (t) => {
   assert.deepEqual(mock.seen, ["GET /support/tickets"]);
 });
 
+test("support list rejects an out-of-range limit before the request", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  for (const bad of ["0", "500", "abc"]) {
+    const result = await runCli(["support", "list", "--limit", bad], { HOME: home });
+    assert.equal(result.code, 1, `limit=${bad}`);
+    assert.match(result.stderr, /--limit must be an integer between 1 and 100/);
+  }
+  assert.deepEqual(mock.seen, []);
+});
+
+test("feedback rejects a message over the body cap", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const huge = "x".repeat(20001);
+  const result = await runCli(["feedback", "--message", huge, "--no-transcript"], { HOME: home });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /--message must be <= 20000 characters/);
+  assert.deepEqual(mock.seen, []);
+});
+
 test("support get renders the message thread", async (t) => {
   const mock = await startMockApi();
   t.after(() => mock.server.close());
