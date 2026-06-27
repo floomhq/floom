@@ -169,7 +169,7 @@ function Pill({
 const CREATE_PILLS = [
   "Create a Linear triage worker",
   "Daily GitHub PR digest",
-  "Alert me on big Stripe charges",
+  "Daily Slack standup reminder",
 ] as const;
 
 const ACTIVE_PILLS = [
