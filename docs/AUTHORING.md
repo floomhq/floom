@@ -1,24 +1,24 @@
-# Authoring Workers
+# Authoring Agents
 
 > **If you are an agent (Claude Code / Cursor) authoring via the MCP, read [AGENT-COOKBOOK.md](AGENT-COOKBOOK.md) first** - it has the per-tool examples + end-to-end recipes. This doc is the schema + concept reference.
 
-This is the canonical guide for writing, deploying, and updating workers on Floom. It covers:
+This is the canonical guide for writing, deploying, and updating agents on Floom. It covers:
 
-1. What a worker is
+1. What an agent is
 2. The two execution modes (script vs agent / SKILL.md)
 3. The `worker.yml` schema (every field, with examples)
 4. Inputs, outputs, secrets, connections, triggers, approvals
-5. Deploying a Claude-style skill bundle as a worker
+5. Deploying a Claude-style skill bundle as an agent
 6. The CLI + MCP authoring flows
-7. The agent-side "write a worker from a prompt" contract
+7. The agent-side "write an agent from a prompt" contract
 
-Treat this as the source of truth. The README's worker section is a stub; everything operational lives here.
+Treat this as the source of truth. The README's agent section is a stub; everything operational lives here.
 
 ---
 
-## 1. What a worker is
+## 1. What an agent is
 
-A **worker** is a folder under `workers/<name>/` containing exactly:
+An **agent** is a folder under `workers/<name>/` containing exactly:
 
 ```
 workers/<name>/

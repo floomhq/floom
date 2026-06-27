@@ -12,7 +12,7 @@ No unreleased changes yet.
 ## [1.0.0] - 2026-06-19
 
 Initial open-source MIT release of Floom, the self-hosted runtime for AI
-workers. This public repository starts from a preserved public history after the preserved
+agents. This public repository starts from a preserved public history after the preserved
 internal commits of development, hardening, and production testing. See
 [HISTORY.md](HISTORY.md) and [the v1.0.0 release notes](docs/releases/v1.0.0.md)
 for provenance and launch context.
@@ -21,7 +21,7 @@ for provenance and launch context.
 
 - FastAPI backend for workers, runs, connections, approvals, contexts, users,
   tokens, and operational views.
-- Next.js web app for creating, running, monitoring, and sharing workers.
+- Next.js web app for creating, running, monitoring, and sharing agents.
 - MCP and CLI package published as `@floomhq/floom`.
 - E2B-sandboxed execution for script workers and agent workers.
 - Manifest-driven worker model with `schema_version: "0.3"`.
@@ -30,14 +30,14 @@ for provenance and launch context.
 - Manual, cron schedule, webhook, and Composio-triggered runs.
 - Composio OAuth connections with server-side tool proxying for sandboxed
   workers.
-- Human approval flows for workers that need review before side effects.
+- Human approval flows for agents that need review before side effects.
 - Run logs, artifacts, transcript capture, bundle snapshots, replay metadata,
   and share-link/public run views.
 - Context packs for reusable worker knowledge.
 - Git-backed workspace export/version history when configured outside the
   engine source checkout.
-- Seed workers for Gmail, GitHub, Slack, WhatsApp, worker authoring, worker
-  authoring, and workspace operations.
+- Seed agents for Gmail, GitHub, Slack, WhatsApp, agent authoring, and
+  workspace operations.
 - Setup scripts for Linux, macOS, and Windows PowerShell.
 - Contributor guide, security policy, code of conduct, roadmap, issue
   templates, PR template, and repository metadata.
