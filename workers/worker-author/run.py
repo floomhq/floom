@@ -537,7 +537,11 @@ def _repair_missing_operator_output(manifest: Dict[str, Any]) -> None:
     Some creator attempts produce a plausible SKILL.md but forget ``outputs`` in
     worker.yml. That is a deterministic contract miss, not a semantic choice, so
     add the minimal operator-facing markdown summary before verifier review.
+    Script-mode workers need their run.py code to produce every declared output,
+    so do not add a contract that the generated code may not satisfy.
     """
+    if not _entry(manifest).lower().endswith(".md"):
+        return
     if _declared_output_names(manifest):
         return
     exec_block = manifest.get("exec")
