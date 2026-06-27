@@ -149,7 +149,7 @@ export function McpInstallPanel() {
             </p>
           </div>
           <Link
-            href="/settings?sel=developer"
+            href="/settings?sel=workspace_token"
             className="text-[12px] font-medium text-[var(--accent)] hover:underline"
           >
             Manage tokens
