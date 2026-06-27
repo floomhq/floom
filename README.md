@@ -2,7 +2,8 @@
 
 **Create AI workers that run on schedules, webhooks, and tool calls.**
 
-Write a worker in plain English, connect tools like Slack, Gmail, GitHub, or Stripe, and let it run in a sandbox with approvals, logs, outputs, and every run on the record.
+Floom turns recurring work into workers that run on a schedule, webhook, or button click with approvals, logs, outputs, and every run on the record.
+A worker is the complete job package: readable YAML (`worker.yml`) plus optional `run.py`, `SKILL.md`, attached memory, scoped secrets, and approved tools.
 
 [Get started](docs/GETTING-STARTED.md) · [Try the hosted version](https://floom.dev) · [Read the docs](docs/)
 
@@ -20,11 +21,11 @@ Write a worker in plain English, connect tools like Slack, Gmail, GitHub, or Str
 
 ---
 
-Most "AI automation" is a chat window you babysit, or a no-code graph that bills you per task and can't be audited. Floom is the missing middle: a real runtime where a worker is a folder you can read, it runs without you watching &mdash; script workers isolated in a sandbox &mdash; and every execution leaves logs, outputs, tool calls, approvals, and a replay you can trust.
+Most "AI automation" is a chat window you babysit, or a no-code graph that bills you per task and can't be audited. Floom is the missing middle: a real runtime where a worker is a package you can read, it runs without you watching &mdash; script workers isolated in a sandbox &mdash; and every execution leaves logs, outputs, tool calls, approvals, and a replay you can trust.
 
 ## What a worker looks like
 
-A worker is a folder. Describe what it should do in plain English (`SKILL.md`) or hand it a script (`run.py`), declare its tools and trigger in `worker.yml`, and Floom runs it.
+A worker is a folder-backed job definition. Describe what it should do in plain English (`SKILL.md`) or hand it a script (`run.py`), declare its tools, trigger, memory, and secrets in `worker.yml`, and Floom runs it.
 
 ```yaml
 # workers/github-digest/worker.yml  (abbreviated)
@@ -72,7 +73,7 @@ Sandboxes allow public network egress by default and block private/internal rang
 | | |
 |:---|:---|
 | **What it is** | Self-hosted runtime to create, run, and supervise background AI workers |
-| **Best for** | Recurring agent work: inbox triage, digests, outreach drafting, enrichment, monitoring |
+| **Best for** | Recurring work: inbox triage, digests, outreach drafting, enrichment, monitoring |
 | **Worker types** | Script (`run.py`/`.sh`/`.js`) and plain-English agent (`SKILL.md`) |
 | **Isolation** | Script workers run in **E2B sandbox microVMs** &mdash; isolated host filesystem, env & process; platform secrets withheld |
 | **Triggers** | Manual, schedule (cron), webhook, Composio event |
