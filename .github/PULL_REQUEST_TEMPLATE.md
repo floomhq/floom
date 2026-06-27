@@ -19,6 +19,7 @@ Closes #
 
 ## Checklist
 
+- [ ] I agree that my contribution is submitted under the Floom Contributor License Agreement (`CLA.md`)
 - [ ] No secrets, credentials, or customer data committed (used `example.com` etc.)
 - [ ] Updated docs / `.env.example` if config, routes, or env vars changed
 - [ ] Change is focused; unrelated code not reformatted

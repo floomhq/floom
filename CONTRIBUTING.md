@@ -135,10 +135,10 @@ If you are not sure where to start:
 - Do not commit secrets, real customer data, or personal information. Use
   `example.com` addresses and synthetic data in tests and fixtures.
 - Run the relevant tests before opening the PR and note what you ran.
-- Sign off each commit with `git commit -s`. Floom uses Developer
-  Certificate of Origin signoff for external contributions and does not require
-  a separate contributor license agreement unless maintainers say so before a
-  specific contribution is accepted.
+- By opening a PR, you agree to the [Floom Contributor License Agreement](CLA.md)
+  for any contribution accepted into the project.
+- Sign off each commit with `git commit -s`. The signoff records that you have
+  the right to submit the contribution.
 
 ## Reporting bugs and security issues
 
@@ -150,9 +150,13 @@ For common local setup and runtime issues, check
 
 ## License
 
-By contributing, you certify the Developer Certificate of Origin 1.1 statement
-for your contribution and agree that your contributions will be licensed under
-the [MIT License](LICENSE) that covers this project.
+Floom is currently distributed under the [MIT License](LICENSE). By
+contributing, you agree to the [Floom Contributor License Agreement](CLA.md),
+which lets Floom use accepted contributions under the current project license
+and future open-source, source-available, or commercial licenses.
+
+You should also certify the Developer Certificate of Origin 1.1 statement for
+your contribution by signing off each commit.
 
 Include this trailer on every commit:
 
