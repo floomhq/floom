@@ -622,8 +622,8 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
 }
 
 // S29b: replaces the "Floom v0" bottom-left footer with a user profile chip.
-// Today's single-user v0 shows "Local user"; hosted builds can swap this for
-// the signed-in user's email + avatar.
+// Single-user OSS can fall back to "Local user"; hosted first paint stays in a
+// neutral loading state until /me resolves so it never flashes the OSS fallback.
 //
 // V8 (the operator 2026-06-02): "have settings next to name, as the gear icon, not
 // its own row." Settings is now a small gear-icon button inline on the name
@@ -642,6 +642,7 @@ export function UserProfileFooter({
 }: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
+  const [userLoaded, setUserLoaded] = useState(false);
   // #1709: canonical fallback is "My workspace" (resolveWorkspaceName), NOT the
   // brand-specific "Floom workspace" — the app is white-labeled and the OSS /me
   // has no workspace yet on first paint.
@@ -651,10 +652,16 @@ export function UserProfileFooter({
     let active = true;
     api.me()
       .then((currentUser) => {
-        if (active) setUser(currentUser);
+        if (active) {
+          setUser(currentUser);
+          setUserLoaded(true);
+        }
       })
       .catch(() => {
-        if (active) setUser(null);
+        if (active) {
+          setUser(null);
+          setUserLoaded(true);
+        }
       });
     return () => {
       active = false;
@@ -680,14 +687,16 @@ export function UserProfileFooter({
   // Multi-member: prefer username, then email, then display_name. #1728: skip
   // UUID-shaped candidates so a raw user/owner id never leaks as the identity
   // line (the OSS /me can return an id-only username).
-  const primary = resolveUserLabel(
-    [
-      (user as (typeof user & { username?: string | null }) | null)?.username,
-      user?.email,
-      user?.display_name,
-    ],
-    "Local user",
-  );
+  const primary = userLoaded
+    ? resolveUserLabel(
+        [
+          (user as (typeof user & { username?: string | null }) | null)?.username,
+          user?.email,
+          user?.display_name,
+        ],
+        "Local user",
+      )
+    : "Loading account";
   const secondary = workspaceName;
   // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
   // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this
