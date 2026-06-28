@@ -631,7 +631,8 @@ export const api = {
     reject: async (
       id: string,
       reason?: string,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("./types").ApprovalAnnotations | null,
+      scope: "asset" | "global" = "asset"
     ) => {
       // INTENT: user clicked reject. The authoritative approval_rejected
       // outcome is emitted server-side. Output-quality enrichment: how much the
@@ -646,7 +647,7 @@ export const api = {
       });
       const result = await fetchJson<import("./types").ActionResponse>(`/runs/${id}/reject`, {
         method: "POST",
-        body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null }),
+        body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null, scope }),
       });
       return result;
     },
@@ -709,14 +710,15 @@ export const api = {
     rejectAction: async (
       approvalId: string,
       reason?: string,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("./types").ApprovalAnnotations | null,
+      scope: "asset" | "global" = "asset"
     ) => {
       captureProductEvent("approval_action_clicked", { approval_id: approvalId, action: "reject" });
       const result = await fetchJson<{ status: string; path: string; reason?: string }>(
         `/approvals/${approvalId}/reject-action`,
         {
           method: "POST",
-          body: JSON.stringify({ reason, annotations: annotations ?? null }),
+          body: JSON.stringify({ reason, annotations: annotations ?? null, scope }),
         }
       );
       return result;
@@ -732,13 +734,13 @@ export const api = {
       );
       return result;
     },
-    rejectAgentTool: async (approvalId: string, reason?: string) => {
+    rejectAgentTool: async (approvalId: string, reason?: string, scope: "asset" | "global" = "asset") => {
       captureProductEvent("approval_action_clicked", { approval_id: approvalId, action: "reject" });
       const result = await fetchJson<import("./types").ActionResponse>(
         `/approvals/${approvalId}/reject`,
         {
           method: "POST",
-          body: JSON.stringify({ reason: reason ?? null }),
+          body: JSON.stringify({ reason: reason ?? null, scope }),
         }
       );
       return result;
@@ -766,13 +768,14 @@ export const api = {
       approvalId: string,
       token: string,
       reason?: string,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("./types").ApprovalAnnotations | null,
+      scope: "asset" | "global" = "asset"
     ) => {
       const result = await fetchJson<import("./types").ActionResponse>(
         `/approvals/public/${encodeURIComponent(approvalId)}/reject?token=${encodeURIComponent(token)}`,
         {
           method: "POST",
-          body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null }),
+          body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null, scope }),
         }
       );
       return result;

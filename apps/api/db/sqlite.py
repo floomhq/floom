@@ -4407,6 +4407,78 @@ class SqliteRunFeedbackRepository:
         return self.get(feedback_id=feedback_id)
 
 
+class SqliteWorkerRuleRepository:
+    """SQLite implementation of durable worker-level rules learned from feedback."""
+
+    _cols = (
+        "id, workspace_id, worker_id, rule_text, rule_hash, source, source_ref, "
+        "run_id, approval_id, created_by, created_at, archived_at"
+    )
+
+    def upsert(
+        self,
+        *,
+        rule_id: str,
+        workspace_id: str,
+        worker_id: str,
+        rule_text: str,
+        rule_hash: str,
+        source: str,
+        source_ref: str | None,
+        run_id: str | None,
+        approval_id: str | None,
+        created_by: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO worker_rules
+                    (id, workspace_id, worker_id, rule_text, rule_hash, source,
+                     source_ref, run_id, approval_id, created_by, created_at, archived_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(workspace_id, worker_id, rule_hash) DO UPDATE SET
+                    archived_at = NULL
+                """,
+                (
+                    rule_id,
+                    workspace_id,
+                    worker_id,
+                    rule_text,
+                    rule_hash,
+                    source,
+                    source_ref,
+                    run_id,
+                    approval_id,
+                    created_by,
+                    created_at,
+                ),
+            )
+            row = conn.execute(
+                f"""
+                SELECT {self._cols}
+                FROM worker_rules
+                WHERE workspace_id = ? AND worker_id = ? AND rule_hash = ?
+                LIMIT 1
+                """,
+                (workspace_id, worker_id, rule_hash),
+            ).fetchone()
+        return _row_dict(row) if row else {}
+
+    def list_active(self, *, workspace_id: str, worker_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {self._cols}
+                FROM worker_rules
+                WHERE workspace_id = ? AND worker_id = ? AND archived_at IS NULL
+                ORDER BY created_at, id
+                """,
+                (workspace_id, worker_id),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+
 class SqliteMcpToolRepository:
     _cols = "id, user_id, name, description, input_schema, worker_id, created_at, updated_at"
 

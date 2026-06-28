@@ -29,7 +29,7 @@ import re
 import secrets as pysecrets
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import (
     APIRouter,
@@ -64,6 +64,7 @@ from services.sse_streaming import _sse_publish
 from services.uploads import _store_uploaded_blob
 from services.worker_access import _delete_worker_impl
 from services.product_events import emit_approval_decided
+from services.worker_rules import record_rejection_feedback_rule
 from services.share_links import (
     _ensure_standalone_share_links_table,
     _load_standalone_share_row,
@@ -384,6 +385,7 @@ class ApproveRequest(BaseModel):
 class RejectRequest(BaseModel):
     reason: Optional[str] = None
     annotations: Optional[Dict[str, Any]] = None
+    scope: Literal["asset", "global"] = "asset"
 
 
 def _safe_workspace_id(value: str | None) -> str | None:
@@ -1009,6 +1011,7 @@ class PublicApprovalDecisionRequest(BaseModel):
     reason: str | None = None
     edited_output: Dict[str, Any] | None = None
     annotations: Dict[str, Any] | None = None
+    scope: Literal["asset", "global"] = "asset"
 
 
 class PublicBatchApprovalDecisionRequest(PublicApprovalDecisionRequest):
@@ -1056,7 +1059,7 @@ def _dispatch_public_approval_decision(
         if decision_input.get("kind") == "destructive_delete":
             result = reject_destructive_action(
                 approval_id=approval_id,
-                body=RejectRequest(reason=body.reason, annotations=body.annotations),
+                body=RejectRequest(reason=body.reason, annotations=body.annotations, scope=body.scope),
                 auth=auth,
                 repos=repos,
             )
@@ -1064,13 +1067,13 @@ def _dispatch_public_approval_decision(
         if decision_input.get("kind") == "agent_tool":
             return reject_agent_tool_approval(
                 approval_id,
-                RejectRequest(reason=body.reason, annotations=body.annotations),
+                RejectRequest(reason=body.reason, annotations=body.annotations, scope=body.scope),
                 auth,
                 repos,
             )
         return reject_run(
             str(approval["run_id"]),
-            RejectRequest(reason=body.reason, annotations=body.annotations),
+            RejectRequest(reason=body.reason, annotations=body.annotations, scope=body.scope),
             auth,
             repos,
         )
@@ -1614,6 +1617,18 @@ def reject_run(
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
     run_data = row_to_dict(run_row)
+    record_rejection_feedback_rule(
+        repos=repos,
+        owner_id=auth.user_id,
+        worker_id=str(run_data.get("worker_id") or "") or None,
+        workspace_id=str(run_data.get("workspace_id") or "") or None,
+        approval_id=str(approval_row.get("id") or "") or None,
+        run_id=run_id,
+        reason=body.reason,
+        annotations=json.loads(annotations_json) if annotations_json else None,
+        scope=body.scope,
+        approval_kind=str(_di_r.get("kind") or "run"),
+    )
     emit_approval_decided(
         owner_id=auth.user_id,
         approval_id=str(approval_row.get("id") or ""),
@@ -1768,6 +1783,7 @@ def reject_destructive_action(
     from db import now_iso
     approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
     decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
+    run_data = row_to_dict(repos.runs.get_any(run_id=str(approval.get("run_id") or "")) or {})
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     claimed = repos.approvals.reject(
         owner_id=auth.user_id,
@@ -1779,6 +1795,18 @@ def reject_destructive_action(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    record_rejection_feedback_rule(
+        repos=repos,
+        owner_id=auth.user_id,
+        worker_id=str(approval.get("worker_id") or run_data.get("worker_id") or "") or None,
+        workspace_id=str(approval.get("workspace_id") or run_data.get("workspace_id") or "") or None,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or "") or None,
+        reason=body.reason,
+        annotations=json.loads(annotations_json) if annotations_json else None,
+        scope=body.scope,
+        approval_kind="destructive_delete",
+    )
     emit_approval_decided(
         owner_id=auth.user_id,
         approval_id=approval_id,
@@ -1856,6 +1884,7 @@ def reject_agent_tool_approval(
     """
     from db import now_iso
     approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
+    run_data = row_to_dict(repos.runs.get_any(run_id=str(approval.get("run_id") or "")) or {})
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     claimed = repos.approvals.reject(
         owner_id=auth.user_id,
@@ -1867,6 +1896,18 @@ def reject_agent_tool_approval(
     )
     if claimed is None:
         raise HTTPException(status_code=409, detail="Approval already decided")
+    record_rejection_feedback_rule(
+        repos=repos,
+        owner_id=auth.user_id,
+        worker_id=str(approval.get("worker_id") or run_data.get("worker_id") or "") or None,
+        workspace_id=str(approval.get("workspace_id") or run_data.get("workspace_id") or "") or None,
+        approval_id=approval_id,
+        run_id=str(approval.get("run_id") or "") or None,
+        reason=body.reason,
+        annotations=json.loads(annotations_json) if annotations_json else None,
+        scope=body.scope,
+        approval_kind="agent_tool",
+    )
     emit_approval_decided(
         owner_id=auth.user_id,
         approval_id=approval_id,
