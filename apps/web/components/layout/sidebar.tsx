@@ -20,6 +20,7 @@ import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import { createWorkerHref } from "@/lib/create-worker-nav";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
 import { Avatar } from "@/components/ui/Avatar";
@@ -232,6 +233,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   // these persistent sidebar links otherwise issue basePath RSC segment
   // prefetches that prod can answer with `_not-found` payloads.
   const queryClient = useQueryClient();
+  const workspaceHref = useWorkspaceHref();
   const warm = (href: string) => {
     prefetchRouteData(queryClient, href);
   };
@@ -241,10 +243,11 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
       {nav.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
         const badge = resolveNavBadge(item.badge, badgeCounts);
+        const href = item.href === "/workers" ? workspaceHref(item.href) : item.href;
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={href}
             prefetch={false}
             onMouseEnter={() => warm(item.href)}
             onPointerDown={() => warm(item.href)}
@@ -370,6 +373,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   const [open, setOpen] = useState(false);
   // collapsed = icon-rail (62px); expanded = full (228px)
   const [collapsed, setCollapsed] = useState(false);
+  const workspaceHref = useWorkspaceHref();
 
   // Hydrate from localStorage after mount to avoid SSR mismatch
   useEffect(() => {
@@ -516,10 +520,11 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             {nav.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               const badge = resolveNavBadge(item.badge, badgeCounts);
+              const href = item.href === "/workers" ? workspaceHref(item.href) : item.href;
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={href}
                   prefetch={false}
                   onMouseEnter={() => warm(item.href)}
                   onPointerDown={() => warm(item.href)}

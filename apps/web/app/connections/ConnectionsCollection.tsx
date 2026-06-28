@@ -34,6 +34,7 @@ import {
   humaniseAppName,
 } from "@/lib/connections/unify";
 import { resolveUserLabel } from "@/lib/workspace/display-name";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 // ---------------------------------------------------------------------------
 // #1233: Resolve owner_id to display name / email.
@@ -192,6 +193,7 @@ function EmailPeekPanel({ connectionId }: { connectionId: string }) {
 }
 
 function ActivityPanel({ connectionId }: { connectionId: string }) {
+  const workspaceHref = useWorkspaceHref();
   const [activity, setActivity] = useState<RunSummary[]>([]);
   const [loadingActivity, setLoadingActivity] = useState(true);
 
@@ -223,7 +225,7 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
           {activity.map((run) => (
             <Link
               key={run.id}
-              href={`/runs/${encodeURIComponent(run.id)}`}
+              href={workspaceHref(`/runs/${encodeURIComponent(run.id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto", textDecoration: "none" }}
             >
@@ -534,6 +536,7 @@ function workersUsing(connection: ConnectionItem, workers: WorkerSummary[]): Wor
 }
 
 function UsedByPanel({ connection, workers }: { connection: ConnectionItem; workers: WorkerSummary[] }) {
+  const workspaceHref = useWorkspaceHref();
   const using = workersUsing(connection, workers);
   return (
     <DetailGroup label="Used by">
@@ -547,7 +550,7 @@ function UsedByPanel({ connection, workers }: { connection: ConnectionItem; work
           {using.map((w) => (
             <Link
               key={w.id}
-              href={`/workers/${encodeURIComponent(w.id)}`}
+              href={workspaceHref(`/workers/${encodeURIComponent(w.id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
             >
@@ -620,6 +623,7 @@ export default function ConnectionsCollection({
   // useStreamedInitialData). The page no longer blocks the RSC on this fetch.
   initialConnectionsPromise?: Promise<ConnectionItem[]>;
 }) {
+  const workspaceHref = useWorkspaceHref();
   useStreamedInitialData(qk.connections, initialConnectionsPromise);
   // Pass undefined (not []) as initialData when empty so the query still fetches
   // on a cold start — an empty-array initialData would mark the query "fresh" and
@@ -1066,7 +1070,7 @@ export default function ConnectionsCollection({
                       return workerId ? (
                         <Link
                           key={workerName}
-                          href={`/workers/${encodeURIComponent(workerId)}`}
+                          href={workspaceHref(`/workers/${encodeURIComponent(workerId)}`)}
                           className="c-lrow"
                           style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
                         >

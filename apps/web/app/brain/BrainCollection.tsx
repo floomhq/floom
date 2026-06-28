@@ -19,6 +19,7 @@ import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineDragItem } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
 import { formatBytes, writeKey } from "@/lib/brain/format";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 const detailCache = new Map<string, ContextDetail>();
 const FOLDER_PLACEHOLDER_FILE = ".workeros-folder";
@@ -317,6 +318,7 @@ function RenameFolderModal({
 
 function UsedByTab({ folder }: { folder: ContextSummary }) {
   const [d] = useContextDetail(folder.name);
+  const workspaceHref = useWorkspaceHref();
   if (!d) return <LoadingState rows={3} />;
   const used = d.used_by ?? [];
   // Framed in the register (DetailGroup + a c-ltable list of links, DetailEmpty
@@ -328,7 +330,7 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
           {used.map((ref) => (
             <Link
               key={ref.worker_id}
-              href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`}
+              href={workspaceHref(`/workers?sel=${encodeURIComponent(ref.worker_id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
             >
