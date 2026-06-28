@@ -275,65 +275,9 @@ result for a run that did not fire.
 
 WORKER_AUTHORING_RULES = """## Worker authoring rules
 
-When I create or update a worker I follow these rules exactly. They are not
-suggestions — they are hard constraints the server enforces. After a direct
-create, I confirm the saved config before saying it is done.
-
-**Approvals** — if the user says anything like "ask me to approve", "needs my OK",
-"HITL", "before it sends / posts / does anything": set `approvals: {required: true}`
-in the YAML. Never set `required: false` when the user asked for approval.
-
-**Connections** — if the user mentions any external service (Gmail, Google Calendar,
-Slack, Notion, etc.): add every named service to the `connections:` list in the YAML.
-An empty `connections: []` means the worker cannot reach any external service at all.
-Before starting worker creation for a job that mentions an external service, check
-whether the matching connection is available. If it is missing, ask the user to
-connect that service and stop instead of starting a worker-author run that cannot
-work.
-
-**Credentials** — never put API keys, tokens, passwords, client secrets, private
-keys, or connection credentials in `inputs:`. Inputs are only for per-run business
-data. For external apps, declare top-level `connections:`. For API-key-only
-services, declare the secret name in `secrets:` / `capabilities.secrets` and let
-the UI show the missing secret/setup-required state.
-
-**Exec mode and tool choice** — if the worker reads email, writes calendar events,
-posts messages, or calls ANY external service via a connection: it needs agent
-mode. **Use `workers__create_from_prompt`, NOT `workers__create`** — the former
-routes through the worker-author meta-worker which writes the SKILL.md
-implementation file. `workers__create` only creates `worker.yml`; it never
-creates SKILL.md, so every agent-mode worker created that way fails immediately
-with "Agent entrypoint not found: SKILL.md".
-
-Rule: `workers__create_from_prompt` for agent-mode (connections, email, calendar,
-any external API). `workers__create` only for pure-script workers where you are
-supplying the full run.py code yourself.
-
-**Trigger types** — valid values: `manual`, `schedule`, `webhook`, `event`. For
-"every N minutes" use `type: "schedule"` with `cron: "*/N * * * *"`. Never use
-`type: "cron"` or `type: "incoming_email"` — they don't exist in Floom.
-
-**Runner** — always `exec.runner: "e2b"`. The local runner was removed.
-
-After creating a worker with `workers__create_from_prompt`, I stop. That tool
-starts the worker-author run and streams progress back to the UI; I do not call
-it again, list workers, or poll for completion in the same turn.
-
-After creating a worker with `workers__create`, I re-read what was actually
-saved (connections, approvals, trigger) and confirm it matches what the user
-asked for before I say it's done.
-
-**Links over walls of text.** When something needs the UI (approve a run, connect
-a tool, sign in), I give you the exact link. I don't describe where to go.
-
-**Never fabricate.** If I don't have the data, I say so and call a tool or tell
-you what's missing. No invented run IDs, no made-up worker outputs, and no
-invented implementation code. For a script worker I author only the `worker.yml`
-manifest; the platform generates `run.py` from it. So I never paste a `run.py`
-(or a `files:`/code block) that I did not actually pass to the tool myself — that
-would show you code that isn't what runs. If you want to see the implementation,
-I re-read the worker with `workers__get` and show the actual saved
-`run_py_content`, not a guess at what it might contain.
+Natural-language worker authoring is disabled for Emily chat. Emily can inspect,
+run, and help edit existing workers, but must not draft or create new workers
+from prose. Use the dedicated worker editor/import flow for worker creation.
 """
 
 DEFAULT_WORKSPACE_CUSTOM_INSTRUCTIONS = (
@@ -1131,23 +1075,6 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
             _tool_workers_create,
         ),
         _make_tool(
-            "workers__create_from_prompt",
-            (
-                "Start an async worker-author run from a natural-language prompt. "
-                "Returns immediately with run_id; use the run events stream for progress."
-            ),
-            {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string"},
-                    "mode": {"type": "string", "enum": ["draft", "create"], "default": "create"},
-                    "idempotency_key": {"type": "string"},
-                },
-                "required": ["prompt", "idempotency_key"],
-            },
-            _tool_workers_create_from_prompt,
-        ),
-        _make_tool(
             "workers__update",
             "Modify an existing worker's YAML configuration.",
             {
@@ -1682,8 +1609,9 @@ def _build_workspace_preamble(user_id: str) -> str:
 
 
 def _workspace_agent_skill_for_intent(skill_md: str, *, include_authoring_rules: bool) -> str:
-    if include_authoring_rules:
-        return skill_md
+    # Natural-language worker authoring is no longer an Emily capability. Keep
+    # the historical parameter for callers/tests, but always strip the worker.yml
+    # authoring block from the workspace-agent prompt.
     return re.sub(
         r"\n## Floom worker\.yml format\n.*?(?=\n## Workspace-management tools\n)",
         "\n",
@@ -1730,7 +1658,11 @@ def _build_system_prompt(
     include_authoring_rules: bool = False,
     include_workspace_context: bool = False,
 ) -> str:
-    """Build the system prompt, with worker-authoring rules gated by intent."""
+    """Build the system prompt.
+
+    ``include_authoring_rules`` is retained for compatibility but ignored:
+    Emily must not create workers from natural language.
+    """
     base_persona = get_workspace_base_persona()
     workspace_context = _workspace_instructions_context() if include_workspace_context else ""
     preamble = _build_workspace_preamble(user_id)
@@ -1742,10 +1674,7 @@ def _build_system_prompt(
         skill_md,
         include_authoring_rules=include_authoring_rules,
     )
-    authoring_rules = WORKER_AUTHORING_RULES if include_authoring_rules else ""
-    return "\n\n".join(
-        part for part in [base_persona, workspace_context, authoring_rules, skill_md] if part
-    )
+    return "\n\n".join(part for part in [base_persona, workspace_context, skill_md] if part)
 
 
 # ---------------------------------------------------------------------------
@@ -1993,10 +1922,7 @@ def build_system_prompt_for_source(user_id: str, source: str = "web", message: s
     tells Emily what she ACTUALLY has available so she can answer "what can you
     do here?" from facts rather than generic marketing.
     """
-    base = _build_system_prompt(
-        user_id,
-        include_authoring_rules=_is_worker_authoring_intent(message),
-    )
+    base = _build_system_prompt(user_id, include_authoring_rules=False)
     snapshot = _build_capabilities_snapshot(user_id)
     prompt = (
         f"{base}\n\n{GLOBAL_COMMUNICATION_RULES}\n\n{_environment_note(source)}"
@@ -2088,7 +2014,7 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
         "agent_id": WORKSPACE_AGENT_ID,
         "model": _default_chat_model(),
         "base_persona": get_workspace_base_persona(),
-        "worker_authoring_rules": WORKER_AUTHORING_RULES,
+        "worker_authoring_rules": "",
         "system_prompt": prompt,
         "tools": workspace_agent_tool_metadata(user_id),
         "settings": settings,
@@ -2109,15 +2035,6 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
 def _fallback_reply_from_successful_tools(tool_results: List[tuple[str, Any]]) -> Optional[str]:
     """Build a deterministic assistant reply when the LLM fails after a tool succeeds."""
     for tool_name, result in reversed(tool_results):
-        if (
-            tool_name == "workers__create_from_prompt"
-            and isinstance(result, dict)
-            and result.get("ok") is True
-        ):
-            run_id = str(result.get("run_id") or "").strip()
-            if run_id:
-                return f"I started drafting that worker. Track progress in the run card for `{run_id}`."
-            return "I started drafting that worker. Track progress in the run card."
         if tool_name != "workers__list_all" or not isinstance(result, dict) or result.get("ok") is not True:
             continue
         workers = [
@@ -2427,7 +2344,7 @@ async def stream_chat(
                 include_usage=True,
                 extra_args=_llm.cache_control_extra_args(_emily_model),
             ),
-            tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs", "workers__create_from_prompt"]},
+            tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
         )
 
         result = Runner.run_streamed(

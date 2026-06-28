@@ -433,14 +433,14 @@ function ChatEmptyState({
   const assistantName = useAssistantName();
   // #1363 — First-run opener: proactive builder message + action-oriented pills
   const headline = isNewWorkspace
-    ? "Hi, describe what you want to automate and I’ll build the worker for you right now."
+    ? "Hi, describe what you want to automate and I’ll help you scope it."
     // Brand call made by Federico (2026-06-16): the assistant is the "chief of
     // staff", not "COO". Greeting follows the persona ("I'm Emily, your chief of
     // staff") instead of the old hardcoded COO string.
     : `I am ${assistantName}, your chief of staff`;
   const sub = isNewWorkspace
     ? null
-    : "Ask me to create workers, check runs, or manage connections.";
+    : "Ask me to check runs, inspect workers, or manage connections.";
   const pills = isNewWorkspace ? FIRST_RUN_SUGGESTIONS : SUGGESTIONS;
 
   return (
@@ -495,8 +495,8 @@ interface EmilyChatCoreProps {
   /** #1363 — when true, show a proactive first-run opener instead of the generic empty state. */
   isNewWorkspace?: boolean;
   /** When set with createMode, the primed prompt is auto-submitted once on
-   *  mount — used by the Emily HOME drafting state so the home "becomes the
-   *  conversation" without the user re-pressing send. */
+   *  mount so the home becomes the conversation without the user re-pressing
+   *  send. The prompt is sent as plain chat. */
   autoSubmitPrime?: boolean;
   /** HOME mode (Federico 2026-06-19): the home route shows this REAL Emily
    *  FULLSCREEN, and its empty state gets the home "stuff" — greeting + lean
@@ -509,11 +509,11 @@ interface EmilyChatCoreProps {
   createEpoch?: number;
 }
 
-const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__create_from_prompt", "workers__update", "workers__delete"]);
+const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
 // Exported so the Emily HOME (components/home/EmilyHome) can render the SAME
-// real chat core inline for its drafting state — reusing the live conversation
-// rendering + worker-drafting tool cards instead of rebuilding Emily.
+// real chat core inline for its create state — reusing the live conversation
+// rendering instead of rebuilding Emily.
 export function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false, autoSubmitPrime = false, homeMode = false, homeInitialData = null, createEpoch = 0 }: EmilyChatCoreProps) {
   const assistantName = useAssistantName();
   const mcpModal = useMcpModal();
@@ -693,21 +693,14 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
   const handleSubmit = useCallback(() => {
     const text = input.trim();
     if (!text && attachedFiles.length === 0) return;
-    // Round-09 #2: the create-mode "Hire a worker" hero must DRAFT a worker, not
-    // send a bare chat message Emily can answer as a query. Wrap the FIRST
-    // create-mode message in an explicit worker-authoring directive so the
-    // backend routes it to the drafting path. Only the opening message (the
-    // hero) is wrapped; once a thread exists the user chats normally.
-    const message =
-      createMode && messages.length === 0 ? buildCreateWorkerMessage(text) : text;
-    sendMessage(message, attachedFiles.length > 0 ? attachedFiles : undefined);
+    sendMessage(text, attachedFiles.length > 0 ? attachedFiles : undefined);
     setInput("");
     setAttachedFiles([]);
   }, [input, attachedFiles, sendMessage, createMode, messages.length]);
 
-  // HOME drafting: auto-submit the primed create prompt exactly once on mount so
-  // the home seamlessly "becomes the conversation". Guarded by a ref so it never
-  // re-fires (e.g. on re-render) and only when there are no messages yet.
+  // HOME create-mode: auto-submit the primed prompt exactly once on mount so the
+  // home seamlessly becomes the conversation. Guarded by a ref so it never
+  // re-fires, and only when there are no messages yet.
   const autoSubmittedRef = useRef(false);
   const createStartedRef = useRef(false);
   // Each ?create=1 click starts a fresh ephemeral create thread and re-seeds

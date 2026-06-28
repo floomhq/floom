@@ -1,9 +1,10 @@
-"""#711 — Emily prompt split: human persona vs worker-authoring rules.
+"""#711 — Emily prompt split: no worker-authoring rules in Emily.
 
 Pins the acceptance criteria:
   - casual chat ("hi") gets NO worker-authoring constraints (neither the
     WORKER_AUTHORING_RULES block nor SKILL.md's worker.yml format section)
-  - worker-creation intent gets the full authoring rules
+  - worker-creation intent also gets NO authoring rules; Emily no longer drafts
+    workers from natural language
   - the casual prompt stays within a token budget so authoring text cannot
     silently creep back into every conversation
   - bare-greeting contract is bounded (2-3 bullets + one ask, no snapshot dump)
@@ -60,11 +61,11 @@ def test_bare_greeting_prompt_has_no_yaml_authoring_text(stubbed):
     assert "workers__create_from_prompt, NOT" not in casual
 
 
-def test_authoring_intent_gets_full_rules(stubbed):
+def test_authoring_intent_does_not_get_authoring_rules(stubbed):
     authoring = _authoring()
-    assert "## Worker authoring rules" in authoring
-    assert "approvals" in authoring.lower()
-    assert "exec.runner" in authoring or 'runner: "e2b"' in authoring
+    assert "## Worker authoring rules" not in authoring
+    assert "worker.yml format" not in authoring
+    assert "workers__create_from_prompt" not in authoring
 
 
 def test_casual_prompt_within_token_budget(stubbed):
@@ -77,8 +78,9 @@ def test_casual_prompt_within_token_budget(stubbed):
 
 
 def test_split_is_material(stubbed):
-    # the gate must remove a real amount of text, not be vestigial
-    assert len(_authoring()) - len(_casual()) >= 2_000
+    # create-like prompts should not receive a materially different system
+    # prompt; worker authoring is not a gated Emily mode anymore.
+    assert abs(len(_authoring()) - len(_casual())) < 500
 
 
 def test_bare_greeting_contract_is_bounded():
