@@ -258,6 +258,44 @@ test("workers validate accepts worker.yml plus run.py", async () => {
   assert.equal(result.stderr, "");
 });
 
+test("workers validate --json emits machine-readable result", async () => {
+  const dir = await makeWorkerDir();
+  const result = await runCli(["workers", "validate", dir, "--json"]);
+
+  assert.equal(result.code, 0);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.valid, true);
+  assert.equal(body.worker_id, "cli-test-worker");
+  assert.deepEqual(body.errors, []);
+  assert.equal(result.stderr, "");
+});
+
+test("workers contract exposes agent authoring rules", async () => {
+  const result = await runCli(["workers", "contract", "--json"]);
+
+  assert.equal(result.code, 0);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.schema_version, "0.3");
+  assert.ok(body.required_top_level_fields.includes("exec"));
+  assert.match(JSON.stringify(body), /result\.json/);
+  assert.equal(result.stderr, "");
+});
+
+test("workers templates list and get expose golden worker bundles", async () => {
+  const listed = await runCli(["workers", "templates", "list", "--json"]);
+  assert.equal(listed.code, 0);
+  const listBody = JSON.parse(listed.stdout);
+  assert.equal(listBody.templates.some((template) => template.id === "python-script"), true);
+
+  const got = await runCli(["workers", "templates", "get", "python-script", "--json"]);
+  assert.equal(got.code, 0);
+  const template = JSON.parse(got.stdout);
+  assert.equal(template.id, "python-script");
+  assert.match(template.worker_yml, /schema_version: "0\.3"/);
+  assert.match(template.run_py, /result\.json/);
+  assert.equal(got.stderr, "");
+});
+
 test("workers validate rejects missing runtime", async () => {
   const dir = await makeWorkerDir({
     workerYml: "name: cli-test-worker\ntitle: CLI Test Worker\n",
