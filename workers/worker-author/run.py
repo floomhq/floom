@@ -559,6 +559,85 @@ def _repair_missing_operator_output(manifest: Dict[str, Any]) -> None:
     ]
 
 
+def _infer_script_output_names(run_code: str) -> List[str]:
+    """Infer result output keys from generated script-mode code.
+
+    Creator attempts sometimes write a good ``result.json``/``_write_result``
+    call but forget the matching ``exec.outputs`` YAML contract. Prefer the keys
+    already used by the script so the manifest matches runtime behavior.
+    """
+    if not isinstance(run_code, str) or not run_code.strip():
+        return []
+
+    names: List[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        clean = str(name or "").strip()
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$", clean):
+            return
+        if clean not in seen:
+            seen.add(clean)
+            names.append(clean)
+
+    try:
+        tree = ast.parse(run_code)
+    except SyntaxError:
+        tree = None
+
+    if tree is not None:
+        for node in ast.walk(tree):
+            candidate: ast.AST | None = None
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if kw.arg == "outputs":
+                        candidate = kw.value
+                        break
+            elif isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values):
+                    if isinstance(key, ast.Constant) and key.value == "outputs":
+                        candidate = value
+                        break
+            if isinstance(candidate, ast.Dict):
+                for key in candidate.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        add(key.value)
+
+    if names:
+        return names
+
+    for match in re.finditer(r"outputs\s*=\s*\{(?P<body>[^{}]{0,1000})\}", run_code, re.DOTALL):
+        for key in re.finditer(r"[\"']([A-Za-z_][A-Za-z0-9_-]{0,63})[\"']\s*:", match.group("body")):
+            add(key.group(1))
+    return names
+
+
+def _repair_script_outputs_from_run_code(manifest: Dict[str, Any], run_code: str) -> None:
+    if not _entry(manifest).lower().endswith(".py"):
+        return
+    if _declared_output_names(manifest):
+        return
+
+    output_names = _infer_script_output_names(run_code)
+    if not output_names:
+        return
+
+    exec_block = manifest.get("exec")
+    if not isinstance(exec_block, dict):
+        exec_block = {}
+        manifest["exec"] = exec_block
+    exec_block["outputs"] = [
+        {
+            "name": name,
+            "kind": "scalar",
+            "type": "markdown" if any(token in name.lower() for token in ("summary", "report", "checklist", "brief", "digest")) else "string",
+            "required": True,
+            "label": _title_from_worker_id(name.replace("_", "-")),
+        }
+        for name in output_names
+    ]
+
+
 def _agent_skill_tool_instructions(manifest: Dict[str, Any], prompt: str) -> str:
     inferred = _infer_connections_from_prompt(prompt)
     lines: List[str] = []
@@ -602,6 +681,9 @@ def _repair_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Dict[str, A
         suggested_id=str(parsed.get("suggested_id") or ""),
     )
     out = dict(parsed)
+    run_code = out.get("run_code")
+    if isinstance(run_code, str):
+        _repair_script_outputs_from_run_code(repaired_manifest, run_code)
     try:
         import yaml as pyyaml
 
@@ -950,6 +1032,10 @@ Rules:
 - worker_yml must be schema_version "0.3", include version: "0.1.0", be valid YAML (all strings double-quoted), and use exec.runner: "e2b"
 - Agent mode (entry: SKILL.md): set skill_md, leave run_code null
 - Script mode (entry: run.py): set run_code, leave skill_md null; always add exec.command
+- Script mode MUST declare exec.outputs matching the exact keys written in
+  result.json outputs. If run.py writes `_write_result("success",
+  outputs={"checklist": checklist})`, worker.yml MUST declare an output named
+  `checklist`. Never return script-mode YAML with no outputs.
 - A separate verifier will reject bundles that merely look plausible. If the
   prompt names an integration, worker.yml must declare it in top-level
   connections, and SKILL.md/run.py must explicitly describe the runtime tool

@@ -366,6 +366,66 @@ def test_worker_author_does_not_add_missing_output_to_script_workers():
     assert "outputs" not in manifest["exec"]
 
 
+def test_worker_author_repairs_script_outputs_from_run_code():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "company-research-checklist"
+title: "Company Research Checklist"
+description: "Creates a company review checklist."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runner: "e2b"
+  inputs:
+    - name: "company_name"
+      kind: "scalar"
+      type: "string"
+      required: true
+connections: []
+""",
+            "run_code": """
+import json
+from pathlib import Path
+
+def _write_result(status, outputs=None, artifacts=None, error=None):
+    Path("result.json").write_text(json.dumps({"status": status, "outputs": outputs or {}, "artifacts": artifacts or [], "error": error}))
+
+def main():
+    inputs = json.loads(Path("inputs.json").read_text())
+    company = inputs.get("company_name") or "Acme"
+    checklist = f"# {company} checklist"
+    _write_result("success", outputs={"checklist": checklist})
+
+if __name__ == "__main__":
+    main()
+""",
+            "suggested_id": "company-research-checklist",
+        },
+        "Create a manual worker that takes a company name input and returns a concise markdown research checklist.",
+    )
+
+    manifest = yaml.safe_load(parsed["worker_yml"])
+    assert manifest["exec"]["outputs"] == [
+        {
+            "name": "checklist",
+            "kind": "scalar",
+            "type": "markdown",
+            "required": True,
+            "label": "Checklist",
+        }
+    ]
+    assert worker_author._validate_generated_bundle(
+        parsed,
+        "Create a manual worker that takes a company name input and returns a concise markdown research checklist.",
+    ) is None
+
+
 def test_worker_author_repairs_known_integration_tools_generically():
     worker_author = _load_worker_author_module()
     manifest = worker_author._repair_generated_worker_manifest(
