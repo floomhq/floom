@@ -21,6 +21,7 @@ from .interface import (
     ShareLinkRepository,
     UserRepository,
     UserSessionRepository,
+    WorkerRuleRepository,
     WorkerRepository,
     WorkspaceMemberRepository,
 )
@@ -39,6 +40,7 @@ from .sqlite import (
     SqliteShareLinkRepository,
     SqliteUserRepository,
     SqliteUserSessionRepository,
+    SqliteWorkerRuleRepository,
     SqliteWorkerRepository,
     SqliteWorkspaceMemberRepository,
 )
@@ -72,6 +74,8 @@ class Repositories(NamedTuple):
     # Share links. Optional so downstream repository factories can adopt the
     # approval-batch public-link store independently.
     share_links: Optional[ShareLinkRepository] = None
+    # Durable worker-level rules learned from scoped approval rejections.
+    worker_rules: Optional[WorkerRuleRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -92,6 +96,7 @@ def _local_repositories() -> Repositories:
         feedback=SqliteFeedbackRepository(),
         run_feedback=SqliteRunFeedbackRepository(),
         share_links=SqliteShareLinkRepository(),
+        worker_rules=SqliteWorkerRuleRepository(),
     )
 
 

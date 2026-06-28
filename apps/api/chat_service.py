@@ -277,7 +277,8 @@ WORKER_AUTHORING_RULES = """## Worker authoring rules
 
 Natural-language worker authoring is disabled for Emily chat. Emily can inspect,
 run, and help edit existing workers, but must not draft or create new workers
-from prose. Use the dedicated worker editor/import flow for worker creation.
+from prose. Dashboard prompt-based worker creation is currently unavailable; use
+the CLI or API bundle flow for worker creation.
 """
 
 DEFAULT_WORKSPACE_CUSTOM_INSTRUCTIONS = (
@@ -1049,7 +1050,14 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         _make_tool(
             "workers__create",
             (
-                "Create a new worker from a YAML bundle string.\n\n"
+                "Create a new worker from a complete worker.yml YAML bundle string.\n"
+                "Only call this tool when the user provides a complete YAML bundle "
+                "or explicitly confirms a complete YAML bundle that is already in "
+                "the conversation. Never draft, invent, scaffold, or synthesize "
+                "worker YAML from a natural-language request. If the user asks to "
+                "create a worker from prose, explain that dashboard prompt-based "
+                "worker creation is currently unavailable and direct them to the "
+                "CLI/API bundle flow.\n\n"
                 "FIELD RULES — these are non-negotiable and will be validated server-side:\n"
                 "- exec.runner: always \"e2b\" (the local runner was removed)\n"
                 "- trigger.type: \"manual\" | \"schedule\" | \"webhook\" | \"event\"\n"

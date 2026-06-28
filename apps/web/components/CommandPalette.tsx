@@ -28,6 +28,7 @@ import {
 import { api } from "@/lib/api";
 import { rankWorkersForCommandPalette } from "@/lib/command-palette";
 import { useWorkers } from "@/lib/query/hooks";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { WorkerSummary } from "@/lib/types";
 
 const NAV = [
@@ -61,6 +62,7 @@ export function CommandPalette() {
     [workers, query],
   );
   const router = useRouter();
+  const workspaceHref = useWorkspaceHref();
 
   useEffect(() => {
     commandContext.open = () => setOpen(true);
@@ -114,7 +116,7 @@ export function CommandPalette() {
             <CommandItem
               key={item.href}
               value={`nav ${item.label} ${item.keywords}`}
-              onSelect={() => go(item.href)}
+              onSelect={() => go(item.href === "/workers" ? workspaceHref(item.href) : item.href)}
             >
               <item.icon />
               {item.label}
@@ -130,7 +132,7 @@ export function CommandPalette() {
                 <CommandItem
                   key={worker.id}
                   value={`worker ${worker.name} ${worker.id} ${worker.description ?? ""}`}
-                  onSelect={() => go(`/workers?sel=${encodeURIComponent(worker.id)}`)}
+                  onSelect={() => go(workspaceHref(`/workers?sel=${encodeURIComponent(worker.id)}`))}
                 >
                   <Box />
                   <span className="truncate">{worker.name}</span>

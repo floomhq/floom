@@ -37,6 +37,7 @@ import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/W
 import { RunPanel } from "@/components/run-page/RunPanel";
 import { FloomMark } from "@/components/share/ShareCardShell";
 import { api } from "@/lib/api";
+import { withWorkspaceParam } from "@/lib/workspaceHref";
 import type { ConnectionItem, WorkerDetail, WorkerInput } from "@/lib/types";
 
 // Normalize connection slugs to the BrandLogo's expected format
@@ -314,7 +315,7 @@ export default function RunWorkerPage() {
   // Where "Back" returns to: the worker's detail pane if we know the id, else
   // the Workers list. The /run page is a standalone takeover (no app sidebar),
   // so this is the only way back into the app.
-  const backHref = id ? `/workers?sel=${encodeURIComponent(id)}` : "/workers";
+  const backHref = withWorkspaceParam(id ? `/workers?sel=${encodeURIComponent(id)}` : "/workers", searchParams);
 
   // Loading
   if (loading) {
@@ -352,6 +353,7 @@ export default function RunWorkerPage() {
       loadError?.toLowerCase().includes("unauthorized") ||
       loadError?.toLowerCase().includes("not authorized") ||
       loadError?.includes("401");
+    const loginNext = withWorkspaceParam(`/run/${id}${token ? `?token=${token}` : ""}`, searchParams);
 
     return (
       <RunPageShell backHref={backHref}>
@@ -361,7 +363,7 @@ export default function RunWorkerPage() {
               <p className="text-sm text-[var(--ink)]">
                 Sign in to run this worker.
               </p>
-              <Link href={`/login?next=${encodeURIComponent(`/run/${id}${token ? `?token=${token}` : ""}`)}`}>
+              <Link href={`/login?next=${encodeURIComponent(loginNext)}`}>
                 <Button>Sign in</Button>
               </Link>
             </>

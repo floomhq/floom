@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { useRunStream } from "@/lib/useRunStream";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { RunDetail } from "@/lib/types";
 
 const VALID_TABS = new Set([
@@ -89,6 +90,7 @@ export default function RunDetailPageClient({
   runId: string;
   initialTab?: string;
 }) {
+  const workspaceHref = useWorkspaceHref();
   const {
     parts,
     fallbackRun,
@@ -148,11 +150,11 @@ export default function RunDetailPageClient({
     try {
       const result = await api.runs.replay(run.worker_id, run.id);
       toast.success("Replay started");
-      window.location.href = `/runs/${encodeURIComponent(result.run_id)}?tab=logs`;
+      window.location.href = workspaceHref(`/runs/${encodeURIComponent(result.run_id)}?tab=logs`);
     } catch (exc) {
       toast.error(exc instanceof Error ? exc.message : "Could not replay run");
     }
-  }, [run]);
+  }, [run, workspaceHref]);
 
   if (loading && !run) {
     return <RunDetailLoadingSkeleton />;

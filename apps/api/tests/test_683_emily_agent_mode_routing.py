@@ -39,6 +39,23 @@ def test_workspace_agent_tool_metadata_excludes_create_from_prompt(monkeypatch):
     assert "workers__run" in names
 
 
+def test_workers_create_metadata_rejects_drafting_from_prose(monkeypatch):
+    import chat_service
+
+    monkeypatch.setattr(chat_service, "_brain_read_tools", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(chat_service, "_composio_read_tools", lambda *_args, **_kwargs: [])
+
+    tools = chat_service.workspace_agent_tool_metadata("local-user")
+    create_tool = next(tool for tool in tools if tool["name"] == "workers__create")
+    description = create_tool["description"].lower()
+
+    assert "complete worker.yml yaml bundle" in description
+    assert "only call this tool when the user provides a complete yaml bundle" in description
+    assert "never draft" in description
+    assert "natural-language request" in description
+    assert "dashboard prompt-based worker creation is currently unavailable" in description
+
+
 def test_workspace_agent_info_reports_no_authoring_rules(monkeypatch):
     import chat_service
 

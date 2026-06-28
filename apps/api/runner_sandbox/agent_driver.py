@@ -429,7 +429,13 @@ class AgentDriver(SandboxDriver):
             user_id=user_id,
         )
 
-        system_prompt = self._load_system_prompt(bundle_dir, config, staged_context_packs)
+        system_prompt = self._load_system_prompt(
+            bundle_dir,
+            config,
+            staged_context_packs,
+            worker_id=worker_id,
+            user_id=user_id,
+        )
         run_input: str | list[dict[str, Any]] = json.dumps(
             {
                 "worker_id": worker_id,
@@ -933,6 +939,9 @@ class AgentDriver(SandboxDriver):
         bundle_dir: Path,
         config: WorkerConfig,
         staged_context_packs: list[str] | None = None,
+        *,
+        worker_id: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         prompt_parts: list[str] = []
         if config.runtime.system_prompt:
@@ -966,12 +975,34 @@ class AgentDriver(SandboxDriver):
                     "preference, correction, or reusable fact, call remember_learning "
                     "with that learning. Memory is persisted only after a successful run."
                 )
+        rules_block = self._worker_feedback_rules_block(
+            worker_id=worker_id or getattr(config, "id", None),
+            user_id=user_id,
+        )
+        if rules_block:
+            prompt_parts.append(rules_block)
         prompt_parts.append(
             "Use tools to inspect bundle files as needed. "
             "Use web_search for fresh or external facts unless disabled. "
             "Call finish_with_outputs when all required outputs are ready."
         )
         return "\n\n".join(part for part in prompt_parts if part)
+
+    def _worker_feedback_rules_block(self, *, worker_id: str | None, user_id: str | None) -> str:
+        if not worker_id:
+            return ""
+        try:
+            from db import get_repositories
+            from services.worker_rules import active_worker_rules_prompt_block
+
+            return active_worker_rules_prompt_block(
+                repos=get_repositories(),
+                worker_id=str(worker_id),
+                user_id=user_id,
+            )
+        except Exception:
+            logger.debug("worker feedback rules prompt block unavailable", exc_info=True)
+            return ""
 
     def _output_contract_block(self, config: WorkerConfig) -> str:
         if not config.outputs:

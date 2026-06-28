@@ -2170,6 +2170,29 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_share_links_approvals_batch_scope
         ON share_links(entity_type, workspace_id, owner_id, revoked_at);
     """,
+    # -- migration 89: durable worker-level feedback rules --------------------
+    # #2079: reviewer feedback explicitly scoped global becomes an auditable,
+    # idempotent worker rule, keyed by workspace+worker so future runs inherit it.
+    """
+    CREATE TABLE IF NOT EXISTS worker_rules (
+        id           TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        worker_id    TEXT NOT NULL,
+        rule_text    TEXT NOT NULL,
+        rule_hash    TEXT NOT NULL,
+        source       TEXT NOT NULL,
+        source_ref   TEXT,
+        run_id       TEXT,
+        approval_id  TEXT,
+        created_by   TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        archived_at  TEXT,
+        FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE,
+        UNIQUE(workspace_id, worker_id, rule_hash)
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_rules_worker_active
+        ON worker_rules(workspace_id, worker_id, archived_at, created_at);
+    """,
 ]
 
 
