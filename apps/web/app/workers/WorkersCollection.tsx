@@ -113,6 +113,7 @@ import { ADVANCED_DETAIL_TABS, BASE_DETAIL_TABS } from "@/lib/workers/pinned-tab
 import { ADVANCED_MODE_STORAGE_KEY } from "@/lib/workers/tabs";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 import { createWorkerHref } from "@/lib/create-worker-nav";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 function rel(ts?: string | null): string {
   if (!ts) return "—";
@@ -445,6 +446,7 @@ function useWorkerRuns(workerId: string): RunSummary[] | undefined {
 // Runs: recent runs w/ durations, link to the full Runs surface.
 function RunsTab({ w }: { w: WorkerSummary }) {
   const fetched = useWorkerRuns(w.id);
+  const workspaceHref = useWorkspaceHref();
   // Until the worker-scoped fetch resolves, fall back to the summary's last_run
   // so the tab is never momentarily empty for a worker that has run.
   const runs = fetched ?? (w.last_run ? [w.last_run] : []);
@@ -468,7 +470,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
         label={(
           <span className="flex items-center gap-2">
             <span>Recent runs</span>
-            <Link href={`/runs?worker_id=${w.id}`} className="c-vpill normal-case" style={{ padding: "4px 8px", letterSpacing: 0 }}>
+            <Link href={workspaceHref(`/runs?worker_id=${w.id}`)} className="c-vpill normal-case" style={{ padding: "4px 8px", letterSpacing: 0 }}>
               All runs →
             </Link>
           </span>
@@ -478,7 +480,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
           {runs.map((r) => (
             <Link
               key={r.id}
-              href={`/runs/${encodeURIComponent(r.id)}`}
+              href={workspaceHref(`/runs/${encodeURIComponent(r.id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto auto", gap: 12, textDecoration: "none", color: "inherit" }}
             >
@@ -1693,6 +1695,7 @@ function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
 function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => void }) {
   const [sub, setSub] = useState<SetupSubtab>("Inputs");
   const counts = useSetupSubCounts(w);
+  const workspaceHref = useWorkspaceHref();
   return (
     <div className="flex flex-col">
       {/* R9 FIX 2: the Setup second-row tabs sit DIRECTLY under the primary
@@ -1722,7 +1725,7 @@ function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => 
       <div className="c-ops-frame">
         <span>Visual worker editor</span>
         <Link
-          href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`}
+          href={workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`)}
           className="ml-auto normal-case"
           style={{ fontSize: 11, letterSpacing: 0 }}
           onClick={(e) => {
@@ -1818,6 +1821,7 @@ function WorkerDetailActions({
   canManage?: boolean;
 }) {
   const router = useRouter();
+  const workspaceHref = useWorkspaceHref();
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [editOpen, setEditOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -1868,7 +1872,7 @@ function WorkerDetailActions({
           // calm inline /run/{worker} page (schema-driven inputs + live
           // output-first run panel), the same standalone runnable surface — no
           // Dialog, no third page. See feedback/round-09/run-detail-real.md.
-          onClick={() => router.push(`/run/${encodeURIComponent(w.id)}`)}
+          onClick={() => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`))}
           title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
@@ -1907,7 +1911,7 @@ function WorkerDetailActions({
                 api.workers.duplicate(w.id)
                   .then((created) => {
                     onUpdated(detailToSummary(created));
-                    router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
+                    router.push(workspaceHref(`/workers?sel=${encodeURIComponent(created.id)}`));
                     toast.success("Worker duplicated");
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
@@ -2119,6 +2123,7 @@ export default function WorkersCollection({
   extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
+  const workspaceHref = useWorkspaceHref();
   useStreamedInitialData(qk.workers(WORKERS_LIST_QUERY_OPTS), initialWorkersPromise);
   // Cache-first workers list (TanStack Query): returning to /workers renders
   // instantly from cache with no skeleton; a slow/failed refetch keeps showing
@@ -2143,10 +2148,10 @@ export default function WorkersCollection({
         safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "open");
       }
       router.replace(
-        `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
+        workspaceHref(`/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`),
       );
     },
-    [router],
+    [router, workspaceHref],
   );
 
   useEffect(() => {
@@ -2291,8 +2296,8 @@ export default function WorkersCollection({
       ],
       status: workerStatusPill(w),
       menu: [
-        { label: "Open", icon: <ArrowRight className="size-4" />, onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) },
-        { label: "Run", icon: <PlayCircle className="size-4" />, onSelect: () => router.push(`/run/${encodeURIComponent(w.id)}`) },
+        { label: "Open", icon: <ArrowRight className="size-4" />, onSelect: () => router.push(workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}`)) },
+        { label: "Run", icon: <PlayCircle className="size-4" />, onSelect: () => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`)) },
         ...(canManageWorkers ? [
           {
             label: "Duplicate",
@@ -2301,7 +2306,7 @@ export default function WorkersCollection({
               api.workers.duplicate(w.id)
                 .then((created) => {
                   setWorkers((prev) => [detailToSummary(created), ...prev]);
-                  router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
+                  router.push(workspaceHref(`/workers?sel=${encodeURIComponent(created.id)}`));
                   toast.success("Worker duplicated");
                 })
                 .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));

@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { IntegrationsShell } from "@/components/connections/IntegrationsShell";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { computeIsAdmin, useIsAdmin } from "@/lib/use-is-admin";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { CurrentUser, SecretItem } from "@/lib/types";
 
 export default function SecretsPage() {
@@ -37,6 +38,7 @@ export function canMutateSecretItem(secret: SecretItem, currentUser: CurrentUser
 function SecretsContent() {
   // S24: ?prefill=NAME from /connections/browse -> opens add form pre-filled.
   const searchParams = useSearchParams();
+  const workspaceHref = useWorkspaceHref();
   const prefillName = searchParams.get("prefill") ?? "";
   // #943 — the secret inventory (names + which workers use them) maps the
   // workspace's vendors and operational gaps. Owner/admin only.
@@ -306,7 +308,7 @@ function SecretsContent() {
                                   {idx > 0 && ", "}
                                   {workerId ? (
                                     <Link
-                                      href={`/workers/${encodeURIComponent(workerId)}`}
+                                      href={workspaceHref(`/workers/${encodeURIComponent(workerId)}`)}
                                       className="underline underline-offset-2 hover:text-foreground"
                                     >
                                       {workerName}

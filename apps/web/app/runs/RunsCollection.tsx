@@ -36,6 +36,7 @@ import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
 import { useRunLogStream } from "@/lib/useRunLogStream";
 import { contentTagOptions } from "@/lib/workers/derive";
 import { createWorkerHref } from "@/lib/create-worker-nav";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import {
   formatDuration,
   formatTrigger,
@@ -492,6 +493,7 @@ export default function RunsCollection({
   // perf: streamed first-load fetch (see runs/page.tsx + useStreamedInitialData).
   initialRunsPromise?: Promise<RunSummary[]>;
 }) {
+  const workspaceHref = useWorkspaceHref();
   useStreamedInitialData(qk.runs(RUNS_FIRST_PAGE_QUERY_PARAMS), initialRunsPromise);
   // Cache-first first page (TanStack Query): /runs renders instantly from cache
   // on return; a slow or failed refetch keeps the cached rows instead of going
@@ -801,7 +803,7 @@ export default function RunsCollection({
         actions: (
           <>
             {/* SPEC §4: ↑ worker link (worker_id on every run — BUILT). */}
-            <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
+            <Link href={workspaceHref(`/workers?sel=${encodeURIComponent(r.worker_id)}`)} className="c-vpill" style={{ padding: "6px 11px" }}>
               ↑ Open worker
             </Link>
             {/* #765: run share link — opens the real Share modal. */}
