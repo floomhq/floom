@@ -620,7 +620,7 @@ def _repair_script_outputs_from_run_code(manifest: Dict[str, Any], run_code: str
 
     output_names = _infer_script_output_names(run_code)
     if not output_names:
-        return
+        output_names = ["summary"]
 
     exec_block = manifest.get("exec")
     if not isinstance(exec_block, dict):
@@ -636,6 +636,68 @@ def _repair_script_outputs_from_run_code(manifest: Dict[str, Any], run_code: str
         }
         for name in output_names
     ]
+
+
+def _ensure_script_default_summary_output(run_code: str) -> str:
+    """Make script-mode fallback output contract executable.
+
+    If the creator emits no declared outputs and no inferable result output key,
+    worker-author repairs the manifest with a ``summary`` output. This wrapper
+    preserves the generated script but guarantees result.json contains that
+    declared key on success, so validation and the Output tab line up.
+    """
+    if not isinstance(run_code, str) or "summary" in run_code:
+        return run_code
+    patched = re.sub(
+        r"if\s+__name__\s*==\s*[\"']__main__[\"']\s*:\s*\n\s*main\(\)\s*\n?",
+        "",
+        run_code,
+        count=1,
+    ).rstrip()
+    patched = re.sub(r"\ndef\s+main\s*\(", "\ndef _floom_original_main(", patched, count=1)
+    if "_floom_original_main" not in patched:
+        return run_code
+    return patched + r'''
+
+
+def main():
+    import json as _floom_json
+    from pathlib import Path as _FloomPath
+
+    try:
+        _floom_original_main()
+        result_path = _FloomPath("result.json")
+        if result_path.exists():
+            try:
+                data = _floom_json.loads(result_path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {"status": "success", "outputs": {}, "artifacts": [], "error": None}
+        else:
+            data = {"status": "success", "outputs": {}, "artifacts": [], "error": None}
+        outputs = data.get("outputs")
+        if not isinstance(outputs, dict):
+            outputs = {}
+        if "summary" not in outputs:
+            outputs["summary"] = "Completed successfully."
+        data["outputs"] = outputs
+        data.setdefault("artifacts", [])
+        data.setdefault("error", None)
+        result_path.write_text(_floom_json.dumps(data), encoding="utf-8")
+    except Exception as exc:
+        _FloomPath("result.json").write_text(
+            _floom_json.dumps({
+                "status": "error",
+                "outputs": {},
+                "artifacts": [],
+                "error": str(exc),
+            }),
+            encoding="utf-8",
+        )
+
+
+if __name__ == "__main__":
+    main()
+'''
 
 
 def _agent_skill_tool_instructions(manifest: Dict[str, Any], prompt: str) -> str:
@@ -683,7 +745,11 @@ def _repair_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Dict[str, A
     out = dict(parsed)
     run_code = out.get("run_code")
     if isinstance(run_code, str):
+        had_output_names = bool(_declared_output_names(repaired_manifest))
+        inferred_names = _infer_script_output_names(run_code)
         _repair_script_outputs_from_run_code(repaired_manifest, run_code)
+        if _entry(repaired_manifest).lower().endswith(".py") and not had_output_names and not inferred_names:
+            out["run_code"] = _ensure_script_default_summary_output(run_code)
     try:
         import yaml as pyyaml
 

@@ -426,6 +426,57 @@ if __name__ == "__main__":
     ) is None
 
 
+def test_worker_author_repairs_script_without_inferable_outputs():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "generic-script"
+title: "Generic Script"
+description: "Runs a generated script."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runner: "e2b"
+connections: []
+""",
+            "run_code": """
+import json
+from pathlib import Path
+
+def main():
+    Path("result.json").write_text(json.dumps({"status": "success", "outputs": {}, "artifacts": [], "error": None}))
+
+if __name__ == "__main__":
+    main()
+""",
+            "suggested_id": "generic-script",
+        },
+        "Create a manual utility worker.",
+    )
+
+    manifest = yaml.safe_load(parsed["worker_yml"])
+    assert manifest["exec"]["outputs"] == [
+        {
+            "name": "summary",
+            "kind": "scalar",
+            "type": "markdown",
+            "required": True,
+            "label": "Summary",
+        }
+    ]
+    assert "_floom_original_main" in parsed["run_code"]
+    assert '"summary"' in parsed["run_code"]
+    assert worker_author._validate_generated_bundle(
+        parsed,
+        "Create a manual utility worker.",
+    ) is None
+
+
 def test_worker_author_repairs_known_integration_tools_generically():
     worker_author = _load_worker_author_module()
     manifest = worker_author._repair_generated_worker_manifest(
