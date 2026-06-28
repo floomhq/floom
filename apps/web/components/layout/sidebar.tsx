@@ -17,6 +17,7 @@ import { prefetchRouteData, prefetchIdleRoutes, prefetchMainRoutesEager } from "
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
+import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
