@@ -53,6 +53,7 @@ import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { EmilyHomeEmpty } from "@/components/home/EmilyHomeEmpty";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { readStoredConversationId } from "@/lib/emily-chat-storage";
+import { createWorkerHref } from "@/lib/create-worker-nav";
 
 // ── Chat controls (New chat + Export) ─────────────────────────────────────────
 
@@ -870,9 +871,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                   sendDisabled={isStreaming}
                   placeholder={`Message ${assistantName}...`}
                   variant="landing"
-                  // Only the worker-create flow says "Hire"; the home/normal
-                  // Emily reads "Ask" (it's a chat, not a worker-builder).
-                  ctaLabel={createMode ? "Hire" : "Ask"}
+                  ctaLabel="Ask"
                   large
                   // #1698: "New worker" / ?create=1 must give visible feedback
                   // from ANY route. Focus the composer when entering create mode
@@ -975,6 +974,7 @@ const DOCK_WIDTH: Record<DockMode, string> = {
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<DockMode>("rail");
   // True fullscreen lives in shared context (AppShell hides the page pane and
@@ -1085,21 +1085,11 @@ export function EmilyDock({ className }: { className?: string }) {
     setFullscreen(true);
   }, [setFullscreen]);
 
-  // In-dock "New worker" trigger (the ⋯ menu item). Same supersede-in-place
-  // behavior as a `?create=1` deep link, without a route change: confirm when a
-  // thread is active, otherwise begin immediately. This REPLACES the old
-  // `router.push(createWorkerHref())` which navigated to /workers/new and left
-  // the docked Emily AND the separate NewWorkerClient surface both on screen.
+  // In-dock "New worker" trigger. Emily no longer creates workers from chat, so
+  // this uses the dedicated creation page and keeps the dock conversation alive.
   const handleNewWorkerClick = useCallback(() => {
-    const hasExistingThread =
-      coreHasMessages || coreConversationId !== null || readStoredConversationId() !== null;
-    if (hasExistingThread) {
-      pendingCreatePrime.current = undefined;
-      setConfirmReplaceOpen(true);
-    } else {
-      beginCreateFlow(undefined);
-    }
-  }, [coreHasMessages, coreConversationId, beginCreateFlow]);
+    router.push(createWorkerHref());
+  }, [router]);
 
   // Deep-link / "New worker" create entry. A `?create=1` (optionally `&prime=`)
   // on the CURRENT route enters the create flow IN PLACE. If there's an existing

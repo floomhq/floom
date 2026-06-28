@@ -312,9 +312,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   };
   return (
     <div className="px-3 pt-3 pb-3 space-y-1.5">
-      {/* New worker drives the in-Emily create flow in place (createWorkerHref
-          -> /?create=1), superseding the active Emily chat, it no longer opens
-          the separate /workers/new page. */}
+      {/* New worker uses the dedicated creation page; Emily remains docked. */}
       <Link
         href={createWorkerHref()}
         prefetch={false}

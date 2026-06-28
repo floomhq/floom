@@ -5,9 +5,8 @@
  * ChatPage opens that same dock in fullscreen instead of mounting a second
  * stream instance, so navigation does not abort an active response.
  *
- * Create flow: legacy `?mode=create` links redirect to the in-Emily create
- * flow (`/?create=1`, via createWorkerHref) — see EmilyDock's `?create=1`
- * effect. They no longer open the separate /workers/new page.
+ * Create flow: legacy `?mode=create` links redirect to the dedicated worker
+ * creation page via createWorkerHref.
  */
 import { redirect } from "next/navigation";
 import { EmilyChatRouteFullscreen } from "@/components/emily/EmilyChat";

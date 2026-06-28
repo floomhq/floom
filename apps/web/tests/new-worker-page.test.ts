@@ -8,18 +8,13 @@ function src(rel: string) {
   return readFileSync(join(process.cwd(), rel), "utf8");
 }
 
-// Product decision (2026-06-24): clicking "New worker" ANYWHERE drives the
-// IN-EMILY create flow (`/?create=1`, handled by EmilyDock) that supersedes the
-// active Emily chat in place — it must NOT navigate to the separate /workers/new
-// page. Every entry point funnels through createWorkerHref, which now returns the
-// `?create=1` deep link.
 describe("New worker entry points", () => {
-  it("createWorkerHref drives the in-Emily ?create=1 flow, not /workers/new", () => {
-    expect(createWorkerHref()).toBe("/?create=1");
-    expect(createWorkerHref()).not.toContain("/workers/new");
+  it("createWorkerHref drives the dedicated /workers/new flow", () => {
+    expect(createWorkerHref()).toBe("/workers/new");
+    expect(createWorkerHref("Daily digest")).toBe("/workers/new?prompt=Daily%20digest");
   });
 
-  it("sidebar primary CTA routes via createWorkerHref (in-Emily flow)", () => {
+  it("sidebar primary CTA routes via createWorkerHref", () => {
     expect(src("components/layout/sidebar.tsx")).toContain("createWorkerHref()");
   });
 
@@ -28,25 +23,19 @@ describe("New worker entry points", () => {
     expect(src("app/workers/WorkersCollection.tsx")).toContain("createWorkerHref()");
   });
 
-  it("/workers/new redirects into the same in-Emily create flow", () => {
+  it("/workers/new is a real page, not a redirect to Emily", () => {
     const page = src("app/workers/new/page.tsx");
-    expect(page).toContain('redirect(`/?${target.toString()}`)');
-    expect(page).not.toContain("NewWorkerClient");
-    expect(page).not.toContain("newFromPrompt");
+    expect(page).toContain("NewWorkerClient");
+    expect(page).not.toContain("redirect(`/?");
   });
 
-  it("EmilyDock owns the in-place create flow (?create=1 effect)", () => {
-    const emily = src("components/emily/EmilyChat.tsx");
-    // The deep-link create channel and the supersede-in-place handler exist.
-    expect(emily).toContain('searchParams.get("create")');
-    expect(emily).toContain("beginCreateFlow");
-    // Emily still stays docked when the user lands directly on /workers/new.
-    expect(emily).toContain("isCreateWorkerRoute");
+  it("dedicated page owns prompt-to-worker creation", () => {
+    const client = src("app/workers/new/NewWorkerClient.tsx");
+    expect(client).toContain("api.workers.newFromPrompt");
+    expect(client).toContain('mode: "create"');
   });
 
-  it("no legacy redirect intercepts ?create=1 to force /workers/new", () => {
-    // AppShell no longer mounts CreateWorkerLegacyRedirect, so ?create=1 reaches
-    // EmilyDock's effect instead of being forwarded to the separate page.
-    expect(src("components/layout/AppShell.tsx")).not.toContain("CreateWorkerLegacyRedirect");
+  it("Emily stays docked on /workers/new", () => {
+    expect(src("components/emily/EmilyChat.tsx")).toContain("isCreateWorkerRoute");
   });
 });

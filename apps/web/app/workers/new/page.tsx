@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { NewWorkerClient } from "./NewWorkerClient";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,5 @@ export default async function NewWorkerPage({
   const initialPrompt =
     (typeof params.prompt === "string" ? params.prompt : "") ||
     (typeof params.prime === "string" ? params.prime : "");
-  const target = new URLSearchParams({ create: "1" });
-  if (initialPrompt.trim()) target.set("prime", initialPrompt.trim());
-  redirect(`/?${target.toString()}`);
+  return <NewWorkerClient initialPrompt={initialPrompt} />;
 }
