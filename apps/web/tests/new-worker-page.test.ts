@@ -2,40 +2,28 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { createWorkerHref } from "@/lib/create-worker-nav";
-
 function src(rel: string) {
   return readFileSync(join(process.cwd(), rel), "utf8");
 }
 
-describe("New worker entry points", () => {
-  it("createWorkerHref drives the dedicated /workers/new flow", () => {
-    expect(createWorkerHref()).toBe("/workers/new");
-    expect(createWorkerHref("Daily digest")).toBe("/workers/new?prompt=Daily%20digest");
+describe("dashboard worker creation entry points", () => {
+  it("does not expose New worker from the sidebar", () => {
+    const sidebar = src("components/layout/sidebar.tsx");
+    expect(sidebar).not.toContain("New worker");
+    expect(sidebar).not.toContain("createWorkerHref");
   });
 
-  it("sidebar primary CTA routes via createWorkerHref", () => {
-    expect(src("components/layout/sidebar.tsx")).toContain("createWorkerHref()");
+  it("does not expose New worker from command palette, Workers, or Runs empty states", () => {
+    expect(src("components/CommandPalette.tsx")).not.toContain("New worker");
+    expect(src("app/workers/WorkersCollection.tsx")).not.toContain("createWorkerHref");
+    expect(src("app/workers/WorkersCollection.tsx")).not.toContain("WorkersEmptyPrompt");
+    expect(src("app/runs/RunsCollection.tsx")).not.toContain("Create your first worker");
   });
 
-  it("command palette and workers collection use createWorkerHref", () => {
-    expect(src("components/CommandPalette.tsx")).toContain("go(createWorkerHref())");
-    expect(src("app/workers/WorkersCollection.tsx")).toContain("createWorkerHref()");
-  });
-
-  it("/workers/new is a real page, not a redirect to Emily", () => {
+  it("/workers/new falls back to Workers instead of mounting prompt creation", () => {
     const page = src("app/workers/new/page.tsx");
-    expect(page).toContain("NewWorkerClient");
-    expect(page).not.toContain("redirect(`/?");
-  });
-
-  it("dedicated page owns prompt-to-worker creation", () => {
-    const client = src("app/workers/new/NewWorkerClient.tsx");
-    expect(client).toContain("api.workers.newFromPrompt");
-    expect(client).toContain('mode: "create"');
-  });
-
-  it("Emily stays docked on /workers/new", () => {
-    expect(src("components/emily/EmilyChat.tsx")).toContain("isCreateWorkerRoute");
+    expect(page).toContain('redirect("/workers")');
+    expect(page).not.toContain("NewWorkerClient");
+    expect(page).not.toContain("newFromPrompt");
   });
 });

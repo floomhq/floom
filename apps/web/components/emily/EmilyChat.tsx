@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize, Minimize, MessageCircle, PenSquare, Download, History, MoreHorizontal, Plus, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize, Minimize, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -53,7 +53,6 @@ import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { EmilyHomeEmpty } from "@/components/home/EmilyHomeEmpty";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { readStoredConversationId } from "@/lib/emily-chat-storage";
-import { createWorkerHref } from "@/lib/create-worker-nav";
 
 // ── Chat controls (New chat + Export) ─────────────────────────────────────────
 
@@ -974,7 +973,6 @@ const DOCK_WIDTH: Record<DockMode, string> = {
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<DockMode>("rail");
   // True fullscreen lives in shared context (AppShell hides the page pane and
@@ -1084,12 +1082,6 @@ export function EmilyDock({ className }: { className?: string }) {
     setMode((m) => (m === "collapsed" ? "rail" : m));
     setFullscreen(true);
   }, [setFullscreen]);
-
-  // In-dock "New worker" trigger. Emily no longer creates workers from chat, so
-  // this uses the dedicated creation page and keeps the dock conversation alive.
-  const handleNewWorkerClick = useCallback(() => {
-    router.push(createWorkerHref());
-  }, [router]);
 
   // Deep-link / "New worker" create entry. A `?create=1` (optionally `&prime=`)
   // on the CURRENT route enters the create flow IN PLACE. If there's an existing
@@ -1341,14 +1333,6 @@ export function EmilyDock({ className }: { className?: string }) {
               <MoreHorizontal className="size-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side="bottom" sideOffset={6} className="w-44 p-1">
-              <DropdownMenuItem
-                onClick={handleNewWorkerClick}
-                className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-              >
-                <Plus className="size-4" />
-                New worker
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="-mx-1 my-1" />
               <DropdownMenuItem
                 onClick={() => {
                   // Plain "New chat" → a normal (non-create) Emily session.

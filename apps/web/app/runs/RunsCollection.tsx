@@ -35,7 +35,6 @@ import { RunTranscript } from "@/components/RunDetailSplitPane";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
 import { useRunLogStream } from "@/lib/useRunLogStream";
 import { contentTagOptions } from "@/lib/workers/derive";
-import { createWorkerHref } from "@/lib/create-worker-nav";
 import {
   formatDuration,
   formatTrigger,
@@ -841,19 +840,9 @@ export default function RunsCollection({
       }),
     }),
     states: {
-      // #1365 — add action CTA to runs empty state
       empty: {
         title: "No runs yet",
         help: "Runs appear here when your workers execute.",
-        action: (
-          <Link
-            href={createWorkerHref()}
-            className="c-addbtn"
-            style={{ display: "inline-block", marginTop: 8, padding: "6px 16px", fontSize: 13 }}
-          >
-            Create your first worker →
-          </Link>
-        ),
       },
     },
     // B37: "Load more" append footer — replaces numeric pagination.
