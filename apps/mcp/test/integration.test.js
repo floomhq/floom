@@ -640,6 +640,27 @@ Path("result.json").write_text(json.dumps({"status": "success", "outputs": {}, "
   });
 });
 
+test("workers.create refuses script workers that omit declared outputs", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const result = await client.callTool({
+      name: "workers.create",
+      arguments: {
+        worker_yml: workerYaml,
+        run_py: `import json
+from pathlib import Path
+Path("result.json").write_text(json.dumps({"status": "success", "outputs": {"other": "ok"}, "artifacts": []}), encoding="utf-8")
+`,
+      },
+    });
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.status, 400);
+    assert.match(JSON.stringify(result.structuredContent.body), /declared output result does not appear in run\.py/);
+  });
+});
+
 test("workers.update, workers.delete, and runs.watch surface 404s in tool results", async (t) => {
   const mock = await startMockApi();
   t.after(() => mock.server.close());

@@ -472,7 +472,7 @@ export function validateWorkerDraft(input: WorkerDraftValidationInput): WorkerDr
       }
       for (const output of declaredOutputs) {
         if (!new RegExp(`["']${output.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(runPy)) {
-          warnings.push(`declared output ${output} does not appear literally in run.py; ensure result.json.outputs includes it`);
+          errors.push(`declared output ${output} does not appear in run.py; result.json.outputs must include every declared output`);
         }
       }
     }
