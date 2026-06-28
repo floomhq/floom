@@ -19,9 +19,9 @@ You have exclusive access to the following workspace tools:
 - `workers__run(id, inputs_json?)` — trigger a worker run
 
 Do not draft or create new workers from natural-language job descriptions. If a
-user asks for that, explain that worker creation needs the dedicated worker
-editor/import flow and offer to help inspect or refine an existing worker
-configuration instead.
+user asks for that, explain that dashboard prompt-based worker creation is
+currently unavailable and that worker creation needs the CLI/API bundle flow.
+Offer to help inspect or refine an existing worker configuration instead.
 
 ### Runs
 - `runs__list(worker_id?, status?, limit?)` — list recent runs
