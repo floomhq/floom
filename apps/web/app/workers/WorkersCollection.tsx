@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -112,7 +112,6 @@ import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 import { ADVANCED_DETAIL_TABS, BASE_DETAIL_TABS } from "@/lib/workers/pinned-tabs";
 import { ADVANCED_MODE_STORAGE_KEY } from "@/lib/workers/tabs";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
-import { createWorkerHref } from "@/lib/create-worker-nav";
 import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 function rel(ts?: string | null): string {
@@ -2044,55 +2043,6 @@ function WorkerDetailActions({
   );
 }
 
-// ---- #1092: Workers empty-state inline prompt --------------------------------
-
-/**
- * A compact prompt input shown in the workers empty state so users can
- * describe what they want done and open the dedicated /workers/new page.
- */
-function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }) {
-  const [value, setValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    const trimmed = value.trim();
-    if (!trimmed) return;
-    onSubmit(trimmed);
-  }
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className="mt-4 flex w-full items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
-      style={{ maxWidth: 440 }}
-    >
-      <input
-        ref={inputRef}
-        type="text"
-        // text-ellipsis so a long *placeholder* (or value) degrades to an
-        // ellipsis on a too-narrow input instead of hard-clipping mid-word
-        // ("…want dor"). The wider max-width above lets the intended
-        // placeholder render in full at the normal empty-state width.
-        className="min-w-0 flex-1 truncate bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-        placeholder="Describe the job you want done…"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        autoComplete="off"
-      />
-      <button
-        type="submit"
-        disabled={!value.trim()}
-        className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
-        aria-label="Create worker"
-      >
-        <ArrowRight className="size-3.5" />
-      </button>
-    </form>
-  );
-}
-
-
 /**
  * A downstream host can inject a top-level view (#1006) and compose
  * `WorkersCollection` without forking the full component. The host decides
@@ -2469,18 +2419,10 @@ export default function WorkersCollection({
         ),
       };
     },
-    // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) },
     states: {
-      // #1364 — improved help text + action CTA driving the in-Emily create flow
       empty: {
         title: "No workers yet",
-        help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
-        action: (
-          <WorkersEmptyPrompt
-            onSubmit={(prompt) => router.push(createWorkerHref(prompt))}
-          />
-        ),
+        help: "Workers are AI agents that run on a schedule, webhook, or on demand. Dashboard worker creation is temporarily unavailable; create workers from CLI/API bundles for now.",
       },
       errorRetry: () => {
         void workersQuery.refetch();
