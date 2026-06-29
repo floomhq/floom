@@ -22,7 +22,7 @@ function warn(name: string, detail?: string, hint?: string): Check {
   return { name, ok: true, detail, hint };
 }
 
-const API_DEFAULT = "https://localhost:8000";
+const API_DEFAULT = "https://workeros-api.floom.dev";
 
 async function checkApiReachable(apiBase: string): Promise<Check> {
   try {
@@ -129,7 +129,7 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
 
   // Check 2: Auth valid
   if (!client) {
-    checks.push(fail("auth", "No credentials found", `Run: ${getCommandName()} login`));
+    checks.push(fail("auth", "No credentials found", `Run: ${getCommandName()} login --cloud`));
   } else {
     checks.push(await checkAuth(client));
   }
@@ -141,7 +141,7 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
   if (client) {
     checks.push(await checkRecentRuns(client));
   } else {
-    checks.push(fail("recent_runs", "Skipped — not authenticated", `Run: ${getCommandName()} login`));
+    checks.push(fail("recent_runs", "Skipped — not authenticated", `Run: ${getCommandName()} login --cloud`));
   }
 
   if (options.json) {
