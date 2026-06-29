@@ -1246,8 +1246,37 @@ def _repair_generated_worker_manifest(
     _repair_prompt_declared_connections(repaired, prompt)
     _repair_missing_operator_output(repaired)
     _repair_agent_markdown_outputs(repaired)
+    _repair_agent_integration_limits(repaired)
     repaired = _repair_manifest_scalar_output_text_fields(repaired, repaired)
     return repaired
+
+
+def _repair_agent_integration_limits(manifest: Dict[str, Any]) -> None:
+    if not _entry(manifest).lower().endswith(".md"):
+        return
+    connections = manifest.get("connections")
+    has_connections = isinstance(connections, list) and any(
+        _connection_app_from_item(item) for item in connections
+    )
+    if not has_connections:
+        return
+    limits = manifest.get("limits")
+    if not isinstance(limits, dict):
+        limits = {}
+    desired = {
+        "max_tool_iterations": 60,
+        "max_output_tokens": 100000,
+        "max_total_tokens": 1000000,
+        "timeout_seconds": 300,
+    }
+    for key, value in desired.items():
+        current = limits.get(key)
+        try:
+            current_int = int(current)
+        except (TypeError, ValueError):
+            current_int = 0
+        limits[key] = max(current_int, value)
+    manifest["limits"] = limits
 
 
 def _normalize_named_schema_list(value: Any) -> Any:
@@ -1442,6 +1471,11 @@ Rules:
   call path, for example `composio__<app>__execute` plus concrete allowed tool
   slugs when known. Do not create workers that cannot actually reach the
   integration they claim to use.
+- Agent-mode workers that use integrations/tool calls MUST include top-level
+  limits with max_tool_iterations: 60, max_output_tokens: 100000,
+  max_total_tokens: 1000000, and timeout_seconds: 300. This is required for
+  Gmail/email/CRM/Slack/GitHub/Calendar and other Composio-backed tools because
+  tool responses can be large and multi-step.
 
 Script-mode run.py rules (these EXACT mistakes crash generated workers — never make them):
 - Use ONLY the Python standard library unless you ALSO list the package in

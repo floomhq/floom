@@ -164,12 +164,35 @@ function validateWorkerContractShape(manifest: Record<string, unknown>): string[
     });
   };
 
+  const validateOutputFields = (value: unknown, path: string) => {
+    if (!Array.isArray(value)) return;
+    value.forEach((field, index) => {
+      if (!isRecord(field)) return;
+      const kind = nonEmptyString(field.kind)?.toLowerCase();
+      if (kind !== "file") return;
+      const mediaType = nonEmptyString(field.media_type);
+      const outputPath = nonEmptyString(field.path);
+      const scalarType = nonEmptyString(field.type);
+      if (!mediaType) {
+        errors.push(`${path}.${index}.media_type is required for file outputs`);
+      }
+      if (!outputPath) {
+        errors.push(`${path}.${index}.path is required for file outputs`);
+      }
+      if (scalarType && !scalarType.includes("/")) {
+        errors.push(`${path}.${index} file output must use media_type instead of scalar type '${scalarType}'`);
+      }
+    });
+  };
+
   validateFields(manifest.inputs, "inputs");
   validateFields(manifest.outputs, "outputs");
+  validateOutputFields(manifest.outputs, "outputs");
   const exec = readNestedRecord(manifest, "exec");
   if (exec) {
     validateFields(exec.inputs, "exec.inputs");
     validateFields(exec.outputs, "exec.outputs");
+    validateOutputFields(exec.outputs, "exec.outputs");
   }
   return errors;
 }

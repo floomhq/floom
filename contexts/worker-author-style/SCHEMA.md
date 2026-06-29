@@ -224,6 +224,16 @@ limits:
   timeout_seconds: 300         # default
 ```
 
+For agent workers that use integrations/tool calls, especially Gmail/email/CRM/Slack/GitHub/Calendar Composio tools, use the launch-safe limits below:
+
+```yaml
+limits:
+  max_tool_iterations: 60
+  max_output_tokens: 100000
+  max_total_tokens: 1000000
+  timeout_seconds: 300
+```
+
 ## Full minimal examples
 
 ### Agent mode (SKILL.md entry)

@@ -171,6 +171,14 @@ limits:                      # agent-mode only; ignored for script mode
   max_total_tokens: 50000
   timeout_seconds: 300
 
+# Use these higher limits for integration-heavy agent workers, especially
+# Gmail/email/CRM/Slack/GitHub/Calendar Composio tools:
+# limits:
+#   max_tool_iterations: 60
+#   max_output_tokens: 100000
+#   max_total_tokens: 1000000
+#   timeout_seconds: 300
+
 resources:                   # optional sandbox sizing request
   memory_mb: 2048            # capped by WORKEROS_MAX_WORKER_MEMORY_MB
   cpu_count: 2               # capped by WORKEROS_MAX_WORKER_CPU_COUNT

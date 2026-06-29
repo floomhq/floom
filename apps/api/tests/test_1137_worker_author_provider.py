@@ -342,6 +342,10 @@ connections: []
     manifest = yaml.safe_load(parsed["worker_yml"])
     assert manifest["connections"][0]["app"] == "gmail"
     assert "GMAIL_FETCH_EMAILS" in manifest["connections"][0]["allowed_tools"]
+    assert manifest["limits"]["max_tool_iterations"] == 60
+    assert manifest["limits"]["max_output_tokens"] == 100000
+    assert manifest["limits"]["max_total_tokens"] == 1000000
+    assert manifest["limits"]["timeout_seconds"] == 300
     assert "composio__gmail__execute" in parsed["skill_md"]
     assert "GMAIL_FETCH_EMAILS" in parsed["skill_md"]
     assert worker_author._validate_generated_bundle(parsed, "Every hour, pull my latest Gmail.") is None
@@ -380,6 +384,52 @@ connections:
 
     assert "finish_with_outputs" in parsed["skill_md"]
     assert '"summary": "final markdown content for summary"' in parsed["skill_md"]
+    assert worker_author._validate_generated_bundle(parsed, "Every hour, pull my latest Gmail.") is None
+
+
+def test_worker_author_repairs_low_agent_integration_limits():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-hourly-summarizer"
+title: "Gmail Hourly Summarizer"
+description: "Summarises recent Gmail messages."
+version: "0.1.0"
+limits:
+  max_tool_iterations: 10
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 120
+trigger:
+  type: "schedule"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+      required: true
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+""",
+            "skill_md": "# Gmail Hourly Summarizer\n\nUse `composio__gmail__execute` with `GMAIL_FETCH_EMAILS`.\n\nCall `finish_with_outputs({\"summary\": \"content\"})`.",
+            "suggested_id": "gmail-hourly-summarizer",
+        },
+        "Every hour, pull my latest Gmail and summarize missed opportunities.",
+    )
+
+    manifest = yaml.safe_load(parsed["worker_yml"])
+    assert manifest["limits"] == {
+        "max_tool_iterations": 60,
+        "max_output_tokens": 100000,
+        "max_total_tokens": 1000000,
+        "timeout_seconds": 300,
+    }
     assert worker_author._validate_generated_bundle(parsed, "Every hour, pull my latest Gmail.") is None
 
 

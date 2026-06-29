@@ -178,10 +178,15 @@ exec:
   outputs:
     - name: summary
       label: Summary
-      type: markdown
       kind: file
+      media_type: text/markdown
       path: out/summary.md
       required: true
+limits:
+  max_tool_iterations: 60
+  max_output_tokens: 100000
+  max_total_tokens: 1000000
+  timeout_seconds: 300
 capabilities:
   network:
     egress: true
@@ -193,7 +198,7 @@ capabilities:
 
 Fetch recent Gmail messages using the declared Gmail connection, summarize the important items, and write a markdown brief to out/summary.md.
 
-Return the output named summary. Do not ask the user for OAuth tokens or passwords.
+Call the Gmail runtime tool once with the declared allowed tool, summarize the returned messages, then call finish_with_outputs with the output named summary. Do not ask the user for OAuth tokens or passwords.
 `,
     notes: [
       "Use agent mode when the work needs reasoning or tool calls.",
@@ -228,8 +233,8 @@ exec:
   outputs:
     - name: plan
       label: Approval plan
-      type: markdown
       kind: file
+      media_type: text/markdown
       path: out/plan.md
       required: true
 approvals:
