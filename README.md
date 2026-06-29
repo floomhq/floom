@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/hero.png" alt="Floom: the loop engineering harness for AI workers" width="880">
+  <img src=".github/hero.gif" alt="Floom: the loop engineering harness for AI workers" width="880">
 </p>
 
 <h1 align="center">Floom</h1>
