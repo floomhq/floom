@@ -182,67 +182,69 @@ def test_673_tool_description_specifies_e2b_runner():
 # #674 — Emily's system prompt contains authoring rules
 # ---------------------------------------------------------------------------
 
-def test_674_system_prompt_has_approval_mapping():
-    """Emily's system prompt must map approval intent to approvals.required: true."""
+def _workers_create_description_block() -> str:
+    tool_idx = CHAT_SRC.find('"workers__create"')
+    assert tool_idx != -1, "#674: workers__create tool registration must exist"
+    block = CHAT_SRC[tool_idx: tool_idx + 2500]
+    assert "FIELD RULES" in block, "#674: workers__create metadata must keep YAML field rules"
+    return block
+
+
+def test_674_worker_authoring_rules_are_disabled_for_emily():
+    """Emily's natural-language authoring rules must stay disabled."""
     authoring_idx = CHAT_SRC.find("## Worker authoring rules")
     assert authoring_idx != -1, "#674: Worker authoring rules section must exist"
     block = CHAT_SRC[authoring_idx: authoring_idx + 2000]
-    assert "approvals" in block and "required: true" in block, (
-        "#674: authoring rules must state that 'ask for approval' maps to approvals: {required: true}"
-    )
+    assert "Natural-language worker authoring is disabled" in block
+    assert "must not draft or create new workers" in block and "from prose" in block
+    assert "Dashboard prompt-based" in block and "currently unavailable" in block
 
 
-def test_674_system_prompt_has_connections_rule():
-    """Emily's system prompt must say to add all external services to connections list."""
-    authoring_idx = CHAT_SRC.find("## Worker authoring rules")
-    assert authoring_idx != -1
-    block = CHAT_SRC[authoring_idx: authoring_idx + 2000]
+def test_674_workers_create_metadata_has_connections_rule():
+    """YAML-only workers__create metadata must say to declare external services."""
+    block = _workers_create_description_block()
     assert "connections" in block, (
-        "#674: authoring rules must include a rule about declaring connections"
+        "#674: workers__create metadata must include a rule about declaring connections"
     )
     assert "[]" in block or "cannot" in block.lower() or "empty" in block.lower(), (
-        "#674: authoring rules must warn that connections: [] means no external service access"
+        "#674: workers__create metadata must warn that connections: [] means no external service access"
     )
 
 
-def test_674_system_prompt_has_exec_mode_guidance():
-    """Emily's system prompt must explain when to use agent vs pure-script mode."""
+def test_674_workers_create_metadata_has_exec_mode_guidance():
+    """YAML-only workers__create metadata must explain agent vs pure-script mode."""
     # The authoring rules section is appended after EMILY_BASE_PERSONA — search for it directly
-    authoring_idx = CHAT_SRC.find("## Worker authoring rules")
-    assert authoring_idx != -1, (
-        "#674: Emily's base persona must include a '## Worker authoring rules' section"
-    )
-    authoring_block = CHAT_SRC[authoring_idx: authoring_idx + 2000]
-    assert "agent" in authoring_block, (
-        "#674: Worker authoring rules must mention agent mode"
-    )
-    assert "pure-script" in authoring_block, (
-        "#674: Worker authoring rules must mention pure-script mode"
-    )
-    assert "connection" in authoring_block.lower(), (
-        "#674: authoring rules must say to use agent mode when calling external services via connections"
+    block = _workers_create_description_block()
+    assert "agent" in block, "#674: workers__create metadata must mention agent mode"
+    assert "pure-script" in block, "#674: workers__create metadata must mention pure-script mode"
+    assert "connection" in block.lower(), (
+        "#674: workers__create metadata must say to use agent mode when calling external services via connections"
     )
 
 
-def test_674_system_prompt_has_trigger_type_rules():
-    """Emily's system prompt must enumerate valid trigger types."""
-    authoring_idx = CHAT_SRC.find("## Worker authoring rules")
-    assert authoring_idx != -1
-    block = CHAT_SRC[authoring_idx: authoring_idx + 2000]
-    assert "schedule" in block, "#674: 'schedule' trigger type must be in Emily's authoring rules"
+def test_674_workers_create_metadata_has_trigger_type_rules():
+    """YAML-only workers__create metadata must enumerate valid trigger types."""
+    block = _workers_create_description_block()
+    assert "schedule" in block, "#674: 'schedule' trigger type must be in workers__create metadata"
     assert "incoming_email" in block or "cron" in block, (
-        "#674: Emily's rules must explicitly call out invalid trigger type values"
+        "#674: workers__create metadata must explicitly call out invalid trigger type values"
     )
 
 
-def test_674_system_prompt_says_verify_after_create():
-    """Emily's system prompt must instruct her to verify saved config after creation."""
-    authoring_idx = CHAT_SRC.find("## Worker authoring rules")
-    assert authoring_idx != -1
-    block = CHAT_SRC[authoring_idx: authoring_idx + 2000]
-    assert "saved" in block.lower() or "re-read" in block.lower() or "confirm" in block.lower(), (
-        "#674: authoring rules must tell Emily to verify what was actually saved "
-        "after creating/updating a worker"
+def test_674_workers_create_metadata_only_allows_confirmed_yaml():
+    """workers__create must not be described as a prose-to-worker drafting tool."""
+    block = _workers_create_description_block().lower()
+    assert "complete worker.yml yaml bundle" in block
+    assert "only call this tool when the user provides a complete yaml bundle" in block
+    assert "never draft" in block and "natural-language request" in block
+    assert "dashboard prompt-based" in block and "currently unavailable" in block
+    assert "cli/api bundle flow" in block
+
+
+def test_674_create_result_still_says_verify_saved_config():
+    """workers__create result must still make saved config verification possible."""
+    assert "saved_config" in CHAT_SRC, (
+        "#674: workers__create must still expose saved_config after create/update"
     )
 
 

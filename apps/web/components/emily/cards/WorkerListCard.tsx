@@ -1,8 +1,10 @@
 import { Box, ExternalLink, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { WorkerListCard as WorkerListCardType } from "@/lib/emily-chat-types";
 
 export function WorkerListCard({ card }: { card: WorkerListCardType }) {
+  const workspaceHref = useWorkspaceHref();
   const { workers } = card;
   if (!workers || workers.length === 0) {
     return (
@@ -39,14 +41,14 @@ export function WorkerListCard({ card }: { card: WorkerListCardType }) {
             <div className="flex gap-1 shrink-0">
               {/* Worker detail opens in the Workers split pane. */}
               <a
-                href={`/workers?sel=${encodeURIComponent(w.id)}`}
+                href={workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}`)}
                 title="Run"
                 className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <Play className="size-3" />
               </a>
               <a
-                href={`/workers?sel=${encodeURIComponent(w.id)}`}
+                href={workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}`)}
                 title="Open"
                 className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >

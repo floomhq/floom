@@ -61,6 +61,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { CodeBlock } from "@/components/file-viewer/code-block";
 import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 const TEXT_PREVIEW_LIMIT = 512 * 1024;
 const TABLE_PREVIEW_ROWS = 100;
@@ -1383,6 +1384,7 @@ export function PackDetailPane({
     onDrop: React.DragEventHandler<HTMLElement>;
   }>;
 }) {
+  const workspaceHref = useWorkspaceHref();
   const sensitive = detail.sensitive ?? true;
 
   return (
@@ -1507,7 +1509,7 @@ export function PackDetailPane({
               <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
                 {(detail.used_by ?? []).map((ref, i, arr) => (
                   <span key={ref.worker_id} className="inline-flex items-center min-w-0">
-                    <Link href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`} className="text-xs font-medium hover:underline truncate">
+                    <Link href={workspaceHref(`/workers?sel=${encodeURIComponent(ref.worker_id)}`)} className="text-xs font-medium hover:underline truncate">
                       {ref.worker_name}
                     </Link>
                     {i < arr.length - 1 && <span className="text-xs text-muted-foreground ml-1.5">·</span>}

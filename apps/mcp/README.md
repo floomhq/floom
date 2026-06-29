@@ -203,7 +203,11 @@ floom workers delete <id>    # permanently remove it (and its runs/artifacts); p
 | --- | --- |
 | `workers.list` | List available Floom workers. |
 | `workers.get` | Read one worker, including config and recent run metadata. |
-| `workers.create` | Create a script-mode worker from `worker_yml` and `run_py`. |
+| `workers.contract` | Read the canonical worker.yml/run.py/SKILL.md authoring contract. |
+| `workers.templates.list` | List golden worker templates agents should start from. |
+| `workers.templates.get` | Return a full template bundle with `worker_yml` plus `run_py` or `skill_md`. |
+| `workers.validate` | Validate a proposed worker bundle before creating it. |
+| `workers.create` | Create a worker from validated `worker_yml` plus `run_py` or `skill_md`. |
 | `workers.update` | Patch trigger, cron, default inputs, capabilities, or rotate webhook secret. |
 | `workers.delete` | Delete a worker and dependent run data. |
 | `workers.run` | Start a manual worker run with input values. |

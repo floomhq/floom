@@ -6,6 +6,11 @@ import { createAuthenticatedClient, FloomApiError, FloomConnectionError } from "
 import { getCommandName } from "../lib/command-name.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 import { promptYesNo } from "../lib/prompt.js";
+import {
+  WORKER_AUTHORING_CONTRACT,
+  getWorkerTemplate,
+  listWorkerTemplates,
+} from "../lib/worker-authoring.js";
 
 type WorkerSummary = {
   id: string;
@@ -619,10 +624,96 @@ function emitApiError(error: unknown): number {
   throw error;
 }
 
-export async function workersValidateCommand(dir: string): Promise<number> {
+export async function workersContractCommand(options: { json?: boolean }): Promise<number> {
+  if (options.json) {
+    printJson(WORKER_AUTHORING_CONTRACT);
+    return 0;
+  }
+  log.heading("Floom worker authoring contract");
+  log.kv("Schema", WORKER_AUTHORING_CONTRACT.schema_version);
+  log.kv("Required files", WORKER_AUTHORING_CONTRACT.required_files.join(", "));
+  log.kv("Required fields", WORKER_AUTHORING_CONTRACT.required_top_level_fields.join(", "));
+  log.blank();
+  log.info("Recommended flow:");
+  for (const step of WORKER_AUTHORING_CONTRACT.validation_order) {
+    log.info(`  - ${step}`);
+  }
+  log.blank();
+  log.info(`List templates: ${getCommandName()} workers templates list`);
+  return 0;
+}
+
+export async function workersTemplatesListCommand(options: { json?: boolean }): Promise<number> {
+  const templates = listWorkerTemplates();
+  if (options.json) {
+    printJson({ templates });
+    return 0;
+  }
+  process.stdout.write(renderTable(templates.map((template) => ({
+    id: template.id,
+    mode: template.mode,
+    title: template.title,
+    description: template.description,
+  })), [
+    { key: "id", label: "ID" },
+    { key: "mode", label: "Mode" },
+    { key: "title", label: "Title" },
+    { key: "description", label: "Description" },
+  ]) + "\n");
+  return 0;
+}
+
+export async function workersTemplatesGetCommand(id: string, options: { json?: boolean }): Promise<number> {
+  const template = getWorkerTemplate(id);
+  if (!template) {
+    return emitError(
+      `Unknown worker template '${id}'.`,
+      `List available templates: ${getCommandName()} workers templates list`,
+      options.json,
+    );
+  }
+  if (options.json) {
+    printJson(template);
+    return 0;
+  }
+  log.heading(template.title);
+  log.kv("ID", template.id);
+  log.kv("Mode", template.mode);
+  log.info(template.description);
+  log.blank();
+  log.info("worker.yml:");
+  process.stdout.write(`${template.worker_yml}\n`);
+  if (template.run_py) {
+    log.info("run.py:");
+    process.stdout.write(`${template.run_py}\n`);
+  }
+  if (template.skill_md) {
+    log.info("SKILL.md:");
+    process.stdout.write(`${template.skill_md}\n`);
+  }
+  return 0;
+}
+
+export async function workersValidateCommand(dir: string, options: { json?: boolean } = {}): Promise<number> {
   const result = await loadWorkerSource(dir);
   if (!result.source) {
+    if (options.json) {
+      printJson({ valid: false, errors: result.errors });
+      return 1;
+    }
     return emitValidationErrors(result.errors);
+  }
+  if (options.json) {
+    printJson({
+      valid: true,
+      errors: [],
+      worker_id: result.source.workerId,
+      directory: result.source.dir,
+      name: result.source.displayName,
+      runtime: result.source.runtime,
+      source: result.source.entrypoint === "SKILL.md" ? "SKILL.md" : result.source.runPy?.trim() ? "run.py" : "SKILL.md",
+    });
+    return 0;
   }
   log.ok(`Validated ${result.source.workerId}`);
   log.kv("Directory", result.source.dir);

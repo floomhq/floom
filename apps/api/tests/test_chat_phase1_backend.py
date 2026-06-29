@@ -260,19 +260,6 @@ def test_worker_list_fallback_summary_uses_successful_tool_result(booted):
     )
 
 
-def test_worker_author_fallback_summary_uses_successful_tool_result(booted):
-    chat_service = booted["chat_service"]
-
-    reply = chat_service._fallback_reply_from_successful_tools([
-        (
-            "workers__create_from_prompt",
-            {"ok": True, "run_id": "run_author_1", "worker_id": "worker-author"},
-        )
-    ])
-
-    assert reply == "I started drafting that worker. Track progress in the run card for `run_author_1`."
-
-
 @pytest.mark.asyncio
 async def test_stream_chat_uses_tool_result_when_provider_fails_after_workers_tool(booted, monkeypatch):
     chat_service = booted["chat_service"]
@@ -340,7 +327,7 @@ async def test_stream_chat_uses_tool_result_when_provider_fails_after_workers_to
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_stops_after_create_from_prompt_tool(booted, monkeypatch):
+async def test_stream_chat_does_not_expose_create_from_prompt_tool(booted, monkeypatch):
     chat_service = booted["chat_service"]
 
     monkeypatch.setattr(chat_service, "_brain_read_tools", lambda *_args, **_kwargs: [])
@@ -359,27 +346,7 @@ async def test_stream_chat_stops_after_create_from_prompt_tool(booted, monkeypat
 
     class _FakeResult:
         async def stream_events(self):
-            yield SimpleNamespace(
-                kind="tool_call",
-                call_id="call_author",
-                tool_name="workers__create_from_prompt",
-                args={
-                    "prompt": "Create a worker for this job",
-                    "mode": "create",
-                    "idempotency_key": "idem-author",
-                },
-            )
-            yield SimpleNamespace(
-                kind="tool_output",
-                call_id="call_author",
-                output={
-                    "ok": True,
-                    "run_id": "run_author_1",
-                    "worker_id": "worker-author",
-                    "status": "running",
-                },
-                is_error=False,
-            )
+            yield SimpleNamespace(kind="message_output", text="Use the worker editor to create a new worker.")
 
     captured = {}
 
@@ -388,6 +355,7 @@ async def test_stream_chat_stops_after_create_from_prompt_tool(booted, monkeypat
     def fake_run_streamed(agent, *args, **kwargs):
         captured["tool_use_behavior"] = agent.tool_use_behavior
         captured["max_turns"] = kwargs.get("max_turns")
+        captured["tool_names"] = {getattr(tool, "name", "") for tool in agent.tools}
         return _FakeResult()
 
     monkeypatch.setattr(agents.Runner, "run_streamed", staticmethod(fake_run_streamed))
@@ -405,17 +373,11 @@ async def test_stream_chat_stops_after_create_from_prompt_tool(booted, monkeypat
     while not q.empty():
         events.append(q.get_nowait())
 
-    assert captured["tool_use_behavior"] == {
-        "stop_at_tool_names": ["finish_with_outputs", "workers__create_from_prompt"]
-    }
+    assert captured["tool_use_behavior"] == {"stop_at_tool_names": ["finish_with_outputs"]}
     assert captured["max_turns"] == 30
-    assert [event["toolName"] for event in events if event.get("type") == "tool-call"] == [
-        "workers__create_from_prompt"
-    ]
+    assert "workers__create_from_prompt" not in captured["tool_names"]
     text_events = [event for event in events if event.get("type") == "text"]
-    assert text_events[-1]["text"] == (
-        "I started drafting that worker. Track progress in the run card for `run_author_1`."
-    )
+    assert text_events[-1]["text"] == "Use the worker editor to create a new worker."
     assert events[-1]["type"] == "finish"
 
 

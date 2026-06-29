@@ -21,6 +21,7 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 import { Avatar } from "@/components/ui/Avatar";
 import { GenericOutput } from "@/components/generic-output";
 import { SHARE_CARD_BODY_HEIGHT } from "@/components/share/ShareCardShell";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { PublicWorker } from "@/lib/types";
 
 const SLUG_ALIASES: Record<string, string> = {
@@ -182,6 +183,7 @@ type FileTab = "skill" | "setup" | "output";
 
 export function WorkerShareCard({ worker, authed = false, token }: { worker: PublicWorker; authed?: boolean; token?: string }) {
   const router = useRouter();
+  const workspaceHref = useWorkspaceHref();
   const [tab, setTab] = useState<FileTab>("skill");
   const [importing, setImporting] = useState(false);
   const [importedId, setImportedId] = useState<string | null>(null);
@@ -196,7 +198,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
     try {
       const result = await api.workers.importFromShare(token);
       setImportedId(result.worker_id);
-      router.push(`/workers?sel=${encodeURIComponent(result.worker_id)}`);
+      router.push(workspaceHref(`/workers?sel=${encodeURIComponent(result.worker_id)}`));
     } catch {
       setImporting(false);
     }

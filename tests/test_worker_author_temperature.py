@@ -221,6 +221,12 @@ def test_worker_author_repairs_schema_version_and_missing_version(monkeypatch, t
         '  command: "python run.py"\n'
         '  runtime: "python311"\n'
         '  runner: "e2b"\n'
+        "  outputs:\n"
+        '    - name: "reversed_text"\n'
+        '      kind: "scalar"\n'
+        '      type: "string"\n'
+        "      required: true\n"
+        '      label: "Reversed Text"\n'
         "trigger:\n"
         '  type: "manual"\n'
     )
