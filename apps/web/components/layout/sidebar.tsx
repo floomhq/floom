@@ -4,11 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Terminal } from "lucide-react";
+import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useModKey } from "@/lib/use-mod-key";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useMcpModal } from "@/components/mcp/mcp-modal-context";
@@ -19,7 +18,7 @@ import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
-import { createWorkerHref } from "@/lib/create-worker-nav";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName, resolveUserLabel } from "@/lib/workspace/display-name";
 import { Avatar } from "@/components/ui/Avatar";
@@ -232,6 +231,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   // these persistent sidebar links otherwise issue basePath RSC segment
   // prefetches that prod can answer with `_not-found` payloads.
   const queryClient = useQueryClient();
+  const workspaceHref = useWorkspaceHref();
   const warm = (href: string) => {
     prefetchRouteData(queryClient, href);
   };
@@ -241,10 +241,11 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
       {nav.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
         const badge = resolveNavBadge(item.badge, badgeCounts);
+        const href = item.href === "/workers" ? workspaceHref(item.href) : item.href;
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={href}
             prefetch={false}
             onMouseEnter={() => warm(item.href)}
             onPointerDown={() => warm(item.href)}
@@ -312,18 +313,6 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   };
   return (
     <div className="px-3 pt-3 pb-3 space-y-1.5">
-      {/* New worker drives the in-Emily create flow in place (createWorkerHref
-          -> /?create=1), superseding the active Emily chat, it no longer opens
-          the separate /workers/new page. */}
-      <Link
-        href={createWorkerHref()}
-        prefetch={false}
-        onClick={() => onNavigate?.()}
-        className={cn(buttonVariants({ size: "lg" }), "w-full")}
-      >
-        <Plus className="w-4 h-4" />
-        <span>New worker</span>
-      </Link>
       {/* #1315: differentiated grey background (var(--bg-2)) so the Search box
           reads as an input, not a plain nav link. kbd chips sit on the lighter
           card surface so they stay legible against the grey field. */}
@@ -370,6 +359,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   const [open, setOpen] = useState(false);
   // collapsed = icon-rail (62px); expanded = full (228px)
   const [collapsed, setCollapsed] = useState(false);
+  const workspaceHref = useWorkspaceHref();
 
   // Hydrate from localStorage after mount to avoid SSR mismatch
   useEffect(() => {
@@ -506,20 +496,14 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
         {/* ── Icon rail (collapsed) ─────────────────────────────────────────── */}
         {collapsed && (
           <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
-            <Link
-              href={createWorkerHref()}
-              title="New worker"
-              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] bg-[var(--primary)] text-[var(--primary-text)] transition-[background,opacity] duration-150 hover:opacity-90"
-            >
-              <Plus className="w-4 h-4" />
-            </Link>
             {nav.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               const badge = resolveNavBadge(item.badge, badgeCounts);
+              const href = item.href === "/workers" ? workspaceHref(item.href) : item.href;
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={href}
                   prefetch={false}
                   onMouseEnter={() => warm(item.href)}
                   onPointerDown={() => warm(item.href)}

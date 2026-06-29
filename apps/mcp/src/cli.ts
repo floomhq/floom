@@ -18,7 +18,10 @@ import {
   workersListCommand,
   workersShowCommand,
   workersInfoCommand,
+  workersContractCommand,
   workersPushCommand,
+  workersTemplatesGetCommand,
+  workersTemplatesListCommand,
   workersValidateCommand,
   workersDeleteCommand,
   workersDisableCommand,
@@ -184,10 +187,26 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .argument("<id>", "Worker id")
     .option("--json", "Print raw JSON")
     .action(async (id: string, options: { json?: boolean }) => runAction(workersInfoCommand(id, options)));
+  workers.command("contract")
+    .description("Show the canonical worker authoring contract for agents")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(workersContractCommand(options)));
+  const workerTemplates = workers.command("templates")
+    .description("List and inspect golden worker templates");
+  workerTemplates.command("list")
+    .description("List worker templates")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(workersTemplatesListCommand(options)));
+  workerTemplates.command("get")
+    .description("Show a worker template")
+    .argument("<id>", "Template id")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { json?: boolean }) => runAction(workersTemplatesGetCommand(id, options)));
   workers.command("validate")
     .description("Validate a local worker directory")
     .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
-    .action(async (dir: string) => runAction(workersValidateCommand(dir)));
+    .option("--json", "Print raw JSON")
+    .action(async (dir: string, options: { json?: boolean }) => runAction(workersValidateCommand(dir, options)));
   workers.command("push")
     .description("Create or update a worker from a local worker directory")
     .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")

@@ -39,6 +39,7 @@ import {
 } from "@/lib/run-format";
 import { stripCitationTokens } from "@/lib/strip-citations";
 import { getToolCardTitle } from "@/lib/useChatStream";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { LogEntry, RunDetail, RunFeedback, RunPart, TranscriptRow, ToolCallEntry, ApprovalEntry } from "@/lib/types";
 
 type Props = {
@@ -208,6 +209,7 @@ export function RunDetailSplitPane({
   onReplay,
   onCancel,
 }: Props) {
+  const workspaceHref = useWorkspaceHref();
   const [replayConfirmOpen, setReplayConfirmOpen] = useState(false);
   const transcriptParts = parts.length > 0 ? parts : partsFromRun(run);
   const timeline = buildTimeline(run, transcriptParts);
@@ -234,7 +236,7 @@ export function RunDetailSplitPane({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/workers?sel=${encodeURIComponent(run.worker_id)}`}
+              href={workspaceHref(`/workers?sel=${encodeURIComponent(run.worker_id)}`)}
               className={cn("min-w-0 break-words font-semibold tracking-tight sm:truncate hover:underline", inline ? "text-base" : "text-xl")}
             >
               {run.worker_name || run.worker_id}
@@ -288,7 +290,7 @@ export function RunDetailSplitPane({
           {/* N27: was "Edit" — misleading in run-detail context (users expected to
               edit the run, not the worker source). Relabelled "Edit worker" and
               link lands on the worker Source tab (same destination as before). */}
-          <Link href={`/workers?sel=${encodeURIComponent(run.worker_id)}&tab=Source`}>
+          <Link href={workspaceHref(`/workers?sel=${encodeURIComponent(run.worker_id)}&tab=Source`)}>
             <Button variant="outline" size="sm">
               <Pencil className="size-3.5 mr-1.5" />
               Edit worker
@@ -1115,6 +1117,7 @@ function ToolCallsView({ calls }: { calls: ToolCallEntry[] }) {
 }
 
 function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
+  const workspaceHref = useWorkspaceHref();
   if (!approval) {
     return <p className="text-sm text-muted-foreground">No approval required for this run.</p>;
   }
@@ -1156,7 +1159,7 @@ function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
         {approval.follow_up_run_id && (
           <p className="text-xs">
             <span className="text-muted-foreground">Follow-up run: </span>
-            <Link href={`/runs/${approval.follow_up_run_id}`} className="text-primary hover:underline font-mono">
+            <Link href={workspaceHref(`/runs/${approval.follow_up_run_id}`)} className="text-primary hover:underline font-mono">
               {approval.follow_up_run_id}
             </Link>
           </p>

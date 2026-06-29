@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -112,7 +112,7 @@ import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 import { ADVANCED_DETAIL_TABS, BASE_DETAIL_TABS } from "@/lib/workers/pinned-tabs";
 import { ADVANCED_MODE_STORAGE_KEY } from "@/lib/workers/tabs";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
-import { createWorkerHref } from "@/lib/create-worker-nav";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 function rel(ts?: string | null): string {
   if (!ts) return "—";
@@ -445,6 +445,7 @@ function useWorkerRuns(workerId: string): RunSummary[] | undefined {
 // Runs: recent runs w/ durations, link to the full Runs surface.
 function RunsTab({ w }: { w: WorkerSummary }) {
   const fetched = useWorkerRuns(w.id);
+  const workspaceHref = useWorkspaceHref();
   // Until the worker-scoped fetch resolves, fall back to the summary's last_run
   // so the tab is never momentarily empty for a worker that has run.
   const runs = fetched ?? (w.last_run ? [w.last_run] : []);
@@ -468,7 +469,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
         label={(
           <span className="flex items-center gap-2">
             <span>Recent runs</span>
-            <Link href={`/runs?worker_id=${w.id}`} className="c-vpill normal-case" style={{ padding: "4px 8px", letterSpacing: 0 }}>
+            <Link href={workspaceHref(`/runs?worker_id=${w.id}`)} className="c-vpill normal-case" style={{ padding: "4px 8px", letterSpacing: 0 }}>
               All runs →
             </Link>
           </span>
@@ -478,7 +479,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
           {runs.map((r) => (
             <Link
               key={r.id}
-              href={`/runs/${encodeURIComponent(r.id)}`}
+              href={workspaceHref(`/runs/${encodeURIComponent(r.id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto auto", gap: 12, textDecoration: "none", color: "inherit" }}
             >
@@ -1693,6 +1694,7 @@ function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
 function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => void }) {
   const [sub, setSub] = useState<SetupSubtab>("Inputs");
   const counts = useSetupSubCounts(w);
+  const workspaceHref = useWorkspaceHref();
   return (
     <div className="flex flex-col">
       {/* R9 FIX 2: the Setup second-row tabs sit DIRECTLY under the primary
@@ -1722,7 +1724,7 @@ function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => 
       <div className="c-ops-frame">
         <span>Visual worker editor</span>
         <Link
-          href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`}
+          href={workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`)}
           className="ml-auto normal-case"
           style={{ fontSize: 11, letterSpacing: 0 }}
           onClick={(e) => {
@@ -1818,6 +1820,7 @@ function WorkerDetailActions({
   canManage?: boolean;
 }) {
   const router = useRouter();
+  const workspaceHref = useWorkspaceHref();
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [editOpen, setEditOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -1868,7 +1871,7 @@ function WorkerDetailActions({
           // calm inline /run/{worker} page (schema-driven inputs + live
           // output-first run panel), the same standalone runnable surface — no
           // Dialog, no third page. See feedback/round-09/run-detail-real.md.
-          onClick={() => router.push(`/run/${encodeURIComponent(w.id)}`)}
+          onClick={() => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`))}
           title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
@@ -1907,7 +1910,7 @@ function WorkerDetailActions({
                 api.workers.duplicate(w.id)
                   .then((created) => {
                     onUpdated(detailToSummary(created));
-                    router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
+                    router.push(workspaceHref(`/workers?sel=${encodeURIComponent(created.id)}`));
                     toast.success("Worker duplicated");
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
@@ -2040,55 +2043,6 @@ function WorkerDetailActions({
   );
 }
 
-// ---- #1092: Workers empty-state inline prompt --------------------------------
-
-/**
- * A compact prompt input shown in the workers empty state so users can
- * describe what they want done and open the dedicated /workers/new page.
- */
-function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }) {
-  const [value, setValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    const trimmed = value.trim();
-    if (!trimmed) return;
-    onSubmit(trimmed);
-  }
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className="mt-4 flex w-full items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
-      style={{ maxWidth: 440 }}
-    >
-      <input
-        ref={inputRef}
-        type="text"
-        // text-ellipsis so a long *placeholder* (or value) degrades to an
-        // ellipsis on a too-narrow input instead of hard-clipping mid-word
-        // ("…want dor"). The wider max-width above lets the intended
-        // placeholder render in full at the normal empty-state width.
-        className="min-w-0 flex-1 truncate bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-        placeholder="Describe the job you want done…"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        autoComplete="off"
-      />
-      <button
-        type="submit"
-        disabled={!value.trim()}
-        className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
-        aria-label="Create worker"
-      >
-        <ArrowRight className="size-3.5" />
-      </button>
-    </form>
-  );
-}
-
-
 /**
  * A downstream host can inject a top-level view (#1006) and compose
  * `WorkersCollection` without forking the full component. The host decides
@@ -2119,6 +2073,7 @@ export default function WorkersCollection({
   extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
+  const workspaceHref = useWorkspaceHref();
   useStreamedInitialData(qk.workers(WORKERS_LIST_QUERY_OPTS), initialWorkersPromise);
   // Cache-first workers list (TanStack Query): returning to /workers renders
   // instantly from cache with no skeleton; a slow/failed refetch keeps showing
@@ -2143,10 +2098,10 @@ export default function WorkersCollection({
         safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "open");
       }
       router.replace(
-        `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
+        workspaceHref(`/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`),
       );
     },
-    [router],
+    [router, workspaceHref],
   );
 
   useEffect(() => {
@@ -2291,8 +2246,8 @@ export default function WorkersCollection({
       ],
       status: workerStatusPill(w),
       menu: [
-        { label: "Open", icon: <ArrowRight className="size-4" />, onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) },
-        { label: "Run", icon: <PlayCircle className="size-4" />, onSelect: () => router.push(`/run/${encodeURIComponent(w.id)}`) },
+        { label: "Open", icon: <ArrowRight className="size-4" />, onSelect: () => router.push(workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}`)) },
+        { label: "Run", icon: <PlayCircle className="size-4" />, onSelect: () => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`)) },
         ...(canManageWorkers ? [
           {
             label: "Duplicate",
@@ -2301,7 +2256,7 @@ export default function WorkersCollection({
               api.workers.duplicate(w.id)
                 .then((created) => {
                   setWorkers((prev) => [detailToSummary(created), ...prev]);
-                  router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
+                  router.push(workspaceHref(`/workers?sel=${encodeURIComponent(created.id)}`));
                   toast.success("Worker duplicated");
                 })
                 .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
@@ -2464,18 +2419,10 @@ export default function WorkersCollection({
         ),
       };
     },
-    // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) },
     states: {
-      // #1364 — improved help text + action CTA driving the in-Emily create flow
       empty: {
         title: "No workers yet",
-        help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
-        action: (
-          <WorkersEmptyPrompt
-            onSubmit={(prompt) => router.push(createWorkerHref(prompt))}
-          />
-        ),
+        help: "Workers are AI agents that run on a schedule, webhook, or on demand. Dashboard worker creation is temporarily unavailable; create workers from CLI/API bundles for now.",
       },
       errorRetry: () => {
         void workersQuery.refetch();

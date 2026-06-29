@@ -1,12 +1,5 @@
-// Round-09 P0 #2 — the "Hire a worker" hero must actually start worker creation,
-// not send a plain chat message that Emily may answer as a query (the live bug:
-// typing a job description + "Hire worker" listed existing workers instead of
-// drafting one).
-//
-// Fix: in create-mode, the hero submit wraps the user's job description in a
-// deterministic worker-draft directive so the backend reliably routes it to the
-// worker-authoring path (matches the engine's worker-authoring intent detector
-// and explicitly instructs Emily to draft + create + open the editor).
+// Create-mode now sends plain chat. Emily no longer drafts or creates workers
+// from natural-language prompts.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -65,32 +58,23 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
 
 import { EmilyChatCore, EmilyChatPage } from "@/components/emily/EmilyChat";
 import { buildCreateWorkerMessage } from "@/components/emily/EmilyChat";
-import { WORKER_AUTHORING_INTENT_RE } from "@/lib/emily-create-intent";
 
 const PLAIN_JOB = "Summarize a URL and email me the result.";
 
-describe("Round-09 #2 — Hire worker drafts a worker (create intent)", () => {
-  it("create-mode submit sends a worker-DRAFT directive, not the bare prompt", async () => {
+describe("Create-mode chat", () => {
+  it("create-mode submit sends the bare prompt", async () => {
     sendMessage.mockClear();
     const user = userEvent.setup();
     render(<EmilyChatCore fullPage createMode />);
 
     const composer = await screen.findByPlaceholderText("Message Emily...");
     await user.click(composer);
-    // Consistent Emily empty state: the real PromptInput composer — submit is
-    // Enter-to-send. The first create-mode send is still wrapped as a worker draft.
     await user.type(composer, PLAIN_JOB);
     await user.keyboard("{Enter}");
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const sent = sendMessage.mock.calls[0][0] as string;
-    // The raw job description is preserved verbatim inside the directive...
-    expect(sent).toContain(PLAIN_JOB);
-    // ...but it is NOT sent as a bare chat message — it carries an explicit
-    // create-worker directive so the backend routes it to worker authoring.
-    expect(sent).not.toBe(PLAIN_JOB);
-    // It must trip the engine's worker-authoring intent detector.
-    expect(WORKER_AUTHORING_INTENT_RE.test(sent)).toBe(true);
+    expect(sent).toBe(PLAIN_JOB);
   });
 
   it("default (non-create) mode sends the message unchanged", async () => {
@@ -106,13 +90,11 @@ describe("Round-09 #2 — Hire worker drafts a worker (create intent)", () => {
     expect(sendMessage.mock.calls[0][0]).toBe("What workers do I have?");
   });
 
-  it("buildCreateWorkerMessage wraps a prompt into an authoring directive", () => {
-    const wrapped = buildCreateWorkerMessage(PLAIN_JOB);
-    expect(wrapped).toContain(PLAIN_JOB);
-    expect(WORKER_AUTHORING_INTENT_RE.test(wrapped)).toBe(true);
+  it("buildCreateWorkerMessage preserves the prompt", () => {
+    expect(buildCreateWorkerMessage(PLAIN_JOB)).toBe(PLAIN_JOB);
   });
 
-  it("buildCreateWorkerMessage is idempotent — never double-wraps", () => {
+  it("buildCreateWorkerMessage is idempotent", () => {
     const once = buildCreateWorkerMessage(PLAIN_JOB);
     const twice = buildCreateWorkerMessage(once);
     expect(twice).toBe(once);

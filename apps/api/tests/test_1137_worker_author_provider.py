@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
@@ -267,6 +268,185 @@ def test_worker_author_repairs_linear_prompt_connections():
     assert manifest["connections"] == ["linear"]
 
 
+def test_worker_author_infers_latest_email_as_gmail_read_connection():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "email-opportunity-summary",
+            "title": "Email Opportunity Summary",
+            "description": "Summarises missed opportunities from email.",
+            "version": "0.1.0",
+            "trigger": {"type": "schedule"},
+            "exec": {"entry": "SKILL.md", "runner": "e2b"},
+            "connections": [],
+        },
+        prompt="Every Monday 9am, pull my latest Email and summarise missed opportunities",
+    )
+
+    assert manifest["connections"][0]["app"] == "gmail"
+    assert "GMAIL_FETCH_EMAILS" in manifest["connections"][0]["allowed_tools"]
+
+
+def test_worker_author_repairs_gmail_agent_skill_tool_instructions():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-hourly-summarizer"
+title: "Gmail Hourly Summarizer"
+description: "Summarises recent Gmail messages."
+version: "0.1.0"
+trigger:
+  type: "schedule"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+connections: []
+""",
+            "skill_md": "# Gmail Hourly Summarizer\n\nSummarise the latest messages.\n\nCall `finish_with_outputs({...})` when done.",
+            "suggested_id": "gmail-hourly-summarizer",
+        },
+        "Every hour, pull my latest Gmail and summarize missed opportunities.",
+    )
+
+    manifest = yaml.safe_load(parsed["worker_yml"])
+    assert manifest["connections"][0]["app"] == "gmail"
+    assert "GMAIL_FETCH_EMAILS" in manifest["connections"][0]["allowed_tools"]
+    assert "composio__gmail__execute" in parsed["skill_md"]
+    assert "GMAIL_FETCH_EMAILS" in parsed["skill_md"]
+    assert worker_author._validate_generated_bundle(parsed, "Every hour, pull my latest Gmail.") is None
+
+
+def test_worker_author_repairs_missing_operator_output():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "gmail-missed-opportunities",
+            "title": "Gmail Missed Opportunities",
+            "description": "Summarises missed opportunities from Gmail.",
+            "version": "0.1.0",
+            "trigger": {"type": "schedule"},
+            "exec": {"entry": "SKILL.md", "runner": "e2b"},
+            "connections": [],
+        },
+        prompt="Every Monday 9am, pull my latest Gmail and summarize missed opportunities.",
+    )
+
+    outputs = manifest["exec"]["outputs"]
+    assert outputs == [
+        {
+            "name": "summary",
+            "kind": "scalar",
+            "type": "markdown",
+            "required": True,
+            "label": "Summary",
+        }
+    ]
+
+
+def test_worker_author_does_not_add_missing_output_to_script_workers():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "script-worker",
+            "title": "Script Worker",
+            "description": "Runs Python code.",
+            "version": "0.1.0",
+            "trigger": {"type": "manual"},
+            "exec": {"entry": "run.py", "runner": "e2b"},
+            "connections": [],
+        },
+        prompt="Run a Python worker.",
+    )
+
+    assert "outputs" not in manifest["exec"]
+
+
+def test_worker_author_repairs_known_integration_tools_generically():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "calendar-slack-brief",
+            "title": "Calendar Slack Brief",
+            "description": "Summarises calendar events and Slack messages.",
+            "version": "0.1.0",
+            "trigger": {"type": "manual"},
+            "exec": {"entry": "SKILL.md", "runner": "e2b"},
+            "connections": [],
+        },
+        prompt="Create a Google Calendar and Slack digest worker",
+    )
+
+    by_app = {item["app"]: item for item in manifest["connections"]}
+    assert "GOOGLECALENDAR_EVENTS_LIST" in by_app["googlecalendar"]["allowed_tools"]
+    assert "SLACK_FETCH_CONVERSATION_HISTORY" in by_app["slack"]["allowed_tools"]
+
+
+def test_worker_author_verifier_flags_missing_generic_tool_instruction():
+    worker_author = _load_worker_author_module()
+    issues = worker_author._deterministic_verifier_issues(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "calendar-brief"
+title: "Calendar Brief"
+description: "Summarises Google Calendar events."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "googlecalendar"
+    allowed_tools:
+      - "GOOGLECALENDAR_EVENTS_LIST"
+""",
+            "skill_md": "# Calendar Brief\n\nSummarise events without naming tools.",
+        },
+        "Summarize my Google Calendar",
+    )
+
+    assert any("composio__googlecalendar__execute" in issue for issue in issues)
+
+
+def test_worker_author_model_verifier_returns_structured_issues(monkeypatch):
+    worker_author = _load_worker_author_module()
+
+    def fake_codegen_chat(**_kwargs):
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content='{"ok": false, "issues": ["SKILL.md invents a tool"]}'
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(worker_author, "_codegen_chat", fake_codegen_chat)
+
+    issues = worker_author._verify_bundle_with_model(
+        {
+            "worker_yml": 'schema_version: "0.3"\nname: "x"\n',
+            "skill_md": "# X",
+        },
+        "Create a worker",
+        lambda *_args, **_kwargs: None,
+    )
+
+    assert issues == ["SKILL.md invents a tool"]
+
+
 def test_worker_author_preserves_existing_connection_objects_when_inferring_prompt_apps():
     worker_author = _load_worker_author_module()
     manifest = worker_author._repair_generated_worker_manifest(
@@ -283,10 +463,10 @@ def test_worker_author_preserves_existing_connection_objects_when_inferring_prom
         prompt="Create a GitHub PR digest and send it to Slack",
     )
 
-    assert manifest["connections"] == [
-        {"app": "github", "allowed_tools": ["GITHUB_LIST_PULL_REQUESTS"]},
-        "slack",
-    ]
+    by_app = {item["app"]: item for item in manifest["connections"]}
+    assert "GITHUB_LIST_PULL_REQUESTS" in by_app["github"]["allowed_tools"]
+    assert "GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS" in by_app["github"]["allowed_tools"]
+    assert "SLACK_FETCH_CONVERSATION_HISTORY" in by_app["slack"]["allowed_tools"]
 
 
 def test_worker_author_moves_api_key_inputs_to_exec_secrets():

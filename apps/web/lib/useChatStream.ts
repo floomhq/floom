@@ -16,7 +16,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
-import type { AttachedFile, ChatMessage } from "./emily-chat-types";
+import { withWorkspaceParam, type WorkspaceSearchParams } from "@/lib/workspaceHref";
+import type { AttachedFile, CardAction, ChatMessage } from "./emily-chat-types";
 import {
   CONVERSATION_STORAGE_KEY,
   readStoredConversationId,
@@ -41,6 +42,20 @@ export interface ChatStreamState {
 }
 
 const GENERIC_CHAT_ERROR = "Emily could not complete that request.";
+const WORKER_SCOPED_CARD_HREF = /^\/(?:workers(?:[/?#]|$)|run\/|runs\/)/;
+
+function withWorkspaceCardHref(href: string, searchParams?: WorkspaceSearchParams): string {
+  if (!WORKER_SCOPED_CARD_HREF.test(href)) return href;
+  return withWorkspaceParam(href, searchParams);
+}
+
+function withWorkspaceCardActions(actions: CardAction[] | undefined, searchParams?: WorkspaceSearchParams): CardAction[] | undefined {
+  if (!actions) return actions;
+  return actions.map((action) => ({
+    ...action,
+    href: withWorkspaceCardHref(action.href, searchParams),
+  }));
+}
 
 function looksInternalErrorMessage(message: string): boolean {
   const trimmed = message.trim();
@@ -472,7 +487,11 @@ export interface RunFinishPart {
   worker_creation_failed?: boolean;
 }
 
-export function reconcileRunCardFinishPart(card: ToolCard, part: RunFinishPart): ToolCard {
+export function reconcileRunCardFinishPart(
+  card: ToolCard,
+  part: RunFinishPart,
+  searchParams?: WorkspaceSearchParams,
+): ToolCard {
   const finalStatus = part.status === "completed" ? "completed" : "failed";
   const createdWorkerId = optionalString(part.created_worker_id);
   const normalizedTool =
@@ -507,7 +526,7 @@ export function reconcileRunCardFinishPart(card: ToolCard, part: RunFinishPart):
             id: "open_worker",
             label: "Open worker",
             method: "GET" as const,
-            href: `/workers/${encodeURIComponent(createdWorkerId)}?edit=1`,
+            href: withWorkspaceParam(`/workers/${encodeURIComponent(createdWorkerId)}?edit=1`, searchParams),
           },
         ],
       } satisfies WorkerCreateCard;
@@ -543,7 +562,7 @@ export function reconcileRunCardFinishPart(card: ToolCard, part: RunFinishPart):
           id: "open_worker",
           label: "Open worker",
           method: "GET" as const,
-          href: `/workers/${encodeURIComponent(createdWorkerId)}?edit=1`,
+          href: withWorkspaceParam(`/workers/${encodeURIComponent(createdWorkerId)}?edit=1`, searchParams),
         },
       ],
     } satisfies RunCard;
@@ -905,7 +924,8 @@ export function workerRowsFromResult(
 
 function workerListCardFromResult(
   event: Extract<ChatSSEEvent, { type: "tool-result" }>,
-  existing: ToolCard
+  existing: ToolCard,
+  searchParams?: WorkspaceSearchParams,
 ): WorkerListCard | null {
   const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
   const isWorkerList =
@@ -919,7 +939,7 @@ function workerListCardFromResult(
     callId: existing.callId,
     card_id: existing.card_id,
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "completed")),
-    actions: event.actions,
+    actions: withWorkspaceCardActions(event.actions, searchParams),
     streams: event.streams,
     args: existing.args ?? ("preview" in existing ? existing.preview : undefined),
     result: event.result,
@@ -929,7 +949,8 @@ function workerListCardFromResult(
 
 function runCardFromResult(
   event: Extract<ChatSSEEvent, { type: "tool-result" }>,
-  existing: ToolCard
+  existing: ToolCard,
+  searchParams?: WorkspaceSearchParams,
 ): RunCard | null {
   const result = asRecord(event.result);
   const nestedRun = asRecord(result?.run);
@@ -957,16 +978,16 @@ function runCardFromResult(
     (normalizedTool === "workers.create_from_prompt" ? "Creating worker" : workerId ?? "Worker run");
   const actions =
     event.actions && event.actions.length > 0
-      ? event.actions
+      ? withWorkspaceCardActions(event.actions, searchParams)
       : existing.actions && existing.actions.length > 0
-        ? existing.actions
+        ? withWorkspaceCardActions(existing.actions, searchParams)
         : normalizedTool === "runs.get"
           ? [
               {
                 id: "open_run",
                 label: "View run",
                 method: "GET" as const,
-                href: `/runs/${encodeURIComponent(runId)}?tab=logs`,
+                href: withWorkspaceParam(`/runs/${encodeURIComponent(runId)}?tab=logs`, searchParams),
               },
             ]
           : normalizedTool === "workers.create_from_prompt"
@@ -975,7 +996,7 @@ function runCardFromResult(
                   id: "open_run",
                   label: "View progress",
                   method: "GET" as const,
-                  href: `/runs/${encodeURIComponent(runId)}?tab=logs`,
+                  href: withWorkspaceParam(`/runs/${encodeURIComponent(runId)}?tab=logs`, searchParams),
                 },
               ]
           : event.actions;
@@ -998,7 +1019,8 @@ function runCardFromResult(
 
 function workerCreateCardFromResult(
   event: Extract<ChatSSEEvent, { type: "tool-result" }>,
-  existing: ToolCard
+  existing: ToolCard,
+  searchParams?: WorkspaceSearchParams,
 ): WorkerCreateCard | null {
   const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
   if (normalizedTool !== "workers.create_from_prompt") return null;
@@ -1015,7 +1037,7 @@ function workerCreateCardFromResult(
     title: "Creating worker",
     workerName: "Creating worker",
     step: event.isError ? "failed" : "drafting",
-    actions: event.actions,
+    actions: withWorkspaceCardActions(event.actions, searchParams),
     streams: event.streams,
     args: existing.args ?? ("preview" in existing ? existing.preview : undefined),
     result: event.result,
@@ -1024,9 +1046,10 @@ function workerCreateCardFromResult(
 
 function toolCardFromResult(
   event: Extract<ChatSSEEvent, { type: "tool-result" }>,
-  existing: ToolCard
+  existing: ToolCard,
+  searchParams?: WorkspaceSearchParams,
 ): ToolCard | null {
-  return workerListCardFromResult(event, existing) ?? workerCreateCardFromResult(event, existing) ?? runCardFromResult(event, existing);
+  return workerListCardFromResult(event, existing, searchParams) ?? workerCreateCardFromResult(event, existing, searchParams) ?? runCardFromResult(event, existing, searchParams);
 }
 
 function toolCardToolName(card: ToolCard): string | null {
@@ -1089,7 +1112,8 @@ function connectionCardFromActionRequired(
 function materializeToolCardFromFollowup(
   event: ToolFollowupEvent,
   cardId: string,
-  status: CardStatus
+  status: CardStatus,
+  searchParams?: WorkspaceSearchParams,
 ): ToolCard {
   const connectionCard = connectionCardFromActionRequired(event, cardId);
   if (connectionCard) return connectionCard;
@@ -1108,7 +1132,7 @@ function materializeToolCardFromFollowup(
     toolName,
     title,
     status,
-    ...(event.actions ? { actions: event.actions } : {}),
+    ...(event.actions ? { actions: withWorkspaceCardActions(event.actions, searchParams) } : {}),
     ...("streams" in event && event.streams ? { streams: event.streams } : {}),
   };
 }
@@ -1134,7 +1158,8 @@ function resolveCardId(
 export function reduceSSEEvent(
   prev: ChatMessage[],
   event: ChatSSEEvent,
-  assistantMsgId: string
+  assistantMsgId: string,
+  searchParams?: WorkspaceSearchParams,
 ): ChatMessage[] {
   switch (event.type) {
     case "chat.meta":
@@ -1198,7 +1223,7 @@ export function reduceSSEEvent(
         status,
         ...(event.resource ? {} : {}),
         ...(event.streams ? { streams: event.streams } : {}),
-        ...(event.actions ? { actions: event.actions } : {}),
+        ...(event.actions ? { actions: withWorkspaceCardActions(event.actions, searchParams) } : {}),
       };
       const newPart: MsgPart = { type: "tool-card", card };
       const existing = prev.find((m) => m.id === assistantMsgId);
@@ -1253,7 +1278,7 @@ export function reduceSSEEvent(
               : newStatus !== undefined && toolName
                 ? { title: getToolCardTitle(toolName, newStatus) }
                 : {}),
-            ...(event.actions ? { actions: event.actions } : {}),
+            ...(event.actions ? { actions: withWorkspaceCardActions(event.actions, searchParams) } : {}),
             ...("streams" in event && event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
           return { type: "tool-card" as const, card: updatedCard };
@@ -1265,7 +1290,7 @@ export function reduceSSEEvent(
       const materializedStatus = newStatus ?? "running";
       const newPart: MsgPart = {
         type: "tool-card",
-        card: materializeToolCardFromFollowup(event, cardId, materializedStatus),
+        card: materializeToolCardFromFollowup(event, cardId, materializedStatus, searchParams),
       };
       if (hasTargetAssistant) {
         return updated.map((m) =>
@@ -1289,7 +1314,7 @@ export function reduceSSEEvent(
         if (m.role !== "assistant" || !m.parts) return m;
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
-          const specializedCard = toolCardFromResult(event, p.card);
+          const specializedCard = toolCardFromResult(event, p.card, searchParams);
           if (specializedCard) return { type: "tool-card" as const, card: specializedCard };
           const status = event.card?.status ?? (event.isError ? "failed" : "completed");
           const toolName = toolCardToolName(p.card);
@@ -1303,7 +1328,7 @@ export function reduceSSEEvent(
                 : {}),
             result: event.result,
             isError: event.isError,
-            ...(event.actions ? { actions: event.actions } : {}),
+            ...(event.actions ? { actions: withWorkspaceCardActions(event.actions, searchParams) } : {}),
             ...(event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
           return { type: "tool-card" as const, card: updatedCard };
@@ -1429,9 +1454,9 @@ export function shouldAutoOpenCreatedWorker(card: ToolCard): card is RunCard | W
   );
 }
 
-export function getAutoOpenCreatedWorkerHref(card: ToolCard): string | null {
+export function getAutoOpenCreatedWorkerHref(card: ToolCard, searchParams?: WorkspaceSearchParams): string | null {
   return shouldAutoOpenCreatedWorker(card) && card.workerId
-    ? `/workers/${encodeURIComponent(card.workerId)}?edit=1`
+    ? withWorkspaceParam(`/workers/${encodeURIComponent(card.workerId)}?edit=1`, searchParams)
     : null;
 }
 
@@ -1442,9 +1467,9 @@ export function safeRunPartsStreamPath(path: unknown): string | null {
   return trimmed;
 }
 
-export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
+export function getAutoOpenRunDetailsHref(card: ToolCard, searchParams?: WorkspaceSearchParams): string | null {
   return shouldAutoOpenRunDetails(card) && card.runId
-    ? `/runs/${encodeURIComponent(card.runId)}?tab=logs`
+    ? withWorkspaceParam(`/runs/${encodeURIComponent(card.runId)}?tab=logs`, searchParams)
     : null;
 }
 
@@ -1465,9 +1490,10 @@ export type RunAutoOpenDecision =
 export function decideRunAutoOpen(
   card: ToolCard,
   createMode: boolean,
+  searchParams?: WorkspaceSearchParams,
 ): RunAutoOpenDecision {
   if (!shouldAutoOpenRunDetails(card)) return { action: "skip" };
-  const href = getAutoOpenRunDetailsHref(card);
+  const href = getAutoOpenRunDetailsHref(card, searchParams);
   const runId = card.runId;
   if (!href || !runId) return { action: "skip" };
   if (createMode) return { action: "suppress", runId };
@@ -1477,27 +1503,27 @@ export function decideRunAutoOpen(
 // #825: Emily's answers link to app pages as REAL router hrefs (no DOM access /
 // page driving — links only). Generalizes getAutoOpenRunDetailsHref across every
 // card kind to its in-app route, or null when there's nothing concrete to open.
-export function getCardHref(card: ToolCard): string | null {
+export function getCardHref(card: ToolCard, searchParams?: WorkspaceSearchParams): string | null {
   switch (card.kind) {
     case "worker-create":
-      return card.workerId ? getAutoOpenCreatedWorkerHref(card) : null;
+      return card.workerId ? getAutoOpenCreatedWorkerHref(card, searchParams) : null;
     case "run":
       if (
         normalizeToolName(card.toolName || "") === "workers.create_from_prompt" &&
         card.status === "completed" &&
         card.workerId
       ) {
-        return getAutoOpenCreatedWorkerHref(card);
+        return getAutoOpenCreatedWorkerHref(card, searchParams);
       }
-      return card.runId ? `/runs/${encodeURIComponent(card.runId)}` : null;
+      return card.runId ? withWorkspaceParam(`/runs/${encodeURIComponent(card.runId)}`, searchParams) : null;
     case "artifact":
-      return card.runId ? `/runs/${encodeURIComponent(card.runId)}?tab=output` : null;
+      return card.runId ? withWorkspaceParam(`/runs/${encodeURIComponent(card.runId)}?tab=output`, searchParams) : null;
     case "approval":
       return card.approvalId ? `/approvals?sel=${card.approvalId}` : "/approvals";
     case "connect-service":
       return "/connections";
     case "worker-list":
-      return "/workers";
+      return withWorkspaceParam("/workers", searchParams);
     case "runs-list":
       return "/runs";
     default:

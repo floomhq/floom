@@ -474,3 +474,100 @@ def test_composio_proxy_enforces_read_only_scope(monkeypatch, tmp_path):
     assert "outside the worker connection scope" in write_resp.json()["detail"]
     assert len(calls) == 1
     db.get_repositories.cache_clear()
+
+
+def test_composio_proxy_uses_scoped_recipe_when_unscoped_cache_is_stale(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    repos = db.get_repositories()
+    worker_id = "gmail-worker"
+    workspace_id = "ws-gmail"
+    manifest = {
+        "id": worker_id,
+        "name": "Gmail Worker",
+        "trigger": {"type": "manual"},
+        "runtime": {"type": "python", "entrypoint": "run.py", "runner": "e2b"},
+        "connections": [{"app": "gmail", "allowed_tools": ["GMAIL_FETCH_EMAILS"]}],
+    }
+    repos.workers.create(
+        user_id="owner-a",
+        worker_id=worker_id,
+        name="Gmail Worker",
+        manifest_json=manifest,
+        bundle_path="workers/gmail-worker",
+        workspace_id=workspace_id,
+    )
+    repos.runs.create(
+        user_id="owner-a",
+        run_id="run-gmail",
+        worker_id=worker_id,
+        status="running",
+        trigger_source="manual",
+        runner="e2b",
+    )
+    repos.connections.upsert(
+        user_id="owner-a",
+        id="conn-row",
+        app_name="gmail",
+        composio_connection_id="ca_gmail",
+        status="active",
+    )
+
+    from db.sqlite import _recipe_cache
+    from models import WorkerConfig, WorkerRuntime, WorkerTrigger
+
+    stale_config = WorkerConfig(
+        id=worker_id,
+        name="Stale Gmail Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python", runner="e2b", entrypoint="run.py"),
+        connections=[],
+    )
+    stale_recipe = {
+        "config": stale_config,
+        "grants": {},
+        "input_values": {},
+        "enabled": True,
+        "owner_id": "owner-a",
+        "bundle_path": "workers/gmail-worker",
+        "manifest_json": {},
+    }
+    original_get_worker_config_for_run = main.get_worker_config_for_run
+    captured_kwargs = {}
+
+    def get_worker_config_with_stale_cache(worker_id_arg, **kwargs):
+        captured_kwargs.update(kwargs)
+        token = _recipe_cache.set({worker_id: stale_recipe})
+        try:
+            return original_get_worker_config_for_run(worker_id_arg, **kwargs)
+        finally:
+            _recipe_cache.reset(token)
+
+    captured_post = {}
+
+    class _Response:
+        def json(self):
+            return {"successful": True, "data": {"messages": []}}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured_post["url"] = url
+        captured_post["json"] = json
+        return _Response()
+
+    monkeypatch.setattr(main, "get_worker_config_for_run", get_worker_config_with_stale_cache)
+    monkeypatch.setattr("requests.post", fake_post)
+
+    client = TestClient(main.app)
+    resp = client.post(
+        "/runs/run-gmail/composio-execute/GMAIL_FETCH_EMAILS",
+        headers=_run_headers("run-gmail"),
+        json={"connected_account_id": "ca_gmail", "arguments": {"query": "is:unread"}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured_kwargs["repos"] is repos
+    assert captured_kwargs["user_id"] == "owner-a"
+    assert captured_kwargs["workspace_id"] == workspace_id
+    assert captured_post["url"].endswith("/GMAIL_FETCH_EMAILS")
+    assert captured_post["json"]["connected_account_id"] == "ca_gmail"
+    assert captured_post["json"]["entity_id"] == "owner-a"
+    db.get_repositories.cache_clear()

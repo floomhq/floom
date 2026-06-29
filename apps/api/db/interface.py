@@ -863,6 +863,28 @@ class RunFeedbackRepository(Protocol):
     def mark_issue_created(self, *, feedback_id: str, issue_id: str) -> RowDict | None: ...
 
 
+class WorkerRuleRepository(Protocol):
+    """Durable worker-level rules learned from reviewer feedback."""
+
+    def upsert(
+        self,
+        *,
+        rule_id: str,
+        workspace_id: str,
+        worker_id: str,
+        rule_text: str,
+        rule_hash: str,
+        source: str,
+        source_ref: str | None,
+        run_id: str | None,
+        approval_id: str | None,
+        created_by: str,
+        created_at: str,
+    ) -> RowDict: ...
+
+    def list_active(self, *, workspace_id: str, worker_id: str) -> list[RowDict]: ...
+
+
 class ShareLinkRepository(Protocol):
     def create_approvals_batch_share(
         self,

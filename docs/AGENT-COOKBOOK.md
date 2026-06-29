@@ -488,9 +488,19 @@ workers.get({ id: "text-summarizer" })
 
 ### workers.create
 
-**Args:** `{ worker_yml, run_py }`
-- MCP creation currently accepts script-mode Python source. Use CLI
-  `floom workers push <dir>` for `SKILL.md` agent-mode bundles.
+Before calling create, call:
+
+1. `workers.contract()`
+2. `workers.templates.list()`
+3. `workers.templates.get({ id })`
+4. `workers.validate({ worker_yml, run_py?, skill_md? })`
+
+Repair every validation error before creating the worker.
+
+**Args:** `{ worker_yml, run_py?, skill_md? }`
+- Script-mode workers must provide `run_py` that reads `inputs.json` and writes
+  `result.json`.
+- Agent-mode workers must provide `skill_md` and declare `exec.entry: SKILL.md`.
 
 **Returns:** `{ worker: { id, ... } }`
 

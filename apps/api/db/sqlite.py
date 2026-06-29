@@ -126,8 +126,9 @@ def _public_stock_worker_ids() -> frozenset[str]:
 _last_run_batch: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "_workeros_last_run_batch", default=None
 )
-_recipe_cache: contextvars.ContextVar[dict[str, dict[str, Any] | None] | None] = contextvars.ContextVar(
-    "_workeros_recipe_cache", default=None
+_RecipeCacheKey = str | tuple[str, str | None, str | None]
+_recipe_cache: contextvars.ContextVar[dict[_RecipeCacheKey, dict[str, Any] | None] | None] = (
+    contextvars.ContextVar("_workeros_recipe_cache", default=None)
 )
 
 # Per-asset visibility default. Private-by-default matches the Codex design
@@ -738,17 +739,18 @@ class SqliteWorkerRepository:
                 ).fetchall()
         # Parse manifest_json once per row; share the result between the worker
         # record and the recipe cache to avoid a second json.loads per worker.
-        cache: dict[str, dict[str, Any] | None] = {}
+        cache: dict[_RecipeCacheKey, dict[str, Any] | None] = {}
         records = []
         for row in rows:
             wid = str(row["id"])
+            cache_key = (wid, None, None)
             config = _config_from_manifest_row(row)
             # _worker_record_from_row also calls json.loads internally; supply the
             # already-parsed dict via a thin wrapper to avoid the duplicate parse.
             records.append(_worker_record_from_row(row))
             if config is not None:
                 _mj = json.loads(row["manifest_json"] or "{}")
-                cache[wid] = {
+                cache[cache_key] = {
                     "config": config,
                     "grants": _json_load(row["grants_json"], {}),
                     "input_values": _json_load(row["input_values_json"], {}),
@@ -758,7 +760,7 @@ class SqliteWorkerRepository:
                     "manifest_json": {k: v for k, v in _mj.items() if k != "_files"},
                 }
             else:
-                cache[wid] = None
+                cache[cache_key] = None
         _recipe_cache.set(cache)
         return records
 
@@ -1535,9 +1537,15 @@ class SqliteWorkerRepository:
         workspace_id: str | None = None,
     ) -> dict[str, Any] | None:
         cache = _recipe_cache.get()
-        if cache is not None and worker_id in cache:
+        user_scope = str(user_id).strip() if user_id else None
+        workspace_scope = str(workspace_id).strip() if workspace_id else None
+        cache_key: _RecipeCacheKey = (worker_id, user_scope or None, workspace_scope or None)
+        legacy_unscoped_key = worker_id if user_scope is None and workspace_scope is None else None
+        if cache is not None and cache_key in cache:
             # Cache hit — return what was pre-fetched by list().
-            return cache[worker_id]
+            return cache[cache_key]
+        if cache is not None and legacy_unscoped_key is not None and legacy_unscoped_key in cache:
+            return cache[legacy_unscoped_key]
         # Cache miss (cache absent OR worker created after list() was called):
         # fall through to a direct DB query rather than returning None.
         where = "WHERE w.id = ?"
@@ -4397,6 +4405,78 @@ class SqliteRunFeedbackRepository:
                 (issue_id, feedback_id),
             )
         return self.get(feedback_id=feedback_id)
+
+
+class SqliteWorkerRuleRepository:
+    """SQLite implementation of durable worker-level rules learned from feedback."""
+
+    _cols = (
+        "id, workspace_id, worker_id, rule_text, rule_hash, source, source_ref, "
+        "run_id, approval_id, created_by, created_at, archived_at"
+    )
+
+    def upsert(
+        self,
+        *,
+        rule_id: str,
+        workspace_id: str,
+        worker_id: str,
+        rule_text: str,
+        rule_hash: str,
+        source: str,
+        source_ref: str | None,
+        run_id: str | None,
+        approval_id: str | None,
+        created_by: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO worker_rules
+                    (id, workspace_id, worker_id, rule_text, rule_hash, source,
+                     source_ref, run_id, approval_id, created_by, created_at, archived_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(workspace_id, worker_id, rule_hash) DO UPDATE SET
+                    archived_at = NULL
+                """,
+                (
+                    rule_id,
+                    workspace_id,
+                    worker_id,
+                    rule_text,
+                    rule_hash,
+                    source,
+                    source_ref,
+                    run_id,
+                    approval_id,
+                    created_by,
+                    created_at,
+                ),
+            )
+            row = conn.execute(
+                f"""
+                SELECT {self._cols}
+                FROM worker_rules
+                WHERE workspace_id = ? AND worker_id = ? AND rule_hash = ?
+                LIMIT 1
+                """,
+                (workspace_id, worker_id, rule_hash),
+            ).fetchone()
+        return _row_dict(row) if row else {}
+
+    def list_active(self, *, workspace_id: str, worker_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {self._cols}
+                FROM worker_rules
+                WHERE workspace_id = ? AND worker_id = ? AND archived_at IS NULL
+                ORDER BY created_at, id
+                """,
+                (workspace_id, worker_id),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
 
 
 class SqliteMcpToolRepository:
