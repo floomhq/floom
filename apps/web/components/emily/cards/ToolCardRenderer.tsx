@@ -3,6 +3,7 @@ import { ArrowUpRight } from "lucide-react";
 import type { ToolCard } from "@/lib/emily-chat-types";
 import { Tool } from "@/components/ai-elements/tool";
 import { getCardHref, getToolCardTitle } from "@/lib/useChatStream";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import { WorkerCreateCard } from "./WorkerCreateCard";
 import { RunCard } from "./RunCard";
 import { ConnectServiceCard } from "./ConnectServiceCard";
@@ -54,7 +55,22 @@ function toolIsError(card: ToolCard): boolean {
   return card.status === "failed" || card.status === "error" || card.status === "cancelled";
 }
 
+function toolDefaultOpen(card: ToolCard): boolean {
+  if (card.kind !== "run" && card.kind !== "worker-create") return false;
+  return (
+    card.status === "running" ||
+    card.status === "starting" ||
+    card.status === "queued" ||
+    card.status === "drafting" ||
+    card.status === "generating" ||
+    card.status === "smoke" ||
+    card.status === "pending_approval" ||
+    card.status === "loading"
+  );
+}
+
 export function ToolCardRenderer({ card }: { card: ToolCard }) {
+  const workspaceHref = useWorkspaceHref();
   const body = renderCard(card);
   if (!body) return null;
   if (card.kind === "approval") {
@@ -63,6 +79,7 @@ export function ToolCardRenderer({ card }: { card: ToolCard }) {
   // #825: Emily's answers link to app pages as real router hrefs (links only —
   // no DOM access / page driving).
   const href = getCardHref(card);
+  const resolvedHref = href ? workspaceHref(href) : null;
   return (
     <div className="space-y-1">
       {card.kind === "generic" ? (
@@ -76,13 +93,14 @@ export function ToolCardRenderer({ card }: { card: ToolCard }) {
           callId={card.callId}
           status={card.status}
           duration={card.duration}
+          defaultOpen={toolDefaultOpen(card)}
         >
           {body}
         </Tool>
       )}
-      {href && (
+      {resolvedHref && (
         <Link
-          href={href}
+          href={resolvedHref}
           className="inline-flex items-center gap-1 px-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           Open in app <ArrowUpRight size={12} />

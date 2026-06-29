@@ -1115,6 +1115,16 @@ def create_run(
             time.sleep(0.05 * (attempt + 1))
     if last_exc is not None:
         raise last_exc
+    bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
+    if bundle_snapshot_path is not None:
+        try:
+            repos_obj.runs.set_bundle_snapshot_path(
+                user_id=owner_id,
+                run_id=run_id,
+                bundle_snapshot_path=bundle_snapshot_path,
+            )
+        except Exception as exc:
+            logger.warning("Run %s bundle snapshot persist failed: %s", run_id, exc)
     logger.info("Created run %s for worker %s (runner=%s)", run_id, worker_id, runner)
     return run_id
 
@@ -3127,7 +3137,12 @@ def execute_run(
             logger.warning("Worker re-materialization failed for %s: %s", worker_id, _rmat_exc)
             perf.mark("rematerialize_error")
 
-        _snapshot_worker_bundle_background(run_id, worker_id, config, owner_id=owner_id)
+        try:
+            existing_bundle_snapshot_path = repos_obj.runs.get_bundle_snapshot_path(user_id=owner_id, run_id=run_id)
+        except Exception:
+            existing_bundle_snapshot_path = None
+        if not existing_bundle_snapshot_path:
+            _snapshot_worker_bundle_background(run_id, worker_id, config, owner_id=owner_id)
         perf.mark("bundle_snapshot_dispatch")
 
         # Dispatch to the appropriate sandbox driver based on worker config.

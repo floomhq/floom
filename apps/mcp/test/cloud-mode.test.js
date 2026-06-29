@@ -458,6 +458,49 @@ test("doctor accepts cloud PAT credentials and uses shared client headers", asyn
   });
 });
 
+test("doctor first run defaults to hosted Floom and points login at cloud", async () => {
+  await withTempHome(async () => {
+    const originalStdout = process.stdout.write.bind(process.stdout);
+    const originalFetch = globalThis.fetch;
+    const originalFloomBase = process.env.FLOOM_API_BASE;
+    let stdout = "";
+    const urls = [];
+    try {
+      delete process.env.WORKEROS_API_BASE;
+      delete process.env.FLOOM_API_BASE;
+      delete process.env.WORKEROS_API_TOKEN;
+      delete process.env.WORKEROS_API_SECRET;
+      delete process.env.WORKEROS_CLOUD;
+      process.stdout.write = (chunk) => {
+        stdout += typeof chunk === "string" ? chunk : chunk.toString();
+        return true;
+      };
+      globalThis.fetch = async (url) => {
+        urls.push(String(url));
+        return new Response(JSON.stringify({ status: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      };
+
+      const code = await doctorCommand({ json: true });
+      assert.equal(code, 1);
+      const body = JSON.parse(stdout);
+      assert.equal(body.ok, false);
+      assert.ok(urls.includes("https://workeros-api.floom.dev/api/health"));
+      const auth = body.checks.find((check) => check.name === "auth");
+      assert.equal(auth.hint, "Run: floom login --cloud");
+      const recentRuns = body.checks.find((check) => check.name === "recent_runs");
+      assert.equal(recentRuns.hint, "Run: floom login --cloud");
+    } finally {
+      process.stdout.write = originalStdout;
+      globalThis.fetch = originalFetch;
+      if (originalFloomBase === undefined) delete process.env.FLOOM_API_BASE;
+      else process.env.FLOOM_API_BASE = originalFloomBase;
+    }
+  });
+});
+
 test("whoami prints hosted account identity from auth/me", async () => {
   await withTempHome(async () => {
     const seen = [];

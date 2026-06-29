@@ -92,7 +92,7 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
     assert body["model"] == "gpt-5-mini"
     assert body["base_persona"].startswith("# Emily")
     assert "Worker authoring rules" not in body["base_persona"]
-    assert "## Worker authoring rules" in body["worker_authoring_rules"]
+    assert body["worker_authoring_rules"] == ""
     assert body["channels"]["slack"] == {
         "events_configured": False,
         "bot_configured": False,
@@ -293,7 +293,7 @@ def test_bare_greeting_identity_guard_leaves_specific_requests_alone():
     assert chat_service._ensure_bare_greeting_identity("Run the first worker", reply) == reply
 
 
-def test_worker_authoring_rules_are_gated_by_message_intent(client_and_main):
+def test_worker_authoring_rules_are_not_injected_by_message_intent(client_and_main):
     _client, _main = client_and_main
     import chat_service
 
@@ -305,7 +305,7 @@ def test_worker_authoring_rules_are_gated_by_message_intent(client_and_main):
     )
 
     assert "## Worker authoring rules" not in casual
-    assert "## Worker authoring rules" in authoring
+    assert "## Worker authoring rules" not in authoring
 
     sample_skill = (
         "# Workspace Agent\n\n"
@@ -324,7 +324,8 @@ def test_worker_authoring_rules_are_gated_by_message_intent(client_and_main):
     )
     assert "## Floom worker.yml format" not in casual_skill
     assert "## Workspace-management tools" in casual_skill
-    assert "## Floom worker.yml format" in authoring_skill
+    assert "## Floom worker.yml format" not in authoring_skill
+    assert "## Workspace-management tools" in authoring_skill
 
 
 def test_emily_persona_investigation_mode_blocks_partial_status_dumps():

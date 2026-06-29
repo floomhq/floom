@@ -192,26 +192,25 @@ def test_audit_runs_hidden_by_default_but_visible_with_include_system(monkeypatc
 # fetch GET /runs/{id} + /logs to drive the GeneratingPanel. PR #231/#235 made
 # those 404 by reusing the LIST visibility filter on single-run fetch.
 # ---------------------------------------------------------------------------
-def _insert_run_for_worker(main, *, worker_id: str) -> str:
+def _insert_run_for_worker(main, *, worker_id: str, actor_user_id: str = "user-a") -> str:
     """Insert a completed run row for an already-created worker (FK satisfied)."""
     from db import get_db
 
     run_id = f"run_{uuid.uuid4().hex[:12]}"
     with get_db() as conn:
         conn.execute(
-            """INSERT INTO runs (id, worker_id, status, trigger_source, runner,
+            """INSERT INTO runs (id, worker_id, actor_user_id, status, trigger_source, runner,
                input_json, output_json, created_at)
-               VALUES (?, ?, 'completed', 'manual', 'e2b', '{}', '{}', datetime('now'))""",
-            (run_id, worker_id),
+               VALUES (?, ?, ?, 'completed', 'manual', 'e2b', '{}', '{}', datetime('now'))""",
+            (run_id, worker_id, actor_user_id),
         )
     return run_id
 
 
-def test_worker_author_run_fetchable_by_explicit_id_but_hidden_from_list(monkeypatch, tmp_path):
-    """worker-author (the generation meta-worker) is hidden from the LIST view
-    but its runs MUST be fetchable by explicit id so the /workers/new
-    GeneratingPanel can poll GET /runs/{id} + /logs after
-    POST /workers/new/from-prompt returns the run_id."""
+def test_worker_author_run_fetchable_by_explicit_id_and_visible_in_list(monkeypatch, tmp_path):
+    """worker-author (the generation meta-worker) is user-initiated from the
+    prompt-to-worker flow, so its runs appear in Run history and remain
+    fetchable by explicit id for the GeneratingPanel."""
     main = _load_api(monkeypatch, tmp_path, stock_workers=("worker-author",))
     client = TestClient(main.app)
     main._reload_workers_for_user("user-a")
@@ -221,11 +220,11 @@ def test_worker_author_run_fetchable_by_explicit_id_but_hidden_from_list(monkeyp
 
     run_id = _insert_run_for_worker(main, worker_id=main._WORKER_AUTHOR_ID)
 
-    # Hidden from the default LIST view (system worker).
+    # Visible in the default LIST view because this is the user's creation run.
     default_ids = {item["id"] for item in client.get("/runs", headers=_headers()).json()}
-    assert run_id not in default_ids
+    assert run_id in default_ids
 
-    # But fetchable by EXPLICIT id — this is what the generation UI relies on.
+    # Still fetchable by EXPLICIT id — this is what the generation UI relies on.
     detail = client.get(f"/runs/{run_id}", headers=_headers())
     assert detail.status_code == 200, detail.text
     assert detail.json()["id"] == run_id

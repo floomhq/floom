@@ -4,9 +4,11 @@ import { CheckCircle2, Loader2, XCircle, FileText, ExternalLink, Clock } from "l
 import { StatusPill } from "@/components/collection/StatusPill";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { resolveProviderSlug } from "@/lib/provider-logo";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { RunCard as RunCardType } from "@/lib/emily-chat-types";
 
 export function RunCard({ card }: { card: RunCardType }) {
+  const workspaceHref = useWorkspaceHref();
   const { status, workerName, duration, logLines, artifact, actions, toolName } = card;
   const isRunning = status === "running" || status === "queued" || status === "starting";
   const isCompleted = status === "completed";
@@ -69,7 +71,7 @@ export function RunCard({ card }: { card: RunCardType }) {
           {actions.filter((a) => a.id !== "download").map((action) => (
             <a
               key={action.id}
-              href={action.href}
+              href={workspaceHref(action.href)}
               className="inline-flex h-7 items-center rounded-md bg-muted/60 px-2.5 text-xs font-normal text-foreground hover:bg-muted transition-colors"
             >
               {action.label ?? action.id}

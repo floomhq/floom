@@ -14,7 +14,12 @@ name: mcp-test-worker
 title: MCP Test Worker
 description: Tiny worker created through the MCP integration test.
 version: 0.1.0
+entrypoint: run.py
+trigger:
+  type: manual
 exec:
+  mode: pure-script
+  entry: run.py
   command: python run.py
   runtime: python311
   runner: e2b
@@ -31,14 +36,27 @@ const workerYamlWithConnection = `${workerYaml}
 connections: [gmail]
 `;
 
-const runPy = `def run(inputs, context):
-    return {"result": inputs.get("message", "ok")}
+const runPy = `import json
+from pathlib import Path
+
+
+inputs_path = Path("inputs.json")
+inputs = json.loads(inputs_path.read_text(encoding="utf-8")) if inputs_path.exists() else {}
+Path("result.json").write_text(
+    json.dumps({"status": "success", "outputs": {"result": inputs.get("message", "ok")}, "artifacts": [], "error": None}),
+    encoding="utf-8",
+)
 `;
 
 const runPyWithSecret = `import os
+import json
+from pathlib import Path
 
-def run(inputs, context):
-    return {"key": os.environ["OPENAI_API_KEY"]}
+key = os.environ["OPENAI_API_KEY"]
+Path("result.json").write_text(
+    json.dumps({"status": "success", "outputs": {"result": key[:0]}, "artifacts": [], "error": None}),
+    encoding="utf-8",
+)
 `;
 
 function json(response, status, body) {
@@ -448,9 +466,13 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
       "workers.create",
       "workers.delete",
       "workers.get",
+      "workers.contract",
       "workers.list",
       "workers.run",
+      "workers.templates.get",
+      "workers.templates.list",
       "workers.update",
+      "workers.validate",
       "workers.versions",
       "workers.write_file",
       "workspace.chat",
@@ -464,6 +486,23 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     assert.match(workersCreateTool.description, /schema_version/);
     assert.match(workersCreateTool.description, /exec/);
     assert.match(workersCreateTool.inputSchema.properties.worker_yml.description, /inputs\.json/);
+
+    const contract = await client.callTool({ name: "workers.contract", arguments: {} });
+    assert.equal(contract.structuredContent.schema_version, "0.3");
+    assert.match(contract.content[0].text, /result\.json/);
+
+    const templates = await client.callTool({ name: "workers.templates.list", arguments: {} });
+    assert.equal(templates.structuredContent.templates.some((template) => template.id === "python-script"), true);
+
+    const template = await client.callTool({ name: "workers.templates.get", arguments: { id: "python-script" } });
+    assert.match(template.structuredContent.worker_yml, /schema_version: "0\.3"/);
+    assert.match(template.structuredContent.run_py, /result\.json/);
+
+    const validation = await client.callTool({
+      name: "workers.validate",
+      arguments: { worker_yml: workerYaml, run_py: runPy },
+    });
+    assert.equal(validation.structuredContent.valid, true);
 
     const listed = await client.callTool({ name: "workers.list", arguments: {} });
     assert.deepEqual(listed.structuredContent, { data: [] });
@@ -583,8 +622,49 @@ test("workers.create renders object validation details as JSON, not object strin
     });
     assert.equal(result.isError, true);
     assert.doesNotMatch(result.content[0].text, /\\[object Object\\]/);
-    assert.match(result.content[0].text, /Schema validation failed/);
-    assert.match(result.content[0].text, /Field required/);
+    assert.match(result.content[0].text, /Worker draft validation failed/);
+    assert.match(JSON.stringify(result.structuredContent.body), /schema_version/);
+  });
+});
+
+test("workers.validate catches empty outputs for declared script outputs", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const result = await client.callTool({
+      name: "workers.validate",
+      arguments: {
+        worker_yml: workerYaml,
+        run_py: `import json
+from pathlib import Path
+Path("result.json").write_text(json.dumps({"status": "success", "outputs": {}, "artifacts": []}), encoding="utf-8")
+`,
+      },
+    });
+    assert.equal(result.structuredContent.valid, false);
+    assert.match(JSON.stringify(result.structuredContent.errors), /empty outputs object/);
+  });
+});
+
+test("workers.create refuses script workers that omit declared outputs", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const result = await client.callTool({
+      name: "workers.create",
+      arguments: {
+        worker_yml: workerYaml,
+        run_py: `import json
+from pathlib import Path
+Path("result.json").write_text(json.dumps({"status": "success", "outputs": {"other": "ok"}, "artifacts": []}), encoding="utf-8")
+`,
+      },
+    });
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.status, 400);
+    assert.match(JSON.stringify(result.structuredContent.body), /declared output result does not appear in run\.py/);
   });
 });
 

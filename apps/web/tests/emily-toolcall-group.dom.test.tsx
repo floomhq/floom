@@ -21,6 +21,19 @@ function genericCard(n: number, status: "completed" | "failed" = "completed"): T
   } as ToolCard;
 }
 
+function workerCreateCard(): ToolCard {
+  return {
+    kind: "worker-create",
+    callId: "call_create",
+    card_id: "card_create",
+    status: "running",
+    title: "Creating worker",
+    workerName: "Creating worker",
+    step: "drafting",
+    streams: { events: "/runs/run_author_123/events", parts: "/runs/run_author_123/stream" },
+  } as ToolCard;
+}
+
 let toolParts: ToolCard[] = [];
 
 vi.mock("next/navigation", () => ({
@@ -97,5 +110,19 @@ describe("Emily tool-call consolidation (FIX1)", () => {
     expect(summary).toBeTruthy();
     // Failure is flagged in the collapsed summary.
     expect(summary.textContent).toMatch(/1 failed/i);
+  });
+
+  it("keeps worker-create progress inline instead of hiding it inside a tool-call group", async () => {
+    toolParts = [
+      genericCard(1),
+      workerCreateCard(),
+      genericCard(2),
+    ];
+    const { EmilyChatPage } = await import("@/components/emily/EmilyChat");
+    render(<EmilyChatPage />);
+
+    expect(screen.queryByRole("button", { name: /3 tool calls/i })).toBeNull();
+    expect(screen.getAllByText("Creating worker").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Drafting manifest")).toBeTruthy();
   });
 });

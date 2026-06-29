@@ -64,9 +64,17 @@ Use existing folders where possible:
 ## Output field conventions
 
 - `name`: snake_case, matches what the SKILL.md or run.py writes
-- `kind: "file"` for everything (workers write files, not inline strings)
-- `media_type`: be precise — `text/markdown` renders inline, `application/json` shows raw
-- `path`: always under `out/` (e.g., `out/digest.md`, `out/result.json`)
+- Include at least one operator-facing output that reads well in the Output tab.
+  Use names such as `summary`, `digest`, `report`, `notification`, or `result`
+  for the thing the operator actually asked to receive.
+- Use `kind: "scalar"` with `type: "markdown"`, `type: "textarea"`, `type: "string"`,
+  or `type: "number"` when the output is a short readable result that can be
+  returned inline. The worker writes the literal value into `result.json`.
+- Use `kind: "file"` only for downloadable artifacts: CSV exports, JSON data,
+  PDFs, attachments, or long markdown documents. File outputs need
+  `media_type` and `path` under `out/` (e.g., `out/digest.md`, `out/result.json`).
+- Gmail/email/CRM/digest workers need a readable markdown/text output first,
+  with any raw JSON or CSV export listed as a secondary file.
 - `label`: 2-4 words, Title Case
 
 ## Version

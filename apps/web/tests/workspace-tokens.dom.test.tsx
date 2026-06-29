@@ -53,6 +53,7 @@ describe("WorkspaceTokensPanel", () => {
     expect(
       screen.getByText(/workspace-shared workers only/)
     ).toBeInTheDocument();
+    expect(screen.getByText(/One shared token/)).toHaveTextContent("wst_");
   });
 
   it("create flow shows the one-time token value", async () => {
