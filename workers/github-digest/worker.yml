@@ -6,9 +6,9 @@ description: "Every morning at 9am, send a digest of unread GitHub PRs and open 
 version: "0.1.0"
 targets: ["generic"]
 limits:
-  max_tool_iterations: 20
-  max_output_tokens: 12000
-  max_total_tokens: 200000
+  max_tool_iterations: 60
+  max_output_tokens: 100000
+  max_total_tokens: 1000000
   timeout_seconds: 300
 exec:
   entry: "SKILL.md"

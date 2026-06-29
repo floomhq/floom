@@ -270,6 +270,49 @@ test("workers validate --json emits machine-readable result", async () => {
   assert.equal(result.stderr, "");
 });
 
+test("workers validate rejects file outputs that use scalar type", async () => {
+  const workerYml = `${scriptWorkerYml}  outputs:
+    - name: report
+      label: Report
+      type: markdown
+      kind: file
+      path: out/report.md
+      required: true
+`;
+  const dir = await makeWorkerDir({ workerYml });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /exec\.outputs\.0 file output must use media_type/);
+});
+
+test("workers validate accepts file outputs with media_type and path", async () => {
+  const workerYml = `${scriptWorkerYml}  outputs:
+    - name: report
+      label: Report
+      kind: file
+      media_type: text/markdown
+      path: out/report.md
+      required: true
+`;
+  const dir = await makeWorkerDir({
+    workerYml,
+    run: `import json
+from pathlib import Path
+
+Path("out").mkdir(exist_ok=True)
+Path("out/report.md").write_text("# Report\\n", encoding="utf-8")
+with open("result.json", "w", encoding="utf-8") as f:
+    json.dump({"status": "success", "outputs": {"report": "out/report.md"}, "artifacts": []}, f)
+`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Validated cli-test-worker/);
+  assert.equal(result.stderr, "");
+});
+
 test("workers contract exposes agent authoring rules", async () => {
   const result = await runCli(["workers", "contract", "--json"]);
 
@@ -294,6 +337,14 @@ test("workers templates list and get expose golden worker bundles", async () => 
   assert.match(template.worker_yml, /schema_version: "0\.3"/);
   assert.match(template.run_py, /result\.json/);
   assert.equal(got.stderr, "");
+
+  const gmail = await runCli(["workers", "templates", "get", "gmail-summary-agent", "--json"]);
+  assert.equal(gmail.code, 0);
+  const gmailTemplate = JSON.parse(gmail.stdout);
+  assert.match(gmailTemplate.worker_yml, /max_tool_iterations: 60/);
+  assert.match(gmailTemplate.worker_yml, /max_total_tokens: 1000000/);
+  assert.match(gmailTemplate.worker_yml, /media_type: text\/markdown/);
+  assert.doesNotMatch(gmailTemplate.worker_yml, /type: markdown/);
 });
 
 test("workers validate rejects missing runtime", async () => {

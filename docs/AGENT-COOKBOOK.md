@@ -310,6 +310,18 @@ exec:
     - OPENAI_API_KEY
 ```
 
+For integration-heavy agents, especially Gmail/email/CRM/Slack/GitHub/Calendar Composio tools, set:
+
+```yaml
+limits:
+  max_tool_iterations: 60
+  max_output_tokens: 100000
+  max_total_tokens: 1000000
+  timeout_seconds: 300
+```
+
+This gives the agent enough room to consume large tool responses and still call `finish_with_outputs`.
+
 Live reference: [workers/research_brief/](../workers/research_brief/).
 
 ---

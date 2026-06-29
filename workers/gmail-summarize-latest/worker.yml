@@ -38,3 +38,8 @@ exec:
       path: "out/result.json"
       required: true
       label: "Email Summary JSON"
+limits:
+  max_tool_iterations: 60
+  max_output_tokens: 100000
+  max_total_tokens: 1000000
+  timeout_seconds: 300

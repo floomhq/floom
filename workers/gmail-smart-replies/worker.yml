@@ -35,9 +35,9 @@ entrypoints:
   path: SKILL.md
   type: markdown
 limits:
-  max_tool_iterations: 20
-  max_output_tokens: 20000
-  max_total_tokens: 250000
+  max_tool_iterations: 60
+  max_output_tokens: 100000
+  max_total_tokens: 1000000
   timeout_seconds: 300
 exec:
   runtime: skill
