@@ -288,6 +288,34 @@ def test_worker_author_infers_latest_email_as_gmail_read_connection():
     assert "GMAIL_FETCH_EMAILS" in manifest["connections"][0]["allowed_tools"]
 
 
+def test_worker_author_filters_invented_known_app_allowed_tools():
+    worker_author = _load_worker_author_module()
+    manifest = worker_author._repair_generated_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "gmail-missed-opportunities",
+            "title": "Gmail Missed Opportunities",
+            "description": "Summarises missed opportunities from Gmail.",
+            "version": "0.1.0",
+            "trigger": {"type": "schedule"},
+            "exec": {"entry": "SKILL.md", "runner": "e2b"},
+            "connections": [
+                {
+                    "app": "gmail",
+                    "allowed_tools": ["GMAIL_LIST_MESSAGES", "GMAIL_GET_MESSAGE"],
+                }
+            ],
+        },
+        prompt="Every hour, pull my latest Gmail and summarize missed opportunities.",
+    )
+
+    tools = manifest["connections"][0]["allowed_tools"]
+    assert "GMAIL_FETCH_EMAILS" in tools
+    assert "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID" in tools
+    assert "GMAIL_LIST_MESSAGES" not in tools
+    assert "GMAIL_GET_MESSAGE" not in tools
+
+
 def test_worker_author_repairs_gmail_agent_skill_tool_instructions():
     worker_author = _load_worker_author_module()
     parsed = worker_author._repair_generated_bundle(
@@ -317,6 +345,193 @@ connections: []
     assert "composio__gmail__execute" in parsed["skill_md"]
     assert "GMAIL_FETCH_EMAILS" in parsed["skill_md"]
     assert worker_author._validate_generated_bundle(parsed, "Every hour, pull my latest Gmail.") is None
+
+
+def test_worker_author_repairs_agent_skill_finish_instruction():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-hourly-summarizer"
+title: "Gmail Hourly Summarizer"
+description: "Summarises recent Gmail messages."
+version: "0.1.0"
+trigger:
+  type: "schedule"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+      required: true
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+""",
+            "skill_md": "# Gmail Hourly Summarizer\n\nSummarise the latest messages.",
+            "suggested_id": "gmail-hourly-summarizer",
+        },
+        "Every hour, pull my latest Gmail and summarize missed opportunities.",
+    )
+
+    assert "finish_with_outputs" in parsed["skill_md"]
+    assert '"summary": "final markdown content for summary"' in parsed["skill_md"]
+    assert worker_author._validate_generated_bundle(parsed, "Every hour, pull my latest Gmail.") is None
+
+
+def test_worker_author_repairs_agent_markdown_summary_to_scalar():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-missed-opportunities"
+title: "Gmail Missed Opportunities"
+description: "Summarises missed opportunities from Gmail."
+version: "0.1.0"
+trigger:
+  type: "schedule"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "file"
+      media_type: "text/markdown"
+      path: "out/summary.md"
+      required: true
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+""",
+            "skill_md": "# Gmail Missed Opportunities\n\nUse `composio__gmail__execute` with `GMAIL_FETCH_EMAILS`.\n\nCall `finish_with_outputs({\"summary\": \"content\"})`.",
+            "suggested_id": "gmail-missed-opportunities",
+        },
+        "Every hour, pull my latest Gmail and summarize missed opportunities.",
+    )
+
+    manifest = yaml.safe_load(parsed["worker_yml"])
+    assert manifest["exec"]["outputs"] == [
+        {
+            "name": "summary",
+            "kind": "scalar",
+            "type": "markdown",
+            "required": True,
+        }
+    ]
+
+
+def test_worker_author_rewrites_scalar_output_file_path_instruction():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-missed-opportunities"
+title: "Gmail Missed Opportunities"
+description: "Summarises missed opportunities from Gmail."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+      required: true
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+""",
+            "skill_md": "# Gmail Missed Opportunities\n\nWrite the final report to `out/summary.md`.\n\nUse `composio__gmail__execute` with `GMAIL_FETCH_EMAILS`.\n\nCall `finish_with_outputs({\"summary\": \"content\"})`.",
+            "suggested_id": "gmail-missed-opportunities",
+        },
+        "Summarize my Gmail",
+    )
+
+    assert "out/summary.md" not in parsed["skill_md"]
+    assert "the `summary` output" in parsed["skill_md"]
+
+
+def test_worker_author_rewrites_scalar_output_file_mode_instructions():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "github-digest"
+title: "GitHub Digest"
+description: "Summarises GitHub activity."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "digest"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "github"
+    allowed_tools:
+      - "GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS"
+""",
+            "skill_md": "# Digest\n\nUse `composio__github__execute` with `GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS`.\n\nWrite the final markdown digest to the `digest` output. Ensure the directory `out` exists.\nConclude your execution once the file is written.\n\nCall `finish_with_outputs({\"digest\": \"content\"})`.",
+        },
+        "Summarize my GitHub PRs and issues",
+    )
+
+    assert "directory `out`" not in parsed["skill_md"]
+    assert "file is written" not in parsed["skill_md"]
+    assert "after calling `finish_with_outputs`" in parsed["skill_md"]
+    assert worker_author._deterministic_verifier_issues(
+        parsed,
+        "Summarize my GitHub PRs and issues",
+    ) == []
+
+
+def test_worker_author_rewrites_scalar_output_file_path_manifest_text():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "calendar-brief"
+title: "Calendar Brief"
+description: "Writes a report to out/briefing.md."
+how_it_works: "Fetch data -> save out/briefing.md"
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "briefing"
+      kind: "scalar"
+      type: "markdown"
+      required: true
+connections: []
+""",
+            "skill_md": "# Calendar Brief\n\nCall `finish_with_outputs({\"briefing\": \"content\"})`.",
+            "suggested_id": "calendar-brief",
+        },
+        "Summarize my calendar",
+    )
+
+    manifest = yaml.safe_load(parsed["worker_yml"])
+    assert "out/briefing.md" not in manifest["description"]
+    assert "out/briefing.md" not in manifest["how_it_works"]
+    assert "the `briefing` output" in manifest["how_it_works"]
 
 
 def test_worker_author_repairs_missing_operator_output():
@@ -364,6 +579,117 @@ def test_worker_author_does_not_add_missing_output_to_script_workers():
     )
 
     assert "outputs" not in manifest["exec"]
+
+
+def test_worker_author_repairs_script_outputs_from_run_code():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "company-research-checklist"
+title: "Company Research Checklist"
+description: "Creates a company review checklist."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runner: "e2b"
+  inputs:
+    - name: "company_name"
+      kind: "scalar"
+      type: "string"
+      required: true
+connections: []
+""",
+            "run_code": """
+import json
+from pathlib import Path
+
+def _write_result(status, outputs=None, artifacts=None, error=None):
+    Path("result.json").write_text(json.dumps({"status": status, "outputs": outputs or {}, "artifacts": artifacts or [], "error": error}))
+
+def main():
+    inputs = json.loads(Path("inputs.json").read_text())
+    company = inputs.get("company_name") or "Acme"
+    checklist = f"# {company} checklist"
+    _write_result("success", outputs={"checklist": checklist})
+
+if __name__ == "__main__":
+    main()
+""",
+            "suggested_id": "company-research-checklist",
+        },
+        "Create a manual worker that takes a company name input and returns a concise markdown research checklist.",
+    )
+
+    manifest = yaml.safe_load(parsed["worker_yml"])
+    assert manifest["exec"]["outputs"] == [
+        {
+            "name": "checklist",
+            "kind": "scalar",
+            "type": "markdown",
+            "required": True,
+            "label": "Checklist",
+        }
+    ]
+    assert worker_author._validate_generated_bundle(
+        parsed,
+        "Create a manual worker that takes a company name input and returns a concise markdown research checklist.",
+    ) is None
+
+
+def test_worker_author_repairs_script_without_inferable_outputs():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "generic-script"
+title: "Generic Script"
+description: "Runs a generated script."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runner: "e2b"
+connections: []
+""",
+            "run_code": """
+import json
+from pathlib import Path
+
+def main():
+    Path("result.json").write_text(json.dumps({"status": "success", "outputs": {}, "artifacts": [], "error": None}))
+
+if __name__ == "__main__":
+    main()
+""",
+            "suggested_id": "generic-script",
+        },
+        "Create a manual utility worker.",
+    )
+
+    manifest = yaml.safe_load(parsed["worker_yml"])
+    assert manifest["exec"]["outputs"] == [
+        {
+            "name": "summary",
+            "kind": "scalar",
+            "type": "markdown",
+            "required": True,
+            "label": "Summary",
+        }
+    ]
+    assert "_floom_original_main" in parsed["run_code"]
+    assert '"summary"' in parsed["run_code"]
+    assert worker_author._validate_generated_bundle(
+        parsed,
+        "Create a manual utility worker.",
+    ) is None
 
 
 def test_worker_author_repairs_known_integration_tools_generically():
@@ -417,6 +743,334 @@ connections:
     )
 
     assert any("composio__googlecalendar__execute" in issue for issue in issues)
+
+
+def test_worker_author_verifier_flags_missing_finish_instruction():
+    worker_author = _load_worker_author_module()
+    issues = worker_author._deterministic_verifier_issues(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-brief"
+title: "Gmail Brief"
+description: "Summarises Gmail messages."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+""",
+            "skill_md": "# Gmail Brief\n\nUse `composio__gmail__execute` with `GMAIL_FETCH_EMAILS`.",
+        },
+        "Summarize my Gmail",
+    )
+
+    assert any("finish_with_outputs" in issue for issue in issues)
+
+
+def test_worker_author_verifier_flags_invented_app_tool_names():
+    worker_author = _load_worker_author_module()
+    issues = worker_author._deterministic_verifier_issues(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-brief"
+title: "Gmail Brief"
+description: "Summarises Gmail messages."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+""",
+            "skill_md": "# Gmail Brief\n\nUse `gmail.list_messages` or `composio__gmail__list_emails`, then `composio__gmail__execute` with `GMAIL_FETCH_EMAILS`.\n\nCall `finish_with_outputs({\"summary\": \"content\"})`.",
+        },
+        "Summarize my Gmail",
+    )
+
+    assert any("invented gmail tool names" in issue for issue in issues)
+
+
+def test_worker_author_verifier_flags_scalar_output_path_instruction():
+    worker_author = _load_worker_author_module()
+    issues = worker_author._deterministic_verifier_issues(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-brief"
+title: "Gmail Brief"
+description: "Summarises Gmail messages."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+""",
+            "skill_md": "# Gmail Brief\n\nUse `composio__gmail__execute` with `GMAIL_FETCH_EMAILS`.\n\nWrite the report to `out/summary.md`.\n\nCall `finish_with_outputs({\"summary\": \"content\"})`.",
+        },
+        "Summarize my Gmail",
+    )
+
+    assert any("scalar output" in issue and "out/summary.md" in issue for issue in issues)
+
+
+def test_worker_author_verifier_flags_undeclared_composio_tool_slugs():
+    worker_author = _load_worker_author_module()
+    issues = worker_author._deterministic_verifier_issues(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-brief"
+title: "Gmail Brief"
+description: "Summarises Gmail messages."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+      - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
+""",
+            "skill_md": "# Gmail Brief\n\nUse `composio__gmail__execute` with `GMAIL_LIST_MESSAGES`, then `GMAIL_GET_MESSAGE`.\n\nCall `finish_with_outputs({\"summary\": \"content\"})`.",
+        },
+        "Summarize my Gmail",
+    )
+
+    assert any("not declared in allowed_tools" in issue for issue in issues)
+    assert any("GMAIL_LIST_MESSAGES" in issue for issue in issues)
+
+
+def test_worker_author_repairs_invalid_agent_tool_references():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-brief"
+title: "Gmail Brief"
+description: "Summarises Gmail messages."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+      - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
+""",
+            "skill_md": "# Gmail Brief\n\nUse `composio__gmail__list_messages`, then `GMAIL_GET_MESSAGE`.\n\nCall `finish_with_outputs({\"summary\": \"content\"})`.",
+        },
+        "Summarize my Gmail",
+    )
+
+    assert "composio__gmail__list_messages" not in parsed["skill_md"]
+    assert "composio__gmail__execute" in parsed["skill_md"]
+    assert "GMAIL_GET_MESSAGE" not in parsed["skill_md"]
+    assert "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID" in parsed["skill_md"]
+    assert worker_author._deterministic_verifier_issues(parsed, "Summarize my Gmail") == []
+
+
+def test_worker_author_repairs_lowercase_stale_action_slug_references():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "calendar-slack-brief"
+title: "Calendar Slack Brief"
+description: "Summarises calendar events and Slack messages."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "briefing"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "googlecalendar"
+    allowed_tools:
+      - "GOOGLECALENDAR_EVENTS_LIST"
+      - "GOOGLECALENDAR_FREE_BUSY_QUERY"
+  - app: "slack"
+    allowed_tools:
+      - "SLACK_FETCH_CONVERSATION_HISTORY"
+      - "SLACK_SEARCH_MESSAGES"
+""",
+            "skill_md": "# Brief\n\nUse `composio__googlecalendar__execute` with `googlecalendar_list_events` and `composio__slack__execute` with `slack_conversations_history`.\n\nCall `finish_with_outputs({\"briefing\": \"content\"})`.",
+        },
+        "Summarize my Google Calendar and Slack",
+    )
+
+    assert "googlecalendar_list_events" not in parsed["skill_md"]
+    assert "slack_conversations_history" not in parsed["skill_md"]
+    assert "GOOGLECALENDAR_EVENTS_LIST" in parsed["skill_md"]
+    assert "SLACK_FETCH_CONVERSATION_HISTORY" in parsed["skill_md"]
+    assert worker_author._deterministic_verifier_issues(
+        parsed,
+        "Summarize my Google Calendar and Slack",
+    ) == []
+
+
+def test_worker_author_does_not_rewrite_app_prefixed_input_names_as_tools():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "slack-brief"
+title: "Slack Brief"
+description: "Summarises Slack messages."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  inputs:
+    - name: "slack_channel"
+      kind: "scalar"
+      type: "string"
+      required: false
+  outputs:
+    - name: "briefing"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "slack"
+    allowed_tools:
+      - "SLACK_FETCH_CONVERSATION_HISTORY"
+      - "SLACK_SEARCH_MESSAGES"
+""",
+            "skill_md": "# Brief\n\nUse `composio__slack__execute` to fetch messages from the `slack_channel` input.\n\nCall `finish_with_outputs({\"briefing\": \"content\"})`.",
+        },
+        "Summarize my Slack messages",
+    )
+
+    assert "`slack_channel` input" in parsed["skill_md"]
+    assert "`SLACK_FETCH_CONVERSATION_HISTORY` input" not in parsed["skill_md"]
+    assert worker_author._deterministic_verifier_issues(parsed, "Summarize my Slack messages") == []
+
+
+def test_worker_author_repairs_partial_wrapper_and_action_slug_casing():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "github-digest"
+title: "GitHub Digest"
+description: "Summarises GitHub activity."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "digest"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "github"
+    allowed_tools:
+      - "GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS"
+      - "GITHUB_LIST_PULL_REQUESTS"
+""",
+            "skill_md": "# Digest\n\nUse `composio__github` tools such as `github_search_issues_and_pull_requests`.\n\nCall `finish_with_outputs({\"digest\": \"content\"})`.",
+        },
+        "Summarize my GitHub PRs and issues",
+    )
+
+    assert "`composio__github` tools" not in parsed["skill_md"]
+    assert "composio__github__execute" in parsed["skill_md"]
+    assert "github_search_issues_and_pull_requests" not in parsed["skill_md"]
+    assert "GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS" in parsed["skill_md"]
+    assert worker_author._deterministic_verifier_issues(
+        parsed,
+        "Summarize my GitHub PRs and issues",
+    ) == []
+
+
+def test_worker_author_rebuilds_agent_runtime_tool_block_from_manifest():
+    worker_author = _load_worker_author_module()
+    parsed = worker_author._repair_generated_bundle(
+        {
+            "worker_yml": """
+schema_version: "0.3"
+name: "gmail-brief"
+title: "Gmail Brief"
+description: "Summarises Gmail messages."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  outputs:
+    - name: "summary"
+      kind: "scalar"
+      type: "markdown"
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+      - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
+""",
+            "skill_md": "# Gmail Brief\n\nUse `composio__gmail__execute` with `GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID`.\n\nCall `finish_with_outputs({\"summary\": \"content\"})`.",
+        },
+        "Summarize my latest Gmail",
+    )
+
+    assert parsed["skill_md"].count("## Runtime tools") == 1
+    assert "composio__gmail__execute" in parsed["skill_md"]
+    assert "GMAIL_FETCH_EMAILS" in parsed["skill_md"]
+    assert "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID" in parsed["skill_md"]
+    assert worker_author._deterministic_verifier_issues(parsed, "Summarize my latest Gmail") == []
 
 
 def test_worker_author_model_verifier_returns_structured_issues(monkeypatch):

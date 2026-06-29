@@ -479,7 +479,18 @@ def _merge_connection_tools(item: Any, app: str, tools: List[str]) -> Any:
         return item
     merged = dict(item)
     existing = merged.get("allowed_tools")
-    allowed = [str(t) for t in existing] if isinstance(existing, list) else []
+    raw_allowed = [str(t) for t in existing] if isinstance(existing, list) else []
+    known = {tool.upper() for tool in tools}
+    known_prefixes = {tool.split("_", 1)[0] for tool in tools if "_" in tool}
+    # For known first-party integrations, do not preserve model-invented action
+    # slugs with the same app prefix. They make the proxy allow a tool that does
+    # not exist and then the generated SKILL.md instructs the agent to call it.
+    allowed = [
+        tool
+        for tool in raw_allowed
+        if tool.upper() in known
+        or (tool.split("_", 1)[0] not in known_prefixes)
+    ]
     seen = {tool.upper() for tool in allowed}
     for tool in tools:
         if tool.upper() not in seen:
@@ -559,6 +570,147 @@ def _repair_missing_operator_output(manifest: Dict[str, Any]) -> None:
     ]
 
 
+def _infer_script_output_names(run_code: str) -> List[str]:
+    """Infer result output keys from generated script-mode code.
+
+    Creator attempts sometimes write a good ``result.json``/``_write_result``
+    call but forget the matching ``exec.outputs`` YAML contract. Prefer the keys
+    already used by the script so the manifest matches runtime behavior.
+    """
+    if not isinstance(run_code, str) or not run_code.strip():
+        return []
+
+    names: List[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        clean = str(name or "").strip()
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$", clean):
+            return
+        if clean not in seen:
+            seen.add(clean)
+            names.append(clean)
+
+    try:
+        tree = ast.parse(run_code)
+    except SyntaxError:
+        tree = None
+
+    if tree is not None:
+        for node in ast.walk(tree):
+            candidate: ast.AST | None = None
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if kw.arg == "outputs":
+                        candidate = kw.value
+                        break
+            elif isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values):
+                    if isinstance(key, ast.Constant) and key.value == "outputs":
+                        candidate = value
+                        break
+            if isinstance(candidate, ast.Dict):
+                for key in candidate.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        add(key.value)
+
+    if names:
+        return names
+
+    for match in re.finditer(r"outputs\s*=\s*\{(?P<body>[^{}]{0,1000})\}", run_code, re.DOTALL):
+        for key in re.finditer(r"[\"']([A-Za-z_][A-Za-z0-9_-]{0,63})[\"']\s*:", match.group("body")):
+            add(key.group(1))
+    return names
+
+
+def _repair_script_outputs_from_run_code(manifest: Dict[str, Any], run_code: str) -> None:
+    if not _entry(manifest).lower().endswith(".py"):
+        return
+    if _declared_output_names(manifest):
+        return
+
+    output_names = _infer_script_output_names(run_code)
+    if not output_names:
+        output_names = ["summary"]
+
+    exec_block = manifest.get("exec")
+    if not isinstance(exec_block, dict):
+        exec_block = {}
+        manifest["exec"] = exec_block
+    exec_block["outputs"] = [
+        {
+            "name": name,
+            "kind": "scalar",
+            "type": "markdown" if any(token in name.lower() for token in ("summary", "report", "checklist", "brief", "digest")) else "string",
+            "required": True,
+            "label": _title_from_worker_id(name.replace("_", "-")),
+        }
+        for name in output_names
+    ]
+
+
+def _ensure_script_default_summary_output(run_code: str) -> str:
+    """Make script-mode fallback output contract executable.
+
+    If the creator emits no declared outputs and no inferable result output key,
+    worker-author repairs the manifest with a ``summary`` output. This wrapper
+    preserves the generated script but guarantees result.json contains that
+    declared key on success, so validation and the Output tab line up.
+    """
+    if not isinstance(run_code, str) or "summary" in run_code:
+        return run_code
+    patched = re.sub(
+        r"if\s+__name__\s*==\s*[\"']__main__[\"']\s*:\s*\n\s*main\(\)\s*\n?",
+        "",
+        run_code,
+        count=1,
+    ).rstrip()
+    patched = re.sub(r"\ndef\s+main\s*\(", "\ndef _floom_original_main(", patched, count=1)
+    if "_floom_original_main" not in patched:
+        return run_code
+    return patched + r'''
+
+
+def main():
+    import json as _floom_json
+    from pathlib import Path as _FloomPath
+
+    try:
+        _floom_original_main()
+        result_path = _FloomPath("result.json")
+        if result_path.exists():
+            try:
+                data = _floom_json.loads(result_path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {"status": "success", "outputs": {}, "artifacts": [], "error": None}
+        else:
+            data = {"status": "success", "outputs": {}, "artifacts": [], "error": None}
+        outputs = data.get("outputs")
+        if not isinstance(outputs, dict):
+            outputs = {}
+        if "summary" not in outputs:
+            outputs["summary"] = "Completed successfully."
+        data["outputs"] = outputs
+        data.setdefault("artifacts", [])
+        data.setdefault("error", None)
+        result_path.write_text(_floom_json.dumps(data), encoding="utf-8")
+    except Exception as exc:
+        _FloomPath("result.json").write_text(
+            _floom_json.dumps({
+                "status": "error",
+                "outputs": {},
+                "artifacts": [],
+                "error": str(exc),
+            }),
+            encoding="utf-8",
+        )
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 def _agent_skill_tool_instructions(manifest: Dict[str, Any], prompt: str) -> str:
     inferred = _infer_connections_from_prompt(prompt)
     lines: List[str] = []
@@ -589,6 +741,280 @@ def _agent_skill_tool_instructions(manifest: Dict[str, Any], prompt: str) -> str
     return "\n\n## Runtime tools\n" + "\n".join(lines) + "\n"
 
 
+def _ensure_agent_runtime_tool_instructions(
+    skill_md: str,
+    manifest: Dict[str, Any],
+    prompt: str,
+) -> str:
+    instructions = _agent_skill_tool_instructions(manifest, prompt)
+    if not instructions:
+        return skill_md
+    # Treat this block as generated contract text. Rebuild it from worker.yml so
+    # stale or partial model-written tool instructions do not survive repair.
+    stripped = re.sub(
+        r"\n*## Runtime tools\n.*?(?=\n## |\Z)",
+        "",
+        str(skill_md or "").rstrip(),
+        flags=re.DOTALL,
+    )
+    return stripped.rstrip() + instructions
+
+
+def _agent_skill_finish_instruction(manifest: Dict[str, Any]) -> str:
+    output_names = _declared_output_names(manifest)
+    if not output_names:
+        return ""
+    example_args = ", ".join(
+        f'"{name}": "{_agent_finish_example_value(manifest, name)}"'
+        for name in output_names
+    )
+    names = ", ".join(f"`{name}`" for name in output_names)
+    return (
+        "\n\n## Finish\n"
+        f"When the work is complete, call `finish_with_outputs({{{example_args}}})`. "
+        f"Use exactly the declared output name(s): {names}.\n"
+    )
+
+
+def _agent_finish_example_value(manifest: Dict[str, Any], name: str) -> str:
+    output = _declared_output_spec(manifest, name)
+    output_type = str((output or {}).get("type") or (output or {}).get("media_type") or "").lower()
+    if output_type in {"markdown", "text/markdown"} or any(
+        token in name.lower() for token in ("summary", "report", "brief", "digest")
+    ):
+        return f"final markdown content for {name}"
+    return f"final value for {name}"
+
+
+def _agent_skill_has_finish_instruction(skill_md: str) -> bool:
+    return "finish_with_outputs" in str(skill_md or "").lower()
+
+
+def _repair_agent_scalar_output_skill_text(skill_md: str, manifest: Dict[str, Any]) -> str:
+    repaired = _repair_scalar_output_path_text(str(skill_md or ""), manifest)
+    if any(_is_scalar_output(manifest, name) for name in _declared_output_names(manifest)):
+        repaired = re.sub(
+            r"\s*Ensure the directory `?out`? exists\.?",
+            "",
+            repaired,
+            flags=re.IGNORECASE,
+        )
+        repaired = re.sub(
+            r"\bConclude your execution once the file is (written|saved)\.?",
+            "Conclude your execution after calling `finish_with_outputs`.",
+            repaired,
+            flags=re.IGNORECASE,
+        )
+    return repaired
+
+
+def _repair_scalar_output_path_text(text: str, manifest: Dict[str, Any]) -> str:
+    repaired = str(text or "")
+    for name in _declared_output_names(manifest):
+        output = _declared_output_spec(manifest, name) or {}
+        if not _is_scalar_output(manifest, name):
+            continue
+        safe_name = re.escape(name)
+        repaired = re.sub(
+            rf"`?out/{safe_name}\.(md|txt)`?",
+            f"the `{name}` output",
+            repaired,
+            flags=re.IGNORECASE,
+        )
+    return repaired
+
+
+def _is_scalar_output(manifest: Dict[str, Any], name: str) -> bool:
+    output = _declared_output_spec(manifest, name) or {}
+    kind = str(output.get("kind") or "").lower()
+    output_type = str(output.get("type") or "").lower()
+    if kind and kind != "scalar":
+        return False
+    return output_type in {"markdown", "text", "textarea", "string"}
+
+
+def _repair_manifest_scalar_output_text_fields(value: Any, manifest: Dict[str, Any]) -> Any:
+    if isinstance(value, str):
+        return _repair_scalar_output_path_text(value, manifest)
+    if isinstance(value, list):
+        return [_repair_manifest_scalar_output_text_fields(item, manifest) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _repair_manifest_scalar_output_text_fields(item, manifest)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _repair_agent_invalid_tool_references(skill_md: str, manifest: Dict[str, Any]) -> str:
+    repaired = str(skill_md or "")
+    connections = manifest.get("connections")
+    if not isinstance(connections, list):
+        return repaired
+    for item in connections:
+        app = _connection_app_from_item(item)
+        if not app:
+            continue
+        allowed_tools = _connection_allowed_tools(item)
+        app_re = re.escape(app)
+        repaired = re.sub(
+            rf"\bcomposio__{app_re}\b(?!__execute)",
+            f"composio__{app}__execute",
+            repaired,
+        )
+        repaired = re.sub(
+            rf"\bcomposio__{app_re}__(?!execute\b)[A-Za-z_][A-Za-z0-9_]*\b",
+            f"composio__{app}__execute",
+            repaired,
+        )
+        for tool in allowed_tools:
+            repaired = re.sub(
+                rf"\b{re.escape(tool)}\b",
+                tool,
+                repaired,
+                flags=re.IGNORECASE,
+            )
+        for bad_slug in _invalid_allowed_tool_slug_references(
+            repaired,
+            allowed_tools,
+            ignored_names=_declared_input_names(manifest) + _declared_output_names(manifest),
+        ):
+            replacement = _closest_allowed_tool_slug(bad_slug, allowed_tools)
+            if replacement:
+                repaired = re.sub(rf"\b{re.escape(bad_slug)}\b", replacement, repaired)
+    return repaired
+
+
+def _closest_allowed_tool_slug(slug: str, allowed_tools: List[str]) -> str:
+    allowed = [tool for tool in allowed_tools if tool]
+    if not allowed:
+        return ""
+    slug_raw = _tool_slug_raw_tokens(slug)
+    slug_tokens = _tool_slug_tokens(slug)
+    best = allowed[0]
+    best_score = -1
+    for candidate in allowed:
+        candidate_raw = _tool_slug_raw_tokens(candidate)
+        score = (3 * len(slug_raw & candidate_raw)) + len(slug_tokens & _tool_slug_tokens(candidate))
+        if score > best_score:
+            best = candidate
+            best_score = score
+    return best
+
+
+def _tool_slug_raw_tokens(slug: str) -> set[str]:
+    return {part for part in re.split(r"[^A-Z0-9]+", str(slug).upper()) if part}
+
+
+def _tool_slug_tokens(slug: str) -> set[str]:
+    raw = _tool_slug_raw_tokens(slug)
+    out = set(raw)
+    if "MESSAGE" in raw or "MESSAGES" in raw or "EMAIL" in raw or "EMAILS" in raw:
+        out.update({"MESSAGE", "MESSAGES", "EMAIL", "EMAILS"})
+    if "GET" in raw or "FETCH" in raw:
+        out.update({"GET", "FETCH"})
+    if "LIST" in raw or "SEARCH" in raw:
+        out.update({"LIST", "SEARCH"})
+    return out
+
+
+def _scalar_output_path_references(skill_md: str, manifest: Dict[str, Any]) -> List[str]:
+    refs: List[str] = []
+    text = str(skill_md or "")
+    for name in _declared_output_names(manifest):
+        if not _is_scalar_output(manifest, name):
+            continue
+        if re.search(rf"\bout/{re.escape(name)}\.(md|txt)\b", text, re.IGNORECASE):
+            refs.append(f"out/{name}.md")
+    return refs
+
+
+def _invented_app_tool_references(skill_md: str, app: str) -> List[str]:
+    text = str(skill_md or "")
+    app_re = re.escape(app)
+    refs: List[str] = []
+    seen: set[str] = set()
+    patterns = [
+        rf"\b{app_re}\.[A-Za-z_][A-Za-z0-9_]*\b",
+        rf"\bcomposio__{app_re}__(?!execute\b)[A-Za-z_][A-Za-z0-9_]*\b",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            ref = match.group(0)
+            if ref not in seen:
+                seen.add(ref)
+                refs.append(ref)
+    return refs
+
+
+def _invalid_allowed_tool_slug_references(
+    skill_md: str,
+    allowed_tools: List[str],
+    *,
+    ignored_names: List[str] | None = None,
+) -> List[str]:
+    allowed = {str(tool).strip() for tool in allowed_tools if str(tool).strip()}
+    prefixes = {tool.split("_", 1)[0] for tool in allowed if "_" in tool}
+    if not prefixes:
+        return []
+    allowed_upper = {tool.upper() for tool in allowed}
+    prefixes_upper = {prefix.upper() for prefix in prefixes}
+    ignored_upper = {str(name).strip().upper() for name in ignored_names or [] if str(name).strip()}
+    refs: List[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"\b[A-Za-z][A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b", str(skill_md or "")):
+        ref = match.group(0)
+        if ref.upper() in ignored_upper:
+            continue
+        if ref.upper() in allowed_upper:
+            continue
+        if ref.split("_", 1)[0].upper() not in prefixes_upper:
+            continue
+        if ref not in seen:
+            seen.add(ref)
+            refs.append(ref)
+    return refs
+
+
+def _connection_allowed_tools(item: Any) -> List[str]:
+    if isinstance(item, dict) and isinstance(item.get("allowed_tools"), list):
+        return [str(tool) for tool in item.get("allowed_tools") if str(tool).strip()]
+    return []
+
+
+def _declared_output_spec(manifest: Dict[str, Any], name: str) -> Dict[str, Any] | None:
+    exec_block = _exec_block(manifest)
+    outputs = exec_block.get("outputs")
+    if not isinstance(outputs, list):
+        return None
+    for item in outputs:
+        if isinstance(item, dict) and item.get("name") == name:
+            return item
+    return None
+
+
+def _repair_agent_markdown_outputs(manifest: Dict[str, Any]) -> None:
+    if not _entry(manifest).lower().endswith(".md"):
+        return
+    exec_block = _exec_block(manifest)
+    outputs = exec_block.get("outputs")
+    if not isinstance(outputs, list):
+        return
+    for item in outputs:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").lower()
+        media_type = str(item.get("media_type") or "").lower()
+        output_type = str(item.get("type") or "").lower()
+        if not any(token in name for token in ("summary", "report", "brief", "digest")):
+            continue
+        if item.get("kind") == "file" or media_type == "text/markdown" or output_type in {"file", "markdown"}:
+            item["kind"] = "scalar"
+            item["type"] = "markdown"
+            item.pop("media_type", None)
+            item.pop("path", None)
+
+
 def _repair_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Dict[str, Any]:
     worker_yml = parsed.get("worker_yml")
     if not isinstance(worker_yml, str) or not worker_yml.strip():
@@ -602,6 +1028,13 @@ def _repair_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Dict[str, A
         suggested_id=str(parsed.get("suggested_id") or ""),
     )
     out = dict(parsed)
+    run_code = out.get("run_code")
+    if isinstance(run_code, str):
+        had_output_names = bool(_declared_output_names(repaired_manifest))
+        inferred_names = _infer_script_output_names(run_code)
+        _repair_script_outputs_from_run_code(repaired_manifest, run_code)
+        if _entry(repaired_manifest).lower().endswith(".py") and not had_output_names and not inferred_names:
+            out["run_code"] = _ensure_script_default_summary_output(run_code)
     try:
         import yaml as pyyaml
 
@@ -616,17 +1049,13 @@ def _repair_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Dict[str, A
     if _entry(repaired_manifest).lower().endswith(".md"):
         skill_md = out.get("skill_md")
         if isinstance(skill_md, str):
-            instructions = _agent_skill_tool_instructions(repaired_manifest, prompt)
-            missing_instruction = any(
-                f"composio__{app}__execute" not in skill_md.lower()
-                or (
-                    _PROMPT_CONNECTION_READ_TOOLS.get(app)
-                    and not any(tool in skill_md for tool in _PROMPT_CONNECTION_READ_TOOLS[app])
-                )
-                for app in _infer_connections_from_prompt(prompt)
-            )
-            if instructions and missing_instruction:
-                out["skill_md"] = skill_md.rstrip() + instructions
+            skill_md = _repair_agent_scalar_output_skill_text(skill_md, repaired_manifest)
+            skill_md = _repair_agent_invalid_tool_references(skill_md, repaired_manifest)
+            skill_md = _ensure_agent_runtime_tool_instructions(skill_md, repaired_manifest, prompt)
+            out["skill_md"] = skill_md
+            finish_instruction = _agent_skill_finish_instruction(repaired_manifest)
+            if finish_instruction and not _agent_skill_has_finish_instruction(skill_md):
+                out["skill_md"] = skill_md.rstrip() + finish_instruction
     return out
 
 
@@ -665,12 +1094,49 @@ def _deterministic_verifier_issues(parsed: Dict[str, Any], prompt: str) -> List[
     if entry.endswith(".md"):
         skill_md = str(parsed.get("skill_md") or "")
         lower_skill = skill_md.lower()
+        if not _agent_skill_has_finish_instruction(skill_md):
+            issues.append("SKILL.md does not instruct the agent to call finish_with_outputs")
+        scalar_path_refs = _scalar_output_path_references(skill_md, manifest)
+        if scalar_path_refs:
+            issues.append(
+                "SKILL.md tells the agent to write a file path for scalar output(s): "
+                + ", ".join(scalar_path_refs)
+            )
+        if any(_is_scalar_output(manifest, name) for name in _declared_output_names(manifest)):
+            if re.search(r"\bdirectory `?out`? exists\b", skill_md, re.IGNORECASE):
+                issues.append("SKILL.md tells the agent to manage the out directory for scalar outputs")
+            if re.search(r"\bfile is (written|saved)\b", skill_md, re.IGNORECASE):
+                issues.append("SKILL.md tells the agent to finish after writing a file for scalar outputs")
         for app in inferred:
             if f"composio__{app}__execute" not in lower_skill:
                 issues.append(f"SKILL.md does not tell the agent to call composio__{app}__execute")
             known_tools = _PROMPT_CONNECTION_READ_TOOLS.get(app, [])
             if known_tools and not any(tool in skill_md for tool in known_tools):
                 issues.append(f"SKILL.md does not name any known {app} runtime tool")
+            invented_refs = _invented_app_tool_references(skill_md, app)
+            if invented_refs:
+                issues.append(
+                    f"SKILL.md references invented {app} tool names: {', '.join(invented_refs)}. "
+                    f"Use composio__{app}__execute with allowed tool slugs instead."
+                )
+            connection_item = next(
+                (
+                    item
+                    for item in connections or []
+                    if _connection_app_from_item(item) == app
+                ),
+                None,
+            )
+            invalid_slugs = _invalid_allowed_tool_slug_references(
+                skill_md,
+                _connection_allowed_tools(connection_item),
+                ignored_names=_declared_input_names(manifest) + _declared_output_names(manifest),
+            )
+            if invalid_slugs:
+                issues.append(
+                    f"SKILL.md references {app} tool slug(s) not declared in allowed_tools: "
+                    + ", ".join(invalid_slugs)
+                )
     elif entry.endswith(".py"):
         run_code = str(parsed.get("run_code") or "")
         for app in inferred:
@@ -779,6 +1245,8 @@ def _repair_generated_worker_manifest(
     _repair_credential_inputs_to_secrets(repaired, prompt)
     _repair_prompt_declared_connections(repaired, prompt)
     _repair_missing_operator_output(repaired)
+    _repair_agent_markdown_outputs(repaired)
+    repaired = _repair_manifest_scalar_output_text_fields(repaired, repaired)
     return repaired
 
 
@@ -856,6 +1324,20 @@ def _declared_output_names(manifest: Dict[str, Any]) -> List[str]:
         return []
     names: List[str] = []
     for item in raw_outputs:
+        if isinstance(item, dict) and item.get("name"):
+            names.append(str(item["name"]))
+    return names
+
+
+def _declared_input_names(manifest: Dict[str, Any]) -> List[str]:
+    exec_block = _exec_block(manifest)
+    raw_inputs = exec_block.get("inputs")
+    if not isinstance(raw_inputs, list):
+        raw_inputs = manifest.get("inputs")
+    if not isinstance(raw_inputs, list):
+        return []
+    names: List[str] = []
+    for item in raw_inputs:
         if isinstance(item, dict) and item.get("name"):
             names.append(str(item["name"]))
     return names
@@ -950,6 +1432,10 @@ Rules:
 - worker_yml must be schema_version "0.3", include version: "0.1.0", be valid YAML (all strings double-quoted), and use exec.runner: "e2b"
 - Agent mode (entry: SKILL.md): set skill_md, leave run_code null
 - Script mode (entry: run.py): set run_code, leave skill_md null; always add exec.command
+- Script mode MUST declare exec.outputs matching the exact keys written in
+  result.json outputs. If run.py writes `_write_result("success",
+  outputs={"checklist": checklist})`, worker.yml MUST declare an output named
+  `checklist`. Never return script-mode YAML with no outputs.
 - A separate verifier will reject bundles that merely look plausible. If the
   prompt names an integration, worker.yml must declare it in top-level
   connections, and SKILL.md/run.py must explicitly describe the runtime tool
