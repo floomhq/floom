@@ -1,10 +1,14 @@
+<p align="center">
+  <img src=".github/hero.gif" alt="Floom: the loop engineering harness for AI workers" width="880">
+</p>
+
 <h1 align="center">Floom</h1>
 
-<p align="center"><strong>Create AI workers that run on schedules, webhooks, and tool calls.</strong></p>
+<p align="center"><strong>The loop engineering harness. AI workers that run on a loop.</strong></p>
 
 <p align="center">
-  Floom turns recurring work into durable AI workers: scheduled, tool-using jobs with approvals, logs, outputs, and every run on the record.<br>
-  A worker is the complete job package: readable YAML (<code>worker.yml</code>) plus optional <code>run.py</code>, <code>SKILL.md</code>, attached memory, scoped secrets, and approved tools.
+  Schedule them, trigger them, require approvals, and keep every run on the record.<br>
+  A worker is a folder: <code>worker.yml</code> + <code>SKILL.md</code> or <code>run.py</code>. Deploy it from Claude Code, Codex, or the CLI. Run it from the UI, REST, or MCP.
 </p>
 
 <p align="center">
@@ -28,7 +32,7 @@
 
 ---
 
-Most "AI automation" is a chat window you babysit, or a no-code graph that bills you per task and can't be audited. Floom is the missing middle: a real runtime where a worker is a package you can read, it runs without you watching - script workers isolated in a sandbox - and every execution leaves logs, outputs, tool calls, approvals, and a replay you can trust.
+Most "AI automation" is a chat window you babysit, or a no-code graph that bills you per task and can't be audited. Floom is the loop engineering harness: a real runtime where a worker is a readable package, it runs on a loop without you watching, and every execution leaves logs, outputs, tool calls, approvals, and a replay you can trust. Used natively from Claude Code and Codex via MCP or CLI.
 
 ## Deploy A Python Script As An App, REST API, And MCP Tool
 
