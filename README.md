@@ -26,10 +26,6 @@
   <img src="https://img.shields.io/badge/runs%20on-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-111111?style=flat-square" alt="Linux, macOS, Windows">
 </p>
 
-<p align="center">
-  <img src="docs/media/hero.gif" alt="Describe an agent in plain English, approve the draft, and watch it run on the record" width="860">
-</p>
-
 ---
 
 Most "AI automation" is a chat window you babysit, or a no-code graph that bills you per task and can't be audited. Floom is the loop engineering harness: a real runtime where a worker is a readable package, it runs on a loop without you watching, and every execution leaves logs, outputs, tool calls, approvals, and a replay you can trust. Used natively from Claude Code and Codex via MCP or CLI.
