@@ -161,6 +161,7 @@ def test_worker_author_retries_until_bundle_has_functional_run_py(monkeypatch, t
     monkeypatch.setattr(module, "_read_context_file", lambda *a, **k: "")
     monkeypatch.setattr(module, "_list_context_dir", lambda *a, **k: [])
     monkeypatch.setattr(module, "_read_existing_workers", lambda *a, **k: [])
+    monkeypatch.setattr(module, "_verify_bundle_with_model", lambda *a, **k: [])
 
     first_stub = {
         "worker_yml": _script_worker_yml(trigger="schedule"),
@@ -208,6 +209,7 @@ def test_worker_author_repairs_schema_version_and_missing_version(monkeypatch, t
     monkeypatch.setattr(module, "_read_context_file", lambda *a, **k: "")
     monkeypatch.setattr(module, "_list_context_dir", lambda *a, **k: [])
     monkeypatch.setattr(module, "_read_existing_workers", lambda *a, **k: [])
+    monkeypatch.setattr(module, "_verify_bundle_with_model", lambda *a, **k: [])
 
     bad_yaml = (
         "schema_version: 0.3\n"
