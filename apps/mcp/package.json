@@ -1,6 +1,6 @@
 {
   "name": "@floomhq/floom",
-  "version": "5.0.7",
+  "version": "5.0.8",
   "description": "CLI + MCP server for self-hosted and hosted Floom instances.",
   "type": "module",
   "bin": {
