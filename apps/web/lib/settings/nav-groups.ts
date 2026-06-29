@@ -27,7 +27,7 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
   // Workspace · {name}: shared/admin controls.
   { key: "system", label: "General", scope: "workspace", description: "Workspace defaults" },
   { key: "members", label: "Members", scope: "workspace", description: "People & roles" },
-  { key: "channels", label: "Channels", scope: "workspace", description: "Slack, email & WhatsApp" },
+  { key: "channels", label: "Channels", scope: "workspace", description: "Slack, email" },
   { key: "assistant", label: "Assistant", scope: "workspace", description: "Configure Emily" },
   { key: "versions", label: "Backups & history", scope: "workspace", description: "Restore points, download a copy, and undo" },
   { key: "danger", label: "Danger zone", scope: "workspace", description: "Irreversible actions" },
