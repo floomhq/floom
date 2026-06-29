@@ -19,6 +19,7 @@
 //
 // This page works TODAY for any authenticated user who has access to the worker.
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -186,6 +187,7 @@ function WorkerIdentityPanel({
 
 export default function RunWorkerPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
   // Support an optional share ?token= param for future public-run path.
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
@@ -302,6 +304,9 @@ export default function RunWorkerPage() {
     try {
       const result = await api.workers.run(worker.id, inputs);
       if (!result.run_id) throw new Error("Run ID missing from API response");
+      queryClient.removeQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["workers"] });
+      queryClient.invalidateQueries({ queryKey: ["system", "overview"] });
       setActiveRunId(result.run_id);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start run");
