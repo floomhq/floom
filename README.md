@@ -1,7 +1,3 @@
-<p align="center">
-  <img src=".github/hero.gif" alt="Floom: the loop engineering harness for AI workers" width="880">
-</p>
-
 <h1 align="center">Floom</h1>
 
 <p align="center"><strong>The loop engineering harness. AI workers that run on a loop.</strong></p>
@@ -24,6 +20,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/sandboxed-by%20default-111111?style=flat-square" alt="Sandboxed by default">
   <img src="https://img.shields.io/badge/runs%20on-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-111111?style=flat-square" alt="Linux, macOS, Windows">
+</p>
+
+<p align="center">
+  <img src=".github/hero.gif" alt="Floom: the loop engineering harness for AI workers" width="880">
 </p>
 
 ---
