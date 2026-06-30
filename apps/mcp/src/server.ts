@@ -13,8 +13,10 @@ import {
   listWorkerTemplates,
   validateWorkerDraft,
 } from "./lib/worker-authoring.js";
+import { captureTelemetry } from "./telemetry.js";
 
 const DEFAULT_API_BASE = "http://localhost:8000";
+const MCP_CLIENT_VERSION = "0.1.0";
 const TERMINAL_RUN_STATUSES = new Set([
   "success",
   "error",
@@ -177,6 +179,36 @@ async function callTool(handler: () => Promise<CallToolResult>): Promise<CallToo
   } catch (error) {
     return errorResult(error);
   }
+}
+
+function toolErrorCategory(result: CallToolResult): string {
+  const status =
+    result.structuredContent &&
+    typeof result.structuredContent === "object" &&
+    typeof (result.structuredContent as JsonObject).status === "number"
+      ? (result.structuredContent as JsonObject).status as number
+      : undefined;
+  if (status === 400) return "validation";
+  if (status === 401 || status === 403) return "auth";
+  if (status === 404) return "not_found";
+  if (status && status >= 500) return "api_5xx";
+  if (status && status >= 400) return "api_4xx";
+  return "tool_error";
+}
+
+function trackToolCall(tool: string, result: CallToolResult, startedAtMs: number): void {
+  const ok = result.isError !== true;
+  void captureTelemetry(
+    "mcp_tool_called",
+    {
+      tool,
+      ok,
+      duration_ms: Date.now() - startedAtMs,
+      source: "mcp",
+      ...(ok ? {} : { error_category: toolErrorCategory(result) }),
+    },
+    { workspaceId: activeWorkspaceId() },
+  );
 }
 
 async function parseResponse(response: Response): Promise<unknown> {
@@ -728,7 +760,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "floom-mcp",
-      version: "0.1.0",
+      version: MCP_CLIENT_VERSION,
     },
     {
       // Read by every connecting agent. Pre-empts the common "never enter API
@@ -745,13 +777,29 @@ export function createServer(): McpServer {
     },
   );
 
+  void captureTelemetry(
+    "mcp_session_started",
+    { source: "mcp", client_version: MCP_CLIENT_VERSION },
+    { workspaceId: activeWorkspaceId() },
+  );
+
+  const registerTool: typeof server.registerTool = (name, config, handler) => {
+    const wrappedHandler = (async (...handlerArgs: Parameters<typeof handler>) => {
+      const startedAtMs = Date.now();
+      const result = await callTool(async () => Reflect.apply(handler, undefined, handlerArgs) as Promise<CallToolResult>);
+      trackToolCall(name, result, startedAtMs);
+      return result;
+    }) as typeof handler;
+    return server.registerTool(name, config, wrappedHandler);
+  };
+
   const workerContractYamlDescription =
     "WorkerContract YAML content. Required top-level fields: schema_version: \"0.3\", name, title, description, version, exec, and trigger. " +
     "Before creating a worker, call workers.contract, choose a starting point with workers.templates.get, then call workers.validate. " +
     "For script workers, exec must include mode: \"pure-script\", entry: \"run.py\", runtime: \"python311\", runner: \"e2b\", command: \"python run.py\", plus exec.inputs and exec.outputs arrays. " +
     "Script workers must read inputs.json and write result.json at the worker root.";
 
-  server.registerTool(
+  registerTool(
     "workers.list",
     {
       title: "List Workers",
@@ -762,7 +810,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(await request("GET", "/workers"))),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.get",
     {
       title: "Get Worker",
@@ -773,7 +821,7 @@ export function createServer(): McpServer {
     async ({ id }) => callTool(async () => jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}`))),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.contract",
     {
       title: "Get Worker Authoring Contract",
@@ -785,7 +833,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(WORKER_AUTHORING_CONTRACT)),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.templates.list",
     {
       title: "List Worker Templates",
@@ -797,7 +845,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult({ templates: listWorkerTemplates() })),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.templates.get",
     {
       title: "Get Worker Template",
@@ -818,7 +866,7 @@ export function createServer(): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.validate",
     {
       title: "Validate Worker Draft",
@@ -835,7 +883,7 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(validateWorkerDraft({ worker_yml, run_py, skill_md }))),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.create",
     {
       title: "Create Worker",
@@ -869,7 +917,7 @@ export function createServer(): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.update",
     {
       title: "Update Worker",
@@ -891,7 +939,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.delete",
     {
       title: "Delete Worker",
@@ -903,7 +951,7 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await request("DELETE", `/workers/${encodeURIComponent(id)}`), "Worker deleted.")),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.run",
     {
       title: "Run Worker",
@@ -921,7 +969,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "runs.list",
     {
       title: "List Runs",
@@ -938,7 +986,7 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await request("GET", "/runs", undefined, { worker_id, status, limit, offset }))),
   );
 
-  server.registerTool(
+  registerTool(
     "runs.get",
     {
       title: "Get Run",
@@ -949,7 +997,7 @@ export function createServer(): McpServer {
     async ({ id }) => callTool(async () => jsonResult(await request("GET", `/runs/${encodeURIComponent(id)}`))),
   );
 
-  server.registerTool(
+  registerTool(
     "runs.watch",
     {
       title: "Watch Run",
@@ -964,7 +1012,7 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await watchRunEvents(id, timeout_ms), "Run watch completed.")),
   );
 
-  server.registerTool(
+  registerTool(
     "secrets.list",
     {
       title: "List Secrets",
@@ -975,7 +1023,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(await request("GET", "/secrets"))),
   );
 
-  server.registerTool(
+  registerTool(
     "secrets.set",
     {
       title: "Set Workspace Secret (env var)",
@@ -997,7 +1045,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "secrets.delete",
     {
       title: "Delete Secret",
@@ -1013,7 +1061,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "connections.list",
     {
       title: "List Connections",
@@ -1024,7 +1072,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(await request("GET", "/connections"))),
   );
 
-  server.registerTool(
+  registerTool(
     "connections.add_mcp",
     {
       title: "Add MCP Connection",
@@ -1046,7 +1094,7 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await request("POST", "/connections/mcp", payload), "MCP connection saved.")),
   );
 
-  server.registerTool(
+  registerTool(
     "contexts.list",
     {
       title: "List Contexts",
@@ -1057,7 +1105,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(await request("GET", "/contexts"))),
   );
 
-  server.registerTool(
+  registerTool(
     "contexts.read",
     {
       title: "Read Context File",
@@ -1072,7 +1120,7 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await readContextFile(name, path))),
   );
 
-  server.registerTool(
+  registerTool(
     "contexts.write",
     {
       title: "Write Context File",
@@ -1097,7 +1145,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "contexts.upload",
     {
       title: "Upload Context File",
@@ -1123,7 +1171,7 @@ export function createServer(): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "triggers.list",
     {
       title: "List Triggers",
@@ -1138,7 +1186,7 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await listTriggers(worker_id, app))),
   );
 
-  server.registerTool(
+  registerTool(
     "workspace.chat",
     {
       title: "Chat with Workspace Agent",
@@ -1160,7 +1208,7 @@ export function createServer(): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.write_file",
     {
       title: "Write Worker File",
@@ -1189,7 +1237,7 @@ export function createServer(): McpServer {
   // CRITICAL: Approvals
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "approvals.list",
     {
       title: "List Approvals",
@@ -1203,7 +1251,7 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await request("GET", "/approvals", undefined, { limit }))),
   );
 
-  server.registerTool(
+  registerTool(
     "approvals.approve",
     {
       title: "Approve Run",
@@ -1223,7 +1271,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "approvals.reject",
     {
       title: "Reject Run",
@@ -1247,7 +1295,7 @@ export function createServer(): McpServer {
   // CRITICAL: Run control
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "runs.cancel",
     {
       title: "Cancel Run",
@@ -1261,7 +1309,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "runs.replay",
     {
       title: "Replay Run",
@@ -1285,7 +1333,7 @@ export function createServer(): McpServer {
   // CRITICAL: Logging
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "workers.logs",
     {
       title: "Get Worker Logs",
@@ -1308,7 +1356,7 @@ export function createServer(): McpServer {
   // CRITICAL: System health
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "system.overview",
     {
       title: "System Overview",
@@ -1319,7 +1367,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(await request("GET", "/system/overview"))),
   );
 
-  server.registerTool(
+  registerTool(
     "system.stats",
     {
       title: "Workspace Stats",
@@ -1334,7 +1382,7 @@ export function createServer(): McpServer {
   // HIGH: Versioning — workers
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "workers.versions",
     {
       title: "List Worker Versions",
@@ -1351,7 +1399,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.rollback",
     {
       title: "Rollback Worker",
@@ -1375,7 +1423,7 @@ export function createServer(): McpServer {
   // HIGH: Versioning — contexts/brain packs
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "contexts.versions",
     {
       title: "List Context Versions",
@@ -1392,7 +1440,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "contexts.rollback",
     {
       title: "Rollback Context",
@@ -1416,7 +1464,7 @@ export function createServer(): McpServer {
   // HIGH: Context CRUD
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "contexts.create",
     {
       title: "Create Context",
@@ -1437,7 +1485,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "contexts.delete",
     {
       title: "Delete Context",
@@ -1457,7 +1505,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "contexts.delete_file",
     {
       title: "Delete Context File",
@@ -1484,7 +1532,7 @@ export function createServer(): McpServer {
   // HIGH: Worker alerts
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "workers.alerts.list",
     {
       title: "List Worker Alerts",
@@ -1498,7 +1546,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.alerts.create",
     {
       title: "Create Worker Alert",
@@ -1520,7 +1568,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.alerts.delete",
     {
       title: "Delete Worker Alert",
@@ -1544,7 +1592,7 @@ export function createServer(): McpServer {
   // HIGH: Worker lifecycle — archive / restore / stats
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "workers.archive",
     {
       title: "Archive Worker",
@@ -1561,7 +1609,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.restore",
     {
       title: "Restore Worker",
@@ -1578,7 +1626,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.stats",
     {
       title: "Get Worker Stats",
@@ -1596,7 +1644,7 @@ export function createServer(): McpServer {
   // MEDIUM: Workers — sample input, timeseries, reload
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "workers.sample_input",
     {
       title: "Get Worker Sample Input",
@@ -1610,7 +1658,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.timeseries",
     {
       title: "Get Worker Run Timeseries",
@@ -1627,7 +1675,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workers.reload",
     {
       title: "Reload Workers",
@@ -1645,7 +1693,7 @@ export function createServer(): McpServer {
   // MEDIUM: Secrets — test
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "secrets.test",
     {
       title: "Test Secret",
@@ -1665,7 +1713,7 @@ export function createServer(): McpServer {
   // MEDIUM: Connections — delete, status, test
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "connections.delete",
     {
       title: "Delete Connection",
@@ -1684,7 +1732,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "connections.status",
     {
       title: "Get Connection Status",
@@ -1700,7 +1748,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "connections.test",
     {
       title: "Test Connection",
@@ -1720,7 +1768,7 @@ export function createServer(): McpServer {
   // MEDIUM: Integrations catalog
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "integrations.catalog",
     {
       title: "List Integrations Catalog",
@@ -1735,7 +1783,7 @@ export function createServer(): McpServer {
   // MEDIUM: Conversations
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "conversations.list",
     {
       title: "List Conversations",
@@ -1751,7 +1799,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "conversations.get",
     {
       title: "Get Conversation",
@@ -1771,7 +1819,7 @@ export function createServer(): McpServer {
   // MEDIUM: Workspace instructions
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "workspace.instructions.get",
     {
       title: "Get Workspace Instructions",
@@ -1782,7 +1830,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(await request("GET", "/workspace"))),
   );
 
-  server.registerTool(
+  registerTool(
     "workspace.instructions.set",
     {
       title: "Set Workspace Instructions",
@@ -1799,7 +1847,7 @@ export function createServer(): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "workspace.versions",
     {
       title: "List Workspace Instruction Versions",
@@ -1815,7 +1863,7 @@ export function createServer(): McpServer {
       ),
   );
 
-  server.registerTool(
+  registerTool(
     "workspace.rollback",
     {
       title: "Rollback Workspace Instructions",
@@ -1838,7 +1886,7 @@ export function createServer(): McpServer {
   // MEDIUM: System info and alerts
   // ---------------------------------------------------------------------------
 
-  server.registerTool(
+  registerTool(
     "system.info",
     {
       title: "System Info",
@@ -1849,7 +1897,7 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(await request("GET", "/system/info"))),
   );
 
-  server.registerTool(
+  registerTool(
     "system.alerts",
     {
       title: "System Alerts",

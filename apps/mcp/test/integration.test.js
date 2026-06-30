@@ -395,15 +395,51 @@ async function startMockApi() {
   };
 }
 
-async function withClient(mock, secret, fn, entry = "dist/server.js") {
+async function startMockPosthog() {
+  const events = [];
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url || "/", "http://127.0.0.1");
+    if (request.method === "POST" && url.pathname === "/capture/") {
+      events.push(await readBody(request));
+      return json(response, 200, { status: "ok" });
+    }
+    return empty(response, 404);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  return {
+    server,
+    events,
+    baseUrl: `http://127.0.0.1:${address.port}`,
+  };
+}
+
+async function waitFor(predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = predicate();
+    if (value) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail("timed out waiting for condition");
+}
+
+async function withClient(mock, secret, fn, entry = "dist/server.js", extraEnv = {}) {
   const client = new Client({ name: "workeros-mcp-test", version: "0.1.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [entry],
     env: {
       ...process.env,
+      POSTHOG_KEY: "",
+      NEXT_PUBLIC_POSTHOG_KEY: "",
       WORKEROS_API_BASE: mock.baseUrl,
       WORKEROS_API_SECRET: secret,
+      ...extraEnv,
     },
   });
   await client.connect(transport);
@@ -436,6 +472,41 @@ async function runCli(args, env = {}, stdin = "") {
     stderr: Buffer.concat(stderr).toString("utf8"),
   };
 }
+
+test("MCP emits source-tagged session and tool telemetry without arguments", async (t) => {
+  const mock = await startMockApi();
+  const posthog = await startMockPosthog();
+  t.after(() => mock.server.close());
+  t.after(() => posthog.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    await waitFor(() => posthog.events.find((event) => event.event === "mcp_session_started"));
+    await client.callTool({ name: "workers.contract", arguments: {} });
+    const toolEvent = await waitFor(() => posthog.events.find((event) => event.event === "mcp_tool_called"));
+    const sessionEvent = posthog.events.find((event) => event.event === "mcp_session_started");
+
+    assert.equal(sessionEvent.api_key, "ph_test_key");
+    assert.equal(sessionEvent.distinct_id, "ws_test");
+    assert.equal(sessionEvent.properties.source, "mcp");
+    assert.equal(sessionEvent.properties.client_version, "0.1.0");
+    assert.deepEqual(sessionEvent.properties.$groups, { workspace: "ws_test" });
+
+    assert.equal(toolEvent.api_key, "ph_test_key");
+    assert.equal(toolEvent.distinct_id, "ws_test");
+    assert.equal(toolEvent.properties.source, "mcp");
+    assert.equal(toolEvent.properties.tool, "workers.contract");
+    assert.equal(toolEvent.properties.ok, true);
+    assert.equal(toolEvent.properties.workspace_id, "ws_test");
+    assert.deepEqual(toolEvent.properties.$groups, { workspace: "ws_test" });
+    assert.equal(typeof toolEvent.properties.duration_ms, "number");
+    assert.ok(toolEvent.properties.duration_ms >= 0);
+    assert.equal(Object.hasOwn(toolEvent.properties, "arguments"), false);
+  }, "dist/server.js", {
+    POSTHOG_KEY: "ph_test_key",
+    POSTHOG_HOST: posthog.baseUrl,
+    WORKEROS_WORKSPACE_ID: "ws_test",
+  });
+});
 
 test("workeros MCP exposes context tools and covers lifecycle happy paths", async (t) => {
   const mock = await startMockApi();
