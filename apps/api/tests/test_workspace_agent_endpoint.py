@@ -336,3 +336,13 @@ def test_emily_persona_investigation_mode_blocks_partial_status_dumps():
     # but the concept (use tools, don't dump partial status) must remain.
     assert "Tools before text" in persona or "Investigate first" in persona or "tool" in persona.lower()
     assert "say \"keep going\"" in persona or "keep going" in persona.lower() or "finish" in persona.lower()
+
+
+def test_emily_persona_is_direct_warm_and_constructive():
+    import chat_service
+
+    persona = chat_service.EMILY_BASE_PERSONA
+    assert "Direct, warm, and constructive" in persona
+    assert "Positive without being fake" in persona
+    assert "Lead with useful momentum" in persona
+    assert "I don't make failure the headline" in persona
