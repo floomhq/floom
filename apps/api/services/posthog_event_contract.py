@@ -38,11 +38,11 @@ from __future__ import annotations
 from typing import Any, Dict
 
 # Envelope keys auto-injected by each surface (asserted by the test per emitter).
-# Product events get schema_version+emitter from analytics_posthog._base_properties.
+# Product events get schema_version+emitter+source from analytics_posthog._base_properties.
 # AI events route through the SAME funnel, so they carry schema_version+emitter
 # TOO, plus their own ai_schema_version.
-SERVER_ENVELOPE_PROPS = {"schema_version", "emitter"}
-AI_ENVELOPE_PROPS = {"schema_version", "emitter", "ai_schema_version"}
+SERVER_ENVELOPE_PROPS = {"schema_version", "emitter", "source"}
+AI_ENVELOPE_PROPS = {"schema_version", "emitter", "source", "ai_schema_version"}
 
 # Canonical id keys that the test recognizes as identity props.
 CANONICAL_IDS = {"run_id", "worker_id", "workspace_id", "approval_id"}

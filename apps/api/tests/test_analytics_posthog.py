@@ -113,6 +113,7 @@ class TestEnabled:
         # injected meta
         assert props["schema_version"] == analytics_posthog.SCHEMA_VERSION
         assert props["emitter"] == "server"
+        assert props["source"] == "api"
 
     def test_empty_distinct_id_dropped(self, monkeypatch):
         stub = _enable_with_stub(monkeypatch)
@@ -150,6 +151,62 @@ class TestEnabled:
         analytics_posthog.capture_event(
             distinct_id="u", event="run_failed", properties={}
         )
+
+    def test_request_source_header_context_wins(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        token = analytics_posthog.set_current_source("cli")
+        try:
+            analytics_posthog.capture_event(
+                distinct_id="u",
+                event="run_completed",
+                properties={"trigger_source": "schedule"},
+            )
+        finally:
+            analytics_posthog.reset_current_source(token)
+
+        _, kwargs = stub.captured[0]
+        assert kwargs["properties"]["source"] == "cli"
+
+    def test_trigger_source_fills_source_without_header(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        analytics_posthog.capture_event(
+            distinct_id="u",
+            event="run_completed",
+            properties={"trigger_source": "schedule"},
+        )
+
+        _, kwargs = stub.captured[0]
+        assert kwargs["properties"]["source"] == "schedule"
+
+    def test_invalid_request_source_fails_open_to_api(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        token = analytics_posthog.set_current_source("mobile")
+        try:
+            analytics_posthog.capture_event(
+                distinct_id="u",
+                event="run_completed",
+                properties={},
+            )
+        finally:
+            analytics_posthog.reset_current_source(token)
+
+        _, kwargs = stub.captured[0]
+        assert kwargs["properties"]["source"] == "api"
+
+    def test_existing_source_property_is_preserved(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        token = analytics_posthog.set_current_source("web")
+        try:
+            analytics_posthog.capture_event(
+                distinct_id="u",
+                event="worker_updated",
+                properties={"source": "visibility"},
+            )
+        finally:
+            analytics_posthog.reset_current_source(token)
+
+        _, kwargs = stub.captured[0]
+        assert kwargs["properties"]["source"] == "visibility"
 
 
 # ---------------------------------------------------------------------------

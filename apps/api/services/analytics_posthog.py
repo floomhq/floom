@@ -31,6 +31,7 @@ import hashlib
 import logging
 import os
 import threading
+from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("floom.analytics")
@@ -47,6 +48,12 @@ _DEFAULT_HOST = "https://us.i.posthog.com"
 _client: Optional[Any] = None
 _init_lock = threading.Lock()
 _init_attempted = False
+_REQUEST_SOURCES = {"web", "cli", "mcp", "api"}
+_DEFAULT_SOURCE = "api"
+_current_source: ContextVar[Optional[str]] = ContextVar(
+    "workeros_posthog_source",
+    default=None,
+)
 
 
 def _env(name: str) -> str:
@@ -128,6 +135,47 @@ def hash_value(value: Optional[str], length: int = 24) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:length]
 
 
+def _normalize_request_source(value: Any) -> Optional[str]:
+    text = str(value or "").strip().lower()
+    if text in _REQUEST_SOURCES:
+        return text
+    return None
+
+
+def set_current_source(source: Any) -> Any:
+    """Set the request-scoped analytics source from ``X-Floom-Source``.
+
+    Only explicit interface values are accepted from HTTP headers. Invalid
+    values are ignored so source derivation can fall back to trigger_source/api.
+    """
+    return _current_source.set(_normalize_request_source(source))
+
+
+def reset_current_source(token: Any) -> None:
+    _current_source.reset(token)
+
+
+def _source_from_trigger_source(extra: Optional[Dict[str, Any]]) -> Optional[str]:
+    trigger_source = ""
+    try:
+        trigger_source = str((extra or {}).get("trigger_source") or "").strip().lower()
+    except Exception:
+        return None
+    if not trigger_source or trigger_source == "manual":
+        return None
+    if trigger_source.startswith("schedule"):
+        return "schedule"
+    return trigger_source
+
+
+def _derived_source(extra: Optional[Dict[str, Any]]) -> str:
+    """Return the analytics attribution source, always fail-open."""
+    try:
+        return _current_source.get() or _source_from_trigger_source(extra) or _DEFAULT_SOURCE
+    except Exception:
+        return _DEFAULT_SOURCE
+
+
 def _base_properties(extra: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     props: Dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -140,6 +188,8 @@ def _base_properties(extra: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         # only when the caller wants them; here we simply keep all provided keys
         # except those the caller set to the sentinel below.
         props.update(extra)
+    if not props.get("source"):
+        props["source"] = _derived_source(extra)
     return props
 
 

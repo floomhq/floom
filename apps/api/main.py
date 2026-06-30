@@ -1066,6 +1066,25 @@ app = FastAPI(
 
 
 @app.middleware("http")
+async def analytics_source_middleware(request: Request, call_next):
+    token = None
+    try:
+        from services import analytics_posthog
+
+        token = analytics_posthog.set_current_source(request.headers.get("x-floom-source"))
+    except Exception:
+        analytics_posthog = None  # type: ignore[assignment]
+    try:
+        return await call_next(request)
+    finally:
+        if token is not None and analytics_posthog is not None:
+            try:
+                analytics_posthog.reset_current_source(token)
+            except Exception:
+                pass
+
+
+@app.middleware("http")
 async def versioned_api_alias_middleware(request: Request, call_next):
     """Accept conventional /api/v1 and /v1 prefixes without duplicating routes."""
     path = request.scope.get("path", "")
