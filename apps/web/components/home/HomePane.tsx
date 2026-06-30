@@ -18,8 +18,21 @@ import { useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { useIsDesktop } from "@/lib/use-is-desktop";
 import WorkersCollection from "@/app/workers/WorkersCollection";
 import { Avatar } from "@/components/ui/Avatar";
+import { useStreamedInitialData, qk } from "@/lib/query/hooks";
+import type { SystemOverview } from "@/lib/types";
 
-export function HomePane() {
+export function HomePane({
+  // perf: the home page server-component streams GET /system/overview as an
+  // unawaited promise. Seeding the ['system','overview'] query cache here (the
+  // same key useOverview reads) lets the home pulse paint immediately on cold
+  // start instead of blocking on the heavy client fetch — the runs/workers
+  // pattern, applied to the home. A resolved null (fetch failed) is a no-op, so
+  // the pulse degrades to hidden exactly as before.
+  overviewPromise,
+}: {
+  overviewPromise?: Promise<SystemOverview | null>;
+} = {}) {
+  useStreamedInitialData(qk.overview, overviewPromise);
   const { fullscreen } = useEmilyFullscreen();
   const isDesktop = useIsDesktop();
 

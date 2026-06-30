@@ -665,6 +665,7 @@ export default function RunsCollection({
 
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
+    subtitle: "Every run, on the record.",
     items: sorted,
     loading,
     idOf: (r) => r.id,
