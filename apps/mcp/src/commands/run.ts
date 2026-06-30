@@ -151,7 +151,7 @@ export async function runWorkerCommand(
     started = (await client.requestJson(
       "POST",
       `/workers/${encodeURIComponent(workerId)}/runs`,
-      { body: { inputs: resolvedInputs, trigger_source: "manual" } },
+      { body: { inputs: resolvedInputs, trigger_source: "cli" } },
     )) as { run_id?: string; status?: string };
   } catch (error) {
     if (error instanceof FloomApiError && error.status === 404) {

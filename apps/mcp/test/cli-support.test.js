@@ -40,6 +40,7 @@ async function runCli(args, env = {}) {
       FLOOM_API_SECRET: "",
       WORKEROS_SESSION_TRANSCRIPT: "",
       CLAUDE_SESSION_TRANSCRIPT: "",
+      FLOOM_CLI_TELEMETRY_DISABLED: "1",
       ...childEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],

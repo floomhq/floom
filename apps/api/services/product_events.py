@@ -70,3 +70,59 @@ def emit_worker_lifecycle_event(
             "source": source,
         },
     )
+
+
+def emit_mcp_tool_called(
+    *,
+    owner_id: str,
+    tool_name: str,
+    success: bool,
+    duration_ms: int,
+    auth_method: Optional[str] = None,
+    worker_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    status_code: Optional[int] = None,
+    error_category: Optional[str] = None,
+    is_custom_tool: bool = False,
+) -> None:
+    emit_product_event(
+        owner_id=owner_id,
+        event="mcp_tool_called",
+        properties={
+            "tool_name": tool_name,
+            "success": bool(success),
+            "duration_ms": max(0, int(duration_ms)),
+            "auth_method": auth_method,
+            "worker_id": worker_id,
+            "run_id": run_id,
+            "status_code": status_code,
+            "error_category": error_category,
+            "is_custom_tool": bool(is_custom_tool),
+        },
+    )
+
+
+def emit_cli_command_invoked(
+    *,
+    owner_id: str,
+    command: str,
+    success: bool,
+    duration_ms: int,
+    exit_code: int,
+    api_base_kind: str,
+    worker_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+) -> None:
+    emit_product_event(
+        owner_id=owner_id,
+        event="cli_command_invoked",
+        properties={
+            "command": command,
+            "success": bool(success),
+            "duration_ms": max(0, int(duration_ms)),
+            "exit_code": int(exit_code),
+            "api_base_kind": api_base_kind,
+            "worker_id": worker_id,
+            "run_id": run_id,
+        },
+    )

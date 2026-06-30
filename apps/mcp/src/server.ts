@@ -13,6 +13,7 @@ import {
   listWorkerTemplates,
   validateWorkerDraft,
 } from "./lib/worker-authoring.js";
+import { emitMcpToolTelemetry } from "./lib/telemetry.js";
 
 const DEFAULT_API_BASE = "http://localhost:8000";
 const TERMINAL_RUN_STATUSES = new Set([
@@ -177,6 +178,65 @@ async function callTool(handler: () => Promise<CallToolResult>): Promise<CallToo
   } catch (error) {
     return errorResult(error);
   }
+}
+
+function mcpTelemetryIds(result: CallToolResult): { worker_id?: string; run_id?: string; status_code?: number } {
+  const content = result.structuredContent && typeof result.structuredContent === "object"
+    ? result.structuredContent as JsonObject
+    : {};
+  const workerId = typeof content.worker_id === "string"
+    ? content.worker_id
+    : typeof content.id === "string" && String(content.id).startsWith("w")
+      ? String(content.id)
+      : undefined;
+  const runId = typeof content.run_id === "string"
+    ? content.run_id
+    : typeof content.id === "string" && String(content.id).startsWith("run")
+      ? String(content.id)
+      : undefined;
+  const status = typeof content.status === "number" ? content.status : undefined;
+  return { worker_id: workerId, run_id: runId, status_code: status };
+}
+
+function installMcpTelemetry(server: McpServer): void {
+  const originalRegisterTool = server.registerTool.bind(server) as (
+    name: string,
+    config: unknown,
+    handler: (...args: unknown[]) => Promise<CallToolResult>,
+  ) => unknown;
+  (server as unknown as {
+    registerTool: (name: string, config: unknown, handler: (...args: unknown[]) => Promise<CallToolResult>) => unknown;
+  }).registerTool = (name, config, handler) => {
+    return originalRegisterTool(name, config, async (...args: unknown[]) => {
+      const startedAt = Date.now();
+      try {
+        const result = await handler(...args);
+        const ids = mcpTelemetryIds(result);
+        await emitMcpToolTelemetry({
+          tool_name: name,
+          success: !result.isError,
+          duration_ms: Date.now() - startedAt,
+          auth_method: "mcp_stdio",
+          worker_id: ids.worker_id,
+          run_id: ids.run_id,
+          status_code: ids.status_code,
+          error_category: result.isError ? "tool_error" : undefined,
+          is_custom_tool: false,
+        });
+        return result;
+      } catch (error) {
+        await emitMcpToolTelemetry({
+          tool_name: name,
+          success: false,
+          duration_ms: Date.now() - startedAt,
+          auth_method: "mcp_stdio",
+          error_category: "internal_error",
+          is_custom_tool: false,
+        });
+        throw error;
+      }
+    });
+  };
 }
 
 async function parseResponse(response: Response): Promise<unknown> {
@@ -744,6 +804,7 @@ export function createServer(): McpServer {
         "OAuth-ing as the user into a third party.)",
     },
   );
+  installMcpTelemetry(server);
 
   const workerContractYamlDescription =
     "WorkerContract YAML content. Required top-level fields: schema_version: \"0.3\", name, title, description, version, exec, and trigger. " +
@@ -907,17 +968,16 @@ export function createServer(): McpServer {
     "workers.run",
     {
       title: "Run Worker",
-      description: "Start a manual Floom worker run.",
+      description: "Start a Floom worker run through MCP.",
       inputSchema: {
         id: z.string().min(1).describe("Floom worker id."),
         inputs: z.record(z.string(), z.unknown()).default({}).describe("Input values for this run."),
-        trigger_source: z.string().default("manual").describe("Run trigger source."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ id, inputs, trigger_source }) =>
+    async ({ id, inputs }) =>
       callTool(async () =>
-        jsonResult(await request("POST", `/workers/${encodeURIComponent(id)}/runs`, { inputs, trigger_source })),
+        jsonResult(await request("POST", `/workers/${encodeURIComponent(id)}/runs`, { inputs, trigger_source: "mcp" })),
       ),
   );
 

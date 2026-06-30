@@ -261,6 +261,17 @@ def test_m06_mcp_serve_accepts_json_rpc_batch(monkeypatch, tmp_path):
     assert "missing id" in body[1]["error"]["message"]
 
 
+def test_mcp_workers_run_schema_does_not_expose_trigger_source(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(_rpc("tools/list")), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    tools = resp.json()["result"]["tools"]
+    workers_run = next(tool for tool in tools if tool["name"] == "workers.run")
+    assert "trigger_source" not in workers_run["inputSchema"]["properties"]
+
+
 def test_m06_mcp_serve_rejects_oversized_json_rpc_batch(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     payload = [_rpc("tools/list", request_id=i) for i in range(main._mcp_max_batch_items() + 1)]
@@ -437,7 +448,7 @@ def test_mcp_workers_run_exposes_run_id_structured_content(monkeypatch, tmp_path
     async def _fake_api_call(method, path, request, **kwargs):
         assert method == "POST"
         assert path == "/workers/worker-1/runs"
-        assert kwargs["body"] == {"inputs": {"echo": "hi"}, "trigger_source": "manual"}
+        assert kwargs["body"] == {"inputs": {"echo": "hi"}, "trigger_source": "mcp"}
         return {"status": "running", "run_id": "run_structured_1"}, 200
 
     monkeypatch.setattr(main, "_api_call", _fake_api_call)

@@ -87,8 +87,11 @@ import {
   resolveCommandName,
   setCommandName,
 } from "./lib/command-name.js";
+import { emitCliCommandTelemetry } from "./lib/telemetry.js";
 
 type RunResult = Promise<number> | number;
+type TelemetryState = { command: string; startedAt: number };
+const telemetryState = new WeakMap<Command, TelemetryState>();
 
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -102,6 +105,16 @@ async function runAction(result: RunResult): Promise<void> {
   if (code !== 0) {
     process.exitCode = code;
   }
+}
+
+function commandPath(command: Command): string {
+  const parts: string[] = [];
+  let current: Command | null = command;
+  while (current && current.parent) {
+    parts.unshift(current.name());
+    current = current.parent;
+  }
+  return parts.join(".");
 }
 
 export function buildCliProgram(commandName: CommandName = "floom"): Command {
@@ -122,6 +135,25 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     if (typeof user === "string" && user.trim()) {
       process.env.WORKEROS_USER = user.trim();
     }
+  });
+
+  program.hook("preAction", (_thisCommand, actionCommand) => {
+    telemetryState.set(actionCommand, {
+      command: commandPath(actionCommand),
+      startedAt: Date.now(),
+    });
+  });
+
+  program.hook("postAction", async (_thisCommand, actionCommand) => {
+    const state = telemetryState.get(actionCommand);
+    if (!state) return;
+    const exitCode = typeof process.exitCode === "number" ? process.exitCode : 0;
+    await emitCliCommandTelemetry({
+      command: state.command,
+      success: exitCode === 0,
+      duration_ms: Date.now() - state.startedAt,
+      exit_code: exitCode,
+    });
   });
 
   program.command("login")
