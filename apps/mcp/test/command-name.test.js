@@ -99,6 +99,21 @@ test("completion keeps the legacy floom name when invoked as floom", async () =>
   assert.match(result.stdout, /complete -F _floom_completion floom/);
 });
 
+test("login help shows hosted default and local override", async () => {
+  const result = await runAs("floom", ["login", "--help"]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /--cloud\s+Authenticate against a hosted Floom instance \(default\)/);
+  assert.match(result.stdout, /--local\s+Authenticate against a local\/self-hosted Floom API/);
+});
+
+test("package README documents hosted login default", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /\*\*Hosted\*\* \(default\)/);
+  assert.match(readme, /floom login --local/);
+  assert.doesNotMatch(readme, /Self-hosted\*\* \(default\)/);
+  assert.doesNotMatch(readme, /floom login --api/);
+});
+
 test("auth error hint uses the invoked binary name (workeros login)", async () => {
   const home = await mkdtemp(join(tmpdir(), "workeros-cmdname-home-"));
   const result = await runAs("workeros", ["whoami"], { HOME: home });

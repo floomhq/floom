@@ -144,7 +144,7 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
   const mode: AuthMode = parsed.mode === "cloud" ? "cloud" : "oss";
   if (envCloudRequested() && mode !== "cloud") {
     // WORKEROS_CLOUD=1 must not silently continue using a saved OSS secret.
-    // Return "not logged in" so callers tell the user to run `floom login --cloud`.
+    // Return "not logged in" so callers tell the user to run `floom login`.
     return null;
   }
   if (mode === "oss" && !parsed.api_secret) {

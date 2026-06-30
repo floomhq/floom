@@ -643,9 +643,12 @@ or upgrade the API.
 
 ```bash
 npm i -g @floomhq/floom
-floom login                              # browser/device auth flow
+floom login                              # hosted browser/device auth flow
+# or: floom login --local                # local/self-hosted browser/device auth flow
 floom doctor
 floom workers list
+floom workers contract
+floom workers templates list
 floom workers validate ./workers/<id>
 floom workers push ./workers/<id>
 floom run <id> --input topic="AI tools"

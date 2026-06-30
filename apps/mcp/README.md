@@ -12,16 +12,34 @@ The CLI targets local, self-hosted, and hosted deployments:
 
 | Mode | API base | Auth | Workspaces |
 |------|----------|------|------------|
-| **Self-hosted** (default) | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
-| **Hosted** | your hosted API URL | bearer token or hosted login flow, legacy `x-workeros-workspace` header | multi-workspace |
+| **Hosted** (default) | `https://workeros-api.floom.dev` | browser/device login or bearer token | multi-workspace |
+| **Self-hosted** | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
 
-## Self-Hosted Quickstart
+## Hosted Quickstart
 
 ```bash
 npm i -g @floomhq/floom@latest
-floom login --api http://localhost:8000
+floom login
 floom workers list
 floom run <worker-id> --input key=value
+```
+
+## Self-Hosted Quickstart
+
+For the default local API at `http://localhost:8000`:
+
+```bash
+npm i -g @floomhq/floom@latest
+floom login --local
+floom workers list
+```
+
+For a custom self-hosted API base, set env vars instead of passing an `--api`
+flag:
+
+```bash
+WORKEROS_API_BASE=http://localhost:8000 floom login --local
+FLOOM_API_BASE=http://localhost:8000 floom doctor
 ```
 
 If your local API runs without `FLOOM_SECRET`, login is not required for basic local development. For a protected self-hosted API, set `FLOOM_SECRET` on the backend and use the matching secret when the CLI prompts.
@@ -174,6 +192,9 @@ Use this path when a fresh agent has a local `workers/<id>/` folder and needs a 
 
 ```bash
 floom login
+floom workers contract
+floom workers templates list
+floom workers templates get python-script
 floom workers validate ./workers/<id>
 floom workers push ./workers/<id>
 floom run <id> --inputs-file docs/workers/inputs/<id>.json

@@ -149,6 +149,7 @@ export function cloudRateLimitRetryMs(
 
 export type LoginOptions = {
   cloud?: boolean;
+  local?: boolean;
 };
 
 // Heuristic: the cloud verification_url points at floom.example.com
@@ -162,6 +163,15 @@ function detectCloudFromVerificationUrl(url: string): boolean {
     if (u.hostname === "floom.example.com") return true;
     if (u.pathname.startsWith("/app/")) return true;
     return false;
+  } catch {
+    return false;
+  }
+}
+
+function isHostedApiBase(apiBase: string): boolean {
+  try {
+    const url = new URL(apiBase);
+    return url.hostname === "workeros-api.floom.dev" || url.hostname.endsWith(".floom.dev");
   } catch {
     return false;
   }
@@ -191,6 +201,10 @@ async function fetchCloudBootstrap(apiBase: string): Promise<CloudBootstrap | nu
 }
 
 export async function runLoginCommand(options: LoginOptions = {}): Promise<number> {
+  if (options.cloud && options.local) {
+    log.err("Choose either --cloud or --local, not both.");
+    return 1;
+  }
   const releaseLoginLock = await acquireLoginLock();
   try {
   log.heading("Login");
@@ -200,15 +214,18 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
   const client = new FloomApiClient(loginApiBase);
   // The engine endpoint /cli-auth/devices lives at /api/cli-auth/devices
   // when the cloud FastAPI app mounts the engine under /api. We don't have
-  // saved credentials yet, so resolvePath in the client can't help. Probe
-  // the hosted path first when --cloud (or WORKEROS_CLOUD=1) is set;
-  // otherwise default to the OSS path.
-  const explicitCloud =
-    options.cloud === true ||
-    (process.env.WORKEROS_CLOUD || "").trim() === "1" ||
-    (process.env.WORKEROS_CLOUD || "").trim().toLowerCase() === "true";
-  const devicesPath = explicitCloud ? "/api/cli-auth/devices" : "/cli-auth/devices";
-  const pollPathPrefix = explicitCloud ? "/api/cli-auth/poll" : "/cli-auth/poll";
+  // saved credentials yet, so resolvePath in the client can't help.
+  const hostedLogin =
+    options.local !== true &&
+    (
+      options.cloud === true ||
+      (process.env.WORKEROS_CLOUD || "").trim() === "1" ||
+      (process.env.WORKEROS_CLOUD || "").trim().toLowerCase() === "true" ||
+      (!process.env.WORKEROS_API_BASE && !process.env.FLOOM_API_BASE) ||
+      isHostedApiBase(loginApiBase)
+    );
+  const devicesPath = hostedLogin ? "/api/cli-auth/devices" : "/cli-auth/devices";
+  const pollPathPrefix = hostedLogin ? "/api/cli-auth/poll" : "/cli-auth/poll";
   const started = (await client.requestJson("POST", devicesPath, {
     auth: false,
     body: { client_name: "floom-cli", scopes: [] },

@@ -78,7 +78,9 @@ test("cloud login defaults to hosted Floom API", () => {
     delete process.env.WORKEROS_API_BASE;
     delete process.env.FLOOM_API_BASE;
     delete process.env.WORKEROS_CLOUD;
+    assert.equal(resolveLoginApiBase(), "https://workeros-api.floom.dev");
     assert.equal(resolveLoginApiBase({ cloud: true }), "https://workeros-api.floom.dev");
+    assert.equal(resolveLoginApiBase({ local: true }), "http://localhost:8000");
     process.env.WORKEROS_CLOUD = "1";
     assert.equal(resolveLoginApiBase(), "https://workeros-api.floom.dev");
   } finally {
@@ -458,7 +460,7 @@ test("doctor accepts cloud PAT credentials and uses shared client headers", asyn
   });
 });
 
-test("doctor first run defaults to hosted Floom and points login at cloud", async () => {
+test("doctor first run defaults to hosted Floom and points login at hosted flow", async () => {
   await withTempHome(async () => {
     const originalStdout = process.stdout.write.bind(process.stdout);
     const originalFetch = globalThis.fetch;
@@ -489,14 +491,56 @@ test("doctor first run defaults to hosted Floom and points login at cloud", asyn
       assert.equal(body.ok, false);
       assert.ok(urls.includes("https://workeros-api.floom.dev/api/health"));
       const auth = body.checks.find((check) => check.name === "auth");
-      assert.equal(auth.hint, "Run: floom login --cloud");
+      assert.equal(auth.hint, "Run: floom login");
       const recentRuns = body.checks.find((check) => check.name === "recent_runs");
-      assert.equal(recentRuns.hint, "Run: floom login --cloud");
+      assert.equal(recentRuns.hint, "Run: floom login");
     } finally {
       process.stdout.write = originalStdout;
       globalThis.fetch = originalFetch;
       if (originalFloomBase === undefined) delete process.env.FLOOM_API_BASE;
       else process.env.FLOOM_API_BASE = originalFloomBase;
+    }
+  });
+});
+
+test("doctor honors FLOOM_API_BASE when no credentials are saved", async () => {
+  await withTempHome(async () => {
+    const originalStdout = process.stdout.write.bind(process.stdout);
+    const originalFetch = globalThis.fetch;
+    const originalFloomBase = process.env.FLOOM_API_BASE;
+    const originalWorkerosBase = process.env.WORKEROS_API_BASE;
+    let stdout = "";
+    const urls = [];
+    try {
+      delete process.env.WORKEROS_API_BASE;
+      delete process.env.WORKEROS_API_TOKEN;
+      delete process.env.WORKEROS_API_SECRET;
+      process.env.FLOOM_API_BASE = "http://127.0.0.1:8765";
+      process.stdout.write = (chunk) => {
+        stdout += typeof chunk === "string" ? chunk : chunk.toString();
+        return true;
+      };
+      globalThis.fetch = async (url) => {
+        urls.push(String(url));
+        return new Response(JSON.stringify({ status: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      };
+
+      const code = await doctorCommand({ json: true });
+      assert.equal(code, 1);
+      const body = JSON.parse(stdout);
+      assert.equal(body.ok, false);
+      assert.ok(urls.includes("http://127.0.0.1:8765/health"));
+      assert.equal(urls.some((url) => url.startsWith("https://workeros-api.floom.dev")), false);
+    } finally {
+      process.stdout.write = originalStdout;
+      globalThis.fetch = originalFetch;
+      if (originalFloomBase === undefined) delete process.env.FLOOM_API_BASE;
+      else process.env.FLOOM_API_BASE = originalFloomBase;
+      if (originalWorkerosBase === undefined) delete process.env.WORKEROS_API_BASE;
+      else process.env.WORKEROS_API_BASE = originalWorkerosBase;
     }
   });
 });

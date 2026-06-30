@@ -264,7 +264,7 @@ connections, read [AUTHORING.md](AUTHORING.md).
 
 ```bash
 npm i -g @floomhq/floom
-floom login
+floom login --local
 floom workers validate ./workers/<id>
 floom workers push ./workers/<id>
 floom run <id> --inputs-file inputs.json

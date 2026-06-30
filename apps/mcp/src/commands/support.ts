@@ -76,7 +76,7 @@ function handleAuthError(error: unknown): number | null {
 function noteCloudOnlyOn404(error: unknown): boolean {
   if (error instanceof FloomApiError && error.status === 404) {
     log.err("Support is a cloud-only feature.");
-    process.stderr.write(`Log in to the hosted product: ${getCommandName()} login --cloud\n`);
+    process.stderr.write(`Log in to the hosted product: ${getCommandName()} login\n`);
     return true;
   }
   return false;
