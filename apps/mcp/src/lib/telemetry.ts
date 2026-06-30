@@ -1,5 +1,6 @@
 import { FloomApiClient } from "./api.js";
 import { readCredentials, type StoredCredentials } from "./credentials.js";
+import { getAnonymousDistinctId, telemetryDisabled } from "./telemetry-config.js";
 
 export type CliTelemetryPayload = {
   command: string;
@@ -21,13 +22,6 @@ export type McpTelemetryPayload = {
   error_category?: string;
   is_custom_tool?: boolean;
 };
-
-function telemetryDisabled(): boolean {
-  const value = (process.env.FLOOM_CLI_TELEMETRY_DISABLED || process.env.WORKEROS_CLI_TELEMETRY_DISABLED || "")
-    .trim()
-    .toLowerCase();
-  return value === "1" || value === "true" || value === "yes" || value === "on";
-}
 
 export function apiBaseKind(apiBase: string): "local" | "cloud" | "custom" {
   let host = "";
@@ -65,8 +59,10 @@ export async function emitCliCommandTelemetry(payload: CliTelemetryPayload): Pro
   try {
     const resolved = await telemetryClient();
     if (!resolved) return;
+    const anonymousDistinctId = await getAnonymousDistinctId();
     await resolved.client.requestJson("POST", "/telemetry/cli-command", {
       body: {
+        anonymous_distinct_id: anonymousDistinctId,
         command: payload.command,
         success: payload.success,
         duration_ms: Math.max(0, Math.floor(payload.duration_ms)),
@@ -85,8 +81,10 @@ export async function emitMcpToolTelemetry(payload: McpTelemetryPayload): Promis
   try {
     const resolved = await telemetryClient();
     if (!resolved) return;
+    const anonymousDistinctId = await getAnonymousDistinctId();
     await resolved.client.requestJson("POST", "/telemetry/mcp-tool", {
       body: {
+        anonymous_distinct_id: anonymousDistinctId,
         tool_name: payload.tool_name,
         success: payload.success,
         duration_ms: Math.max(0, Math.floor(payload.duration_ms)),
@@ -100,5 +98,18 @@ export async function emitMcpToolTelemetry(payload: McpTelemetryPayload): Promis
     });
   } catch {
     // Analytics must never affect MCP tool behavior.
+  }
+}
+
+export async function identifyTelemetryUser(credentials: StoredCredentials): Promise<void> {
+  if (telemetryDisabled()) return;
+  try {
+    const anonymousDistinctId = await getAnonymousDistinctId();
+    const client = new FloomApiClient(credentials.api_base, credentials);
+    await client.requestJson("POST", "/telemetry/identify", {
+      body: { anonymous_distinct_id: anonymousDistinctId },
+    });
+  } catch {
+    // Analytics must never affect auth/login behavior.
   }
 }

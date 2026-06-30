@@ -4,7 +4,7 @@ const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
 
 async function handler(req: NextRequest) {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { "X-Floom-Source": "web" };
   if (API_SECRET) headers["x-floom-secret"] = API_SECRET;
 
   const authorization = req.headers.get("authorization");

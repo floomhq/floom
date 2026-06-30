@@ -19,6 +19,7 @@ export async function GET(
   }
 
   const upstream = await fetch(`${apiBase}/s/${encodeURIComponent(token)}/download`, {
+    headers: { "X-Floom-Source": "web" },
     cache: "no-store",
   });
 

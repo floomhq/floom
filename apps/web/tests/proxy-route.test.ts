@@ -84,6 +84,35 @@ describe("api proxy route", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           cookie: "workeros_cloud_session=cloud-session; theme=dark",
+          "X-Floom-Source": "web",
+        }),
+      }),
+    );
+  });
+
+  it("forwards web source and do-not-track headers upstream", async () => {
+    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+    const { GET } = await import("@/app/api/proxy/[...path]/route");
+
+    await GET(
+      new NextRequest("https://workers.floom.dev/api/proxy/workers", {
+        headers: { "x-floom-do-not-track": "1" },
+      }),
+      { params: Promise.resolve({ path: ["workers"] }) },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://workers-api.floom.dev/workers",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-Floom-Source": "web",
+          "X-Floom-Do-Not-Track": "1",
         }),
       }),
     );

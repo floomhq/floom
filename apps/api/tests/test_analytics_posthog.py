@@ -113,6 +113,68 @@ class TestEnabled:
         # injected meta
         assert props["schema_version"] == analytics_posthog.SCHEMA_VERSION
         assert props["emitter"] == "server"
+        assert props["source"] == "api"
+
+    def test_request_source_context_is_injected(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        tokens = analytics_posthog.set_request_context(source="cli", do_not_track=False)
+        try:
+            analytics_posthog.capture_event(
+                distinct_id="owner-9",
+                event="run_completed",
+                properties={"run_id": "r1"},
+                groups={"workspace": "ws-7"},
+            )
+        finally:
+            analytics_posthog.reset_request_context(tokens)
+
+        props = stub.captured[0][1]["properties"]
+        assert props["source"] == "cli"
+
+    def test_request_do_not_track_suppresses_capture(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        tokens = analytics_posthog.set_request_context(source="cli", do_not_track=True)
+        try:
+            analytics_posthog.capture_event(
+                distinct_id="owner-9",
+                event="run_completed",
+                properties={"run_id": "r1"},
+                groups={"workspace": "ws-7"},
+            )
+        finally:
+            analytics_posthog.reset_request_context(tokens)
+
+        assert stub.captured == []
+
+    def test_workspace_opt_out_suppresses_capture(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        monkeypatch.setattr(
+            analytics_posthog,
+            "_workspace_analytics_opted_out",
+            lambda workspace_id: workspace_id == "ws-off",
+        )
+        analytics_posthog.capture_event(
+            distinct_id="owner-9",
+            event="run_completed",
+            properties={"run_id": "r1"},
+            groups={"workspace": "ws-off"},
+        )
+        assert stub.captured == []
+
+    def test_identify_user_links_anonymous_install_id(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        analytics_posthog.identify_user(
+            distinct_id="owner-9",
+            anonymous_distinct_id="anon_install",
+            groups={"workspace": "ws-7"},
+        )
+
+        assert len(stub.captured) == 1
+        event, kwargs = stub.captured[0]
+        assert event == "$identify"
+        assert kwargs["distinct_id"] == "owner-9"
+        assert kwargs["groups"] == {"workspace": "ws-7"}
+        assert kwargs["properties"]["$anon_distinct_id"] == "anon_install"
 
     def test_empty_distinct_id_dropped(self, monkeypatch):
         stub = _enable_with_stub(monkeypatch)

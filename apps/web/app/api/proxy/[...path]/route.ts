@@ -95,8 +95,12 @@ async function handler(
   const upstreamUrl = `${apiBase}${upstreamPath}${search}`;
   // Forward relevant request headers, injecting the secret
   const forwardHeaders: Record<string, string> = {
+    "X-Floom-Source": "web",
     "x-floom-secret": API_SECRET,
   };
+  if (req.headers.get("x-floom-do-not-track") === "1" || req.headers.get("dnt") === "1" || process.env.DO_NOT_TRACK === "1") {
+    forwardHeaders["X-Floom-Do-Not-Track"] = "1";
+  }
   const activeWorkspace = req.headers.get("x-workeros-workspace");
   if (activeWorkspace) forwardHeaders["x-workeros-workspace"] = activeWorkspace;
   // Multi-member/cloud: forward the browser's backend session cookies so

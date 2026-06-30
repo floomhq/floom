@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { getCommandName } from "./command-name.js";
 import { readCredentials, updateCredentials, type StoredCredentials } from "./credentials.js";
+import { telemetryRequestHeaders } from "./telemetry-config.js";
 
 const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 
@@ -225,6 +226,7 @@ export class FloomApiClient {
     const auth = options.auth ?? true;
     const headers: Record<string, string> = {
       accept: "application/json, text/plain, text/event-stream",
+      ...telemetryRequestHeaders("cli"),
       ...(options.headers || {}),
     };
     if (auth) {
@@ -257,6 +259,7 @@ export class FloomApiClient {
     const auth = options.auth ?? true;
     const headers: Record<string, string> = {
       accept: "*/*",
+      ...telemetryRequestHeaders("cli"),
       ...(options.headers || {}),
     };
     if (auth) {
@@ -290,6 +293,7 @@ export class FloomApiClient {
       method: "POST",
       headers: {
         accept: "application/json",
+        ...telemetryRequestHeaders("cli"),
         ...(await this.authHeaders()),
       },
       body: form,
@@ -329,6 +333,7 @@ export class FloomApiClient {
       method: "POST",
       headers: {
         accept: "application/json",
+        ...telemetryRequestHeaders("cli"),
         ...(await this.authHeaders()),
       },
       body: form,

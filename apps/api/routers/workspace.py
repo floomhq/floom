@@ -1375,6 +1375,7 @@ def put_workspace_setting(
 
 
 _WORKSPACE_SETTING_BOOL_KEYS = {
+    "analytics_opt_out",
     "auto_pause",
     "auto_pause_enabled",
     "failure_email_enabled",

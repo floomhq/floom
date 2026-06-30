@@ -1066,6 +1066,26 @@ app = FastAPI(
 
 
 @app.middleware("http")
+async def analytics_request_context_middleware(request: Request, call_next):
+    try:
+        from services import analytics_posthog
+    except Exception:
+        return await call_next(request)
+    do_not_track = (
+        request.headers.get("x-floom-do-not-track") == "1"
+        or request.headers.get("dnt") == "1"
+    )
+    tokens = analytics_posthog.set_request_context(
+        source=request.headers.get("x-floom-source"),
+        do_not_track=do_not_track,
+    )
+    try:
+        return await call_next(request)
+    finally:
+        analytics_posthog.reset_request_context(tokens)
+
+
+@app.middleware("http")
 async def versioned_api_alias_middleware(request: Request, call_next):
     """Accept conventional /api/v1 and /v1 prefixes without duplicating routes."""
     path = request.scope.get("path", "")
@@ -1177,6 +1197,8 @@ _CORS_ALLOWED_HEADERS = [
     "Cache-Control",
     "X-Requested-With",
     "X-Floom-Secret",
+    "X-Floom-Source",
+    "X-Floom-Do-Not-Track",
     "X-Floom-User",
     # Compatibility: clients still send the legacy workspace/run-token headers.
     "X-Workeros-Workspace",
@@ -8080,6 +8102,7 @@ async def mcp_http_endpoint(
 
 
 class CliCommandTelemetry(BaseModel):
+    anonymous_distinct_id: Optional[str] = Field(default=None, max_length=200)
     command: str = Field(min_length=1, max_length=80)
     success: bool
     duration_ms: int = Field(ge=0, le=86_400_000)
@@ -8090,6 +8113,7 @@ class CliCommandTelemetry(BaseModel):
 
 
 class McpToolTelemetry(BaseModel):
+    anonymous_distinct_id: Optional[str] = Field(default=None, max_length=200)
     tool_name: str = Field(min_length=1, max_length=160)
     success: bool
     duration_ms: int = Field(ge=0, le=86_400_000)
@@ -8101,6 +8125,42 @@ class McpToolTelemetry(BaseModel):
     is_custom_tool: bool = False
 
 
+class TelemetryIdentify(BaseModel):
+    anonymous_distinct_id: str = Field(min_length=1, max_length=200)
+
+
+def _telemetry_workspace_id(owner_id: str) -> str:
+    try:
+        return str(derive_workspace_id(owner_id))
+    except Exception:
+        return ""
+
+
+def _identify_telemetry_install(owner_id: str, anonymous_distinct_id: Optional[str]) -> None:
+    if not anonymous_distinct_id:
+        return
+    try:
+        from services import analytics_posthog
+
+        workspace_id = _telemetry_workspace_id(owner_id)
+        analytics_posthog.identify_user(
+            distinct_id=owner_id or "",
+            anonymous_distinct_id=anonymous_distinct_id,
+            groups={"workspace": workspace_id} if workspace_id else None,
+        )
+    except Exception:
+        logger.debug("Telemetry identify failed", exc_info=True)
+
+
+@app.post("/telemetry/identify", status_code=204)
+async def post_telemetry_identify(
+    payload: TelemetryIdentify,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Response:
+    _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id)
+    return Response(status_code=204)
+
+
 @app.post("/telemetry/cli-command", status_code=204)
 async def post_cli_telemetry(
     payload: CliCommandTelemetry,
@@ -8109,6 +8169,7 @@ async def post_cli_telemetry(
     try:
         from services.product_events import emit_cli_command_invoked
 
+        _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id)
         emit_cli_command_invoked(
             owner_id=auth.user_id,
             command=payload.command,
@@ -8132,6 +8193,7 @@ async def post_mcp_tool_telemetry(
     try:
         from services.product_events import emit_mcp_tool_called
 
+        _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id)
         emit_mcp_tool_called(
             owner_id=auth.user_id,
             tool_name=payload.tool_name,

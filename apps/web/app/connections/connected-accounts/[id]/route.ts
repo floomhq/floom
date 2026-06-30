@@ -37,7 +37,7 @@ export async function GET(
     const upstream = await fetch(
       `${API_BASE}/connections/${encodeURIComponent(localId)}/account-info`,
       {
-        headers: { "x-floom-secret": API_SECRET, "Content-Type": "application/json" },
+        headers: { "x-floom-secret": API_SECRET, "Content-Type": "application/json", "X-Floom-Source": "web" },
         cache: "no-store",
       }
     );
@@ -69,7 +69,7 @@ export async function GET(
 async function resolveLocalConnectionId(connectionId: string): Promise<string | null> {
   try {
     const res = await fetch(`${API_BASE}/connections`, {
-      headers: { "x-floom-secret": API_SECRET, "Content-Type": "application/json" },
+      headers: { "x-floom-secret": API_SECRET, "Content-Type": "application/json", "X-Floom-Source": "web" },
       cache: "no-store",
     });
     if (!res.ok) return null;

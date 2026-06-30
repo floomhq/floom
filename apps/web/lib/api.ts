@@ -63,6 +63,10 @@ function extractApiErrorMessage(body: unknown): string {
 
 function withWorkspaceHeaders(headers?: HeadersInit): Headers {
   const merged = new Headers(headers);
+  merged.set("X-Floom-Source", "web");
+  if (typeof navigator !== "undefined" && navigator.doNotTrack === "1") {
+    merged.set("X-Floom-Do-Not-Track", "1");
+  }
   const activeWorkspace = getActiveWorkspaceId();
   if (activeWorkspace) {
     merged.set("x-workeros-workspace", activeWorkspace);
@@ -93,7 +97,7 @@ function captureProductEvent(eventName: string, properties: Record<string, unkno
 }
 
 async function fetchApi(path: string, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, init);
+  return fetch(input, { ...init, headers: withWorkspaceHeaders(init?.headers) });
 }
 
 function isSignedApprovalProxyPath(path: string): boolean {

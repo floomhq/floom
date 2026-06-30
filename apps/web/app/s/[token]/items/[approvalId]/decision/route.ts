@@ -24,6 +24,7 @@ export async function POST(
   const body = await request.text();
   const headers = new Headers({
     "content-type": request.headers.get("content-type") || "application/json",
+    "X-Floom-Source": "web",
   });
 
   const upstream = await fetch(
