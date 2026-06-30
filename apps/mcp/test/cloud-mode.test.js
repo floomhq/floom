@@ -21,6 +21,7 @@ import {
 import { doctorCommand } from "../dist/commands/doctor.js";
 import { runWhoamiCommand } from "../dist/commands/whoami.js";
 import { acquireLoginLock, cloudRateLimitRetryMs, resolveInitialCloudWorkspace } from "../dist/commands/login.js";
+import { apiBaseKind } from "../dist/lib/telemetry.js";
 
 test("cloud login honors Retry-After headers on cli-exchange 429", () => {
   const error = new FloomApiError(
@@ -91,6 +92,11 @@ test("cloud login defaults to hosted Floom API", () => {
     if (originalCloud === undefined) delete process.env.WORKEROS_CLOUD;
     else process.env.WORKEROS_CLOUD = originalCloud;
   }
+});
+
+test("telemetry classifies hosted floom.dev API as cloud", () => {
+  assert.equal(apiBaseKind("https://workeros-api.floom.dev"), "cloud");
+  assert.equal(apiBaseKind("http://127.0.0.1:8000"), "local");
 });
 
 test("cloud login can persist api_token credentials from cli-exchange", () => {

@@ -179,6 +179,32 @@ def _drive_worker_deleted():
     )
 
 
+def _drive_mcp_tool_called():
+    product_events.emit_mcp_tool_called(
+        owner_id="owner-1",
+        tool_name="workers.run",
+        success=True,
+        duration_ms=123,
+        auth_method="pat",
+        worker_id="wkr-1",
+        run_id="run-1",
+        is_custom_tool=False,
+    )
+
+
+def _drive_cli_command_invoked():
+    product_events.emit_cli_command_invoked(
+        owner_id="owner-1",
+        command="run",
+        success=True,
+        duration_ms=456,
+        exit_code=0,
+        api_base_kind="local",
+        worker_id="wkr-1",
+        run_id="run-1",
+    )
+
+
 def _drive_trigger_fired():
     scheduler._emit_trigger_fired(
         owner_id="owner-1",
@@ -254,6 +280,8 @@ _DRIVERS = {
     "worker_updated": _drive_worker_updated,
     "worker_archived": _drive_worker_archived,
     "worker_deleted": _drive_worker_deleted,
+    "mcp_tool_called": _drive_mcp_tool_called,
+    "cli_command_invoked": _drive_cli_command_invoked,
     "trigger_fired": _drive_trigger_fired,
     "connection_added": _drive_connection_added,
     "connection_failed": _drive_connection_failed,
@@ -318,3 +346,11 @@ def test_no_unexpected_required_drift(stub, event):
         f"{event}: emitted props NOT in contract (update posthog_event_contract.py "
         f"AND any downstream dashboards): {sorted(unexpected)}"
     )
+
+
+@pytest.mark.parametrize("event", ["mcp_tool_called", "cli_command_invoked"])
+def test_programmatic_surface_events_do_not_capture_payloads(stub, event):
+    _DRIVERS[event]()
+    emitted = _events(stub, event)[0]
+    forbidden = {"inputs", "arguments", "raw_arguments", "payload", "output", "response", "error"}
+    assert forbidden.isdisjoint(emitted["properties"])

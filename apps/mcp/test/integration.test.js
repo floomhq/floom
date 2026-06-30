@@ -285,7 +285,15 @@ async function startMockApi() {
     if (request.method === "POST" && url.pathname === "/workers/mcp-test-worker/runs") {
       const body = await readBody(request);
       assert.deepEqual(body.inputs, { message: "hello" });
+      assert.equal(body.trigger_source, "mcp");
       json(response, 200, { status: "running", run_id: "run_test" });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/telemetry/mcp-tool") {
+      const body = await readBody(request);
+      bodies.push(body);
+      empty(response, 204);
       return;
     }
 
@@ -299,7 +307,7 @@ async function startMockApi() {
         id: "run_test",
         worker_id: "mcp-test-worker",
         status: "completed",
-        trigger_source: "manual",
+        trigger_source: "mcp",
         runner: "e2b",
         input: { message: "hello" },
         output: { result: "hello" },
@@ -395,7 +403,7 @@ async function startMockApi() {
   };
 }
 
-async function withClient(mock, secret, fn, entry = "dist/server.js") {
+async function withClient(mock, secret, fn, entry = "dist/server.js", extraEnv = {}) {
   const client = new Client({ name: "workeros-mcp-test", version: "0.1.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -404,6 +412,8 @@ async function withClient(mock, secret, fn, entry = "dist/server.js") {
       ...process.env,
       WORKEROS_API_BASE: mock.baseUrl,
       WORKEROS_API_SECRET: secret,
+      FLOOM_CLI_TELEMETRY_DISABLED: "1",
+      ...extraEnv,
     },
   });
   await client.connect(transport);
@@ -486,6 +496,9 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     assert.match(workersCreateTool.description, /schema_version/);
     assert.match(workersCreateTool.description, /exec/);
     assert.match(workersCreateTool.inputSchema.properties.worker_yml.description, /inputs\.json/);
+    const workersRunTool = tools.tools.find((tool) => tool.name === "workers.run");
+    assert.ok(workersRunTool);
+    assert.equal("trigger_source" in workersRunTool.inputSchema.properties, false);
 
     const contract = await client.callTool({ name: "workers.contract", arguments: {} });
     assert.equal(contract.structuredContent.schema_version, "0.3");
@@ -606,6 +619,32 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     "GET /runs/run_test/events",
     "DELETE /workers/mcp-test-worker",
   ]);
+});
+
+test("stdio MCP emits sanitized tool telemetry", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(
+    mock,
+    "test-secret",
+    async (client) => {
+      const listed = await client.callTool({ name: "workers.list", arguments: {} });
+      assert.deepEqual(listed.structuredContent, { data: [] });
+    },
+    "dist/server.js",
+    { FLOOM_CLI_TELEMETRY_DISABLED: "0" },
+  );
+
+  assert.deepEqual(mock.seen, ["GET /workers", "POST /telemetry/mcp-tool"]);
+  const event = mock.bodies.at(-1);
+  assert.equal(event.tool_name, "workers.list");
+  assert.equal(event.success, true);
+  assert.equal(event.auth_method, "mcp_stdio");
+  assert.equal(event.is_custom_tool, false);
+  assert.equal(typeof event.duration_ms, "number");
+  assert.equal("inputs" in event, false);
+  assert.equal("arguments" in event, false);
 });
 
 test("workers.create renders object validation details as JSON, not object string", async (t) => {

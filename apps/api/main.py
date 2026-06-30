@@ -5808,6 +5808,76 @@ _WORKEROS_REMOTE_MCP_VERSION = "0.2.0"
 _MCP_TERMINAL_RUN_STATUSES = {"completed", "failed", "pending_approval", "approved", "rejected", "success", "error"}
 
 
+def _mcp_result_payload(result: Any) -> Dict[str, Any]:
+    if isinstance(result, dict) and isinstance(result.get("content"), list):
+        for item in result.get("content") or []:
+            if not isinstance(item, dict) or item.get("type") != "text":
+                continue
+            text = item.get("text")
+            if not isinstance(text, str):
+                continue
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return result if isinstance(result, dict) else {}
+
+
+def _mcp_tool_tracking_properties(tool_name: str, arguments: Dict[str, Any], result: Any) -> Dict[str, Any]:
+    payload = _mcp_result_payload(result)
+    worker_id = payload.get("worker_id")
+    if not worker_id and tool_name in {"workers.get", "workers.create"}:
+        worker_id = payload.get("id")
+    if not worker_id and isinstance(arguments.get("id"), str) and tool_name.startswith("workers."):
+        worker_id = arguments.get("id")
+    if not worker_id and isinstance(arguments.get("worker_id"), str):
+        worker_id = arguments.get("worker_id")
+    run_id = payload.get("run_id")
+    if not run_id and tool_name in {"runs.get"}:
+        run_id = payload.get("id")
+    status_code = payload.get("status_code")
+    if not isinstance(status_code, int):
+        status_code = None
+    return {
+        "worker_id": str(worker_id) if worker_id else None,
+        "run_id": str(run_id) if run_id else None,
+        "status_code": status_code,
+        "is_custom_tool": _mcp_default_tool(tool_name) is None,
+    }
+
+
+def _emit_mcp_tool_called_event(
+    *,
+    auth: AuthContext,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    result: Any = None,
+    success: bool,
+    duration_ms: int,
+    error_category: Optional[str] = None,
+) -> None:
+    try:
+        from services.product_events import emit_mcp_tool_called
+
+        props = _mcp_tool_tracking_properties(tool_name, arguments, result)
+        emit_mcp_tool_called(
+            owner_id=auth.user_id,
+            tool_name=tool_name,
+            success=success,
+            duration_ms=duration_ms,
+            auth_method=auth.auth_method,
+            worker_id=props.get("worker_id"),
+            run_id=props.get("run_id"),
+            status_code=props.get("status_code"),
+            error_category=error_category,
+            is_custom_tool=bool(props.get("is_custom_tool")),
+        )
+    except Exception:
+        logger.debug("MCP analytics emit failed for tool=%r", tool_name, exc_info=True)
+
+
 def _workspace_agent_mcp_enabled() -> bool:
     value = os.environ.get("WORKSPACE_AGENT_MCP_ENABLED", "1").strip().lower()
     return value not in {"0", "false", "no", "off"}
@@ -6193,7 +6263,6 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             "inputSchema": _mcp_json_schema({
                 "id": {"type": "string"},
                 "inputs": {"type": "object", "default": {}},
-                "trigger_source": {"type": "string", "default": "manual"},
             }, ["id"]),
         },
         {
@@ -6386,7 +6455,7 @@ def _mcp_call_workers_update(arguments: Dict[str, Any], auth: AuthContext, repos
 def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     payload = RunCreate(
         inputs=arguments.get("inputs") if isinstance(arguments.get("inputs"), dict) else {},
-        trigger_source=str(arguments.get("trigger_source") or "manual"),
+        trigger_source="mcp",
     )
     data = create_worker_run(_mcp_arg(arguments, "id"), payload, request=None, auth=auth, repos=repos)
     return _mcp_call_result(data, "Worker run started.")
@@ -7217,7 +7286,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md and a minimal run_py stub.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}}, "required": ["worker_yml", "run_py"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
     {"name": "workers.delete", "description": "Delete a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
-    {"name": "workers.run", "description": "Start a manual Floom worker run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run."}, "trigger_source": {"type": "string", "default": "manual"}}, "required": ["id"]}},
+    {"name": "workers.run", "description": "Start a Floom worker run through MCP.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run."}}, "required": ["id"]}},
     {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
     {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
     {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
@@ -7423,7 +7492,7 @@ async def _mcp_dispatch(
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}", request)
         return _mcp_api_result(data, s)
     if name == "workers.run":
-        body = {"inputs": a.get("inputs") or {}, "trigger_source": a.get("trigger_source", "manual")}
+        body = {"inputs": a.get("inputs") or {}, "trigger_source": "mcp"}
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/runs", request, body=body)
         return _mcp_api_result(data, s)
     if name == "workers.write_file":
@@ -7825,19 +7894,63 @@ async def _mcp_handle_request(
             "mcp tools/call: tool=%r user=%s role=%s auth_method=%s",
             tool_name, auth.user_id, auth.role, auth.auth_method,
         )
+        started_at = time.monotonic()
         denied = _mcp_access_error(tool_name, auth)
         if denied is not None:
-            return _mcp_ok(rpc_id, _mcp_content(denied, is_error=True))
+            result = _mcp_content(denied, is_error=True)
+            _emit_mcp_tool_called_event(
+                auth=auth,
+                tool_name=tool_name,
+                arguments=arguments,
+                result=result,
+                success=False,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                error_category="access_denied",
+            )
+            return _mcp_ok(rpc_id, result)
         try:
             result = await _mcp_dispatch(tool_name, arguments, auth, repos, request)
         except KeyError as exc:
             missing = str(exc).strip("'") or "required argument"
+            _emit_mcp_tool_called_event(
+                auth=auth,
+                tool_name=tool_name,
+                arguments=arguments,
+                success=False,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                error_category="invalid_params",
+            )
             return _mcp_err(rpc_id, -32602, f"Invalid params: missing {missing}")
         except ValidationError as exc:
+            _emit_mcp_tool_called_event(
+                auth=auth,
+                tool_name=tool_name,
+                arguments=arguments,
+                success=False,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                error_category="invalid_params",
+            )
             return _mcp_err(rpc_id, -32602, f"Invalid params: {exc}")
         except Exception:
             logger.exception("MCP serve tools/call failed: tool=%r", tool_name)
+            _emit_mcp_tool_called_event(
+                auth=auth,
+                tool_name=tool_name,
+                arguments=arguments,
+                success=False,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                error_category="internal_error",
+            )
             return _mcp_err(rpc_id, -32603, "Internal error")
+        _emit_mcp_tool_called_event(
+            auth=auth,
+            tool_name=tool_name,
+            arguments=arguments,
+            result=result,
+            success=not bool(isinstance(result, dict) and result.get("isError")),
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            error_category="tool_error" if isinstance(result, dict) and result.get("isError") else None,
+        )
         return _mcp_ok(rpc_id, result)
 
     return _mcp_err(rpc_id, -32601, f"Method not found: {method!r}")
@@ -7867,6 +7980,76 @@ async def mcp_http_endpoint(
     except Exception:
         return JSONResponse(_mcp_err(None, -32700, "Parse error"), status_code=400)
     return JSONResponse(await _mcp_handle_request(body, auth, repos, request))
+
+
+class CliCommandTelemetry(BaseModel):
+    command: str = Field(min_length=1, max_length=80)
+    success: bool
+    duration_ms: int = Field(ge=0, le=86_400_000)
+    exit_code: int = Field(ge=0, le=255)
+    api_base_kind: Literal["local", "cloud", "custom"] = "custom"
+    worker_id: Optional[str] = Field(default=None, max_length=200)
+    run_id: Optional[str] = Field(default=None, max_length=200)
+
+
+class McpToolTelemetry(BaseModel):
+    tool_name: str = Field(min_length=1, max_length=160)
+    success: bool
+    duration_ms: int = Field(ge=0, le=86_400_000)
+    auth_method: Optional[str] = Field(default=None, max_length=80)
+    worker_id: Optional[str] = Field(default=None, max_length=200)
+    run_id: Optional[str] = Field(default=None, max_length=200)
+    status_code: Optional[int] = Field(default=None, ge=100, le=599)
+    error_category: Optional[str] = Field(default=None, max_length=80)
+    is_custom_tool: bool = False
+
+
+@app.post("/telemetry/cli-command", status_code=204)
+async def post_cli_telemetry(
+    payload: CliCommandTelemetry,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Response:
+    try:
+        from services.product_events import emit_cli_command_invoked
+
+        emit_cli_command_invoked(
+            owner_id=auth.user_id,
+            command=payload.command,
+            success=payload.success,
+            duration_ms=payload.duration_ms,
+            exit_code=payload.exit_code,
+            api_base_kind=payload.api_base_kind,
+            worker_id=payload.worker_id,
+            run_id=payload.run_id,
+        )
+    except Exception:
+        logger.debug("CLI telemetry emit failed for command=%r", payload.command, exc_info=True)
+    return Response(status_code=204)
+
+
+@app.post("/telemetry/mcp-tool", status_code=204)
+async def post_mcp_tool_telemetry(
+    payload: McpToolTelemetry,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Response:
+    try:
+        from services.product_events import emit_mcp_tool_called
+
+        emit_mcp_tool_called(
+            owner_id=auth.user_id,
+            tool_name=payload.tool_name,
+            success=payload.success,
+            duration_ms=payload.duration_ms,
+            auth_method=payload.auth_method or auth.auth_method,
+            worker_id=payload.worker_id,
+            run_id=payload.run_id,
+            status_code=payload.status_code,
+            error_category=payload.error_category,
+            is_custom_tool=payload.is_custom_tool,
+        )
+    except Exception:
+        logger.debug("MCP telemetry emit failed for tool=%r", payload.tool_name, exc_info=True)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

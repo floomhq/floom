@@ -19,6 +19,7 @@ import time
 import subprocess
 import threading
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     import click
@@ -53,6 +54,42 @@ def _api(method: str, path: str, **kwargs) -> requests.Response:
     url = f"{API_BASE}{path}"
     kwargs.setdefault("headers", {}).update(_headers())
     return getattr(requests, method)(url, **kwargs)
+
+
+def _api_base_kind() -> str:
+    parsed = urlparse(API_BASE)
+    host = (parsed.hostname or "").lower()
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return "local"
+    if host.endswith("floom.dev") or host.endswith("floom.ai") or host.endswith("floom.app") or host.endswith("workeros.com"):
+        return "cloud"
+    return "custom"
+
+
+def _emit_cli_command(
+    command: str,
+    *,
+    success: bool,
+    duration_ms: int,
+    exit_code: int,
+    worker_id: str | None = None,
+    run_id: str | None = None,
+) -> None:
+    payload = {
+        "command": command,
+        "success": bool(success),
+        "duration_ms": max(0, int(duration_ms)),
+        "exit_code": int(exit_code),
+        "api_base_kind": _api_base_kind(),
+    }
+    if worker_id:
+        payload["worker_id"] = worker_id
+    if run_id:
+        payload["run_id"] = run_id
+    try:
+        _api("post", "/telemetry/cli-command", json=payload, timeout=2)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -131,13 +168,26 @@ def dev():
 @cli.command()
 def reload():
     """POST /workers/reload â€” reload all workers from disk."""
+    started_at = time.monotonic()
     try:
         r = _api("post", "/workers/reload")
         r.raise_for_status()
         data = r.json()
         click.echo(f"Reloaded: {data.get('workers_loaded', '?')} workers")
+        _emit_cli_command(
+            "reload",
+            success=True,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            exit_code=0,
+        )
     except requests.RequestException as exc:
         click.echo(f"Error: {exc}", err=True)
+        _emit_cli_command(
+            "reload",
+            success=False,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            exit_code=1,
+        )
         sys.exit(1)
 
 
@@ -152,6 +202,8 @@ def reload():
 @click.option("--timeout", default=120, show_default=True, help="Max seconds to wait")
 def run_worker(worker_id: str, input_file: str | None, poll_interval: int, timeout: int):
     """POST /workers/<worker_id>/runs, poll until done, print output."""
+    started_at = time.monotonic()
+    run_id: str | None = None
     inputs: dict = {}
     if input_file:
         with open(input_file) as f:
@@ -165,6 +217,13 @@ def run_worker(worker_id: str, input_file: str | None, poll_interval: int, timeo
         r.raise_for_status()
     except requests.RequestException as exc:
         click.echo(f"Failed to start run: {exc}", err=True)
+        _emit_cli_command(
+            "run",
+            success=False,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            exit_code=1,
+            worker_id=worker_id,
+        )
         sys.exit(1)
 
     run_id = r.json()["run_id"]
@@ -191,12 +250,36 @@ def run_worker(worker_id: str, input_file: str | None, poll_interval: int, timeo
                 click.echo(json.dumps(run["output"], indent=2, ensure_ascii=False))
             if run.get("error"):
                 click.echo(f"Error: {run['error']}", err=True)
+                _emit_cli_command(
+                    "run",
+                    success=False,
+                    duration_ms=int((time.monotonic() - started_at) * 1000),
+                    exit_code=1,
+                    worker_id=worker_id,
+                    run_id=run_id,
+                )
                 sys.exit(1)
             if status == "pending_approval":
                 click.echo("NOTE: Run is awaiting approval. Approve at " + f"{API_BASE}/approvals")
+            _emit_cli_command(
+                "run",
+                success=status in ("completed", "pending_approval", "approved"),
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                exit_code=0,
+                worker_id=worker_id,
+                run_id=run_id,
+            )
             return
 
     click.echo(f"Timeout: run {run_id} did not complete within {timeout}s", err=True)
+    _emit_cli_command(
+        "run",
+        success=False,
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+        exit_code=1,
+        worker_id=worker_id,
+        run_id=run_id,
+    )
     sys.exit(1)
 
 
@@ -281,11 +364,19 @@ def worker_cmd(action: str, worker_id: str):
 
     Usage: floom worker create <id>
     """
+    started_at = time.monotonic()
     workers_dir = REPO_ROOT / "workers"
     target = workers_dir / worker_id
 
     if target.exists():
         click.echo(f"Worker {worker_id!r} already exists at {target}", err=True)
+        _emit_cli_command(
+            "worker.create",
+            success=False,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            exit_code=1,
+            worker_id=worker_id,
+        )
         sys.exit(1)
 
     target.mkdir(parents=True)
@@ -306,6 +397,13 @@ def worker_cmd(action: str, worker_id: str):
     click.echo(f"  {target}/run.py")
     click.echo(f"  {target}/requirements.txt")
     click.echo("\nRun 'floom reload' to register the new worker.")
+    _emit_cli_command(
+        "worker.create",
+        success=True,
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+        exit_code=0,
+        worker_id=worker_id,
+    )
 
 
 # ---------------------------------------------------------------------------

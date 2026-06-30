@@ -166,6 +166,39 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
         },
         "optional_props": set(),
     },
+    # --- programmatic surfaces (server, services.product_events) -------------
+    "mcp_tool_called": {
+        "emitter": EMITTER_SERVER,
+        "surface": "main._mcp_handle_request/post_mcp_tool_telemetry",
+        "required_props": {
+            "tool_name",
+            "success",
+            "duration_ms",
+            "auth_method",
+            "is_custom_tool",
+        },
+        "optional_props": {
+            "worker_id",
+            "run_id",
+            "status_code",
+            "error_category",
+        },
+    },
+    "cli_command_invoked": {
+        "emitter": EMITTER_SERVER,
+        "surface": "main.post_cli_telemetry",
+        "required_props": {
+            "command",
+            "success",
+            "duration_ms",
+            "exit_code",
+            "api_base_kind",
+        },
+        "optional_props": {
+            "worker_id",
+            "run_id",
+        },
+    },
     # --- connections (server, routers.connections._emit_connection_resolved) -
     # OAuth activation outcome, emitted once per callback resolution.
     "connection_added": {

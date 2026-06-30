@@ -81,6 +81,7 @@ async function runCli(args, env = {}) {
       WORKEROS_API_TOKEN: "",
       FLOOM_API_BASE: "",
       FLOOM_API_SECRET: "",
+      FLOOM_CLI_TELEMETRY_DISABLED: "1",
       ...childEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -213,6 +214,14 @@ async function startMockApi({
         return;
       }
       json(response, 200, { run_id: "run_1", status: "queued" });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/telemetry/cli-command") {
+      const body = await readBody(request);
+      bodies.push(body);
+      response.writeHead(204, { "content-type": "application/json" });
+      response.end();
       return;
     }
 
@@ -887,6 +896,35 @@ test("workers run --json surfaces output_schema values when output is empty", as
   assert.deepEqual(body.output, { result: "hello" });
   assert.deepEqual(body.outputs, { result: "hello" });
   assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/runs", "GET /runs/run_1"]);
+});
+
+test("npm CLI run emits telemetry and marks worker run as cli", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["run", "cli-test-worker", "--json"], {
+    HOME: home,
+    FLOOM_CLI_TELEMETRY_DISABLED: "0",
+  });
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(mock.seen, [
+    "POST /workers/cli-test-worker/runs",
+    "GET /runs/run_1",
+    "POST /telemetry/cli-command",
+  ]);
+  assert.deepEqual(mock.bodies[0], { inputs: {}, trigger_source: "cli" });
+  assert.deepEqual(mock.bodies[1], {
+    command: "run",
+    success: true,
+    duration_ms: mock.bodies[1].duration_ms,
+    exit_code: 0,
+    api_base_kind: "local",
+  });
+  assert.equal(typeof mock.bodies[1].duration_ms, "number");
+  assert.equal("inputs" in mock.bodies[1], false);
+  assert.equal("output" in mock.bodies[1], false);
 });
 
 test("run --json treats pending_approval as terminal and surfaces approval link", async (t) => {

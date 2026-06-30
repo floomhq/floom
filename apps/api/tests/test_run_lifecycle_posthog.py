@@ -84,6 +84,11 @@ class TestRunLifecycleEmit:
         assert props["input_present"] is True
         assert props["input_bytes"] and props["input_bytes"] > 0
 
+    @pytest.mark.parametrize("trigger_source", ["cli", "mcp"])
+    def test_run_started_preserves_programmatic_trigger_source(self, emit, trigger_source):
+        _emit("running", run_row={"trigger_source": trigger_source, "runner": "e2b", "input_json": {}})
+        assert emit.calls[0]["properties"]["trigger_source"] == trigger_source
+
     def test_run_completed_carries_cost(self, emit):
         _emit("completed")
         assert len(emit.calls) == 1

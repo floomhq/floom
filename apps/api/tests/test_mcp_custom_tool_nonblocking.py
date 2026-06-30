@@ -89,6 +89,33 @@ def _dispatch(main, monkeypatch, repos):
     return asyncio.run(main._mcp_dispatch("my_custom_tool", {}, auth, repos, _fake_request()))
 
 
+def test_workers_run_forces_mcp_trigger_source(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    from auth.context import AuthContext
+
+    async def _fake_api_call(method, path, request, **kwargs):
+        assert method == "POST"
+        assert path == "/workers/w1/runs"
+        assert kwargs["body"] == {"inputs": {"echo": "hi"}, "trigger_source": "mcp"}
+        return {"status": "running", "run_id": "run-1"}, 200
+
+    monkeypatch.setattr(main, "_api_call", _fake_api_call)
+    auth = AuthContext(user_id="u-1", role="member", auth_method="pat")
+    repos = SimpleNamespace(mcp_tools=SimpleNamespace(get_by_name=lambda *, user_id, name: None))
+
+    result = asyncio.run(
+        main._mcp_dispatch(
+            "workers.run",
+            {"id": "w1", "inputs": {"echo": "hi"}, "trigger_source": "manual"},
+            auth,
+            repos,
+            _fake_request(),
+        )
+    )
+
+    assert result["content"][0]["text"]
+
+
 def test_slow_run_returns_run_id_instead_of_blocking(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
 
