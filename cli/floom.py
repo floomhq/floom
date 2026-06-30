@@ -19,6 +19,7 @@ import time
 import subprocess
 import threading
 from pathlib import Path
+from time import perf_counter
 
 try:
     import click
@@ -29,6 +30,12 @@ except ImportError:
     import click
     import requests
 
+try:
+    from floom_telemetry import emit_cli_command
+except Exception:
+    def emit_cli_command(**_kwargs):
+        return
+
 # #598: support both FLOOM_API_TOKEN (PAT / bearer token, preferred for
 # multi-member installs) and FLOOM_API_SECRET (shared secret, single-tenant).
 # Token takes precedence when both are set. FLOOM_API_BASE is respected for
@@ -38,6 +45,38 @@ API_TOKEN = os.environ.get("FLOOM_API_TOKEN", "")
 API_SECRET = os.environ.get("FLOOM_API_SECRET", "")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+CLI_VERSION = "0.1.0"
+
+
+class TelemetryGroup(click.Group):
+    def invoke(self, ctx: click.Context):
+        start = perf_counter()
+        ok = False
+        try:
+            result = super().invoke(ctx)
+            ok = True
+            return result
+        except SystemExit as exc:
+            ok = _exit_code_ok(exc.code)
+            raise
+        except BaseException:
+            ok = False
+            raise
+        finally:
+            command = ctx.invoked_subcommand
+            if command:
+                duration_ms = int((perf_counter() - start) * 1000)
+                emit_cli_command(
+                    command=command,
+                    ok=ok,
+                    duration_ms=duration_ms,
+                    cli_version=CLI_VERSION,
+                    no_telemetry=bool((ctx.obj or {}).get("no_telemetry")),
+                )
+
+
+def _exit_code_ok(code) -> bool:
+    return code in (None, 0)
 
 
 def _headers() -> dict:
@@ -59,15 +98,17 @@ def _api(method: str, path: str, **kwargs) -> requests.Response:
 # CLI group
 # ---------------------------------------------------------------------------
 
-@click.group()
+@click.group(cls=TelemetryGroup)
+@click.option("--no-telemetry", is_flag=True, help="Disable telemetry for this invocation")
 @click.option("--secret", envvar="FLOOM_API_SECRET", default="", help="x-floom-secret header value (or set FLOOM_API_SECRET)")
 @click.option("--token", envvar="FLOOM_API_TOKEN", default="", help="Bearer token / PAT (or set FLOOM_API_TOKEN)")
 @click.option("--api-base", envvar="FLOOM_API_BASE", default="http://localhost:8000", help="API base URL")
 @click.pass_context
-def cli(ctx: click.Context, secret: str, token: str, api_base: str):
+def cli(ctx: click.Context, no_telemetry: bool, secret: str, token: str, api_base: str):
     """floom â€” Floom operator CLI."""
     # #598: allow --secret / --token flags to override env vars at call time
     ctx.ensure_object(dict)
+    ctx.obj["no_telemetry"] = no_telemetry
     if secret:
         ctx.obj["secret"] = secret
     if token:
