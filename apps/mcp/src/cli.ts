@@ -81,14 +81,26 @@ import {
 import { completionCommand, type CompletionShell } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { main as runServer } from "./server.js";
+import { readCredentials } from "./lib/credentials.js";
 import {
   type CommandName,
   getCommandName,
   resolveCommandName,
   setCommandName,
 } from "./lib/command-name.js";
+import { captureTelemetry } from "./telemetry.js";
 
 type RunResult = Promise<number> | number;
+type CliTelemetryContext = {
+  command: string;
+  startedAtMs: number;
+  cliVersion: string;
+  telemetryEnabled: boolean;
+  workspaceId?: string;
+  captured: boolean;
+};
+
+let activeCliTelemetryContext: CliTelemetryContext | undefined;
 
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -97,10 +109,70 @@ export function getPackageVersion(): string {
   return parsed.version || "0.0.0";
 }
 
+function commandTelemetryName(command: Command): string {
+  const parts: string[] = [];
+  let current: Command | null = command;
+  while (current && current.parent) {
+    parts.unshift(current.name());
+    current = current.parent;
+  }
+  return parts.join(".") || command.name();
+}
+
+async function resolveTelemetryWorkspaceId(): Promise<string | undefined> {
+  try {
+    const credentials = await readCredentials();
+    return credentials?.workspace_id?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function startCliTelemetry(program: Command, actionCommand: Command): Promise<void> {
+  const options = program.opts<{ telemetry?: boolean }>();
+  activeCliTelemetryContext = {
+    command: commandTelemetryName(actionCommand),
+    startedAtMs: Date.now(),
+    cliVersion: getPackageVersion(),
+    telemetryEnabled: options.telemetry !== false,
+    workspaceId: await resolveTelemetryWorkspaceId(),
+    captured: false,
+  };
+}
+
+async function finishCliTelemetry(ok: boolean): Promise<void> {
+  const context = activeCliTelemetryContext;
+  if (!context || context.captured) {
+    return;
+  }
+  context.captured = true;
+  if (!context.telemetryEnabled) {
+    return;
+  }
+
+  await captureTelemetry(
+    "cli_command",
+    {
+      command: context.command,
+      ok,
+      duration_ms: Date.now() - context.startedAtMs,
+      cli_version: context.cliVersion,
+      source: "cli",
+    },
+    { workspaceId: context.workspaceId },
+  );
+}
+
 async function runAction(result: RunResult): Promise<void> {
-  const code = await result;
-  if (code !== 0) {
-    process.exitCode = code;
+  let ok = false;
+  try {
+    const code = await result;
+    ok = code === 0;
+    if (code !== 0) {
+      process.exitCode = code;
+    }
+  } finally {
+    await finishCliTelemetry(ok);
   }
 }
 
@@ -113,7 +185,8 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .showHelpAfterError()
     // OSS/self-hosted: identity sent as x-floom-user (engines with user-header
     // scope require it). Also settable via WORKEROS_USER / FLOOM_USER.
-    .option("--user <user>", "OSS self-hosted: send x-floom-user header");
+    .option("--user <user>", "OSS self-hosted: send x-floom-user header")
+    .option("--no-telemetry", "Disable CLI telemetry for this invocation");
 
   // A global --user must reach readCredentials(), which reads from env. Mirror
   // the flag into WORKEROS_USER before any subcommand action runs.
@@ -122,6 +195,9 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     if (typeof user === "string" && user.trim()) {
       process.env.WORKEROS_USER = user.trim();
     }
+  });
+  program.hook("preAction", async (thisCommand, actionCommand) => {
+    await startCliTelemetry(thisCommand, actionCommand);
   });
 
   program.command("login")
@@ -534,7 +610,14 @@ export async function main(argv = process.argv): Promise<void> {
     await runServer();
     return;
   }
-  await program.parseAsync(argv);
+  try {
+    await program.parseAsync(argv);
+  } catch (error) {
+    await finishCliTelemetry(false);
+    throw error;
+  } finally {
+    activeCliTelemetryContext = undefined;
+  }
 }
 
 function resolveExecutedPath(argv1?: string): string {
