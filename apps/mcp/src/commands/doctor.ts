@@ -119,7 +119,11 @@ async function checkRecentRuns(client: FloomApiClient): Promise<Check> {
 
 export async function doctorCommand(options: { json?: boolean } = {}): Promise<number> {
   const credentials = await readCredentials();
-  const apiBase = credentials?.api_base || process.env.WORKEROS_API_BASE || API_DEFAULT;
+  const apiBase =
+    credentials?.api_base ||
+    process.env.WORKEROS_API_BASE ||
+    process.env.FLOOM_API_BASE ||
+    API_DEFAULT;
   const client = credentials ? new FloomApiClient(apiBase, credentials) : null;
 
   const checks: Check[] = [];
@@ -129,7 +133,7 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
 
   // Check 2: Auth valid
   if (!client) {
-    checks.push(fail("auth", "No credentials found", `Run: ${getCommandName()} login --cloud`));
+    checks.push(fail("auth", "No credentials found", `Run: ${getCommandName()} login`));
   } else {
     checks.push(await checkAuth(client));
   }
@@ -141,7 +145,7 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
   if (client) {
     checks.push(await checkRecentRuns(client));
   } else {
-    checks.push(fail("recent_runs", "Skipped — not authenticated", `Run: ${getCommandName()} login --cloud`));
+    checks.push(fail("recent_runs", "Skipped — not authenticated", `Run: ${getCommandName()} login`));
   }
 
   if (options.json) {

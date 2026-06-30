@@ -137,7 +137,7 @@ Deploy the worker:
 
 ```bash
 npm i -g @floomhq/floom
-floom login --api http://localhost:8000
+floom login --local
 floom workers validate ./workers/hello-worker
 floom workers push ./workers/hello-worker
 floom run hello-worker --input name=Floom

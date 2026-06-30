@@ -126,8 +126,9 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
 
   program.command("login")
     .description("Login via browser device authorization")
-    .option("--cloud", "Authenticate against a hosted Floom instance")
-    .action(async (options: { cloud?: boolean }) => runAction(runLoginCommand(options)));
+    .option("--cloud", "Authenticate against a hosted Floom instance (default)")
+    .option("--local", "Authenticate against a local/self-hosted Floom API")
+    .action(async (options: { cloud?: boolean; local?: boolean }) => runAction(runLoginCommand(options)));
 
   program.command("logout")
     .description("Remove saved CLI credentials")
@@ -145,8 +146,9 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .action(async (options: { json?: boolean }) => runAction(authListCommand(options)));
   auth.command("login")
     .description("Add or refresh an account via browser device authorization")
-    .option("--cloud", "Authenticate against a hosted Floom instance")
-    .action(async (options: { cloud?: boolean }) => runAction(authLoginCommand(options)));
+    .option("--cloud", "Authenticate against a hosted Floom instance (default)")
+    .option("--local", "Authenticate against a local/self-hosted Floom API")
+    .action(async (options: { cloud?: boolean; local?: boolean }) => runAction(authLoginCommand(options)));
   auth.command("switch")
     .description("Set the active saved account")
     .argument("<account>", "Account id, label, user, email, or workspace")

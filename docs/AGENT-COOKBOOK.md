@@ -49,10 +49,24 @@ floom doctor
 floom workers list
 ```
 
-Hosted workspaces use the hosted login flow:
+`floom login` uses hosted Floom by default. For local/self-hosted development:
 
 ```bash
-floom login --cloud
+floom login --local
+```
+
+Then inspect the worker authoring contract before creating bundles:
+
+```bash
+floom workers contract
+floom workers templates list
+floom workers templates get python-script
+floom workers validate ./workers/<id>
+```
+
+Hosted workspace switching:
+
+```bash
 floom workspace list
 floom workspace switch <workspace-name-or-id>
 ```

@@ -134,7 +134,7 @@ async function refreshSupabaseJwt(
 async function getCloudJwt(creds: StoredCredentials): Promise<string> {
   if (!creds.refresh_token || !creds.supabase_url || !creds.supabase_anon_key) {
     throw new Error(
-      `Hosted credentials incomplete (missing refresh_token / supabase_url / supabase_anon_key). Run ${getCommandName()} login --cloud again.`,
+      `Hosted credentials incomplete (missing refresh_token / supabase_url / supabase_anon_key). Run ${getCommandName()} login again.`,
     );
   }
   const cacheKey = `${creds.supabase_url}|${creds.refresh_token.slice(-12)}`;
@@ -367,14 +367,11 @@ export function createPublicClient(
   return new FloomApiClient(normalizeBase(base));
 }
 
-// Used by `floom login [--cloud]` to talk to the API base before any
-// credentials have been saved. WORKEROS_CLOUD=1 also flips to cloud.
-export function resolveLoginApiBase(opts: { cloud?: boolean } = {}): string {
+// Used by `floom login` to talk to the API base before credentials exist.
+// Hosted Floom is the zero-config default; --local opts into self-hosted OSS.
+export function resolveLoginApiBase(opts: { cloud?: boolean; local?: boolean } = {}): string {
   const explicit = process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE;
   if (explicit) return normalizeBase(explicit);
-  const cloud =
-    opts.cloud === true ||
-    (process.env.WORKEROS_CLOUD || "").trim() === "1" ||
-    (process.env.WORKEROS_CLOUD || "").trim().toLowerCase() === "true";
-  return cloud ? DEFAULT_CLOUD_API_BASE : "https://localhost:8000";
+  if (opts.local === true) return "http://localhost:8000";
+  return DEFAULT_CLOUD_API_BASE;
 }

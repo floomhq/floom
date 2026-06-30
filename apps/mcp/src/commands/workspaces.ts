@@ -168,7 +168,7 @@ export async function workspacesSwitchCommand(target: string): Promise<number> {
       process.stderr.write(
         `Run \`${getCommandName()} workspaces list\` to see workspaces your credentials can access.\n` +
         `If the workspace belongs to another account, authenticate first: ${getCommandName()} login` +
-        (credentials.mode === "cloud" ? " --cloud" : "") + "\n",
+        "\n",
       );
       return 1;
     }
