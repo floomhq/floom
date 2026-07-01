@@ -7,6 +7,7 @@ import { MarkdownRenderer } from "@/components/contexts/markdown-renderer";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -96,6 +97,19 @@ function displayTypeIcon(displayType: string) {
   if (displayType === "PDF") return <FileText className="size-4 shrink-0 text-muted-foreground" />;
   if (displayType === "Video") return <Film className="size-4 shrink-0 text-muted-foreground" />;
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
+}
+
+export function isWorkerMemoryContext(name: string): boolean {
+  return /^memory-[a-z0-9][a-z0-9._-]*$/i.test(name);
+}
+
+export function isWorkerMemoryPack(ctx: Pick<ContextSummary, "name" | "category" | "worker_count">): boolean {
+  if (isWorkerMemoryContext(ctx.name)) return true;
+  return ctx.name !== "memory" && ctx.category === "memory" && (ctx.worker_count ?? 0) > 0;
+}
+
+export function memoryGroupOpenForView(open: boolean, selectedIsMemoryPack: boolean, search: string): boolean {
+  return open || selectedIsMemoryPack || Boolean(search.trim());
 }
 
 function packNameFromFiles(files: FileList | File[], existing: ContextSummary[]): string {
@@ -549,7 +563,16 @@ function ContextsPage() {
   }, [contexts, search]);
 
   const operatorPacks = useMemo(() => filteredContexts.filter((c) => !c.system), [filteredContexts]);
+  const regularOperatorPacks = useMemo(() => operatorPacks.filter((c) => !isWorkerMemoryPack(c)), [operatorPacks]);
+  const memoryPacks = useMemo(() => operatorPacks.filter((c) => isWorkerMemoryPack(c)), [operatorPacks]);
   const systemPacks = useMemo(() => filteredContexts.filter((c) => c.system), [filteredContexts]);
+  const selectedIsMemoryPack = memoryPacks.some((pack) => pack.name === selectedName);
+  const [memoryGroupOpen, setMemoryGroupOpen] = useState(selectedIsMemoryPack);
+  const memoryGroupVisibleOpen = memoryGroupOpenForView(memoryGroupOpen, selectedIsMemoryPack, search);
+
+  useEffect(() => {
+    if (selectedIsMemoryPack) setMemoryGroupOpen(true);
+  }, [selectedIsMemoryPack]);
 
   // Miller columns: one entry list per folder level, [root, level1, ...].
   const folderColumns = useMemo(() => {
@@ -874,7 +897,7 @@ function ContextsPage() {
 
             {operatorPacks.length > 0 ? (
               <div className="[&>*+*]:[border-top:var(--bd-div)]">
-                {operatorPacks.map((ctx) => (
+                {regularOperatorPacks.map((ctx) => (
                   <PackRow
                     key={ctx.name}
                     ctx={ctx}
@@ -884,6 +907,17 @@ function ContextsPage() {
                     onDelete={() => void deleteContext(ctx)}
                   />
                 ))}
+                {memoryPacks.length > 0 && (
+                  <MemoryPackGroup
+                    packs={memoryPacks}
+                    compact={fileOpen}
+                    open={memoryGroupVisibleOpen}
+                    selectedName={selectedName}
+                    onToggle={() => setMemoryGroupOpen((value) => !value)}
+                    onSelect={(name) => void selectContext(name)}
+                    onDelete={(ctx) => void deleteContext(ctx)}
+                  />
+                )}
               </div>
             ) : (
               !search.trim() && (
@@ -1224,6 +1258,69 @@ function SecretWarningBanner({
 // ===========================================================================
 // Pack row in the left rail.
 // ===========================================================================
+
+export function MemoryPackGroup({
+  packs,
+  selectedName,
+  compact,
+  open,
+  onToggle,
+  onSelect,
+  onDelete,
+}: {
+  packs: ContextSummary[];
+  selectedName: string;
+  compact: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (name: string) => void;
+  onDelete: (ctx: ContextSummary) => void;
+}) {
+  const totalFiles = packs.reduce((sum, pack) => sum + (pack.file_count ?? 0), 0);
+  const selected = packs.some((pack) => pack.name === selectedName);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`group flex w-full items-start gap-2.5 px-3 py-3 text-left transition-colors ${
+          selected ? "bg-[var(--active-nav-bg)]" : "hover:bg-muted/40"
+        }`}
+        aria-expanded={open}
+      >
+        <span className="mt-0.5 text-muted-foreground">
+          {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate text-sm font-medium">memory</span>
+          </span>
+          {!compact && (
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {packs.length} worker {packs.length === 1 ? "folder" : "folders"} · {totalFiles} {totalFiles === 1 ? "file" : "files"}
+            </span>
+          )}
+        </span>
+      </button>
+      {open && (
+        <div className="[&>*+*]:[border-top:var(--bd-div)] [border-top:var(--bd-div)] bg-[var(--bg-2)] pl-4">
+          {packs.map((ctx) => (
+            <PackRow
+              key={ctx.name}
+              ctx={ctx}
+              compact={compact}
+              selected={ctx.name === selectedName}
+              onSelect={() => onSelect(ctx.name)}
+              onDelete={() => onDelete(ctx)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PackRow({
   ctx,

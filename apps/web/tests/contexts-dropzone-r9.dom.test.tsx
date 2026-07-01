@@ -1,7 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
-import { PackDetailPane, ContextEmptyState } from "@/app/contexts/page";
-import type { ContextDetail } from "@/lib/types";
+import { useState } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  PackDetailPane,
+  ContextEmptyState,
+  MemoryPackGroup,
+  isWorkerMemoryContext,
+  isWorkerMemoryPack,
+  memoryGroupOpenForView,
+} from "@/app/contexts/page";
+import type { ContextDetail, ContextSummary } from "@/lib/types";
 
 // Round-09 B11 + B6 — drag-upload affordance.
 // B11: dragging must NOT wash the whole right pane grey (bg-muted/30). The
@@ -103,5 +111,67 @@ describe("B6 — Library empty state has a dashed drop-zone affordance", () => {
     expect(section!.className).not.toMatch(/bg-muted\/30/);
     // The dashed box is still the single affordance, now in its active state.
     expect(container.querySelectorAll('[data-dropzone="true"]').length).toBe(1);
+  });
+});
+
+describe("Memory folder grouping", () => {
+  const memoryPacks: ContextSummary[] = [
+    { name: "memory-morning-brief", file_count: 2, total_size_bytes: 20, worker_count: 1, read_only: false, writeable: true, visibility: "private" },
+    { name: "memory-worker-author", file_count: 1, total_size_bytes: 10, worker_count: 1, read_only: false, writeable: true, visibility: "private" },
+  ];
+
+  it("classifies only worker memory folders", () => {
+    expect(isWorkerMemoryContext("memory-morning-brief")).toBe(true);
+    expect(isWorkerMemoryContext("memory-sales.v2")).toBe(true);
+    expect(isWorkerMemoryContext("company-memory")).toBe(false);
+    expect(isWorkerMemoryContext("memory")).toBe(false);
+    expect(isWorkerMemoryPack({ name: "team-notes", category: "memory", worker_count: 1 })).toBe(true);
+    expect(isWorkerMemoryPack({ name: "memory", category: "memory", worker_count: 1 })).toBe(false);
+    expect(isWorkerMemoryPack({ name: "team-notes", category: "memory", worker_count: 0 })).toBe(false);
+  });
+
+  it("keeps matching memory folders visible during search", () => {
+    expect(memoryGroupOpenForView(false, false, "worker-author")).toBe(true);
+    expect(memoryGroupOpenForView(false, false, "")).toBe(false);
+  });
+
+  it("clusters memory folders behind one parent row", () => {
+    render(
+      <MemoryPackGroup
+        packs={memoryPacks}
+        selectedName=""
+        compact={false}
+        open={false}
+        onToggle={() => {}}
+        onSelect={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /memory/i })).toBeInTheDocument();
+    expect(screen.queryByText("memory-morning-brief")).toBeNull();
+  });
+
+  it("reveals memory folder children when expanded", () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <MemoryPackGroup
+          packs={memoryPacks}
+          selectedName=""
+          compact={false}
+          open={open}
+          onToggle={() => setOpen((value) => !value)}
+          onSelect={() => {}}
+          onDelete={() => {}}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: /memory/i }));
+
+    expect(screen.getByText("memory-morning-brief")).toBeInTheDocument();
+    expect(screen.getByText("memory-worker-author")).toBeInTheDocument();
   });
 });
