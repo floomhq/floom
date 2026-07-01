@@ -11,7 +11,17 @@ ops automation.
 
 ## What you get locally
 
-The local setup runs the same core pieces used by hosted deployments:
+This page is for the local/self-hosted runtime. If you only want to use hosted
+Floom Cloud from Claude Code, Cursor, the CLI, or the dashboard, start with:
+
+```bash
+npx -y @floomhq/floom mcp install --target claude
+```
+
+Hosted Cloud does not require cloning this repo, editing `.env`, or supplying
+your own `OPENAI_API_KEY` / `E2B_API_KEY`; those are local/self-hosted runtime
+requirements. The local setup runs the same core pieces used by hosted
+deployments:
 
 - FastAPI backend with SQLite persistence.
 - Next.js web app.
@@ -23,7 +33,7 @@ Hosted-only concerns such as commercial billing, managed enterprise SSO, and
 SOC 2 evidence collection live outside the open-source runtime. This repo
 provides the core runtime and local/self-hosted path.
 
-## 1. Run the app
+## 1. Run the local app
 
 Prerequisites:
 
@@ -273,6 +283,10 @@ floom workers validate ./workers/<id>
 floom workers push ./workers/<id>
 floom run <id> --inputs-file inputs.json
 ```
+
+`floom login --local` is intentionally local/self-hosted. For hosted Floom
+Cloud, use `floom login` or `floom mcp install`, which target
+`https://workeros-api.floom.dev` by default.
 
 ### Example workers
 

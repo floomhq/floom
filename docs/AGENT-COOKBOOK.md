@@ -8,8 +8,11 @@ If you only have time for one doc, read this. If you want the full schema refere
 
 ## 0. Fresh-agent path
 
-Use this path when you have a blank shell, a Floom secret, and a prompt to
-create or edit a worker.
+Use this path when you have a blank shell and want an agent such as Claude Code
+or Cursor to work against hosted Floom Cloud. Hosted is the default path:
+Floom provides the API, sandbox compute, storage, and model/runtime
+infrastructure. You do not need to clone this repo, edit `.env`, set
+`WORKEROS_API_BASE`, or provide `E2B_API_KEY` just to use Floom Cloud.
 
 ### 0.1 Install + verify MCP
 
@@ -28,10 +31,13 @@ npx -y @floomhq/floom mcp install --target claude
 npx -y @floomhq/floom mcp install --target cursor
 ```
 
-Set `WORKEROS_API_BASE` to your API URL before install; for local development
-that is usually `http://localhost:8000`. Set `WORKEROS_API_SECRET` to skip the
-secret prompt when your API is protected by `FLOOM_SECRET`. For older harnesses
-that need a local stdio process, configure `npx -y -p @floomhq/floom floom-mcp`.
+`mcp install` targets hosted Floom Cloud by default. If no valid hosted
+credentials are saved, it starts the browser login/pairing flow; if you are
+already logged in, it reuses the active account and workspace. It also writes
+the Floom MCP config for the selected client.
+
+For older harnesses that need a local stdio process, configure
+`npx -y -p @floomhq/floom floom-mcp`.
 Verify:
 
 ```bash
@@ -49,11 +55,21 @@ floom doctor
 floom workers list
 ```
 
-`floom login` uses hosted Floom by default. For local/self-hosted development:
+`floom login` uses hosted Floom by default.
+
+#### Self-hosted only
+
+Use the local/self-hosted path only when you are running your own Floom API
+server. In that case, start the API first, then opt into local mode:
 
 ```bash
+export WORKEROS_API_BASE=http://localhost:8000
 floom login --local
 ```
+
+If your self-hosted API is protected by `FLOOM_SECRET`, set
+`WORKEROS_API_SECRET` before `mcp install` or enter the secret when prompted.
+These env vars are not needed for hosted Floom Cloud.
 
 Then inspect the worker authoring contract before creating bundles:
 

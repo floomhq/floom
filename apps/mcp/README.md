@@ -5,7 +5,7 @@ Floom lets agents create, update, run, watch, and delete worker automations thro
 Floom ships as a single npm package that exposes:
 
 - **`floom` CLI** - `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. `workeros` remains a compatibility alias for older installs.
-- **HTTP MCP endpoint** - `floom mcp install` writes an HTTP transport entry (`url` + `headers`) pointing at `/mcp-tools/serve` on the Floom API. No local subprocess is required.
+- **HTTP MCP endpoint** - `floom mcp install` writes an HTTP transport entry (`url` + `headers`) pointing at the right Floom API endpoint for hosted Cloud or your self-hosted API. No local subprocess is required.
 - **`floom-mcp` stdio server** - legacy stdio path; `workeros-mcp` still works as an alias. Use this for harnesses that do not support HTTP MCP transport.
 
 The CLI targets local, self-hosted, and hosted deployments:
@@ -16,6 +16,18 @@ The CLI targets local, self-hosted, and hosted deployments:
 | **Self-hosted** | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
 
 ## Hosted Quickstart
+
+```bash
+npx -y @floomhq/floom mcp install --target claude
+```
+
+`mcp install` is the one-command hosted setup path. It targets Floom Cloud by
+default, starts browser login only when no valid hosted credentials are saved,
+selects the active workspace, and writes the MCP config for the client. Use
+`--target cursor`, `--target vscode`, `--target windsurf`, `--target continue`,
+or `--target generic` for other clients.
+
+For CLI use outside an MCP client:
 
 ```bash
 npm i -g @floomhq/floom@latest
@@ -62,7 +74,9 @@ Credentials live at `~/.config/floom/credentials.json` (mode 0600). Existing `~/
 npx -y @floomhq/floom mcp install
 ```
 
-Auto-detects the first existing config file. To target a specific harness:
+Targets hosted Floom Cloud unless self-hosted env vars or local login are used.
+It auto-detects the first existing config file and reuses saved hosted
+credentials when possible. To target a specific harness:
 
 ```bash
 floom mcp install --target claude     # ~/.claude/settings.json
@@ -104,9 +118,9 @@ All targets write **HTTP MCP transport** (`url` + `headers`) - no local subproce
 {
   "mcpServers": {
     "floom": {
-      "url": "http://localhost:8000/mcp-tools/serve",
+      "url": "https://workeros-api.floom.dev/mcp/<workspace_id>",
       "headers": {
-        "x-floom-secret": "<WORKEROS_API_SECRET>"
+        "Authorization": "Bearer <floom_token>"
       }
     }
   }
@@ -115,15 +129,16 @@ All targets write **HTTP MCP transport** (`url` + `headers`) - no local subproce
 
 ### HTTP transport (recommended - written by `floom mcp install`)
 
-Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape):
+Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape), hosted
+Cloud:
 
 ```json
 {
   "mcpServers": {
     "floom": {
-      "url": "http://localhost:8000/mcp-tools/serve",
+      "url": "https://workeros-api.floom.dev/mcp/<workspace_id>",
       "headers": {
-        "x-floom-secret": "<WORKEROS_API_SECRET>"
+        "Authorization": "Bearer <floom_token>"
       }
     }
   }
@@ -132,7 +147,10 @@ Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape):
 
 The published binary stays connected for that handshake when launched as `npx -p @floomhq/floom floom-mcp`.
 
-## Manual config
+## Manual self-hosted config
+
+Use this section only when you run your own Floom API. Hosted users should let
+`floom mcp install` generate the config above.
 
 Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape, HTTP MCP):
 
@@ -165,7 +183,8 @@ Continue (`~/.continue/.continuerc.json`, array shape, HTTP MCP):
 }
 ```
 
-Replace `http://localhost:8000` with your deployed API base URL when connecting to a remote self-hosted instance.
+Replace `http://localhost:8000` with your deployed API base URL when connecting
+to a remote self-hosted instance.
 
 ### Stdio transport (fallback - for harnesses that do not support HTTP MCP)
 
