@@ -679,6 +679,12 @@ def _ensure_mcp_connection_columns(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_connection_oauth_redirect_url_column(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "composio_connections")
+    if "oauth_redirect_url" not in columns:
+        conn.execute("ALTER TABLE composio_connections ADD COLUMN oauth_redirect_url TEXT")
+
+
 def _ensure_runs_artifacts_archived_column(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "runs")
     if "artifacts_archived" not in columns:
@@ -2193,6 +2199,8 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_worker_rules_worker_active
         ON worker_rules(workspace_id, worker_id, archived_at, created_at);
     """,
+    # -- migration 90: short OAuth authorize URLs -----------------------------
+    _ensure_connection_oauth_redirect_url_column,
 ]
 
 

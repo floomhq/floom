@@ -1846,6 +1846,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/api/workspace-agent/mcp"
             or path in {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
             or path.startswith("/connections/authorize/")
+            or re.fullmatch(r"/connections/[0-9a-fA-F-]{36}/authorize", path) is not None
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
             or path.startswith("/approvals/public-batch/")

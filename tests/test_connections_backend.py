@@ -480,7 +480,8 @@ class TestConnectionCallbackAndComposio503:
 
         assert resp.status_code == 200, resp.text
         redirect_url = resp.json()["redirect_url"]
-        assert redirect_url.startswith("https://floom.dev/app/api/proxy/connections/authorize/")
+        conn_id = resp.json()["id"]
+        assert redirect_url == f"https://floom.dev/app/api/proxy/connections/{conn_id}/authorize"
         assert "composio.dev" not in redirect_url
 
         api_path = urlparse(redirect_url).path.removeprefix("/app/api/proxy")
@@ -491,14 +492,19 @@ class TestConnectionCallbackAndComposio503:
     def test_authorize_link_rejects_non_composio_targets(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
-        from routers.connections import _issue_authorize_token
-
-        token = _issue_authorize_token(
-            redirect_url="https://evil.example/phish",
+        conn_id = "11111111-1111-4111-8111-111111111111"
+        main.get_repositories().connections.upsert(
             user_id="local-user",
+            id=conn_id,
+            app_name="gmail",
+            composio_connection_id="composio_evil_test",
+            oauth_redirect_url="https://evil.example/phish",
+            status="initiated",
+            created_at=main.now_iso(),
+            updated_at=main.now_iso(),
         )
 
-        resp = client.get(f"/connections/authorize/{token}", follow_redirects=False)
+        resp = client.get(f"/connections/{conn_id}/authorize", follow_redirects=False)
 
         assert resp.status_code == 400
         assert resp.json()["detail"] == "Invalid authorization target"

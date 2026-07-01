@@ -60,9 +60,9 @@ describe("#1044 proxy Location header validation", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("allows Composio redirects only from signed connection authorize proxy links", async () => {
+  it("allows Composio redirects only from connection authorize proxy links", async () => {
     const composio = "https://connect.composio.dev/link/lk_test";
-    const allowed = await proxyWithLocation(composio, "/api/proxy/connections/authorize/signed-token");
+    const allowed = await proxyWithLocation(composio, "/api/proxy/connections/11111111-1111-4111-8111-111111111111/authorize");
     expect(allowed.headers.get("location")).toBe(composio);
 
     const notAuthorize = await proxyWithLocation(composio, "/api/proxy/connections/callback");

@@ -100,6 +100,7 @@ function isPublicPage(pathname: string): boolean {
 
 function isPublicProxy(pathname: string): boolean {
   if (PUBLIC_PROXY_PATHS.includes(pathname)) return true;
+  if (/^\/api\/proxy\/connections\/[0-9a-fA-F-]{36}\/authorize$/.test(pathname)) return true;
   return PUBLIC_PROXY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 

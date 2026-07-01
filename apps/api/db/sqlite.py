@@ -3313,7 +3313,7 @@ class SqliteConnectionRepository:
         id, app_name, composio_connection_id, status, created_at, updated_at,
         scopes_json, account_label, display_name, last_checked_at, last_check_status, last_check_error, user_id,
         kind, mcp_label, mcp_url, mcp_transport, mcp_command, mcp_args_json, mcp_env_json, mcp_cwd,
-        mcp_auth_secret, mcp_allowed_tools_json
+        mcp_auth_secret, mcp_allowed_tools_json, oauth_redirect_url
     """
 
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
@@ -3339,6 +3339,19 @@ class SqliteConnectionRepository:
                 LIMIT 1
                 """,
                 (user_id, composio_id),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def get_by_id(self, *, composio_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"""
+                SELECT {self._columns}
+                FROM composio_connections
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (composio_id,),
             ).fetchone()
         return _row_dict(row) if row else None
 
@@ -3418,6 +3431,7 @@ class SqliteConnectionRepository:
         mcp_cwd = fields.get("mcp_cwd")
         mcp_auth_secret = fields.get("mcp_auth_secret")
         mcp_allowed_tools_json = fields.get("mcp_allowed_tools_json")
+        oauth_redirect_url = fields.get("oauth_redirect_url")
         if mcp_args_json is not None and not isinstance(mcp_args_json, str):
             mcp_args_json = _json_dump(mcp_args_json)
         if mcp_env_json is not None and not isinstance(mcp_env_json, str):
@@ -3431,8 +3445,8 @@ class SqliteConnectionRepository:
                     (id, app_name, composio_connection_id, status, created_at, updated_at,
                      scopes_json, account_label, display_name, last_checked_at, last_check_status, last_check_error, user_id,
                      kind, mcp_label, mcp_url, mcp_transport, mcp_command, mcp_args_json, mcp_env_json, mcp_cwd,
-                     mcp_auth_secret, mcp_allowed_tools_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     mcp_auth_secret, mcp_allowed_tools_json, oauth_redirect_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     app_name = excluded.app_name,
                     composio_connection_id = excluded.composio_connection_id,
@@ -3454,7 +3468,8 @@ class SqliteConnectionRepository:
                     mcp_env_json = excluded.mcp_env_json,
                     mcp_cwd = excluded.mcp_cwd,
                     mcp_auth_secret = excluded.mcp_auth_secret,
-                    mcp_allowed_tools_json = excluded.mcp_allowed_tools_json
+                    mcp_allowed_tools_json = excluded.mcp_allowed_tools_json,
+                    oauth_redirect_url = excluded.oauth_redirect_url
                 """,
                 (
                     connection_id,
@@ -3480,6 +3495,7 @@ class SqliteConnectionRepository:
                     mcp_cwd,
                     mcp_auth_secret,
                     mcp_allowed_tools_json,
+                    oauth_redirect_url,
                 ),
             )
         item = self.get(user_id=user_id, composio_id=connection_id)
@@ -3509,6 +3525,7 @@ class SqliteConnectionRepository:
             "mcp_cwd",
             "mcp_auth_secret",
             "mcp_allowed_tools_json",
+            "oauth_redirect_url",
         }
         updates: list[str] = []
         params: list[Any] = []

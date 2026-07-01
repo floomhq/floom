@@ -101,10 +101,10 @@ describe("middleware auth gate", () => {
     expect(proxy.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("keeps signed connection authorize proxy links reachable without login", async () => {
+  it("keeps short connection authorize proxy links reachable without login", async () => {
     const { proxy: middleware } = await import("@/proxy");
 
-    const proxy = await middleware(req("/api/proxy/connections/authorize/signed-token"));
+    const proxy = await middleware(req("/api/proxy/connections/11111111-1111-4111-8111-111111111111/authorize"));
 
     expect(proxy.status).toBe(200);
     expect(proxy.headers.get("x-middleware-next")).toBe("1");

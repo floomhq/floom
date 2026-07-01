@@ -98,7 +98,7 @@ def test_post_connections_schedules_pending_connection_reconciler(monkeypatch):
             "redirect_url": "https://connect.example/link",
         },
     )
-    monkeypatch.setattr(connections, "_branded_authorize_url", lambda url, _user_id: url)
+    monkeypatch.setattr(connections, "_branded_authorize_url", lambda connection_id: f"short:{connection_id}")
     monkeypatch.setattr(connections, "_invalidate_connections_cache", lambda _user_id: None)
 
     background_tasks = BackgroundTasks()

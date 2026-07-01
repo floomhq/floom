@@ -64,6 +64,23 @@ def _seed_active(repos, owner, *, conn_id, ca_id, account_label, created_at="202
     )
 
 
+def _session_cookie(repos, user_id: str) -> dict[str, str]:
+    if repos.users.get(user_id=user_id) is None:
+        repos.users.create(
+            user_id=user_id,
+            username=user_id,
+            display_name=user_id,
+            password_hash="not-used",
+            role="admin",
+        )
+    repos.sessions.create(
+        session_id="session-" + user_id,
+        user_id=user_id,
+        expires_at="2999-01-01T00:00:00+00:00",
+    )
+    return {"wos_session": "session-" + user_id}
+
+
 def test_find_by_app_account_returns_oldest(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     repos = db.get_repositories()
@@ -131,7 +148,12 @@ def test_reconnect_same_account_no_duplicate(monkeypatch, tmp_path):
     client = TestClient(main.app)
     resp = client.get(
         "/connections/callback",
-        params={"connection_id": "ca_second", "status": "active"},
+        params={
+            "connection_id": "ca_second",
+            "status": "active",
+            "state": _conn._issue_oauth_state(user_id=owner),
+        },
+        cookies=_session_cookie(repos, owner),
         follow_redirects=False,
     )
     assert resp.status_code in (302, 307)
@@ -185,7 +207,12 @@ def test_connect_new_account_adds_row(monkeypatch, tmp_path):
     client = TestClient(main.app)
     resp = client.get(
         "/connections/callback",
-        params={"connection_id": "ca_second", "status": "active"},
+        params={
+            "connection_id": "ca_second",
+            "status": "active",
+            "state": _conn._issue_oauth_state(user_id=owner),
+        },
+        cookies=_session_cookie(repos, owner),
         follow_redirects=False,
     )
     assert resp.status_code in (302, 307)
