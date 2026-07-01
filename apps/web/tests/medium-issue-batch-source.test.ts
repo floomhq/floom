@@ -45,13 +45,17 @@ describe("medium issue batch source guards", () => {
     expect(source).not.toContain("bg-[var(--bg-2)] px-3 py-2.5");
     expect(source).toContain('aria-label="Supported MCP clients"');
     // The install snippet stays token-free, but the modal must also expose the
-    // workspace-token create/copy path so first-run setup is complete.
+    // optional personal/workspace token paths for scripts and CI.
     expect(source).toMatch(/<h2[^>]*>MCP setup<\/h2>/);
     expect(source).toContain("buildMcpJson");
-    expect(source).not.toContain('href="/settings?sel=personal_tokens"');
+    expect(source).toContain("MCP setup uses your saved CLI login");
+    expect(source).toContain("floom login");
+    expect(source).toContain("Personal tokens");
+    expect(source).toContain('href="/settings?sel=personal_tokens"');
+    expect(source).toContain("Workspace tokens");
     expect(source).toContain("api.workspace.tokens.create");
     expect(source).toContain("Copy token");
-    expect(source).toContain("Manage tokens");
+    expect(source).toContain("Create workspace token");
     expect(source).toContain("max-w-full overflow-x-auto");
     expect(source).toContain("min-w-0 overflow-hidden");
   });
