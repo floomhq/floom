@@ -31,6 +31,15 @@ Once the first read-only worker has a real completed run and you have shown the 
 4. **Watch** — `runs_list`, `runs_get`, `runs_watch`, `runs_logs`.
 5. **Approve** — a run that needs sign-off appears in `runs_list`; resolve with `runs_approve` / `runs_reject`. Nothing sensitive happens without approval.
 
+## When a run fails
+If a `workers_run` does not complete successfully, do not just say "it failed."
+1. Fetch the failure with `runs_get`; use `runs_logs` when the root cause is not explicit.
+2. State the root cause in one line: missing connection, bad input, auth failure, worker code error, or another concrete cause.
+3. Give the exact fix: the connection to add, the input to change, the auth step to complete, or the corrected worker file.
+4. Offer to re-run the worker immediately after the fix.
+
+Never claim success for a failed run or a run whose final status is unknown.
+
 ## Tools you'll use
 - **workers_** list / get / create / update / run / write_file
 - **runs_** list / get / watch / logs / approve / reject / cancel
