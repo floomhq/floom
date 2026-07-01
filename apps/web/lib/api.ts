@@ -4,6 +4,7 @@
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy" without forking this client.
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 import { captureIntentEvent } from "@/lib/posthog-intent";
+import { PERSIST_STORAGE_KEY } from "@/lib/query/persist";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
@@ -38,6 +39,11 @@ export function getPersistedActiveWorkspaceId(): string | null {
 
 export function setActiveWorkspaceId(workspaceId: string | null) {
   if (typeof window === "undefined") return;
+  const previous = getPersistedActiveWorkspaceId();
+  const next = workspaceId || "local-default";
+  if (previous !== next) {
+    safeStorageRemove("local", PERSIST_STORAGE_KEY);
+  }
   if (!workspaceId) {
     safeStorageRemove("local", ACTIVE_WORKSPACE_STORAGE_KEY);
     window.document.cookie = activeWorkspaceCookie("", 0);

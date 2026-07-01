@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { QueryClientContext } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -115,6 +117,8 @@ function WorkspaceAvatar({
 }
 
 export function WorkspaceSwitcher() {
+  const router = useRouter();
+  const queryClient = useContext(QueryClientContext);
   const [state, setState] = useState<WorkspaceState | null>(() => workspaceSwitcherCache?.state ?? null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -162,14 +166,32 @@ export function WorkspaceSwitcher() {
     };
   }, []);
 
+  function commitWorkspaceSelection(workspaceId: string, nextWorkspaces?: LocalWorkspace[]) {
+    setActiveWorkspaceId(workspaceId);
+    replaceUrlWorkspaceParam(workspaceId);
+    queryClient?.clear();
+
+    const workspaces = nextWorkspaces ?? state?.workspaces ?? [];
+    const nextState = state ? { ...state, workspaces, activeId: workspaceId } : null;
+    if (nextState) {
+      setState(nextState);
+      cacheWorkspaceSwitcherState({
+        state: nextState,
+        canExportWorkspace,
+      });
+    }
+    const activeWorkspace = workspaces.find((w) => w.id === workspaceId);
+    groupPostHogWorkspace(workspaceId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
+    setSwitchingTo(null);
+    router.refresh();
+  }
+
   async function handleSwitch(workspaceId: string) {
     if (state && state.activeId === workspaceId) return;
     setSwitchingTo(workspaceId);
     try {
       await api.workspace.select(workspaceId);
-      setActiveWorkspaceId(workspaceId);
-      replaceUrlWorkspaceParam(workspaceId);
-      window.location.reload();
+      commitWorkspaceSelection(workspaceId);
     } catch (err) {
       setError((err as Error).message || "Failed to switch workspace");
       setSwitchingTo(null);
@@ -184,9 +206,12 @@ export function WorkspaceSwitcher() {
     try {
       const created = await api.workspace.create(name);
       await api.workspace.select(created.id);
-      setActiveWorkspaceId(created.id);
-      replaceUrlWorkspaceParam(created.id);
-      window.location.reload();
+      const nextWorkspaces = state
+        ? [...state.workspaces.filter((w) => w.id !== created.id), created]
+        : [created];
+      setCreateOpen(false);
+      setCreating(false);
+      commitWorkspaceSelection(created.id, nextWorkspaces);
     } catch (err) {
       const message = (err as Error).message || "Failed to create workspace";
       setError(message);
@@ -271,10 +296,10 @@ export function WorkspaceSwitcher() {
     try {
       const created = await api.workspace.duplicate(state.activeId);
       await api.workspace.select(created.id);
-      setActiveWorkspaceId(created.id);
-      replaceUrlWorkspaceParam(created.id);
+      const nextWorkspaces = [...state.workspaces.filter((w) => w.id !== created.id), created];
+      commitWorkspaceSelection(created.id, nextWorkspaces);
       toast.success(`Duplicated to “${created.name}”`);
-      window.location.reload();
+      setDuplicating(false);
     } catch (err) {
       toast.error((err as Error).message || "Failed to duplicate workspace");
       setDuplicating(false);

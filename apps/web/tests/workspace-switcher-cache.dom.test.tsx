@@ -8,9 +8,12 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   me: vi.fn(),
   create: vi.fn(),
+  select: vi.fn(),
   getActiveWorkspaceId: vi.fn(),
+  setActiveWorkspaceId: vi.fn(),
   groupPostHogWorkspace: vi.fn(),
   toastError: vi.fn(),
+  routerRefresh: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -18,7 +21,7 @@ vi.mock("@/lib/api", () => ({
     workspace: {
       list: mocks.list,
       create: mocks.create,
-      select: vi.fn(),
+      select: mocks.select,
       rename: vi.fn(),
       exportTemplate: vi.fn(),
       importTemplate: vi.fn(),
@@ -28,7 +31,13 @@ vi.mock("@/lib/api", () => ({
     me: mocks.me,
   },
   getActiveWorkspaceId: mocks.getActiveWorkspaceId,
-  setActiveWorkspaceId: vi.fn(),
+  setActiveWorkspaceId: mocks.setActiveWorkspaceId,
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    refresh: mocks.routerRefresh,
+  }),
 }));
 
 vi.mock("@/lib/posthog", () => ({
@@ -48,11 +57,15 @@ describe("WorkspaceSwitcher cache", () => {
     mocks.list.mockReset();
     mocks.me.mockReset();
     mocks.create.mockReset();
+    mocks.select.mockReset();
     mocks.getActiveWorkspaceId.mockReset();
+    mocks.setActiveWorkspaceId.mockReset();
     mocks.groupPostHogWorkspace.mockReset();
     mocks.toastError.mockReset();
+    mocks.routerRefresh.mockReset();
     mocks.getActiveWorkspaceId.mockReturnValue(null);
     mocks.me.mockResolvedValue({ id: "u1", role: "owner" });
+    mocks.select.mockResolvedValue({ id: "ws_1", name: "Acme", owner_user_id: "u1", created_at: "2026-06-01T00:00:00Z" });
   });
 
   afterEach(() => {
@@ -118,6 +131,28 @@ describe("WorkspaceSwitcher cache", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Switch workspace" }));
 
     expect(await screen.findByText("New workspace")).toBeInTheDocument();
+  });
+
+  it("switches workspaces in-place before any browser reload", async () => {
+    mocks.list.mockResolvedValueOnce({
+      active_id: "ws_2",
+      workspaces: [
+        { id: "ws_1", name: "Old workspace", owner_user_id: "u1", created_at: "2026-06-01T00:00:00Z" },
+        { id: "ws_2", name: "New workspace", owner_user_id: "u1", created_at: "2026-06-02T00:00:00Z" },
+      ],
+    });
+    const { WorkspaceSwitcher } = await import("@/components/layout/WorkspaceSwitcher");
+    render(<WorkspaceSwitcher />);
+
+    expect(await screen.findByText("New workspace")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Switch workspace" }));
+    await user.click(await screen.findByText("Old workspace"));
+
+    await waitFor(() => expect(mocks.select).toHaveBeenCalledWith("ws_1"));
+    expect(mocks.setActiveWorkspaceId).toHaveBeenCalledWith("ws_1");
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Switch workspace" })).toHaveTextContent("Old workspace");
   });
 
   it("replaces stale URL workspace params before reload after a workspace switch", async () => {
