@@ -186,6 +186,28 @@ describe("page components render with data (no client crash)", () => {
     expect(screen.getByText("Library")).toBeInTheDocument();
   });
 
+  it("BrainCollection clusters worker memory folders under one memory row", async () => {
+    const { api } = await import("@/lib/api");
+    const memoryFolders = [
+      { ...folder, name: "memory-email-missed-opportunities", file_count: 1, total_size_bytes: 100, worker_count: 1 },
+      { ...folder, name: "memory-morning-brief", file_count: 1, total_size_bytes: 200, worker_count: 1 },
+      { ...folder, name: "memory-worker-author", file_count: 1, total_size_bytes: 300, worker_count: 1 },
+    ];
+    vi.mocked(api.contexts.list).mockResolvedValueOnce(memoryFolders as never);
+
+    const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
+    render(<TestQueryProvider><BrainCollection initialFolders={memoryFolders as never} /></TestQueryProvider>);
+
+    expect(await screen.findByRole("button", { name: /memory/i })).toBeInTheDocument();
+    expect(screen.getByText("3 worker memory folders")).toBeInTheDocument();
+    expect(screen.queryByText("memory-email-missed-opportunities")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /memory/i }));
+    expect(await screen.findByText("memory-email-missed-opportunities")).toBeInTheDocument();
+    expect(screen.getByText("memory-morning-brief")).toBeInTheDocument();
+    expect(screen.getByText("memory-worker-author")).toBeInTheDocument();
+  });
+
   it("ApprovalsCollection fetches + renders the approval", async () => {
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
     render(<TestQueryProvider><ApprovalsCollection /></TestQueryProvider>);
