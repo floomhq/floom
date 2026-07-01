@@ -29,6 +29,10 @@ type DisplayContextSummary = ContextSummary & {
   memory_children?: ContextSummary[];
 };
 
+function RelativeUpdated({ value }: { value?: string | null }) {
+  return <span suppressHydrationWarning>{formatRelative(value ?? "")}</span>;
+}
+
 export function isWorkerMemoryContext(name: string): boolean {
   return /^memory-[a-z0-9][a-z0-9._-]*$/i.test(name);
 }
@@ -414,7 +418,7 @@ function MemoryChildrenTab({ packs }: { packs: ContextSummary[] }) {
               </div>
             </div>
             <div className="c-cell">{pack.file_count ?? 0} files</div>
-            <div className="c-cell">{formatRelative(pack.updated_at ?? "")}</div>
+            <div className="c-cell"><RelativeUpdated value={pack.updated_at} /></div>
           </Link>
         ))}
       </div>
@@ -613,7 +617,7 @@ export default function BrainCollection({
       ),
       primary: folderTitle(c),
       secondary: c.description ?? undefined,
-      cols: [`${c.file_count ?? 0} files`, formatRelative(c.updated_at ?? "")],
+      cols: [`${c.file_count ?? 0} files`, <RelativeUpdated key="updated" value={c.updated_at} />],
       menu: c.read_only || c.memory_group
         ? undefined
         : [
@@ -630,7 +634,11 @@ export default function BrainCollection({
       // #1257: wrap in a span with title so the full name is accessible on hover
       // even when it is ellipsis-truncated by c-gnm.
       name: <span title={c.name}>{c.name}</span>,
-      description: `${c.file_count ?? 0} files · ${formatRelative(c.updated_at ?? "")}`,
+      description: (
+        <>
+          {c.file_count ?? 0} files · <RelativeUpdated value={c.updated_at} />
+        </>
+      ),
       status: c.read_only ? { tone: "idle", label: "Read only" } : null,
     }),
     detail: (c) => ({
