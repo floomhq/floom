@@ -142,6 +142,7 @@ test("mcp install (OSS) bakes the x-floom-user header into the client config", a
     assert.equal(code, 0);
     const config = JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8"));
     const entry = config.mcpServers.floom;
+    assert.equal(entry.type, "http");
     assert.equal(entry.headers["x-floom-secret"], "test-secret");
     assert.equal(entry.headers["x-floom-user"], "alice@example.com");
   });

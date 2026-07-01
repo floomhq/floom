@@ -899,6 +899,7 @@ test("install subcommand patches agent config idempotently", async () => {
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
     assert.equal(config.mcpServers.floom.url, "https://localhost:8000/mcp-tools/serve");
+    assert.equal(config.mcpServers.floom.type, "http");
     assert.equal(config.mcpServers.floom.headers["x-floom-secret"], "test-secret");
     assert.equal(config.mcpServers.floom.command, undefined);
     assert.equal(config.mcpServers.floom.args, undefined);
@@ -1029,6 +1030,7 @@ test("mcp add patches agent config", async () => {
 
     const config = JSON.parse(await readFile(configPath, "utf8"));
     assert.equal(config.mcpServers.floom.url, "https://localhost:8000/mcp-tools/serve");
+    assert.equal(config.mcpServers.floom.type, "http");
     assert.equal(config.mcpServers.floom.headers["x-floom-secret"], "test-secret");
     assert.equal(config.mcpServers.floom.command, undefined);
     assert.equal(config.mcpServers.floom.args, undefined);
@@ -1049,6 +1051,7 @@ test("mcp install generic redacts credentials by default", async () => {
     });
     assert.equal(result.code, 0);
     assert.match(result.stdout, /"x-floom-secret": "<x-floom-secret>"/);
+    assert.match(result.stdout, /"type": "http"/);
     assert.doesNotMatch(result.stdout, /test-secret/);
     assert.match(result.stdout, /Credentials are redacted by default/);
   } finally {

@@ -347,6 +347,7 @@ test("cloud mcp install infers active workspace from /api/workspaces envelope", 
       assert.equal(code, 0);
       const payload = JSON.parse(captured.text());
       assert.equal(payload.mcpServers.floom.url, `${base}/mcp/local-default`);
+      assert.equal(payload.mcpServers.floom.type, "http");
       assert.equal(payload.mcpServers.floom.headers.Authorization, "Bearer pat-token");
     }, { cloud: true });
   });
@@ -468,6 +469,7 @@ test("mcp install (OSS) bakes the active workspace header into the client config
     assert.equal(code, 0);
     const config = JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8"));
     const entry = config.mcpServers.floom;
+    assert.equal(entry.type, "http");
     assert.equal(entry.headers["x-floom-secret"], "test-secret");
     assert.equal(entry.headers["x-workeros-workspace"], "ws_0123456789abcd");
   });
@@ -479,6 +481,7 @@ test("mcp install (OSS) omits the workspace header when no workspace is selected
     const code = await mcpInstallCommand({ target: "claude" });
     assert.equal(code, 0);
     const config = JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8"));
+    assert.equal(config.mcpServers.floom.type, "http");
     assert.equal(config.mcpServers.floom.headers["x-workeros-workspace"], undefined);
   });
 });
