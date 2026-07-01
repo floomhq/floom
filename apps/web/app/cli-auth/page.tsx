@@ -144,6 +144,17 @@ export function CliAuthContent({
                   <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#C98A1A]" />
                   <span>Only approve if this code matches your terminal.</span>
                 </div>
+                <p className="mt-3 text-xs leading-5 text-[#68707C]">
+                  By approving, you connect this CLI/MCP client to your Floom account and agree to the{" "}
+                  <a className="font-medium text-[#16171A] underline underline-offset-2" href="/terms" target="_blank" rel="noreferrer">
+                    Terms
+                  </a>{" "}
+                  and{" "}
+                  <a className="font-medium text-[#16171A] underline underline-offset-2" href="/privacy" target="_blank" rel="noreferrer">
+                    Privacy
+                  </a>
+                  .
+                </p>
 
                 {state === "error" && errorText && (
                   <p className="mt-4 text-sm text-[#9A5E00]">{errorText}</p>

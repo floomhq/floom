@@ -98,22 +98,13 @@ async function writeAndLogFloomSkill(
 
 function logInstallSuccessNextStep(): void {
   log.blank();
-  log.ok("Floom is installed.");
-  log.info("This is hosted Floom Cloud at workeros-api.floom.dev; do not set up self-hosting, edit .env files, or run a local server.");
-  log.info("Run your first worker now — paste this into your agent:");
+  log.ok("Floom is ready.");
+  log.ok("Installed MCP for your agent.");
+  log.info("Next: open your agent and ask:");
   log.blank();
-  log.info([
-    "'Use hosted Floom Cloud to create and run my first worker now.",
-    "Do not set up self-hosting, edit .env files, or run a local server; use only the Floom MCP tools.",
-    "First check my Floom connections.",
-    "If Gmail is connected, create a manual read-only Gmail Intake Brief worker",
-    "(in:inbox newer_than:14d, max 10) that outputs a markdown brief of important messages,",
-    "decisions, blockers, and next actions; run it immediately, watch the run, and show me the result.",
-    "If Gmail is not connected but GitHub is, create+run a manual read-only GitHub Stalest PRs worker:",
-    "open PRs involving me, sorted by age, output the 5 stalest with owner/repo/age/URL and a recommended next action.",
-    "Do not schedule anything yet — prove value with one completed run first.'",
-  ].join("\n"));
-  log.info("After it runs, tell your agent to schedule it and set up your next worker.");
+  log.info('"Use Floom to create and run my first read-only worker."');
+  log.blank();
+  log.info("Tip: connect Gmail, GitHub, Slack, or Linear in Floom first for a better first worker.");
 }
 
 // HTTP MCP config — url + headers, no subprocess needed.
@@ -371,7 +362,6 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
     log.ok(`Installed Floom MCP config for ${client.name}`);
     log.kv("Config path", displayPath);
-    log.kv("MCP URL", mcpUrl);
     await writeAndLogFloomSkill(client, configPath);
     logInstallSuccessNextStep();
     return 0;
@@ -391,7 +381,6 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
     log.ok(`Installed Floom MCP config for ${client.name} (auto-detected)`);
     log.kv("Config path", displayPath);
-    log.kv("MCP URL", mcpUrl);
     await writeAndLogFloomSkill(client, configPath);
     logInstallSuccessNextStep();
     return 0;
