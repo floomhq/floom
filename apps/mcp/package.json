@@ -1,6 +1,6 @@
 {
   "name": "@floomhq/floom",
-  "version": "5.1.7",
+  "version": "5.1.8",
   "description": "Hosted Floom Cloud CLI + MCP installer, with self-hosted support available via explicit local mode.",
   "type": "module",
   "bin": {
