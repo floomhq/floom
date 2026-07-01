@@ -17,6 +17,7 @@ if str(API_DIR) not in sys.path:
 
 _BEDROCK = "bedrock/us.anthropic.claude-sonnet-4-6"
 _GEMINI = "gemini/gemini-3.5-flash"
+_VERTEX_GEMINI = "vertex_ai/gemini-3.5-flash"
 
 
 def _load_worker_author_module():
@@ -72,6 +73,17 @@ def test_worker_author_reports_missing_gemini_credentials(monkeypatch):
     assert "GEMINI_API_KEY" in worker_author._provider_credentials_error(_GEMINI)
 
 
+def test_worker_author_allows_vertex_gemini_without_gemini_api_key(monkeypatch):
+    worker_author = _load_worker_author_module()
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _VERTEX_GEMINI)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_FALLBACK", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY_FALLBACK", raising=False)
+
+    assert worker_author._provider_credentials_error(_VERTEX_GEMINI) is None
+
+
 def test_worker_author_routes_bedrock_through_litellm(monkeypatch):
     worker_author = _load_worker_author_module()
     monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _BEDROCK)
@@ -119,7 +131,55 @@ def test_worker_author_routes_gemini_through_litellm(monkeypatch):
     assert out == "OK"
     assert captured["model"] == _GEMINI
     assert captured["max_tokens"] == 12
+    assert captured["api_key"] == "test-gemini-key"
     assert captured["messages"][0]["content"] == "S"
+
+
+def test_worker_author_retries_gemini_with_fallback_key(monkeypatch):
+    worker_author = _load_worker_author_module()
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _GEMINI)
+    monkeypatch.setenv("GEMINI_API_KEY", "primary-gemini")
+    monkeypatch.setenv("GEMINI_API_KEY_FALLBACK", "fallback-gemini")
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("429 exceeded your current quota")
+        return "OK"
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        out = worker_author._codegen_chat(
+            messages=[{"role": "system", "content": "S"}, {"role": "user", "content": "u"}],
+            max_output_tokens=12,
+            temperature=0.2,
+        )
+
+    assert out == "OK"
+    assert [call["api_key"] for call in calls] == ["primary-gemini", "fallback-gemini"]
+
+
+def test_worker_author_does_not_inject_gemini_key_for_vertex_gemini(monkeypatch):
+    worker_author = _load_worker_author_module()
+    monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _VERTEX_GEMINI)
+    monkeypatch.setenv("GEMINI_API_KEY", "primary-gemini")
+    monkeypatch.setenv("GEMINI_API_KEY_FALLBACK", "fallback-gemini")
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return "OK"
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        out = worker_author._codegen_chat(
+            messages=[{"role": "system", "content": "S"}, {"role": "user", "content": "u"}],
+            max_output_tokens=12,
+            temperature=0.2,
+        )
+
+    assert out == "OK"
+    assert captured["model"] == _VERTEX_GEMINI
+    assert "api_key" not in captured
 
 
 def test_worker_author_parses_first_json_object_with_trailing_text():
@@ -1252,12 +1312,14 @@ def test_worker_author_env_bridge_forwards_gemini_key(monkeypatch):
 
     monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", _GEMINI)
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setenv("GEMINI_API_KEY_FALLBACK", "test-gemini-fallback")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
     env = _worker_author_platform_env()
 
     assert env["WORKEROS_CODEGEN_MODEL"] == _GEMINI
     assert env["GEMINI_API_KEY"] == "test-gemini-key"
+    assert env["GEMINI_API_KEY_FALLBACK"] == "test-gemini-fallback"
 
 
 def test_worker_author_manifest_does_not_require_byo_ai_key():

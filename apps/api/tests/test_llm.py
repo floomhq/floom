@@ -67,6 +67,16 @@ def test_provider_credentials_present(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
     assert llm.provider_credentials_present("bedrock/us.anthropic.claude-sonnet-4-6") is True
 
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_FALLBACK", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY_FALLBACK", raising=False)
+    assert llm.provider_credentials_present("gemini/gemini-3.5-flash") is False
+    monkeypatch.setenv("GEMINI_API_KEY_FALLBACK", "fallback-gemini")
+    assert llm.provider_credentials_present("gemini/gemini-3.5-flash") is True
+    monkeypatch.delenv("GEMINI_API_KEY_FALLBACK", raising=False)
+    assert llm.provider_credentials_present("vertex_ai/gemini-3.5-flash") is True
+
 
 def test_completion_routes_to_litellm_and_caches_for_bedrock(monkeypatch):
     captured = {}
@@ -103,6 +113,66 @@ def test_completion_bridges_platform_key_for_openai(monkeypatch):
         llm.completion(model="gpt-5.5", messages=[{"role": "user", "content": "u"}], max_tokens=5)
     # Reserved platform key name is bridged onto the standard key litellm reads.
     assert captured["api_key"] == "sk-platform"
+
+
+def test_completion_retries_gemini_with_fallback_key(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "primary-gemini")
+    monkeypatch.setenv("GEMINI_API_KEY_FALLBACK", "fallback-gemini")
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("429 exceeded your current quota")
+        return "R"
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        out = llm.completion(
+            model="gemini/gemini-3.5-flash",
+            messages=[{"role": "user", "content": "u"}],
+            max_tokens=5,
+        )
+
+    assert out == "R"
+    assert [call["api_key"] for call in calls] == ["primary-gemini", "fallback-gemini"]
+
+
+def test_completion_does_not_inject_gemini_key_for_vertex_gemini(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "primary-gemini")
+    monkeypatch.setenv("GEMINI_API_KEY_FALLBACK", "fallback-gemini")
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return "R"
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        out = llm.completion(
+            model="vertex_ai/gemini-3.5-flash",
+            messages=[{"role": "user", "content": "u"}],
+            max_tokens=5,
+        )
+
+    assert out == "R"
+    assert captured["model"] == "vertex_ai/gemini-3.5-flash"
+    assert "api_key" not in captured
+
+
+def test_completion_does_not_retry_gemini_non_key_error(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "primary-gemini")
+    monkeypatch.setenv("GEMINI_API_KEY_FALLBACK", "fallback-gemini")
+
+    with patch("litellm.completion", side_effect=RuntimeError("invalid response_format")) as mocked:
+        try:
+            llm.completion(
+                model="gemini/gemini-3.5-flash",
+                messages=[{"role": "user", "content": "u"}],
+                max_tokens=5,
+            )
+        except RuntimeError:
+            pass
+
+    assert mocked.call_count == 1
 
 
 def test_cache_control_extra_args():

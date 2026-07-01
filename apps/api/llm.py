@@ -36,6 +36,12 @@ _PROVIDER_ERROR_RE = _re.compile(
     r"error code: \d{3}|openai|anthropic|litellm|bedrock|api.?connection",
     _re.IGNORECASE,
 )
+_GEMINI_KEY_FALLBACK_RE = _re.compile(
+    r"invalid api key|api[_ -]?key|authentication|permission|unauthorized|forbidden"
+    r"|billing|quota|exceeded your current quota|rate.?limit|resource_exhausted"
+    r"|429|401|403",
+    _re.IGNORECASE,
+)
 
 
 def is_llm_provider_outage(exc: BaseException | str) -> bool:
@@ -74,6 +80,33 @@ def is_litellm_model(model: str) -> bool:
     return not model.startswith(("openai/", "litellm/openai/"))
 
 
+def _is_direct_gemini_api_key_model(model: str) -> bool:
+    normalized = model.lower()
+    if normalized.startswith("litellm/"):
+        normalized = normalized.removeprefix("litellm/")
+    return normalized.startswith("gemini/")
+
+
+def _gemini_primary_key() -> str | None:
+    import os
+
+    return (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip() or None
+
+
+def _gemini_fallback_key() -> str | None:
+    import os
+
+    return (
+        os.environ.get("GEMINI_API_KEY_FALLBACK")
+        or os.environ.get("GOOGLE_API_KEY_FALLBACK")
+        or ""
+    ).strip() or None
+
+
+def _should_retry_gemini_with_fallback(exc: BaseException) -> bool:
+    return bool(_GEMINI_KEY_FALLBACK_RE.search(str(exc)))
+
+
 def agent_model(model: str) -> str:
     """Normalize ``model`` for the OpenAI Agents SDK ``MultiProvider``.
 
@@ -97,6 +130,8 @@ def provider_credentials_present(model: str) -> bool:
     import os
 
     if is_litellm_model(model):
+        if _is_direct_gemini_api_key_model(model):
+            return bool(_gemini_primary_key() or _gemini_fallback_key())
         if "bedrock" in model.lower():
             return bool(
                 os.environ.get("AWS_ACCESS_KEY_ID")
@@ -187,6 +222,19 @@ def completion(
         key = os.environ.get("OPENAI_API_KEY") or os.environ.get("PLATFORM_OPENAI_API_KEY")
         if key:
             kwargs["api_key"] = key
+    if is_litellm_model(model) and _is_direct_gemini_api_key_model(model) and "api_key" not in kwargs:
+        primary_key = _gemini_primary_key()
+        fallback_key = _gemini_fallback_key()
+        if primary_key:
+            kwargs["api_key"] = primary_key
+        try:
+            return litellm.completion(model=model, messages=msgs, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - litellm/provider exception classes vary
+            if not fallback_key or fallback_key == primary_key or not _should_retry_gemini_with_fallback(exc):
+                raise
+            logger.warning("Gemini primary key failed; retrying with fallback key for model %s", model)
+            retry_kwargs = {**kwargs, "api_key": fallback_key}
+            return litellm.completion(model=model, messages=msgs, **retry_kwargs)
     return litellm.completion(model=model, messages=msgs, **kwargs)
 
 
