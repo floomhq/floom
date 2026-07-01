@@ -124,6 +124,10 @@ Other litellm providers work the same way:
 | Google Gemini | `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
 | Groq | `groq/llama-3.3-70b-versatile` | `GROQ_API_KEY` |
 
+For Gemini API-key failover, set `GEMINI_API_KEY_FALLBACK` (or
+`GOOGLE_API_KEY_FALLBACK`). Floom retries once with the fallback key when the
+primary Gemini key returns an auth, billing, quota, or rate-limit style failure.
+
 Vertex AI Gemini uses Google Application Default Credentials instead of
 `GEMINI_API_KEY`. For local development, install from the normal requirements
 file, then set a Vertex model id and Google auth environment:
