@@ -79,7 +79,7 @@ export async function workspacesListCommand(options: { json?: boolean }): Promis
     log.step("Only workspaces your credentials can access are listed.");
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -89,7 +89,11 @@ export async function workspacesCreateCommand(name: string, options: { json?: bo
   try {
     const trimmed = name.trim();
     if (!trimmed) {
-      log.err("workspace name is required");
+      if (options.json) {
+        printJson({ error: "workspace name is required" });
+      } else {
+        log.err("workspace name is required");
+      }
       return 1;
     }
     const { client } = await createAuthenticatedClient();
@@ -108,7 +112,7 @@ export async function workspacesCreateCommand(name: string, options: { json?: bo
     }
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -143,7 +147,7 @@ export async function workspacesShowCommand(options: { json?: boolean }): Promis
     log.kv("API base", payload.api_base);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }

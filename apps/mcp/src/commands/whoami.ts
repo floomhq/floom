@@ -1,7 +1,7 @@
 import { createAuthenticatedClient } from "../lib/api.js";
 import { getCommandName } from "../lib/command-name.js";
 import { maskSecret } from "../lib/credentials.js";
-import { log, printJson } from "../lib/output.js";
+import { log, printJson, printJsonError } from "../lib/output.js";
 
 type AuthMe = {
   user_id?: unknown;
@@ -85,6 +85,10 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
+      if (options.json) {
+        printJsonError("Not logged in.", `Run: ${getCommandName()} login`);
+        return 1;
+      }
       log.err("Not logged in.");
       log.info(`Run: ${getCommandName()} login`);
       return 1;

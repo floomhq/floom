@@ -6,7 +6,6 @@ import {
   FloomApiError,
   resolveLoginApiBase,
 } from "../lib/api.js";
-import { promptYesNo } from "../lib/prompt.js";
 import { getCommandName } from "../lib/command-name.js";
 import { log } from "../lib/output.js";
 import {
@@ -14,8 +13,6 @@ import {
   credentialsPath,
   type StoredCredentials,
 } from "../lib/credentials.js";
-import { telemetryRequestHeaders } from "../lib/telemetry-config.js";
-import { identifyTelemetryUser } from "../lib/telemetry.js";
 
 type DeviceResponse = {
   device_code: string;
@@ -185,7 +182,7 @@ async function fetchCloudBootstrap(apiBase: string): Promise<CloudBootstrap | nu
   // the cli-exchange response carries the same fields and we still succeed.
   try {
     const response = await fetch(`${apiBase}/auth/cli-bootstrap`, {
-      headers: { accept: "application/json", ...telemetryRequestHeaders("cli") },
+      headers: { accept: "application/json" },
     });
     if (!response.ok) return null;
     const parsed = (await response.json()) as Partial<CloudBootstrap>;
@@ -244,13 +241,10 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
     "Approve ONLY if this exact code appears on the page. " +
       "If it differs, someone may be trying to hijack your login — deny it.",
   );
-  const shouldOpen = await promptYesNo("Or open the URL automatically? [Y/n] ", true);
-  if (shouldOpen) {
-    try {
-      await open(started.verification_url);
-    } catch {
-      // Best effort only.
-    }
+  try {
+    await open(started.verification_url);
+  } catch {
+    // Best effort only.
   }
 
   const isCloud =
@@ -294,7 +288,6 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
           authed_at: new Date().toISOString(),
         };
         await writeCredentials(creds);
-        await identifyTelemetryUser(creds);
         log.ok(`Logged in`);
         log.kv("API", polled.api_base);
         log.kv("Token saved to", credentialsPath());
@@ -418,7 +411,6 @@ async function saveCloudCredentials(creds: StoredCredentials, apiBase: string): 
       : {}),
   };
   await writeCredentials(savedCreds);
-  await identifyTelemetryUser(savedCreds);
   log.ok(`Logged in`);
   log.kv("API", apiBase);
   if (workspace) {

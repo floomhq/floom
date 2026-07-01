@@ -1,11 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createAuthenticatedClient, FloomApiClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
 import { getCommandName } from "../lib/command-name.js";
 import { readCredentials, updateCredentials } from "../lib/credentials.js";
 import { log, printJson, renderTable } from "../lib/output.js";
+import { runLoginCommand } from "./login.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -13,6 +15,13 @@ const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
 const MCP_SERVER_NAME = "floom";
 const LEGACY_MCP_SERVER_NAME = "workeros";
+const FLOOM_SKILL_ASSET_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "assets",
+  "floom-skill.md",
+);
 
 // Targets that write a file (kind = "object" or "array" for config shape).
 const FILE_CLIENTS = [
@@ -27,6 +36,7 @@ const FILE_CLIENTS = [
 type FileTarget = (typeof FILE_CLIENTS)[number]["target"];
 // "generic" is valid as a CLI --target but never writes a file.
 export type ClientTarget = FileTarget | "generic";
+type SkillClient = { target: ClientTarget };
 
 function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
@@ -42,6 +52,48 @@ function readJson(path: string): JsonObject {
 async function writeJson(path: string, value: JsonObject): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function skillTargetPath(client: SkillClient, configPath: string): string {
+  if (client.target === "claude") {
+    return join(resolveHomeDir(), ".claude", "skills", "floom", "SKILL.md");
+  }
+  if (client.target === "cursor") {
+    return join(process.cwd(), ".cursor", "rules", "floom.mdc");
+  }
+  if (client.target === "generic") {
+    return join(process.cwd(), "FLOOM.md");
+  }
+  return join(dirname(configPath), "FLOOM.md");
+}
+
+export async function writeFloomSkillForClient(client: SkillClient, configPath: string): Promise<string | null> {
+  try {
+    const skillPath = skillTargetPath(client, configPath);
+    const content = readFileSync(FLOOM_SKILL_ASSET_PATH, "utf8");
+    await mkdir(dirname(skillPath), { recursive: true });
+    await writeFile(skillPath, content, "utf8");
+    return skillPath;
+  } catch {
+    return null;
+  }
+}
+
+async function writeAndLogFloomSkill(
+  client: SkillClient,
+  configPath: string,
+  displayPath?: string,
+  stream: "stdout" | "stderr" = "stdout",
+): Promise<void> {
+  const skillPath = await writeFloomSkillForClient(client, configPath);
+  if (skillPath) {
+    const message = `Added Floom skill so your agent knows how to use it -> ${displayPath || skillPath}`;
+    if (stream === "stderr") {
+      process.stderr.write(`${message}\n`);
+    } else {
+      log.info(message);
+    }
+  }
 }
 
 // HTTP MCP config — url + headers, no subprocess needed.
@@ -138,6 +190,10 @@ function selectFileClients(target: FileTarget): Array<(typeof FILE_CLIENTS)[numb
   return FILE_CLIENTS.filter((c) => c.target === target);
 }
 
+function isSupportedTarget(target: string): target is ClientTarget {
+  return target === "generic" || FILE_CLIENTS.some((client) => client.target === target);
+}
+
 type McpConfig = { mcpUrl: string; headers: Record<string, string> };
 
 type WorkspaceRow = { id: string; name?: string };
@@ -187,8 +243,7 @@ async function resolveMcpConfig(
   if (!pat) {
     throw new Error(
       "Cloud MCP install requires a Personal Access Token (PAT).\n" +
-      "Generate one at https://floom.ai/settings/tokens, then run:\n" +
-      `  ${getCommandName()} login --pat <your-token>`,
+      "Generate one in the dashboard, then set FLOOM_TOKEN or WORKEROS_API_TOKEN before running MCP install.",
     );
   }
 
@@ -221,15 +276,29 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
   const home = resolveHomeDir();
   if (!home) throw new Error("HOME is required");
 
-  const credentials = await readCredentials();
-  if (!credentials) {
-    log.err("Not logged in. Cannot install MCP config without credentials.");
-    log.info(`Run: ${getCommandName()} login`);
+  if (options.target && !isSupportedTarget(options.target)) {
+    log.err(`Unknown target: ${options.target}`);
+    log.info("Supported targets: claude | cursor | vscode | windsurf | continue | generic");
     return 1;
+  }
+
+  let credentials = await readCredentials();
+  if (!credentials) {
+    log.info("No saved Floom credentials found. Starting login...");
+    const loginResult = await runLoginCommand({});
+    if (loginResult !== 0) {
+      return loginResult;
+    }
+    credentials = await readCredentials();
+    if (!credentials) {
+      log.err("Login completed but no credentials were saved.");
+      return 1;
+    }
   }
 
   const resolvedBase = (
     credentials.api_base ||
+    process.env.FLOOM_API_BASE ||
     process.env.WORKEROS_API_BASE ||
     (credentials.mode === "cloud" ? DEFAULT_CLOUD_API_BASE : DEFAULT_OSS_API_BASE)
   ).replace(/\/+$/, "");
@@ -257,6 +326,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
         `Credentials are redacted by default. Re-run \`${getCommandName()} mcp install --target generic --show-token\` only when you are ready to paste into a private MCP config.`,
       );
     }
+    await writeAndLogFloomSkill({ target: "generic" }, join(process.cwd(), "FLOOM.md"), "FLOOM.md", "stderr");
     return 0;
   }
 
@@ -282,6 +352,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
     log.ok(`Installed Floom MCP config for ${client.name}`);
     log.kv("Config path", displayPath);
     log.kv("MCP URL", mcpUrl);
+    await writeAndLogFloomSkill(client, configPath);
     return 0;
   }
 
@@ -300,10 +371,13 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
     log.ok(`Installed Floom MCP config for ${client.name} (auto-detected)`);
     log.kv("Config path", displayPath);
     log.kv("MCP URL", mcpUrl);
+    await writeAndLogFloomSkill(client, configPath);
     return 0;
   }
 
+  log.info("No supported MCP client config was found; defaulting to --target generic.");
   process.stdout.write(manualSnippets(mcpUrl, headers) + "\n");
+  await writeAndLogFloomSkill({ target: "generic" }, join(process.cwd(), "FLOOM.md"), "FLOOM.md", "stderr");
   return 0;
 }
 
@@ -391,7 +465,7 @@ export async function mcpListCommand(options: { json?: boolean }): Promise<numbe
     ) + "\n");
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -475,7 +549,7 @@ export async function mcpTestCommand(
     }
     return valid ? 0 : 1;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }

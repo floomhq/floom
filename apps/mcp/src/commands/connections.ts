@@ -105,7 +105,7 @@ export async function connectionsListCommand(options: { json?: boolean }): Promi
     ) + "\n");
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -141,7 +141,7 @@ export async function connectionsAddCommand(
     }
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -168,7 +168,7 @@ export async function connectionsImportMcpConfigCommand(path: string, options: {
     }
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }

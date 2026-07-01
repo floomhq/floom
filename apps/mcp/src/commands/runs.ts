@@ -2,8 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import { createAuthenticatedClient, FloomApiError } from "../lib/api.js";
 import { getCommandName } from "../lib/command-name.js";
-import { log, printJson, renderTable } from "../lib/output.js";
-import { telemetryRequestHeaders } from "../lib/telemetry-config.js";
+import { log, printJson, printJsonError, renderTable } from "../lib/output.js";
 
 type RunSummary = {
   id: string;
@@ -33,19 +32,31 @@ function parseSseChunk(chunk: string): unknown[] {
   return events;
 }
 
-function handleAuthError(error: unknown): number | null {
+function handleAuthError(error: unknown, options: { json?: boolean } = {}): number | null {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("Not logged in")) {
+    if (options.json) {
+      printJsonError("Not authenticated.", `Run: ${getCommandName()} login`);
+      return 1;
+    }
     log.err("Not authenticated.");
     process.stderr.write(`Run: ${getCommandName()} login\n`);
     return 1;
   }
   if (error instanceof FloomApiError && (error.status === 401 || error.status === 403)) {
+    if (options.json) {
+      printJsonError("Your session expired.", `Re-run: ${getCommandName()} login`);
+      return 1;
+    }
     log.err("Your session expired.");
     process.stderr.write(`Re-run: ${getCommandName()} login\n`);
     return 1;
   }
   if (error instanceof FloomApiError && error.status && error.status >= 500) {
+    if (options.json) {
+      printJsonError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues");
+      return 1;
+    }
     log.err(`API error: ${message}`);
     process.stderr.write("Check API status, then retry. Report: https://github.com/floomhq/floom/issues\n");
     return 1;
@@ -92,7 +103,7 @@ export async function runsListCommand(options: {
     ) + "\n");
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -142,17 +153,21 @@ export async function runsShowCommand(runId: string, options: { json?: boolean }
     return 0;
   } catch (error) {
     if (error instanceof FloomApiError && error.status === 404) {
-      log.err(`Run '${runId}' not found.`);
-      log.info(`List recent runs: ${getCommandName()} runs list`);
+      if (options.json) {
+        printJsonError(`Run '${runId}' not found.`, `List recent runs: ${getCommandName()} runs list`);
+      } else {
+        log.err(`Run '${runId}' not found.`);
+        log.info(`List recent runs: ${getCommandName()} runs list`);
+      }
       return 1;
     }
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
 }
 
-export async function runsLogsCommand(runId: string, options: { follow?: boolean }): Promise<number> {
+export async function runsLogsCommand(runId: string, options: { follow?: boolean; json?: boolean }): Promise<number> {
   try {
     const { client, credentials } = await createAuthenticatedClient();
     if (!options.follow) {
@@ -161,6 +176,12 @@ export async function runsLogsCommand(runId: string, options: { follow?: boolean
         level: string;
         message: string;
       }>;
+      if (options.json) {
+        for (const entry of logs) {
+          process.stdout.write(JSON.stringify(entry) + "\n");
+        }
+        return 0;
+      }
       for (const entry of logs) {
         process.stdout.write(`[${entry.timestamp}] ${entry.level.toUpperCase()}: ${entry.message}\n`);
       }
@@ -179,18 +200,25 @@ export async function runsLogsCommand(runId: string, options: { follow?: boolean
       method: "GET",
       headers: {
         accept: "text/event-stream",
-        ...telemetryRequestHeaders("cli"),
         ...authHeaders,
       },
     });
     if (!response.ok) {
-      log.err(`Failed to follow logs: HTTP ${response.status}`);
-      log.info(`Check run status: ${getCommandName()} runs show ${runId}`);
+      if (options.json) {
+        printJsonError(`Failed to follow logs: HTTP ${response.status}`, `Check run status: ${getCommandName()} runs show ${runId}`);
+      } else {
+        log.err(`Failed to follow logs: HTTP ${response.status}`);
+        log.info(`Check run status: ${getCommandName()} runs show ${runId}`);
+      }
       return 1;
     }
     if (!response.body) {
-      log.err("Events response body is missing");
-      log.info(`Check run status: ${getCommandName()} runs show ${runId}`);
+      if (options.json) {
+        printJsonError("Events response body is missing", `Check run status: ${getCommandName()} runs show ${runId}`);
+      } else {
+        log.err("Events response body is missing");
+        log.info(`Check run status: ${getCommandName()} runs show ${runId}`);
+      }
       return 1;
     }
 
@@ -223,7 +251,7 @@ export async function runsLogsCommand(runId: string, options: { follow?: boolean
     }
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -261,8 +289,12 @@ export async function runsApproveCommand(runId: string, options: { comment?: str
       try {
         editedOutput = JSON.parse(options.edit);
       } catch {
+      if (options.json) {
+        printJsonError("--edit must be valid JSON");
+      } else {
         log.err("--edit must be valid JSON");
-        return 1;
+      }
+      return 1;
       }
     }
     const body: Record<string, unknown> = {};
@@ -278,14 +310,22 @@ export async function runsApproveCommand(runId: string, options: { comment?: str
     if (out.run_id && out.run_id !== runId) log.info(`Follow-up run: ${out.run_id}`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     if (error instanceof FloomApiError && error.status === 404) {
-      log.err(`Run '${runId}' not found.`);
+      if (options.json) {
+        printJsonError(`Run '${runId}' not found.`);
+      } else {
+        log.err(`Run '${runId}' not found.`);
+      }
       return 1;
     }
     if (error instanceof FloomApiError && error.status === 409) {
-      log.err(error.message);
+      if (options.json) {
+        printJsonError(error.message);
+      } else {
+        log.err(error.message);
+      }
       return 1;
     }
     throw error;
@@ -305,14 +345,22 @@ export async function runsRejectCommand(runId: string, options: { reason?: strin
     log.ok(`Rejected ${runId}`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     if (error instanceof FloomApiError && error.status === 404) {
-      log.err(`Run '${runId}' not found.`);
+      if (options.json) {
+        printJsonError(`Run '${runId}' not found.`);
+      } else {
+        log.err(`Run '${runId}' not found.`);
+      }
       return 1;
     }
     if (error instanceof FloomApiError && error.status === 409) {
-      log.err(error.message);
+      if (options.json) {
+        printJsonError(error.message);
+      } else {
+        log.err(error.message);
+      }
       return 1;
     }
     throw error;
@@ -330,10 +378,14 @@ export async function runsCancelCommand(runId: string, options: { json?: boolean
     log.ok(`Cancelled ${runId}`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     if (error instanceof FloomApiError && error.status === 404) {
-      log.err(`Run '${runId}' not found.`);
+      if (options.json) {
+        printJsonError(`Run '${runId}' not found.`);
+      } else {
+        log.err(`Run '${runId}' not found.`);
+      }
       return 1;
     }
     throw error;

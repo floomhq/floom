@@ -7,7 +7,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { readCredentials } from "./lib/credentials.js";
-import { telemetryRequestHeaders } from "./lib/telemetry-config.js";
 import {
   WORKER_AUTHORING_CONTRACT,
   getWorkerTemplate,
@@ -40,7 +39,7 @@ class FloomApiError extends Error {
 }
 
 function apiBase(): string {
-  return (process.env.WORKEROS_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, "");
+  return (process.env.FLOOM_API_BASE || process.env.WORKEROS_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
 function hostedModeRequested(): boolean {
@@ -49,7 +48,7 @@ function hostedModeRequested(): boolean {
 }
 
 function isHostedApi(): boolean {
-  return Boolean(process.env.WORKEROS_API_TOKEN) || hostedModeRequested();
+  return Boolean(process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN) || hostedModeRequested();
 }
 
 function resolvePath(path: string): string {
@@ -76,14 +75,14 @@ function activeWorkspaceId(): string | undefined {
 }
 
 function authHeader(): Record<string, string> {
-  const headers: Record<string, string> = { ...telemetryRequestHeaders("mcp") };
-  const token = process.env.WORKEROS_API_TOKEN?.trim();
+  const headers: Record<string, string> = {};
+  const token = (process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN || "").trim();
   if (token) {
     headers["x-floom-token"] = token;
   } else {
     const secret = process.env.WORKEROS_API_SECRET?.trim();
     if (!secret) {
-      throw new Error("WORKEROS_API_TOKEN or WORKEROS_API_SECRET is required");
+      throw new Error("FLOOM_TOKEN, WORKEROS_API_TOKEN, or WORKEROS_API_SECRET is required");
     }
     headers["x-floom-secret"] = secret;
     // Self-hosted engines with user-header scope require x-floom-user (OSS only).

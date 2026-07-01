@@ -86,7 +86,6 @@ test("#1455 MCP sends x-workeros-workspace on worker writes in hosted mode", asy
   for (const r of workerReqs) {
     assert.equal(r.headers["x-workeros-workspace"], WS, `missing/wrong workspace header on ${r.method} ${r.path}`);
     assert.equal(r.headers["x-floom-token"], PAT, `missing PAT on ${r.method} ${r.path}`);
-    assert.equal(r.headers["x-floom-source"], "mcp", `missing source header on ${r.method} ${r.path}`);
   }
 });
 
@@ -113,6 +112,5 @@ test("#1455 reads also carry the workspace header (consistency)", async () => {
   assert.ok(reqs.length >= 1);
   for (const r of reqs) {
     assert.equal(r.headers["x-workeros-workspace"], WS);
-    assert.equal(r.headers["x-floom-source"], "mcp");
   }
 });
