@@ -401,6 +401,7 @@ def test_mcp_proxy_empty_success_response_is_not_internal_error(monkeypatch, tmp
 
 def test_mcp_proxy_text_success_response_is_structured_content(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
 
     async def _fake_api_call(method, path, request, **kwargs):
         assert method == "GET"
