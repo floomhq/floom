@@ -2368,9 +2368,10 @@ class WorkerSummary(BaseModel):
     missing_connections: List[str] = Field(default_factory=list)
     inputs: List[Union[WorkerInput, WorkerSummaryInput]] = Field(default_factory=list)  # input descriptors for worker-card icon composition
     runtime: Optional[str] = None  # exec.runtime ("skill", "python311", "node22", …)
-    # Owner-only signed share link to the standalone public worker page
-    # (/w/<id>?token=<hmac>). Lets the worker card render a Share affordance
-    # without a second fetch. Same deterministic HMAC as WorkerDetail.public_link.
+    # Owner-only signed public runner link (/w/<id>?token=<hmac>). Present only
+    # for workers whose visibility is public. Unlisted share/import links are
+    # minted explicitly by POST /workers/{id}/share-link because raw share tokens
+    # are hashed at rest and rotate on creation.
     public_link: Optional[str] = None
     # Members STEP 1: ownership + per-asset visibility + computed permissions.
     owner_id: Optional[str] = None
@@ -2438,11 +2439,10 @@ class WorkerDetail(BaseModel):
     # #556: specific secrets/connections required by the worker that are not yet configured.
     missing_secrets: List[str] = Field(default_factory=list)
     missing_connections: List[str] = Field(default_factory=list)
-    # Owner-only signed share link to the standalone public worker page
-    # (/w/<id>?token=<hmac>). Mirrors the approval `public_link` pattern: the
-    # token is a deterministic HMAC the /workers/public/* route verifies, so the
-    # owner can copy this URL to share a read-only "skill card" view of the
-    # worker with anyone — no secrets, source, or run history are exposed there.
+    # Owner-only signed public runner link (/w/<id>?token=<hmac>). Mirrors the
+    # approval public_link pattern and is present only for public workers. For
+    # private/unlisted source sharing, clients call POST /workers/{id}/share-link
+    # to mint a revocable /s/<token> URL.
     public_link: Optional[str] = None
     # Set on the response of an edit that transparently forked a read-only stock
     # worker into a user-owned editable copy (clone-on-edit). Carries the source
