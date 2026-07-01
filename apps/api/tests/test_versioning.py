@@ -33,6 +33,76 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 
+def test_current_worker_version_summary_fills_empty_history_row():
+    from routers.worker_versions import _current_worker_version_summary
+
+    entry = _current_worker_version_summary(
+        "invoice-worker",
+        {"id": "invoice-worker", "updated_at": "2026-07-01T09:15:00+00:00"},
+    )
+
+    assert entry.id == "current"
+    assert entry.sha == "current"
+    assert entry.message == "Current source"
+    assert entry.author == "Floom"
+    assert entry.timestamp == "2026-07-01T09:15:00+00:00"
+    assert entry.asset_type == "worker"
+    assert entry.asset_id == "invoice-worker"
+    assert entry.change_source == "current"
+
+
+def test_visible_worker_version_id_preserves_existing_worker_id():
+    from routers.worker_versions import _visible_worker_version_id
+
+    assert _visible_worker_version_id("gmail_inbox_manager", {"id": "gmail_inbox_manager"}) == "gmail_inbox_manager"
+    assert _visible_worker_version_id("display alias", {}) == "display alias"
+
+
+def test_current_worker_version_files_reads_visible_source_files(tmp_path, monkeypatch):
+    import worker_registry
+    from routers.worker_versions import _current_worker_version_files
+
+    workers_dir = tmp_path / "workers"
+    worker_dir = workers_dir / "invoice-worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "worker.yml").write_text("id: invoice-worker\nname: Invoice Worker\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    (worker_dir / ".env").write_text("SECRET=value\n", encoding="utf-8")
+
+    monkeypatch.setattr(worker_registry, "WORKERS_DIR", workers_dir)
+
+    files = _current_worker_version_files("invoice-worker")
+
+    assert files == [
+        {"path": "worker.yml", "content": "id: invoice-worker\nname: Invoice Worker\n"},
+        {"path": "run.py", "content": "print('ok')\n"},
+    ]
+
+
+def test_current_worker_version_files_reuses_detail_source_resolution(monkeypatch):
+    from types import SimpleNamespace
+
+    from models import WorkerFile
+    import routers.worker_versions as versions
+
+    def fake_build_worker_detail(worker_id, *, user_id, repos):
+        assert worker_id == "invoice-worker"
+        assert user_id == "user-1"
+        assert repos is not None
+        return SimpleNamespace(
+            files=[
+                WorkerFile(path="worker.yml", language="yaml", content="id: invoice-worker\n", binary=False, size=19),
+                WorkerFile(path="logo.png", language="text", content=None, binary=True, size=4),
+            ]
+        )
+
+    monkeypatch.setattr(versions, "_build_worker_detail", fake_build_worker_detail)
+
+    files = versions._current_worker_version_files("invoice-worker", user_id="user-1", repos=object())
+
+    assert files == [{"path": "worker.yml", "content": "id: invoice-worker\n"}]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

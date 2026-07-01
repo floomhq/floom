@@ -713,10 +713,6 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   return (
     <>
       <DetailGroup label="Source">
-        <p className="c-dctx">
-          {ordered.map((file) => file.path).slice(0, 4).join(" · ")}
-          {ordered.length > 4 ? ` · +${ordered.length - 4} more` : ""}
-        </p>
         {editable && (
           <div className="mb-3 flex justify-end">
             <button type="button" className="c-vpill" style={pillBtn} onClick={openEditor}>

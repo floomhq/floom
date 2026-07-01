@@ -2810,8 +2810,8 @@ class WorkspaceStats(BaseModel):
 
 
 class VersionSummary(BaseModel):
-    id: str           # 7-char git SHA
-    sha: str          # same 7-char git SHA
+    id: str           # git SHA or synthetic current marker
+    sha: str          # git SHA or synthetic current marker
     message: str      # commit message
     author: str       # git author name
     timestamp: str    # ISO 8601 commit date
