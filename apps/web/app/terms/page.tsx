@@ -1,6 +1,6 @@
 export const metadata = {
   title: "Terms | Floom",
-  description: "Terms for using Floom.",
+  description: "Terms for using this Floom instance.",
 };
 
 export default function TermsPage() {
@@ -8,66 +8,42 @@ export default function TermsPage() {
     <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Terms</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Last updated 2026-07-01.
+        <p className="text-sm text-muted-foreground mt-1">
+          Last updated 2026-05-29.
         </p>
       </div>
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>
-          These terms apply when you use Floom Cloud, the Floom web app, CLI,
-          MCP server, and hosted worker runtime. If you self-host the open-source
-          Floom software, you are responsible for operating that deployment.
+          Floom is MIT-licensed software provided as-is, without warranty of
+          any kind. This instance is operated by its deployer for their own use.
         </p>
 
-        <h2 className="pt-2 text-base font-medium">Your account and workspaces</h2>
+        <h2 className="text-base font-medium pt-2">Acceptable use</h2>
         <p>
-          You are responsible for the workspaces you create, the credentials and
-          connections you add, and the workers or agents you run. Keep your login
-          sessions, API tokens, CLI tokens, and MCP client configs private. You
-          may revoke tokens and connections from the product settings.
+          The account owner is responsible for the workers they run, the
+          credentials they add, and the data those workers process. Do not use
+          this instance to violate the terms of the model and tool providers it
+          connects to (for example OpenAI, E2B, or Composio), or any applicable
+          law.
         </p>
 
-        <h2 className="pt-2 text-base font-medium">Acceptable use</h2>
+        <h2 className="text-base font-medium pt-2">Costs</h2>
         <p>
-          Do not use Floom to break the law, abuse third-party services, access
-          data you do not have rights to use, send spam, evade platform limits,
-          or violate the terms of model, sandbox, communication, or tool
-          providers that Floom connects to.
+          Running workers and the workspace agent incurs costs with the
+          configured providers (LLM tokens, sandbox time). The account owner is
+          responsible for those costs. Per-user run and chat quotas exist to
+          limit runaway spend, but they do not cap total spend.
         </p>
 
-        <h2 className="pt-2 text-base font-medium">Workers and outputs</h2>
+        <h2 className="text-base font-medium pt-2">Liability</h2>
         <p>
-          Floom can create and run automations that read connected data, call
-          tools, generate files, send messages, or schedule future work when you
-          configure them to do so. You are responsible for reviewing worker
-          behavior, approving sensitive actions, and deciding whether outputs
-          are accurate or appropriate for your use case.
+          To the maximum extent permitted by law, the software and its authors
+          are not liable for any damages arising from use of this instance,
+          including data loss, provider charges, or worker output.
         </p>
 
-        <h2 className="pt-2 text-base font-medium">Costs and limits</h2>
-        <p>
-          Running workers and agents can consume model tokens, sandbox time,
-          storage, and third-party provider quota. Floom may apply product
-          limits, rate limits, spend controls, or safety pauses to protect the
-          service and your workspace.
-        </p>
-
-        <h2 className="pt-2 text-base font-medium">Service changes</h2>
-        <p>
-          Floom may change, suspend, or discontinue features as the product
-          evolves. Preview, beta, and generated-worker features may be less
-          stable than core product surfaces.
-        </p>
-
-        <h2 className="pt-2 text-base font-medium">Liability</h2>
-        <p>
-          To the maximum extent permitted by law, Floom is provided without
-          warranties and is not liable for indirect damages, lost data, provider
-          charges, business interruption, or decisions made from worker output.
-        </p>
-
-        <p className="pt-2 text-muted-foreground">
+        <p className="text-muted-foreground pt-2">
           See also{" "}
           <a className="underline" href="/privacy">
             Privacy
