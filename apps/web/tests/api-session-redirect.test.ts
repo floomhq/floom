@@ -158,4 +158,48 @@ describe("api session expiry handling", () => {
       "workeros.activeWorkspaceId=ws%20local; Path=/; Max-Age=31536000; SameSite=Lax",
     );
   });
+
+  it("clears persisted query data when the active workspace changes", async () => {
+    const removeItem = vi.fn();
+    const setItem = vi.fn();
+    vi.stubGlobal("window", {
+      location: { protocol: "https:", search: "" },
+      localStorage: {
+        getItem: vi.fn((key: string) => key === "workeros.activeWorkspaceId" ? "ws_old" : null),
+        setItem,
+        removeItem,
+      },
+      document: {
+        set cookie(_value: string) {},
+      },
+    });
+
+    const { setActiveWorkspaceId } = await import("@/lib/api");
+
+    setActiveWorkspaceId("ws_new");
+
+    expect(removeItem).toHaveBeenCalledWith("floom-query-cache");
+    expect(setItem).toHaveBeenCalledWith("workeros.activeWorkspaceId", "ws_new");
+  });
+
+  it("keeps persisted query data when the active workspace is unchanged", async () => {
+    const removeItem = vi.fn();
+    vi.stubGlobal("window", {
+      location: { protocol: "https:", search: "" },
+      localStorage: {
+        getItem: vi.fn((key: string) => key === "workeros.activeWorkspaceId" ? "ws_same" : null),
+        setItem: vi.fn(),
+        removeItem,
+      },
+      document: {
+        set cookie(_value: string) {},
+      },
+    });
+
+    const { setActiveWorkspaceId } = await import("@/lib/api");
+
+    setActiveWorkspaceId("ws_same");
+
+    expect(removeItem).not.toHaveBeenCalledWith("floom-query-cache");
+  });
 });
