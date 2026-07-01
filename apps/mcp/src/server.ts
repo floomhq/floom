@@ -6,7 +6,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { readCredentials } from "./lib/credentials.js";
+import { FloomApiClient } from "./lib/api.js";
+import { readCredentials, type StoredCredentials } from "./lib/credentials.js";
 import {
   WORKER_AUTHORING_CONTRACT,
   getWorkerTemplate,
@@ -39,7 +40,7 @@ class FloomApiError extends Error {
 }
 
 function apiBase(): string {
-  return (process.env.FLOOM_API_BASE || process.env.WORKEROS_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, "");
+  return (process.env.FLOOM_API_BASE || process.env.WORKEROS_API_BASE || resolvedCredentials?.api_base || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
 function hostedModeRequested(): boolean {
@@ -48,7 +49,7 @@ function hostedModeRequested(): boolean {
 }
 
 function isHostedApi(): boolean {
-  return Boolean(process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN) || hostedModeRequested();
+  return Boolean(process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN) || hostedModeRequested() || resolvedCredentials?.mode === "cloud";
 }
 
 function resolvePath(path: string): string {
@@ -59,9 +60,10 @@ function resolvePath(path: string): string {
   return `/api${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
-// #1455: the workspace id resolved once at startup from readCredentials() (env
-// OR ~/.config/floom/credentials.json). authHeader() is synchronous and runs
-// per-request, so we cache it here instead of reading the creds file each call.
+// #1455/#1229: credentials resolved once at startup from env or saved
+// ~/.config/floom/credentials.json. The MCP server mirrors the CLI auth client,
+// so a token-free MCP config works after `floom login`.
+let resolvedCredentials: StoredCredentials | null = null;
 let resolvedWorkspaceId: string | undefined;
 
 // #1455: hosted APIs may require x-workeros-workspace on worker WRITES
@@ -74,7 +76,14 @@ function activeWorkspaceId(): string | undefined {
   return process.env.WORKEROS_WORKSPACE_ID?.trim() || resolvedWorkspaceId;
 }
 
-function authHeader(): Record<string, string> {
+async function authHeaders(): Promise<Record<string, string>> {
+  if (resolvedCredentials) {
+    const workspaceId = process.env.WORKEROS_WORKSPACE_ID?.trim();
+    const credentials = workspaceId
+      ? { ...resolvedCredentials, workspace_id: workspaceId }
+      : resolvedCredentials;
+    return new FloomApiClient(apiBase(), credentials).authHeaders();
+  }
   const headers: Record<string, string> = {};
   const token = (process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN || "").trim();
   if (token) {
@@ -82,7 +91,7 @@ function authHeader(): Record<string, string> {
   } else {
     const secret = process.env.WORKEROS_API_SECRET?.trim();
     if (!secret) {
-      throw new Error("FLOOM_TOKEN, WORKEROS_API_TOKEN, or WORKEROS_API_SECRET is required");
+      throw new Error("Run `floom login`, or set FLOOM_TOKEN, WORKEROS_API_TOKEN, or WORKEROS_API_SECRET");
     }
     headers["x-floom-secret"] = secret;
     // Self-hosted engines with user-header scope require x-floom-user (OSS only).
@@ -276,7 +285,7 @@ async function request(
     headers: {
       "accept": "application/json, text/event-stream",
       "content-type": "application/json",
-      ...authHeader(),
+      ...(await authHeaders()),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -308,7 +317,7 @@ async function requestBytes(
     headers: {
       "accept": "application/json",
       "content-type": contentType,
-      ...authHeader(),
+      ...(await authHeaders()),
     },
     body: Buffer.from(body),
   });
@@ -353,7 +362,7 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
     method: "GET",
     headers: {
       "accept": "text/plain, application/json, text/*",
-      ...authHeader(),
+      ...(await authHeaders()),
     },
   });
   if (!response.ok) {
@@ -444,7 +453,7 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
       method: "GET",
       headers: {
         "accept": "text/event-stream",
-        ...authHeader(),
+        ...(await authHeaders()),
       },
       signal: controller.signal,
     });
@@ -699,7 +708,7 @@ async function consumeChatStream(
       headers: {
         "accept": "text/event-stream",
         "content-type": "application/json",
-        ...authHeader(),
+        ...(await authHeaders()),
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -1939,15 +1948,16 @@ export function createServer(): McpServer {
 }
 
 export async function main(): Promise<void> {
-  // #1455: resolve the active workspace once (env or creds file) so authHeader()
-  // can attach x-workeros-workspace to every request, matching the CLI.
+  // #1455/#1229: resolve credentials once so stdio MCP can use the same saved
+  // login as the CLI and attach x-workeros-workspace to every request.
   try {
     const creds = await readCredentials();
+    resolvedCredentials = creds;
     if (creds?.workspace_id) {
       resolvedWorkspaceId = creds.workspace_id;
     }
   } catch {
-    // Non-fatal: fall back to the WORKEROS_WORKSPACE_ID env read in authHeader().
+    // Non-fatal: fall back to the WORKEROS_WORKSPACE_ID env read in authHeaders().
   }
   const server = createServer();
   const transport = new StdioServerTransport();

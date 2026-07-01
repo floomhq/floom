@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -111,6 +111,84 @@ test("#1455 reads also carry the workspace header (consistency)", async () => {
   const reqs = mock.seen.filter((r) => r.path.includes("/workers"));
   assert.ok(reqs.length >= 1);
   for (const r of reqs) {
+    assert.equal(r.headers["x-workeros-workspace"], WS);
+  }
+});
+
+test("#1229 stdio MCP uses saved CLI credentials without token env", async () => {
+  const mock = await startMock();
+  const home = await mkdtemp(join(tmpdir(), "wos-saved-mcp-"));
+  const configRoot = join(home, ".config");
+  await mkdir(join(configRoot, "floom"), { recursive: true });
+  await writeFile(join(configRoot, "floom", "credentials.json"), JSON.stringify({
+    api_base: mock.baseUrl,
+    mode: "cloud",
+    api_token: PAT,
+    workspace_id: WS,
+    authed_at: new Date().toISOString(),
+  }));
+  const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: configRoot };
+  delete env.FLOOM_API_BASE;
+  delete env.WORKEROS_API_BASE;
+  delete env.FLOOM_TOKEN;
+  delete env.WORKEROS_API_TOKEN;
+  delete env.WORKEROS_API_SECRET;
+  delete env.FLOOM_API_SECRET;
+  delete env.WORKEROS_CLOUD;
+  delete env.WORKEROS_WORKSPACE_ID;
+
+  const client = new Client({ name: "saved-auth-test", version: "0.1.0" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ["dist/server.js"], env });
+  await client.connect(transport);
+  try {
+    await client.callTool({ name: "workers.list", arguments: {} });
+  } finally {
+    await client.close();
+    mock.server.close();
+  }
+  const reqs = mock.seen.filter((r) => r.path.includes("/workers"));
+  assert.ok(reqs.length >= 1);
+  for (const r of reqs) {
+    assert.equal(r.headers["x-floom-token"], PAT);
+    assert.equal(r.headers["x-workeros-workspace"], WS);
+  }
+});
+
+test("#1229 stdio MCP lets WORKEROS_WORKSPACE_ID override saved credentials", async () => {
+  const mock = await startMock();
+  const home = await mkdtemp(join(tmpdir(), "wos-saved-mcp-"));
+  const configRoot = join(home, ".config");
+  await mkdir(join(configRoot, "floom"), { recursive: true });
+  await writeFile(join(configRoot, "floom", "credentials.json"), JSON.stringify({
+    api_base: mock.baseUrl,
+    mode: "cloud",
+    api_token: PAT,
+    workspace_id: "ws_saved",
+    authed_at: new Date().toISOString(),
+  }));
+  const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: configRoot };
+  delete env.FLOOM_API_BASE;
+  delete env.WORKEROS_API_BASE;
+  delete env.FLOOM_TOKEN;
+  delete env.WORKEROS_API_TOKEN;
+  delete env.WORKEROS_API_SECRET;
+  delete env.FLOOM_API_SECRET;
+  delete env.WORKEROS_CLOUD;
+  env.WORKEROS_WORKSPACE_ID = WS;
+
+  const client = new Client({ name: "saved-auth-override-test", version: "0.1.0" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ["dist/server.js"], env });
+  await client.connect(transport);
+  try {
+    await client.callTool({ name: "workers.list", arguments: {} });
+  } finally {
+    await client.close();
+    mock.server.close();
+  }
+  const reqs = mock.seen.filter((r) => r.path.includes("/workers"));
+  assert.ok(reqs.length >= 1);
+  for (const r of reqs) {
+    assert.equal(r.headers["x-floom-token"], PAT);
     assert.equal(r.headers["x-workeros-workspace"], WS);
   }
 });
