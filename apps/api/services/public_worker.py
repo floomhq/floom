@@ -127,7 +127,33 @@ def _load_public_worker(worker_id: str, token: str, repos: "Repositories") -> Di
     return worker
 
 
-def _public_worker_share_from_worker(worker: Dict[str, Any]) -> Dict[str, Any]:
+def _public_share_actor(worker: Dict[str, Any], repos: "Repositories" | None) -> Dict[str, str] | None:
+    if repos is None:
+        return None
+    owner_id = str(worker.get("owner_id") or "").strip()
+    workspace_id = str(worker.get("workspace_id") or "local-default").strip() or "local-default"
+    if not owner_id:
+        return None
+    try:
+        member = repos.members.get(workspace_id=workspace_id, user_id=owner_id)
+    except Exception:
+        member = None
+    if not member:
+        return None
+    display_name = str(member.get("display_name") or "").strip()
+    email = str(member.get("email") or "").strip()
+    label = display_name or email
+    if not label:
+        return None
+    out = {"label": label}
+    if display_name:
+        out["display_name"] = display_name
+    if email:
+        out["email"] = email
+    return out
+
+
+def _public_worker_share_from_worker(worker: Dict[str, Any], repos: "Repositories" | None = None) -> Dict[str, Any]:
     from models import WorkerConfig
 
     try:
@@ -154,6 +180,7 @@ def _public_worker_share_from_worker(worker: Dict[str, Any]) -> Dict[str, Any]:
         "entity_type": "worker",
         "title": public.get("name"),
         "description": public.get("description") or public.get("long_description"),
+        "shared_by": _public_share_actor(worker, repos),
         "worker": public,
         "files": share_files,
     }
@@ -284,7 +311,7 @@ def _standalone_share_payload(
             worker = repos.workers.get_any(worker_id=str(row.get("entity_id") or ""))
             if not worker or str(worker.get("owner_id") or "") != str(row.get("owner_id") or ""):
                 raise HTTPException(status_code=404, detail="Share link not found")
-            return _public_worker_share_from_worker(worker)
+            return _public_worker_share_from_worker(worker, repos)
         if entity_type == "brain_file":
             return _public_brain_file_share(row)
         if entity_type == "brain_pack":
@@ -310,4 +337,4 @@ def _standalone_share_payload(
     # Backward compatibility for worker short links created before the unified
     # share table existed.
     worker = _load_short_link_public_worker(token, repos)
-    return _public_worker_share_from_worker(worker)
+    return _public_worker_share_from_worker(worker, repos)

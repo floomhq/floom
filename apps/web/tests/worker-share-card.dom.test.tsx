@@ -46,24 +46,27 @@ const worker: PublicWorker = {
   ],
 };
 
-describe("WorkerShareCard setup view", () => {
-  it("shows readable setup instead of a raw worker.yml tab", () => {
+describe("WorkerShareCard public panes", () => {
+  it("shows overview details plus copyable setup instead of a raw worker.yml tab", () => {
     const { container } = render(<WorkerShareCard worker={worker} authed={false} token="share_token" />);
 
     expect(screen.queryByRole("button", { name: "worker.yml" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Setup" }));
-
-    expect(screen.getByText("Trigger")).toBeInTheDocument();
     expect(screen.getAllByText("Runs on a schedule").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Tools")).toBeInTheDocument();
+    expect(screen.getByText("Tools used")).toBeInTheDocument();
     expect(screen.getAllByText("linear").length).toBeGreaterThanOrEqual(1);
     expect(container.querySelector('use[href="#brand-linear"]')).toBeTruthy();
     expect(screen.getByText("Inputs")).toBeInTheDocument();
-    expect(screen.getByText("Team")).toBeInTheDocument();
-    expect(screen.getByText("string · Required")).toBeInTheDocument();
-    expect(screen.getByText("Outputs")).toBeInTheDocument();
-    expect(screen.getByText("Brief")).toBeInTheDocument();
-    expect(screen.getByText("markdown")).toBeInTheDocument();
+    expect(screen.getByText("team")).toBeInTheDocument();
+    expect(screen.getByText("string")).toBeInTheDocument();
+    expect(screen.getByText("required")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Setup" }));
+
+    expect(screen.getByText("Agent install prompt")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy prompt" })).toBeInTheDocument();
+    expect(screen.getByText("Worker setup")).toBeInTheDocument();
+    expect(screen.getByText(/name: Linear Triage/)).toBeInTheDocument();
+    expect(screen.getByText(/brief: markdown/)).toBeInTheDocument();
   });
 });
