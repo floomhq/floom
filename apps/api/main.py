@@ -4784,6 +4784,21 @@ class _ComposioProxyRequest(BaseModel):
     arguments: Optional[Dict[str, Any]] = None
 
 
+def _active_connection_matching_ref(
+    active_connections: list[dict[str, Any]],
+    connection_ref: str | None,
+) -> dict[str, Any] | None:
+    ref = str(connection_ref or "").strip()
+    if not ref:
+        return None
+    for conn_row in active_connections:
+        raw_id = str(conn_row.get("composio_connection_id") or "").strip()
+        public_id = str(conn_row.get("id") or "").strip()
+        if ref in {raw_id, public_id}:
+            return conn_row
+    return None
+
+
 class _ManagedLLMRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -5039,10 +5054,17 @@ def composio_execute_proxy(
         if conn_row.get("app_name") == tool_prefix and conn_row.get("status") == "active"
     ]
     if connected_account_id:
-        if not any(conn_row.get("composio_connection_id") == connected_account_id for conn_row in active_owner_connections):
+        matched_connection = _active_connection_matching_ref(active_owner_connections, connected_account_id)
+        if matched_connection is None:
             raise HTTPException(
                 status_code=403,
                 detail=f"Connection is not active for owner/app {tool_prefix}",
+            )
+        connected_account_id = str(matched_connection.get("composio_connection_id") or "").strip()
+        if not connected_account_id:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Connection is missing Composio account id for owner/app {tool_prefix}",
             )
     elif active_owner_connections:
         connected_account_id = active_owner_connections[0].get("composio_connection_id")
