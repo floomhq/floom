@@ -1,6 +1,6 @@
 "use client";
 
-// SHARED MCP-install panel — "Agent install". Rendered in BOTH the sidebar "MCP"
+// SHARED MCP-install panel — "MCP setup". Rendered in BOTH the sidebar "MCP"
 // popup (McpInstallModal wraps this in dialog chrome) and Settings → Connect &
 // automate → MCP setup.
 //
@@ -99,7 +99,7 @@ export function McpInstallPanel() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-foreground">Agent install</h2>
+        <h2 className="text-base font-semibold text-foreground">MCP setup</h2>
         <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
           Copy this into Claude Code, Cursor, Codex, VS Code, Windsurf, Cline, or
           any MCP client. Create a workspace token here, then paste it when Floom

@@ -55,6 +55,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -68,6 +69,10 @@ const TABLE_PREVIEW_ROWS = 100;
 const TABLE_PREVIEW_COLS = 12;
 const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const BRAIN_ROUTE = `${APP_BASE_PATH}/brain`;
+
+type PendingDelete =
+  | { kind: "folder"; context: ContextSummary }
+  | { kind: "file"; contextName: string; path: string };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -401,6 +406,8 @@ function ContextsPage() {
   const [newContextName, setNewContextName] = useState("");
   const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // ---- Resizable panes (desktop only) -------------------------------------
   const isDesktop = useIsDesktop();
@@ -611,31 +618,50 @@ function ContextsPage() {
     }
   }
 
-  async function deleteContext(context: ContextSummary) {
+  function deleteContext(context: ContextSummary) {
     if (context.read_only) return;
-    if (!confirm(`Delete folder "${context.name}"? This cannot be undone.`)) return;
+    setPendingDelete({ kind: "folder", context });
+  }
+
+  async function confirmDeleteContext(context: ContextSummary) {
+    if (context.read_only || deleting) return;
+    setDeleting(true);
     try {
       await api.contexts.delete(context.name, true);
       const remaining = contexts.filter((item) => item.name !== context.name);
       setFolderPath([]);
       setSelectedFile(null);
       await loadContexts(remaining[0]?.name || "");
+      setPendingDelete(null);
       toast.success("Folder deleted");
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to delete folder");
+    } finally {
+      setDeleting(false);
     }
   }
 
-  async function deleteFile(path: string) {
-    if (!selectedName || !confirm(`Delete "${path}"?`)) return;
+  function deleteFile(path: string) {
+    if (!selectedName) return;
+    setPendingDelete({ kind: "file", contextName: selectedName, path });
+  }
+
+  async function confirmDeleteFile(contextName: string, path: string) {
+    if (!contextName || deleting) return;
+    setDeleting(true);
     try {
-      const next = await api.contexts.deleteFile(selectedName, path);
-      setDetail(next);
+      const next = await api.contexts.deleteFile(contextName, path);
+      if (selectedName === contextName) {
+        setDetail(next);
+      }
       if (selectedFile === path) setSelectedFile(null);
-      await loadContexts(selectedName);
+      await loadContexts(contextName);
+      setPendingDelete(null);
       toast.success("File deleted");
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to delete file");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -1032,6 +1058,31 @@ function ContextsPage() {
           }}
         />
       </div>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setPendingDelete(null);
+        }}
+        title={
+          pendingDelete?.kind === "folder"
+            ? `Delete folder "${pendingDelete.context.name}"?`
+            : pendingDelete?.kind === "file"
+              ? `Delete "${pendingDelete.path}"?`
+              : "Delete?"
+        }
+        body={
+          pendingDelete?.kind === "folder"
+            ? "This removes the folder and its files. This cannot be undone."
+            : "This removes the file from the current folder."
+        }
+        confirmLabel={deleting ? "Deleting..." : "Delete"}
+        destructive
+        loading={deleting}
+        onConfirm={() => {
+          if (pendingDelete?.kind === "folder") void confirmDeleteContext(pendingDelete.context);
+          if (pendingDelete?.kind === "file") void confirmDeleteFile(pendingDelete.contextName, pendingDelete.path);
+        }}
+      />
     </div>
   );
 }
