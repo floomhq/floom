@@ -1411,7 +1411,7 @@ class WorkerLimits(BaseModel):
         return min(v, float(_ceiling_from_env("FLOOM_MAX_MONTHLY_COST_USD", 100_000)))
 
 
-_SCRIPT_ENTRY_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js")
+_SCRIPT_ENTRY_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js", ".ts")
 _AGENT_ENTRY_SUFFIXES: tuple[str, ...] = (".md",)
 
 
@@ -1422,7 +1422,7 @@ def _infer_mode_from_entry(entry: str) -> Literal["agent", "pure-script"]:
     if lower.endswith(_SCRIPT_ENTRY_SUFFIXES):
         return "pure-script"
     raise ValueError(
-        f"exec.entry must end in .md (agent) or .py/.sh/.js (script); got {entry!r}"
+        f"exec.entry must end in .md (agent) or .py/.sh/.js/.ts (script); got {entry!r}"
     )
 
 
@@ -1444,12 +1444,14 @@ def _default_command_from_entry(entry: str) -> Optional[str]:
         return f"bash {entry}"
     if lower.endswith(".js"):
         return f"node {entry}"
+    if lower.endswith(".ts"):
+        return f"npx --yes tsx {entry}"
     return None
 
 
 class WorkerContractExec(BaseModel):
     command: Optional[str] = None
-    runtime: Literal["python311", "node22", "bash", "skill", "none"] = "skill"
+    runtime: Literal["python311", "node22", "typescript", "ts", "bash", "skill", "none"] = "skill"
     # E2B-only execution. Workers must run in sandboxed microVMs. The
     # Legacy local runner declarations get coerced to `e2b` for
     # backward-compatibility with old worker.yml files (in-process executor
@@ -1461,7 +1463,7 @@ class WorkerContractExec(BaseModel):
     # template id via WORKEROS_E2B_TEMPLATE_PROFILE_<NAME>. Profiles are logical
     # names, not raw template ids, so hosted infra controls stay operator-owned.
     template_profile: Optional[str] = None
-    # PR S11: `entry` is the canonical mode signal. `.md` -> agent, `.py/.sh/.js` -> script.
+    # PR S11: `entry` is the canonical mode signal. `.md` -> agent, `.py/.sh/.js/.ts` -> script.
     # `mode` is a deprecated alias retained for back-compat; if both are absent we infer
     # from `command` / `runtime` (legacy path).
     entry: Optional[str] = None
@@ -1543,8 +1545,9 @@ class WorkerContractExec(BaseModel):
                 self.entry = "run.py"
         # Engine #211: default exec.command from exec.entry for script modes
         # when the author (often the LLM) omitted it. `.py` -> `python <entry>`,
-        # `.sh` -> `bash <entry>`, `.js` -> `node <entry>`. Only fall back to the
-        # hard error when we genuinely cannot derive a command (no entry).
+        # `.sh` -> `bash <entry>`, `.js` -> `node <entry>`, `.ts` -> `tsx <entry>`.
+        # Only fall back to the hard error when we genuinely cannot derive a
+        # command (no entry).
         if self.mode == "pure-script" and not self.command:
             if self.entry:
                 self.command = _default_command_from_entry(self.entry)

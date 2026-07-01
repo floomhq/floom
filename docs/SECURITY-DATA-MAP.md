@@ -59,7 +59,7 @@ added via the secrets API are stored in the DB `secrets` table, not here.
 
 Floom has two execution paths:
 
-- Pure-script workers (`.py`, `.sh`, `.js`, or `runtime.mode: pure-script`) run
+- Pure-script workers (`.py`, `.sh`, `.js`, `.ts`, or `runtime.mode: pure-script`) run
   in E2B microVMs.
 - Agent workers (`.md`, `SKILL.md`, or `runtime.mode: agent`) run through
   AgentDriver in the API process.

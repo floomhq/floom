@@ -62,9 +62,9 @@ test("workers push source includes full UTF-8 bundle tree", async () => {
   await writeFile(join(dir, "worker.yml"), [
     "id: full-bundle",
     "name: full-bundle",
-    "runtime: python",
+    "runtime: python311",
     "exec:",
-    "  runtime: python",
+    "  runtime: python311",
     "  entry: run.py",
     "",
   ].join("\n"));
@@ -83,4 +83,38 @@ test("workers push source includes full UTF-8 bundle tree", async () => {
   assert.equal(files.get("lib/helper.py"), "def main(): pass\n");
   assert.equal(files.get("worker.yml")?.includes("full-bundle"), true);
   assert.equal(files.has("__pycache__/ignored.pyc"), false);
+});
+
+test("workers source loader accepts TypeScript script workers", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "workeros-worker-ts-"));
+  await writeFile(join(dir, "worker.yml"), [
+    'schema_version: "0.3"',
+    "name: ts-worker",
+    "title: TS Worker",
+    "description: TypeScript worker",
+    "entrypoint: run.ts",
+    "exec:",
+    "  runtime: node22",
+    "  runner: e2b",
+    "  entry: run.ts",
+    "  command: npx --yes tsx run.ts",
+    "  inputs: []",
+    "  outputs: []",
+    "trigger: { type: manual }",
+    "",
+  ].join("\n"));
+  await writeFile(join(dir, "run.ts"), [
+    'import { writeFileSync } from "node:fs";',
+    'writeFileSync("result.json", JSON.stringify({ status: "success", outputs: {}, artifacts: [] }));',
+    "",
+  ].join("\n"));
+
+  const result = await loadWorkerSource(dir);
+
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.source);
+  assert.equal(result.source.entrypoint, "run.ts");
+  assert.equal(result.source.runTs?.includes("result.json"), true);
+  const files = new Map(result.source.files.map((file) => [file.path, file.content]));
+  assert.equal(files.has("run.ts"), true);
 });

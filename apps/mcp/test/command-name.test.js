@@ -130,7 +130,7 @@ test("install success prompt is concise and launch-safe", () => {
   const prompt = src.slice(
     src.indexOf("function logInstallSuccessNextStep"),
     src.indexOf("// HTTP MCP config"),
-  );
+  ).replace(/\r\n/g, "\n");
   assert.match(prompt, /Floom is ready/);
   assert.match(prompt, /Installed MCP for your agent/);
   assert.match(prompt, /log\.blank\(\);\n  log\.step\("Installed MCP for your agent"\);/);
