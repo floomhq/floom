@@ -1290,13 +1290,14 @@ export interface CatalogToolItem {
 }
 
 export interface VersionSummary {
-  id: string;       // 7-char git SHA
-  sha: string;      // same 7-char git SHA
+  id: string;       // git SHA or synthetic current marker
+  sha: string;      // git SHA or synthetic current marker
   message: string;  // commit message
   author: string;   // git author name
   timestamp: string; // ISO 8601 commit date
   asset_type: string;
   asset_id: string;
+  change_source?: string | null;
 }
 
 /** Unified git timeline entry (#772 /workspace/changelog). */

@@ -98,11 +98,12 @@ async function writeAndLogFloomSkill(
 
 function logInstallSuccessNextStep(): void {
   log.blank();
-  log.ok("Floom is ready.");
-  log.ok("Installed MCP for your agent.");
-  log.info("Next: open your agent and ask:");
+  log.ok("Floom is ready");
   log.blank();
-  log.info('"Use Floom to create and run my first read-only worker."');
+  log.step("Installed MCP for your agent");
+  log.step("Next: open your agent and ask:");
+  log.blank();
+  log.info('  "Use Floom to create and run my first read-only worker."');
   log.blank();
   log.info("Tip: connect Gmail, GitHub, Slack, or Linear in Floom first for a better first worker.");
 }

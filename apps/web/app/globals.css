@@ -796,6 +796,7 @@ html.dark .grain {
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
 .c-srch { flex:1; min-width:0; display:flex; align-items:center; gap:9px; border:var(--bd-input); border-radius:var(--radius-button); padding:9px 12px; color:var(--muted-foreground); background:var(--bg-2); max-width:480px; }
+.c-srch:focus-within { box-shadow: var(--focus); }
 .c-srch input { flex:1; border:0; background:none; outline:none; color:var(--ink); font:inherit; min-width:0; }
 .c-srch input::placeholder { color:var(--muted-foreground); }
 .c-controlstrip-toprow .c-srch {
