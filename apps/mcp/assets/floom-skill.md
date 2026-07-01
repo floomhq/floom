@@ -54,6 +54,7 @@ Never claim success for a failed run or a run whose final status is unknown.
 ## Rules of thumb
 - A worker = **worker.yml** (config: trigger, schedule, inputs) + **run.py** or **SKILL.md** (what it does).
 - Keep first-worker authoring small: one trigger, clear inputs, one observable success condition.
+- Prefer read-only connection tools for the first proof run. Do not copy raw Gmail or customer data into worker logs unless the user explicitly asks for an audit trail.
 - Prefer setting a **schedule** after the first useful manual run — that's the loop (set once, never run again).
 - Never claim success until a run has completed successfully and you have checked details/logs.
 - Reference secrets by name; never echo their values.

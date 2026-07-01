@@ -33,6 +33,11 @@ Hosted-only concerns such as commercial billing, managed enterprise SSO, and
 SOC 2 evidence collection live outside the open-source runtime. This repo
 provides the core runtime and local/self-hosted path.
 
+Before operating a public hosted deployment, review the data and legal
+boundaries in [DATA-RETENTION.md](DATA-RETENTION.md). Public deployments should
+have explicit Terms/Privacy acceptance and provider-side spend alerts in
+addition to Floom's run-dispatch caps.
+
 ## 1. Run the local app
 
 Prerequisites:

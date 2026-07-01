@@ -374,6 +374,11 @@ connections:
 
 - The E2B Composio proxy rejects undeclared apps and rejects tool slugs outside `allowed_tools`. This is platform-level enforcement against prompt injection or worker bugs; it does not shrink the underlying OAuth refresh token. For true OAuth least privilege, create a separate Composio auth config with narrower scopes such as Gmail readonly.
 - E2B `run.py` workers call `POST /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}` through `WORKEROS_API_URL`; they do not shell out to `composio execute` or carry `COMPOSIO_API_KEY` in the sandbox.
+- Treat Gmail and other inbox data as sensitive run input. Prefer read-only
+  tool declarations for research and summarization workers, keep outputs scoped
+  to the workspace, and avoid copying raw message bodies into logs unless the
+  user explicitly needs that audit trail. See [DATA-RETENTION.md](DATA-RETENTION.md)
+  for storage and deletion boundaries.
 
 ### Brain/context packs
 
