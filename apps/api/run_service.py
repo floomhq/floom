@@ -1524,12 +1524,20 @@ def _emit_run_lifecycle_event(
                 props["error_category"] = "cancelled"
                 props["error_code"] = error_code or None
 
-        analytics_posthog.capture_event(
-            distinct_id=owner_id or "",
-            event=event,
-            properties=props,
-            groups={"workspace": workspace_id} if workspace_id else None,
+        source = analytics_posthog.normalize_source(trigger_source)
+        tokens = analytics_posthog.set_request_context(
+            source=source,
+            do_not_track=analytics_posthog._request_do_not_track.get(),
         )
+        try:
+            analytics_posthog.capture_event(
+                distinct_id=owner_id or "",
+                event=event,
+                properties=props,
+                groups={"workspace": workspace_id} if workspace_id else None,
+            )
+        finally:
+            analytics_posthog.reset_request_context(tokens)
     except Exception:  # pragma: no cover - belt-and-suspenders
         logger.debug("PostHog run-lifecycle emit failed for %s", run_id, exc_info=True)
 
