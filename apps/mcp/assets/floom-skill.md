@@ -46,7 +46,8 @@ Never claim success for a failed run or a run whose final status is unknown.
 - **workers_** list / get / create / update / run / write_file
 - **runs_** list / get / watch / logs / approve / reject / cancel
 - **secrets_** list / set — credentials workers reference by name (write-only, never printed)
-- **connections_** list / add_mcp — connect apps (Gmail, Slack, HubSpot…) and MCP servers
+- **connections_** list — inspect connected OAuth apps such as Gmail, Slack, and HubSpot
+- **connections_** add_mcp — register a custom MCP server connection; do not use it for OAuth app connects
 - **contexts_** list / read / write — brain-pack files workers draw on at run time
 
 (Tool names may appear with a dot in some clients, e.g. `workers.list`.)
@@ -55,6 +56,7 @@ Never claim success for a failed run or a run whose final status is unknown.
 - A worker = **worker.yml** (config: trigger, schedule, inputs) + **run.py** or **SKILL.md** (what it does).
 - Keep first-worker authoring small: one trigger, clear inputs, one observable success condition.
 - Prefer read-only connection tools for the first proof run. Do not copy raw Gmail or customer data into worker logs unless the user explicitly asks for an audit trail.
+- OAuth apps and MCP servers are different connection paths: use OAuth/app connect flows for Gmail, Slack, HubSpot, and similar apps; use `connections_add_mcp` only when the user is registering a custom MCP server URL/command.
 - Prefer setting a **schedule** after the first useful manual run — that's the loop (set once, never run again).
 - Never claim success until a run has completed successfully and you have checked details/logs.
 - Reference secrets by name; never echo their values.
