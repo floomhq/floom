@@ -5,13 +5,15 @@ import { describe, expect, it } from "vitest";
 const SRC = readFileSync(join(__dirname, "../app/workers/WorkersCollection.tsx"), "utf8");
 
 describe("workers empty state quick start", () => {
-  it("guides new users to create their first worker with CLI or MCP", () => {
+  it("guides new users to create their first worker with the MCP quickstart", () => {
     expect(SRC).toContain("Create your first worker");
     expect(SRC).toContain("Quick start");
-    expect(SRC).toContain("Go to your coding agent, install the Floom CLI or MCP");
-    expect(SRC).toContain("npm install -g @floomhq/floom");
-    expect(SRC).toContain("floom login");
-    expect(SRC).toContain("floom mcp install");
+    expect(SRC).toContain("Go to your coding agent, install the Floom MCP server");
+    expect(SRC).toContain("npx -y @floomhq/floom mcp install");
+    expect(SRC).not.toContain("npm install -g @floomhq/floom");
+    expect(SRC).not.toContain("floom login");
+    expect(SRC).toContain("apps/mcp/README.md");
+    expect(SRC).toContain("Install MCP");
   });
 
   it("shows concrete worker prompt examples instead of the old empty copy", () => {
