@@ -8176,22 +8176,34 @@ async def post_telemetry_identify(
 @app.post("/telemetry/cli-command", status_code=204)
 async def post_cli_telemetry(
     payload: CliCommandTelemetry,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> Response:
     try:
+        from services import analytics_posthog
         from services.product_events import emit_cli_command_invoked
 
         _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id)
-        emit_cli_command_invoked(
-            owner_id=auth.user_id,
-            command=payload.command,
-            success=payload.success,
-            duration_ms=payload.duration_ms,
-            exit_code=payload.exit_code,
-            api_base_kind=payload.api_base_kind,
-            worker_id=payload.worker_id,
-            run_id=payload.run_id,
+        tokens = analytics_posthog.set_request_context(
+            source="cli",
+            do_not_track=(
+                request.headers.get("x-floom-do-not-track") == "1"
+                or request.headers.get("dnt") == "1"
+            ),
         )
+        try:
+            emit_cli_command_invoked(
+                owner_id=auth.user_id,
+                command=payload.command,
+                success=payload.success,
+                duration_ms=payload.duration_ms,
+                exit_code=payload.exit_code,
+                api_base_kind=payload.api_base_kind,
+                worker_id=payload.worker_id,
+                run_id=payload.run_id,
+            )
+        finally:
+            analytics_posthog.reset_request_context(tokens)
     except Exception:
         logger.debug("CLI telemetry emit failed for command=%r", payload.command, exc_info=True)
     return Response(status_code=204)
@@ -8200,24 +8212,36 @@ async def post_cli_telemetry(
 @app.post("/telemetry/mcp-tool", status_code=204)
 async def post_mcp_tool_telemetry(
     payload: McpToolTelemetry,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> Response:
     try:
+        from services import analytics_posthog
         from services.product_events import emit_mcp_tool_called
 
         _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id)
-        emit_mcp_tool_called(
-            owner_id=auth.user_id,
-            tool_name=payload.tool_name,
-            success=payload.success,
-            duration_ms=payload.duration_ms,
-            auth_method=payload.auth_method or auth.auth_method,
-            worker_id=payload.worker_id,
-            run_id=payload.run_id,
-            status_code=payload.status_code,
-            error_category=payload.error_category,
-            is_custom_tool=payload.is_custom_tool,
+        tokens = analytics_posthog.set_request_context(
+            source="mcp",
+            do_not_track=(
+                request.headers.get("x-floom-do-not-track") == "1"
+                or request.headers.get("dnt") == "1"
+            ),
         )
+        try:
+            emit_mcp_tool_called(
+                owner_id=auth.user_id,
+                tool_name=payload.tool_name,
+                success=payload.success,
+                duration_ms=payload.duration_ms,
+                auth_method=payload.auth_method or auth.auth_method,
+                worker_id=payload.worker_id,
+                run_id=payload.run_id,
+                status_code=payload.status_code,
+                error_category=payload.error_category,
+                is_custom_tool=payload.is_custom_tool,
+            )
+        finally:
+            analytics_posthog.reset_request_context(tokens)
     except Exception:
         logger.debug("MCP telemetry emit failed for tool=%r", payload.tool_name, exc_info=True)
     return Response(status_code=204)
