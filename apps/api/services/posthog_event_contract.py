@@ -59,9 +59,11 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
         "required_props": {
             "run_id",
             "worker_id",
+            "workspace_id",
             "status",
             "trigger_source",
             "runner",
+            "duration_ms",
             "input_bytes",
             "input_present",
         },
@@ -73,6 +75,7 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
         "required_props": {
             "run_id",
             "worker_id",
+            "workspace_id",
             "status",
             "trigger_source",
             "runner",
@@ -88,6 +91,7 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
         "required_props": {
             "run_id",
             "worker_id",
+            "workspace_id",
             "status",
             "trigger_source",
             "runner",
@@ -105,6 +109,7 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
         "required_props": {
             "run_id",
             "worker_id",
+            "workspace_id",
             "status",
             "trigger_source",
             "runner",
@@ -122,9 +127,22 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
         "surface": "services.worker_create._emit_worker_created",
         "required_props": {
             "worker_id",
+            "workspace_id",
+            "trigger_type",
+            "created_via",
             "has_schedule",
             "tool_count",
             "runner",
+        },
+        "optional_props": set(),
+    },
+    "worker_scheduled": {
+        "emitter": EMITTER_SERVER,
+        "surface": "services.product_events.emit_worker_scheduled",
+        "required_props": {
+            "worker_id",
+            "workspace_id",
+            "cadence",
         },
         "optional_props": set(),
     },

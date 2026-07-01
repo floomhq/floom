@@ -26,8 +26,8 @@ class _Recorder:
         )
 
 
-def _config(cron=None, connections=None, calls=None, runner="e2b"):
-    trigger = types.SimpleNamespace(cron=cron)
+def _config(cron=None, connections=None, calls=None, runner="e2b", trigger_type=None):
+    trigger = types.SimpleNamespace(cron=cron, type=trigger_type)
     runtime = types.SimpleNamespace(runner=runner)
     return types.SimpleNamespace(
         trigger=trigger,
@@ -52,6 +52,9 @@ def test_worker_created_emits_counts_and_flags(monkeypatch):
     assert call["groups"] == {"workspace": "local-default"}
     props = call["properties"]
     assert props["worker_id"] == "wkr-1"
+    assert props["workspace_id"] == "local-default"
+    assert props["trigger_type"] == "schedule"
+    assert props["created_via"] == "api"
     assert props["has_schedule"] is True
     assert props["tool_count"] == 2
     assert props["runner"] == "e2b"
@@ -66,6 +69,7 @@ def test_worker_created_no_schedule(monkeypatch):
     )
     assert rec.calls[0]["properties"]["has_schedule"] is False
     assert rec.calls[0]["properties"]["tool_count"] == 0
+    assert rec.calls[0]["properties"]["trigger_type"] == "manual"
 
 
 def test_worker_created_disabled_noop(monkeypatch):

@@ -111,3 +111,31 @@ def test_patch_description_only_keeps_name(client_and_main):
     assert resp.status_code == 200, resp.text
     assert resp.json()["name"] == original_name  # unchanged
     assert resp.json()["description"] == "only desc changed"
+
+
+def test_patch_manual_worker_to_schedule_emits_worker_scheduled(client_and_main, monkeypatch):
+    client, _, _ = client_and_main
+    calls = []
+
+    monkeypatch.setattr("services.analytics_posthog.is_enabled", lambda: True)
+    monkeypatch.setattr(
+        "services.analytics_posthog.capture_event",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    resp = client.patch(
+        "/workers/patch-nd-worker",
+        json={"trigger_type": "schedule", "cron_expr": "0 9 * * *"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    scheduled = [call for call in calls if call["event"] == "worker_scheduled"]
+    assert len(scheduled) == 1
+    call = scheduled[0]
+    assert call["distinct_id"] == "local-user"
+    assert call["groups"] == {"workspace": "local-default"}
+    assert call["properties"] == {
+        "worker_id": "patch-nd-worker",
+        "workspace_id": "local-default",
+        "cadence": "0 9 * * *",
+    }

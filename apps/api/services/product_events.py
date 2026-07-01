@@ -72,6 +72,31 @@ def emit_worker_lifecycle_event(
     )
 
 
+def emit_worker_scheduled(
+    *,
+    owner_id: str,
+    worker_id: str,
+    cadence: str,
+    workspace_id: Optional[str] = None,
+) -> None:
+    try:
+        from db import derive_workspace_id
+
+        resolved_workspace_id = workspace_id or derive_workspace_id(owner_id)
+        emit_product_event(
+            owner_id=owner_id,
+            event="worker_scheduled",
+            workspace_id=resolved_workspace_id,
+            properties={
+                "worker_id": worker_id,
+                "workspace_id": resolved_workspace_id,
+                "cadence": cadence,
+            },
+        )
+    except Exception:  # pragma: no cover
+        logger.debug("PostHog worker_scheduled emit failed for %s", worker_id, exc_info=True)
+
+
 def emit_mcp_tool_called(
     *,
     owner_id: str,

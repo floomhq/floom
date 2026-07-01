@@ -63,6 +63,10 @@ def normalize_source(value: Optional[str]) -> str:
     return source if source in _ALLOWED_SOURCES else "api"
 
 
+def current_source() -> str:
+    return _request_source.get()
+
+
 def set_request_context(*, source: Optional[str] = None, do_not_track: bool = False) -> tuple[Token[str], Token[bool]]:
     return (
         _request_source.set(normalize_source(source)),
