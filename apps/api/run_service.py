@@ -1041,8 +1041,14 @@ def _snapshot_worker_bundle_background(
 from services.run_cost import (  # noqa: E402,F401
     SpendCapExceeded,
     _persist_run_cost,
+    _user_daily_spend_cap_usd,
+    _user_day_to_date_cost_usd,
+    _user_monthly_spend_cap_usd,
+    _user_month_to_date_cost_usd,
     _worker_month_to_date_cost_usd,
     _spend_cap_for_config,
+    _workspace_daily_spend_cap_usd,
+    _workspace_day_to_date_cost_usd,
     _workspace_monthly_spend_cap_usd,
     _workspace_month_to_date_cost_usd,
 )
@@ -1072,6 +1078,33 @@ def create_run(
             raise SpendCapExceeded(
                 f"Worker {worker_id} has reached its monthly spend cap "
                 f"(${_spent:.2f} of ${_cap:.2f}). Raise the cap or wait for next month."
+            )
+    cap_user_id = str(user_id or owner_id or "").strip()
+    _user_day_cap = _user_daily_spend_cap_usd()
+    if cap_user_id and _user_day_cap is not None:
+        _user_day_spent = _user_day_to_date_cost_usd(cap_user_id)
+        if _user_day_spent >= _user_day_cap:
+            raise SpendCapExceeded(
+                f"User has reached their daily spend cap "
+                f"(${_user_day_spent:.2f} of ${_user_day_cap:.2f}). Raise it or wait until tomorrow."
+            )
+    _user_month_cap = _user_monthly_spend_cap_usd()
+    if cap_user_id and _user_month_cap is not None:
+        _user_month_spent = _user_month_to_date_cost_usd(cap_user_id)
+        if _user_month_spent >= _user_month_cap:
+            raise SpendCapExceeded(
+                f"User has reached their monthly spend cap "
+                f"(${_user_month_spent:.2f} of ${_user_month_cap:.2f}). Raise it or wait for next month."
+            )
+    # Launch abuse guard: every workspace gets a daily spend backstop by
+    # default, even if no explicit workspace setting has been saved.
+    _ws_day_cap = _workspace_daily_spend_cap_usd()
+    if _ws_day_cap is not None:
+        _ws_day_spent = _workspace_day_to_date_cost_usd()
+        if _ws_day_spent >= _ws_day_cap:
+            raise SpendCapExceeded(
+                f"Workspace has reached its daily spend cap "
+                f"(${_ws_day_spent:.2f} of ${_ws_day_cap:.2f}). Raise it in Settings or wait until tomorrow."
             )
     # #797: workspace-level monthly spend cap — aggregate ALL workers' month-to-
     # date cost against the workspace budget.

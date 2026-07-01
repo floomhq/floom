@@ -54,9 +54,8 @@ def _as_role(main, **ctx):
 
 
 def _settings_without_readonly(payload: dict) -> dict:
-    # #797 added a read-only `current_month_spend_usd` mirror to the settings
-    # map; this #794 round-trip only asserts the stored key/value pairs.
-    return {k: v for k, v in payload.items() if k != "current_month_spend_usd"}
+    # Spend mirrors are read-only; this round-trip only asserts stored KV pairs.
+    return {k: v for k, v in payload.items() if k not in {"current_day_spend_usd", "current_month_spend_usd"}}
 
 
 def test_admin_round_trip(app_main, client):
@@ -80,6 +79,7 @@ def test_admin_round_trip(app_main, client):
         ("auto_pause_enabled", "1"),
         ("failure_email_enabled", "false"),
         ("failure_email_to", "ops@example.com,alerts@example.com"),
+        ("daily_spend_cap_usd", "5.00"),
         ("monthly_spend_cap_usd", "25.50"),
         ("default_model", "anthropic.claude-3-5-sonnet"),
         ("fallback_model", "gpt-5.1-mini"),
@@ -106,9 +106,10 @@ def test_unknown_workspace_setting_key_rejected(app_main, client):
 
 def test_current_month_spend_setting_is_read_only(app_main, client):
     _as_role(app_main, user_id="alice", role="admin")
-    resp = client.put("/workspace/settings/current_month_spend_usd", json={"value": "0"})
-    assert resp.status_code == 422
-    assert "read-only" in resp.json()["detail"]
+    for key in ("current_day_spend_usd", "current_month_spend_usd"):
+        resp = client.put(f"/workspace/settings/{key}", json={"value": "0"})
+        assert resp.status_code == 422
+        assert "read-only" in resp.json()["detail"]
 
 
 @pytest.mark.parametrize("key", ["default_model", "fallback_model"])
@@ -125,6 +126,7 @@ def test_model_settings_reject_path_or_scheme_values(app_main, client, key, valu
     [
         ("auto_pause_enabled", "sometimes"),
         ("failure_email_to", "not-an-email"),
+        ("daily_spend_cap_usd", "-1"),
         ("monthly_spend_cap_usd", "-1"),
         ("default_timeout_seconds", "0"),
         ("max_output_tokens", "1000001"),
