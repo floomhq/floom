@@ -123,16 +123,25 @@ def _emit_trigger_fired(
 ) -> None:
     if not owner_id:
         return
-    emit_product_event(
-        owner_id=owner_id,
-        event="trigger_fired",
-        properties={
-            "worker_id": worker_id,
-            "run_id": run_id,
-            "trigger_type": trigger_type,
-            "trigger_id": trigger_id,
-        },
-    )
+    # The scheduler runs in a background thread with no HTTP request context, so
+    # the analytics source would default to "api". These fires originate from the
+    # cron scheduler; tag them source="schedule" (the declared enum value).
+    from services import analytics_posthog
+
+    tokens = analytics_posthog.set_request_context(source="schedule")
+    try:
+        emit_product_event(
+            owner_id=owner_id,
+            event="trigger_fired",
+            properties={
+                "worker_id": worker_id,
+                "run_id": run_id,
+                "trigger_type": trigger_type,
+                "trigger_id": trigger_id,
+            },
+        )
+    finally:
+        analytics_posthog.reset_request_context(tokens)
 
 logger = logging.getLogger("floom.scheduler")
 
