@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, Request
 
+from services.run_py_contract import RUN_PY_CONTRACT
+
 logger = logging.getLogger("floom.api")
 
 
@@ -333,6 +335,7 @@ The `requirements` array is the authoritative source. `required_connections` = o
 === STYLE ===
 
 Never use em dashes (U+2014 —) in any output: worker titles, descriptions, SKILL.md prose, comments, or user-facing strings. Use commas, colons, semicolons, or parentheses instead."""
+_DRAFT_SYSTEM_PROMPT = f"{_DRAFT_SYSTEM_PROMPT}\n\n{RUN_PY_CONTRACT}"
 
 
 _BOTH_METHODS: frozenset = frozenset({

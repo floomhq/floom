@@ -33,7 +33,7 @@ from fastapi.routing import APIRouter
 from pydantic import BaseModel
 
 from auth import AuthContext, get_auth_context
-from channels.common import _MAX_WEBHOOK_BODY_BYTES, collect_agent_reply
+from channels.common import _MAX_WEBHOOK_BODY_BYTES, collect_agent_reply, public_channel_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -1947,7 +1947,10 @@ def _slack_interactivity_response_from_form(form: Dict[str, str]) -> Response:
     except HTTPException as exc:
         return JSONResponse({
             "replace_original": False,
-            "text": f"Could not apply Slack approval action: {exc.detail}",
+            "text": public_channel_error_message(
+                exc,
+                "Could not apply Slack approval action. The failure was logged for the workspace operator.",
+            ),
         })
 
 

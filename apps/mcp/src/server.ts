@@ -25,8 +25,61 @@ const TERMINAL_RUN_STATUSES = new Set([
   "approved",
   "rejected",
 ]);
+const RUN_STATUS_VALUES = ["queued", "running", "pending_approval", "completed", "failed", "cancelled"] as const;
+const TOOL_TEXT_PREVIEW_CHARS = 4096;
+const TOOL_LIST_PREVIEW_ITEMS = 25;
 
 type JsonObject = Record<string, unknown>;
+
+function truncateToolText(value: unknown, limit = TOOL_TEXT_PREVIEW_CHARS): JsonObject {
+  const text = value == null ? "" : String(value);
+  return {
+    content: text.slice(0, limit),
+    truncated: text.length > limit,
+    omitted_chars: Math.max(0, text.length - limit),
+  };
+}
+
+function previewToolValue(value: unknown): unknown {
+  if (typeof value === "string") return truncateToolText(value);
+  if (Array.isArray(value)) {
+    return {
+      items: value.slice(0, TOOL_LIST_PREVIEW_ITEMS).map((item) => previewToolValue(item)),
+      truncated: value.length > TOOL_LIST_PREVIEW_ITEMS,
+      omitted_items: Math.max(0, value.length - TOOL_LIST_PREVIEW_ITEMS),
+    };
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as JsonObject);
+    return {
+      fields: Object.fromEntries(entries.slice(0, TOOL_LIST_PREVIEW_ITEMS).map(([key, item]) => [key, previewToolValue(item)])),
+      truncated: entries.length > TOOL_LIST_PREVIEW_ITEMS,
+      omitted_fields: Math.max(0, entries.length - TOOL_LIST_PREVIEW_ITEMS),
+    };
+  }
+  return value;
+}
+
+function projectRunForTool(run: unknown): unknown {
+  if (!run || typeof run !== "object") return run;
+  const item = run as JsonObject;
+  return {
+    id: item.id,
+    worker_id: item.worker_id,
+    worker_name: item.worker_name,
+    status: item.status,
+    created_at: item.created_at,
+    started_at: item.started_at,
+    completed_at: item.completed_at,
+    duration_ms: item.duration_ms,
+    total_tokens: item.total_tokens,
+    total_cost_usd: item.total_cost_usd,
+    error: item.error,
+    output_preview: previewToolValue(item.output ?? item.outputs ?? item.output_json),
+    artifacts: Array.isArray(item.artifacts) ? item.artifacts.slice(0, TOOL_LIST_PREVIEW_ITEMS) : [],
+    artifacts_truncated: Array.isArray(item.artifacts) && item.artifacts.length > TOOL_LIST_PREVIEW_ITEMS,
+  };
+}
 
 class FloomApiError extends Error {
   constructor(
@@ -373,13 +426,17 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
       parsed,
     );
   }
+  const text = await response.text();
+  const preview = truncateToolText(text);
   return {
     name,
     path,
     size: file.size,
     mime_type: file.mime_type,
     is_binary: false,
-    content: await response.text(),
+    content: preview.content,
+    truncated: preview.truncated,
+    omitted_chars: preview.omitted_chars,
   };
 }
 
@@ -1020,10 +1077,10 @@ export function createServer(): McpServer {
     "runs.list",
     {
       title: "List Runs",
-      description: "List Floom runs, optionally filtered by worker id.",
+      description: "List recent Floom run summaries. Use this to find the right run before calling runs.get for a bounded output preview.",
       inputSchema: {
         worker_id: z.string().optional().describe("Optional worker id filter."),
-        status: z.string().optional().describe("Optional run status filter."),
+        status: z.enum(RUN_STATUS_VALUES).optional().describe("Optional run status filter."),
         limit: z.number().int().min(1).max(500).default(50).describe("Maximum runs to return."),
         offset: z.number().int().min(0).default(0).describe("Pagination offset."),
       },
@@ -1037,11 +1094,11 @@ export function createServer(): McpServer {
     "runs.get",
     {
       title: "Get Run",
-      description: "Get a Floom run by id, including logs, outputs, artifacts, and approval status.",
+      description: "Get one Floom run by id with bounded output previews and artifact metadata. Use files/download APIs for full artifacts.",
       inputSchema: runIdSchema.shape,
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ id }) => callTool(async () => jsonResult(await request("GET", `/runs/${encodeURIComponent(id)}`))),
+    async ({ id }) => callTool(async () => jsonResult(projectRunForTool(await request("GET", `/runs/${encodeURIComponent(id)}`)))),
   );
 
   server.registerTool(

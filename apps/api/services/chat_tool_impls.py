@@ -18,6 +18,10 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("floom.chat")
 
+TOOL_TEXT_PREVIEW_CHARS = 4096
+TOOL_LIST_PREVIEW_ITEMS = 25
+RUN_TOOL_STATUSES = ("queued", "running", "pending_approval", "completed", "failed", "cancelled")
+
 
 # ---------------------------------------------------------------------------
 # Authz helpers
@@ -58,6 +62,101 @@ def _caller_is_workspace_admin(user_id: str) -> bool:
         return bool(row) and str(row["role"]).lower() == "admin"
     except Exception:
         return False
+
+
+def _public_error_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        from services.public_view import _redact_public_log_message
+
+        text = _redact_public_log_message(text)
+    except Exception:
+        pass
+    text = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[redacted]", text)
+    text = re.sub(r"(?i)(authorization\s*:\s*)[^\s,;]+(?:\s+[^\s,;]+)?", r"\1[redacted]", text)
+    return text
+
+
+def _truncate_tool_text(value: Any, limit: int = TOOL_TEXT_PREVIEW_CHARS) -> Dict[str, Any]:
+    text = "" if value is None else str(value)
+    return {
+        "content": text[:limit],
+        "truncated": len(text) > limit,
+        "omitted_chars": max(0, len(text) - limit),
+    }
+
+
+def _preview_tool_value(value: Any, limit: int = TOOL_TEXT_PREVIEW_CHARS) -> Any:
+    if isinstance(value, str):
+        return _truncate_tool_text(value, limit)
+    if isinstance(value, list):
+        preview = [_preview_tool_value(item, limit) for item in value[:TOOL_LIST_PREVIEW_ITEMS]]
+        return {
+            "items": preview,
+            "truncated": len(value) > TOOL_LIST_PREVIEW_ITEMS,
+            "omitted_items": max(0, len(value) - TOOL_LIST_PREVIEW_ITEMS),
+        }
+    if isinstance(value, dict):
+        preview: Dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= TOOL_LIST_PREVIEW_ITEMS:
+                break
+            preview[str(key)] = _preview_tool_value(item, limit)
+        return {
+            "fields": preview,
+            "truncated": len(value) > TOOL_LIST_PREVIEW_ITEMS,
+            "omitted_fields": max(0, len(value) - TOOL_LIST_PREVIEW_ITEMS),
+        }
+    return value
+
+
+def _project_run_for_tool(run: Dict[str, Any]) -> Dict[str, Any]:
+    parsed_outputs: Any = {}
+    raw_output = run.get("output_json")
+    if raw_output:
+        try:
+            parsed_outputs = json.loads(raw_output)
+        except Exception:
+            parsed_outputs = {}
+    elif isinstance(run.get("outputs"), dict):
+        parsed_outputs = run.get("outputs") or {}
+
+    artifacts = run.get("artifacts")
+    if isinstance(artifacts, str):
+        try:
+            artifacts = json.loads(artifacts)
+        except Exception:
+            artifacts = []
+    if not isinstance(artifacts, list):
+        artifacts = []
+
+    return {
+        "id": run.get("id"),
+        "worker_id": run.get("worker_id"),
+        "worker_name": run.get("worker_name"),
+        "status": run.get("status"),
+        "created_at": run.get("created_at"),
+        "started_at": run.get("started_at"),
+        "completed_at": run.get("completed_at"),
+        "duration_ms": run.get("duration_ms"),
+        "total_tokens": run.get("total_tokens"),
+        "total_cost_usd": run.get("total_cost_usd"),
+        "error": _public_error_text(run.get("error")),
+        "outputs_preview": _preview_tool_value(parsed_outputs),
+        "artifacts": [
+            {
+                "name": item.get("name"),
+                "relative_path": item.get("relative_path"),
+                "type": item.get("type"),
+                "size": item.get("size"),
+            }
+            for item in artifacts[:TOOL_LIST_PREVIEW_ITEMS]
+            if isinstance(item, dict)
+        ],
+        "artifacts_truncated": len(artifacts) > TOOL_LIST_PREVIEW_ITEMS,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +626,7 @@ def _tool_runs_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 def _tool_runs_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from db import get_repositories
+    from core.utils import row_to_dict
     run_id = str(args.get("run_id") or "")
     if not run_id:
         return {"ok": False, "error": "run_id is required"}
@@ -534,14 +634,7 @@ def _tool_runs_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     run = repos.runs.get(user_id=user_id, run_id=run_id)
     if not run:
         return {"ok": False, "error": f"Run not found: {run_id}"}
-    r = dict(run)
-    # Parse output_json safely
-    if r.get("output_json"):
-        try:
-            r["outputs"] = json.loads(r["output_json"])
-        except Exception:
-            r["outputs"] = {}
-    return {"ok": True, "run": r}
+    return {"ok": True, "run": _project_run_for_tool(row_to_dict(run))}
 
 
 def _tool_runs_cancel(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -890,7 +983,14 @@ def _tool_contexts_read(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             content = full_path.read_text(errors="replace")
         if not full_path.is_file():
             return {"ok": False, "error": f"File not found: {file_path}"}
-        return {"ok": True, "content": content}
+        preview = _truncate_tool_text(content)
+        return {
+            "ok": True,
+            "content": preview["content"],
+            "truncated": preview["truncated"],
+            "omitted_chars": preview["omitted_chars"],
+            "size_chars": len(content),
+        }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 

@@ -51,6 +51,7 @@ from channels.common import (
     MAX_EVENTS_PER_DELIVERY,
     MAX_INBOUND_TEXT_CHARS,
     collect_agent_reply,
+    public_channel_error_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -981,7 +982,10 @@ async def _maybe_handle_approval_reply(
             run_id,
             scoped_user_id,
         )
-        return f"Could not process approval: {detail}"
+        return public_channel_error_message(
+            exc,
+            "Could not process approval. The failure was logged for the workspace operator.",
+        )
 
 
 # ---------------------------------------------------------------------------

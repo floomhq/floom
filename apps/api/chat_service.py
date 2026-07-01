@@ -1164,12 +1164,19 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         ),
         _make_tool(
             "runs__list",
-            "List recent runs, optionally filtered by worker_id and/or status.",
+            (
+                "List recent worker runs. Use this before runs__get when the user asks "
+                "what happened recently, wants failures, or does not know the run id. "
+                "Returns run summaries only, not full outputs."
+            ),
             {
                 "type": "object",
                 "properties": {
                     "worker_id": {"type": "string"},
-                    "status": {"type": "string"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["queued", "running", "pending_approval", "completed", "failed", "cancelled"],
+                    },
                     "limit": {"type": "integer", "default": 20},
                 },
                 "required": [],
@@ -1178,7 +1185,10 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         ),
         _make_tool(
             "runs__get",
-            "Get a specific run's details including outputs and error.",
+            (
+                "Inspect one run by id. Use this after runs__list or when the user gives "
+                "a run id. Returns a bounded, redacted output preview and artifact metadata."
+            ),
             {
                 "type": "object",
                 "properties": {"run_id": {"type": "string"}},
@@ -1188,7 +1198,7 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         ),
         _make_tool(
             "runs__cancel",
-            "Cancel an in-progress run.",
+            "Cancel a queued or running run only after the user clearly asks to stop that run.",
             {
                 "type": "object",
                 "properties": {"run_id": {"type": "string"}},
@@ -1293,7 +1303,11 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         ),
         _make_tool(
             "contexts__read",
-            "Read a file from a brain pack.",
+            (
+                "Read a bounded preview of a file from a brain pack. Use this to inspect "
+                "relevant workspace knowledge before answering or editing, then ask for "
+                "a narrower file/chunk if the preview is truncated."
+            ),
             {
                 "type": "object",
                 "properties": {

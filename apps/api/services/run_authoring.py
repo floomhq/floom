@@ -25,6 +25,7 @@ from contexts import context_scope_for_user, use_context_scope
 from db.factory import Repositories
 from models import WorkerConfig
 from runner_utils import ARTIFACTS_DIR, _validate_output_schema
+from services.run_py_contract import RUN_PY_CONTRACT
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.run_service")
@@ -627,6 +628,7 @@ _SMOKE_REPAIR_SYSTEM_PROMPT = (
     "Return ONLY the corrected, complete run.py file. "
     "No markdown fences, no commentary."
 )
+_SMOKE_REPAIR_SYSTEM_PROMPT = f"{_SMOKE_REPAIR_SYSTEM_PROMPT}\n\n{RUN_PY_CONTRACT}"
 
 
 def _strip_code_fences(text: str) -> str:
