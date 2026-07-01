@@ -187,7 +187,14 @@ Requires Python 3.11+, Node.js 20+, Git, a model provider key, and an E2B key fr
 
 Full setup, model providers, optional integrations, and the safe self-hosting checklist: [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md). Common issues: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
-Not ready to self-host? [**floom.dev**](https://floom.dev) is the hosted version - hire AI agents with no setup.
+Not ready to self-host? [**floom.dev**](https://floom.dev) is the hosted version - hire AI agents with no setup. Hosted users can start from an MCP client with:
+
+```bash
+npx -y @floomhq/floom mcp install --target claude
+```
+
+The `.env`, model-provider, and E2B keys above are for running your own local or
+self-hosted runtime, not for using Floom Cloud.
 
 ## How a run works
 

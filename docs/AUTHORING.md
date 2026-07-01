@@ -643,8 +643,7 @@ or upgrade the API.
 
 ```bash
 npm i -g @floomhq/floom
-floom login                              # hosted browser/device auth flow
-# or: floom login --local                # local/self-hosted browser/device auth flow
+floom login                              # hosted Floom Cloud browser/device auth flow
 floom doctor
 floom workers list
 floom workers contract
@@ -653,6 +652,10 @@ floom workers validate ./workers/<id>
 floom workers push ./workers/<id>
 floom run <id> --input topic="AI tools"
 ```
+
+For local/self-hosted development, start your API first and use
+`floom login --local`. Hosted Cloud is the default and does not require
+`WORKEROS_API_BASE`, `WORKEROS_API_SECRET`, or local `.env` provider keys.
 
 The package also installs `floom` as a compatible alias. Use `floom` when a
 separate Floom CLI is already present on the machine.
@@ -663,9 +666,14 @@ separate Floom CLI is already present on the machine.
 npx -y @floomhq/floom mcp install --target claude
 ```
 
-Exposes tools the agent can call to create, update settings, run, watch, and
-delete workers without leaving the chat. Use `WORKEROS_API_SECRET` env var to
-skip the install-time prompt.
+Targets hosted Floom Cloud by default. If no valid hosted credentials are
+saved, the installer starts browser login; if you are already logged in, it
+reuses the active account and workspace. It exposes tools the agent can call to
+create, update settings, run, watch, and delete workers without leaving the
+chat.
+
+Use `WORKEROS_API_BASE` / `WORKEROS_API_SECRET` only for self-hosted APIs
+protected by `FLOOM_SECRET`.
 
 Current MCP source creation accepts `worker_yml` plus `run_py`. Use CLI
 `floom workers push <dir>` for local `SKILL.md` agent-mode bundles and for
