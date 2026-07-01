@@ -216,6 +216,7 @@ export function RunDetailSplitPane({
   const isActive = run.status === "running" || run.status === "queued";
   const latest = latestStatus(run, transcriptParts);
   const displayStatus = streamUnavailable && isActive ? "unknown" : latest;
+  const showTimelineRail = isActive || streamConnected || Boolean(streamError) || timeline.length > 1;
 
   return (
     <div className={cn("space-y-6", inline && "min-h-[280px]")}>
@@ -364,16 +365,18 @@ export function RunDetailSplitPane({
             `md:max-h-none`, which stretched a short timeline into a huge empty
             box reserving dead vertical height. Drop the resize affordance and
             let the pane size to its content (self-scroll only when long). */}
-        <aside className="max-h-44 w-full shrink-0 overflow-y-auto [border-bottom:var(--bd-div)] bg-muted/25 md:max-h-[calc(100vh-12rem)] md:w-[280px] md:min-w-[220px] md:max-w-[320px] md:[border-right:var(--bd-div)] md:[border-bottom:0]">
-          {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
-              The timeline IS the panel; the label was dead weight (ChatGPT
-              audit P-1). */}
-          <div className="p-2">
-            {timeline.map((item, index) => (
-              <TimelineRow key={`${item.label}-${index}`} item={item} />
-            ))}
-          </div>
-        </aside>
+        {showTimelineRail && (
+          <aside className="max-h-44 w-full shrink-0 overflow-y-auto [border-bottom:var(--bd-div)] bg-muted/25 md:max-h-[calc(100vh-12rem)] md:w-[240px] md:min-w-[200px] md:max-w-[280px] md:[border-right:var(--bd-div)] md:[border-bottom:0]">
+            {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
+                The timeline IS the panel; the label was dead weight (ChatGPT
+                audit P-1). */}
+            <div className="p-2">
+              {timeline.map((item, index) => (
+                <TimelineRow key={`${item.label}-${index}`} item={item} />
+              ))}
+            </div>
+          </aside>
+        )}
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* v6: lead with the rendered OUTPUT (the generic viewer). The
@@ -460,7 +463,7 @@ function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
   const durationValue =
     run.duration_ms != null ? formatDuration(run.duration_ms) : status === "unknown" ? "Unknown" : "Running";
   return (
-    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
+    <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
       <RunMetric label="Status" value={statusLabel(status)} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
       <RunMetric label="Duration" value={durationValue} />
@@ -474,7 +477,7 @@ function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
 
 function RunMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 bg-card px-3 py-2">
+    <div className="min-w-0 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card px-3 py-2">
       <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 truncate font-medium text-foreground">{value}</dd>
     </div>

@@ -18,8 +18,12 @@ describe("standalone run detail polish", () => {
   it("keeps the timeline rail compact and metrics adaptive", () => {
     const src = read("components/RunDetailSplitPane.tsx");
 
-    expect(src).toContain("md:w-[280px]");
-    expect(src).toContain("md:max-w-[320px]");
+    expect(src).toContain("showTimelineRail");
+    expect(src).toContain("timeline.length > 1");
+    expect(src).toContain("md:w-[240px]");
+    expect(src).toContain("md:max-w-[280px]");
     expect(src).toContain("lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]");
+    expect(src).toContain("[border:var(--bd-card)] bg-card px-3 py-2");
+    expect(src).not.toContain("gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)]");
   });
 });
