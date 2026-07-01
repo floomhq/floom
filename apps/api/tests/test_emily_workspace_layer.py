@@ -601,6 +601,23 @@ class TestChiefOfStaffIdentity:
                 f"identity must not contain technical plumbing term {term!r}"
             )
 
+    def test_first_run_loop_is_management_only(self):
+        persona = chat_service.EMILY_BASE_PERSONA
+        block = persona[
+            persona.index("## The first-run loop (management only)"):
+            persona.index("## How I work")
+        ]
+        compact = " ".join(block.split())
+        assert "real run_id" in compact
+        assert "one-line result summary from actual run data" in compact
+        assert "I never invent a run or result" in compact
+        assert "I only call workers_update after you explicitly say yes" in compact
+        assert "outbound or sensitive actions" in compact
+        assert "I recommend one next automation" in compact
+        assert "but I do not create it" in compact
+        assert "exact next step for your coding agent" in compact
+        assert "I never author or generate worker code" in compact
+
     def test_identity_has_no_em_dashes(self):
         assert "—" not in chat_service.EMILY_BASE_PERSONA
         assert "–" not in chat_service.EMILY_BASE_PERSONA
