@@ -51,8 +51,9 @@ describe("medium issue batch source guards", () => {
     expect(source).toContain("MCP setup uses your saved CLI login");
     expect(source).toContain("floom login");
     expect(source).toContain("Personal tokens");
-    expect(source).toContain('href="/settings?sel=personal_tokens"');
+    expect(source).toContain('workspaceHref("/settings?sel=personal_tokens")');
     expect(source).toContain("Workspace tokens");
+    expect(source).toContain('workspaceHref("/settings?sel=workspace_token")');
     expect(source).toContain("api.workspace.tokens.create");
     expect(source).toContain("Copy token");
     expect(source).toContain("Create workspace token");

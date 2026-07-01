@@ -35,6 +35,34 @@ def test_derived_workspace_id_from_scoped_owner(repo_bundle):
     assert worker["workspace_id"] == "ws_0123456789abcd"
 
 
+def test_mcp_tools_are_filtered_by_workspace_id(repo_bundle):
+    repos, _db, manifest = repo_bundle
+    owner_default = "local-user"
+    owner_scoped = "local-user__ws_0123456789abcd"
+    _create_worker(repos, manifest, user_id=owner_default, worker_id="w-default")
+    _create_worker(repos, manifest, user_id=owner_scoped, worker_id="w-scoped")
+
+    default_tool = repos.mcp_tools.create(
+        user_id=owner_default,
+        name="daily_digest",
+        description="Default workspace digest",
+        input_schema={},
+        worker_id="w-default",
+    )
+    scoped_tool = repos.mcp_tools.create(
+        user_id=owner_scoped,
+        name="daily_digest",
+        description="Scoped workspace digest",
+        input_schema={},
+        worker_id="w-scoped",
+    )
+
+    assert default_tool["workspace_id"] == "local-default"
+    assert scoped_tool["workspace_id"] == "ws_0123456789abcd"
+    assert [row["id"] for row in repos.mcp_tools.list(user_id=owner_default)] == [default_tool["id"]]
+    assert [row["id"] for row in repos.mcp_tools.list(user_id=owner_scoped)] == [scoped_tool["id"]]
+
+
 def test_user_delete_refuses_to_orphan_owned_resources(repo_bundle):
     repos, _db, manifest = repo_bundle
     repos.users.create(

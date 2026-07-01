@@ -126,10 +126,10 @@ function test545WorkerShareCardRedirectsAfterImport(): void {
 // ---------------------------------------------------------------------------
 
 function test545StandaloneShareCardPassesToken(): void {
-  const s = src("app/s/[token]/StandaloneShareCard.tsx");
+  const s = src("app/s/[token]/StandaloneShareCard.tsx") + "\n" + src("app/w/[id]/page.tsx");
   assert(
     s.includes("token={token}"),
-    "StandaloneShareCard must pass token prop to WorkerShareCard",
+    "share pages must pass token prop to WorkerShareCard",
   );
 }
 

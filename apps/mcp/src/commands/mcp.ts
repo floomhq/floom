@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAuthenticatedClient, FloomApiClient } from "../lib/api.js";
@@ -52,6 +52,9 @@ function readJson(path: string): JsonObject {
 async function writeJson(path: string, value: JsonObject): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  if (process.platform !== "win32") {
+    await chmod(path, 0o600);
+  }
 }
 
 function skillTargetPath(client: SkillClient, configPath: string): string {
@@ -267,7 +270,7 @@ async function resolveMcpConfig(
       const payload = await client.requestJson("GET", "/api/workspaces");
       const workspace = resolveWorkspaceFromPayload(payload);
       if (!workspace) {
-        throw new Error("No workspaces found. Create a workspace first at https://floom.ai");
+        throw new Error("No workspaces found. Create a workspace first at https://floom.dev");
       }
       workspaceId = workspace.id;
     } catch (err) {
