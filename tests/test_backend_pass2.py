@@ -73,6 +73,7 @@ def test_worker_short_link_mints_and_resolves_public_card_without_leaks(monkeypa
 
 def test_mcp_tools_alias_crud_and_emily_metadata(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
     client = TestClient(main.app)
     worker_id = f"p2test-mcp-{uuid.uuid4().hex[:8]}"
 

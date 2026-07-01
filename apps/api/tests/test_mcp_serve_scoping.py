@@ -33,6 +33,7 @@ def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.delenv("WORKEROS_MCP_ENABLED_TOOLS", raising=False)
+    monkeypatch.delenv("WORKEROS_MCP_FULL_TOOLS", raising=False)
     monkeypatch.delenv("WORKEROS_MCP_ENABLE_DESTRUCTIVE", raising=False)
     for name in list(sys.modules):
         if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth.") or name.startswith("routers"):
@@ -81,6 +82,7 @@ def _list_tools(main, auth):
 
 def test_member_cannot_call_destructive_tools(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
 
     for tool in ("workers.delete", "secrets.set", "contexts.delete", "workspace.instructions.set"):
         out = _call(main, _member(main), tool, {"id": "x", "key": "K", "value": "v", "name": "n", "content": "c"})
@@ -90,6 +92,7 @@ def test_member_cannot_call_destructive_tools(monkeypatch, tmp_path):
 
 def test_admin_passes_the_gate(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
 
     async def _fake_api_call(method, path, request, **kwargs):
         return {"ok": True}, 200
@@ -101,6 +104,7 @@ def test_admin_passes_the_gate(monkeypatch, tmp_path):
 
 def test_tools_list_hides_admin_tools_from_members(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
 
     member_tools = _list_tools(main, _member(main))
     admin_tools = _list_tools(main, _admin(main))
@@ -112,6 +116,7 @@ def test_tools_list_hides_admin_tools_from_members(monkeypatch, tmp_path):
 
 def test_tools_list_uses_dotted_tool_admin_names_and_no_domain_specific_feedback(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
 
     tools = _list_tools(main, _admin(main))
 
@@ -121,6 +126,37 @@ def test_tools_list_uses_dotted_tool_admin_names_and_no_domain_specific_feedback
     assert "tools_delete" not in tools
     assert "tools_update" not in tools
     assert "record_candidate_feedback" not in tools
+
+
+def test_tools_list_defaults_to_lean_audit_surface(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+
+    tools = _list_tools(main, _admin(main))
+
+    assert len(tools) == 14
+    assert {
+        "workers.list",
+        "workers.create",
+        "workers.run",
+        "runs.list",
+        "runs.watch",
+        "secrets.list",
+        "contexts.read",
+    } <= tools
+    assert "workers.delete" not in tools
+    assert "tools.register" not in tools
+
+
+def test_full_tools_env_restores_complete_default_registry(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
+
+    tools = _list_tools(main, _admin(main))
+
+    assert len(tools) == 61
+    assert "workers.delete" in tools
+    assert "workers.reload" in tools
+    assert "tools.register" in tools
 
 
 def test_enabled_tools_allowlist_restricts_serving(monkeypatch, tmp_path):

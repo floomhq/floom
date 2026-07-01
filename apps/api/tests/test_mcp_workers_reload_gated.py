@@ -5,7 +5,7 @@ workers from disk with no confirmation — one accidental or malicious remote
 call interrupts every worker on an OSS self-hosted instance.
 
 Fix: the tool joins ``_MCP_OFF_BY_DEFAULT_TOOLS`` — hidden from tools/list
-and rejected in tools/call unless the operator sets
+and rejected in tools/call unless the operator explicitly serves it and sets
 ``WORKEROS_MCP_ENABLE_DESTRUCTIVE=1`` (and it stays admin-only via #833).
 The REST endpoint and local CLI flows are unaffected.
 
@@ -32,6 +32,7 @@ def _load_main(monkeypatch, tmp_path, *, enable_destructive: bool = False):
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.delenv("WORKEROS_MCP_ENABLED_TOOLS", raising=False)
+    monkeypatch.delenv("WORKEROS_MCP_FULL_TOOLS", raising=False)
     if enable_destructive:
         monkeypatch.setenv("WORKEROS_MCP_ENABLE_DESTRUCTIVE", "1")
     else:
@@ -96,6 +97,7 @@ def test_reload_hidden_from_tools_list_by_default(monkeypatch, tmp_path):
 
 def test_opt_in_is_still_admin_only(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path, enable_destructive=True)
+    monkeypatch.setenv("WORKEROS_MCP_ENABLED_TOOLS", TOOL)
 
     # member: still blocked by the #833 admin gate
     out = _call(main, _member(main))

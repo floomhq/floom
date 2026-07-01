@@ -7481,13 +7481,19 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
 # was full workspace-destruction capability (workers.delete, secrets.set,
 # contexts.delete, ...). The REST layer the tools proxy to has its own
 # checks, but the MCP surface itself granted member tokens admin-shaped
-# reach. Three controls, all enforced in tools/list AND tools/call:
+# reach. Controls, all enforced in tools/list AND tools/call:
 #   1. _MCP_ADMIN_ONLY_TOOLS    — destructive tools require auth.is_admin.
 #   2. WORKEROS_MCP_ENABLED_TOOLS — optional comma-separated allow-list; when
 #      set, only the named default tools are served at all.
 #   3. _MCP_OFF_BY_DEFAULT_TOOLS — tools with remote-takeover potential are
 #      not served unless WORKEROS_MCP_ENABLE_DESTRUCTIVE=1 (#838, #840).
+#   4. Lean defaults from the MCP audit — env-reversible with
+#      WORKEROS_MCP_FULL_TOOLS=1, which serves the full default registry.
 # Every tools/call is audit-logged with tool, user, and role.
+
+_MCP_LEAN_DEFAULT_TOOL_NAMES: frozenset[str] = frozenset(
+    str(tool["name"]) for tool in _workeros_remote_mcp_tool_definitions()
+)
 
 _MCP_ADMIN_ONLY_TOOLS = frozenset({
     "workers.delete",
@@ -7536,16 +7542,22 @@ def _mcp_visible_default_tools(auth: AuthContext) -> List[dict]:
     ]
 
 
+def _mcp_full_tools_enabled() -> bool:
+    return os.environ.get("WORKEROS_MCP_FULL_TOOLS") == "1"
+
+
 def _mcp_destructive_tools_enabled() -> bool:
-    return os.environ.get("WORKEROS_MCP_ENABLE_DESTRUCTIVE") == "1"
+    return os.environ.get("WORKEROS_MCP_ENABLE_DESTRUCTIVE") == "1" or _mcp_full_tools_enabled()
 
 
 def _mcp_enabled_tool_names() -> set | None:
-    """Parse WORKEROS_MCP_ENABLED_TOOLS; None means 'no allow-list set'."""
+    """Parse the served-tool allow-list; None means serve the full registry."""
     raw = (os.environ.get("WORKEROS_MCP_ENABLED_TOOLS") or "").strip()
-    if not raw:
+    if raw:
+        return {part.strip() for part in raw.split(",") if part.strip()}
+    if _mcp_full_tools_enabled():
         return None
-    return {part.strip() for part in raw.split(",") if part.strip()}
+    return set(_MCP_LEAN_DEFAULT_TOOL_NAMES)
 
 
 def _mcp_tool_served(name: str) -> bool:
