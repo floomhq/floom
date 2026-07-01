@@ -128,10 +128,15 @@ def test_worker_standalone_share_wraps_public_worker_projection():
                     }
                 return None
 
+        class UsersRepo:
+            def get(self, *, user_id: str):
+                return None
+
         class Repos:
             workers = WorkersRepo()
             runs = RunsRepo()
             members = MembersRepo()
+            users = UsersRepo()
 
         main.app.dependency_overrides[main.get_repos] = lambda: Repos()
         try:
@@ -155,6 +160,79 @@ def test_worker_standalone_share_wraps_public_worker_projection():
         }
         assert "OPENAI_API_KEY" not in public.text
         assert "owner_id" not in public.text
+
+
+def test_worker_standalone_share_actor_falls_back_to_owner_user_without_workspace():
+    with tempfile.TemporaryDirectory(prefix="workeros-share-user-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        worker = {
+            "id": "share-worker",
+            "owner_id": "local-user",
+            "workspace_id": None,
+            "name": "Share Worker",
+            "description": "Public form worker.",
+            "trigger_type": "manual",
+            "runner": "e2b",
+            "config": {
+                "id": "share-worker",
+                "name": "Share Worker",
+                "description": "Public form worker.",
+                "trigger": {"type": "manual"},
+                "runtime": {"type": "skill", "entrypoint": "SKILL.md"},
+                "connections": ["gmail"],
+                "inputs": [],
+                "outputs": [],
+            },
+        }
+
+        class WorkersRepo:
+            def get(self, *, user_id: str, worker_id: str):
+                return worker if worker_id == "share-worker" else None
+
+            def get_any(self, *, worker_id: str):
+                return worker if worker_id == "share-worker" else None
+
+            def list(self, user_id: str):
+                return [worker]
+
+        class RunsRepo:
+            def list_for_worker(self, **kwargs):
+                return []
+
+        class MembersRepo:
+            def get(self, *, workspace_id: str, user_id: str):
+                return None
+
+        class UsersRepo:
+            def get(self, *, user_id: str):
+                if user_id == "local-user":
+                    return {
+                        "id": "local-user",
+                        "username": "owner@example.com",
+                        "display_name": "Owner User",
+                    }
+                return None
+
+        class Repos:
+            workers = WorkersRepo()
+            runs = RunsRepo()
+            members = MembersRepo()
+            users = UsersRepo()
+
+        main.app.dependency_overrides[main.get_repos] = lambda: Repos()
+        try:
+            link = client.post("/workers/share-worker/share-link", headers=_headers())
+            assert link.status_code == 200, link.text
+            public = client.get(f"/s/{link.json()['token']}")
+        finally:
+            main.app.dependency_overrides.clear()
+
+        assert public.status_code == 200, public.text
+        assert public.json()["shared_by"] == {
+            "label": "Owner User",
+            "display_name": "Owner User",
+            "email": "owner@example.com",
+        }
 
 
 def test_worker_share_run_meta_and_public_run_are_scoped(monkeypatch):
