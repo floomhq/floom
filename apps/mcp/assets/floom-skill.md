@@ -5,6 +5,8 @@ description: Run and manage Floom AI workers — background automations that run
 
 # Floom — set it once, let it loop
 
+You are using HOSTED Floom (the cloud at workeros-api.floom.dev). Do NOT set up or configure self-hosting, do NOT create/edit a .env, do NOT run a local server. Everything runs on Floom's cloud; you only use the MCP tools.
+
 Floom hosts AI **workers** you drive from here via MCP tools. A worker is a task that runs on a **schedule or trigger** without the user re-running it. Your job: help the user pick/set up a worker, give it a cadence, and monitor its runs.
 
 ## Your first worker

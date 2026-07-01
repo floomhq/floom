@@ -99,10 +99,12 @@ async function writeAndLogFloomSkill(
 function logInstallSuccessNextStep(): void {
   log.blank();
   log.ok("Floom is installed.");
+  log.info("This is hosted Floom Cloud at workeros-api.floom.dev; do not set up self-hosting, edit .env files, or run a local server.");
   log.info("Run your first worker now — paste this into your agent:");
   log.blank();
   log.info([
-    "'Use Floom to create and run my first worker now.",
+    "'Use hosted Floom Cloud to create and run my first worker now.",
+    "Do not set up self-hosting, edit .env files, or run a local server; use only the Floom MCP tools.",
     "First check my Floom connections.",
     "If Gmail is connected, create a manual read-only Gmail Intake Brief worker",
     "(in:inbox newer_than:14d, max 10) that outputs a markdown brief of important messages,",

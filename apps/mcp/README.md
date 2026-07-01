@@ -1,14 +1,14 @@
 # Floom CLI + MCP
 
-Floom lets agents create, update, run, watch, and delete worker automations through an HTTP MCP endpoint backed by the Floom API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP HTTP or stdio server entry.
+Floom lets agents create, update, run, watch, and delete worker automations through an HTTP MCP endpoint backed by the hosted Floom Cloud API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP HTTP or stdio server entry.
 
 Floom ships as a single npm package that exposes:
 
 - **`floom` CLI** - `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. `workeros` remains a compatibility alias for older installs.
-- **HTTP MCP endpoint** - `floom mcp install` writes an HTTP transport entry (`url` + `headers`) pointing at the right Floom API endpoint for hosted Cloud or your self-hosted API. No local subprocess is required.
+- **HTTP MCP endpoint** - `floom mcp install` writes an HTTP transport entry (`url` + `headers`) pointing at hosted Floom Cloud by default. No local subprocess is required.
 - **`floom-mcp` stdio server** - legacy stdio path; `workeros-mcp` still works as an alias. Use this for harnesses that do not support HTTP MCP transport.
 
-The CLI targets local, self-hosted, and hosted deployments:
+The CLI targets hosted Floom Cloud by default. Self-hosted/local mode is only for operators already running their own Floom API:
 
 | Mode | API base | Auth | Workspaces |
 |------|----------|------|------------|
