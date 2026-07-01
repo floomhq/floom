@@ -168,3 +168,29 @@ def test_mcp_tool_telemetry_endpoint_honors_do_not_track(app_and_stub):
 
     assert response.status_code == 204
     assert _events(stub, "mcp_tool_called") == []
+
+
+def test_cloud_mcp_dispatcher_forces_mcp_source(app_and_stub):
+    """The cloud MCP dispatcher (_emit_mcp_tool_called_event) serves
+    /mcp/{workspace} tool calls which carry no X-Floom-Source header, so it must
+    force source="mcp" rather than defaulting to "api"."""
+    main, stub = app_and_stub
+    from auth.context import AuthContext
+
+    auth = AuthContext(
+        user_id="owner-1", email="u@example.com", role="member",
+        scopes=("member",), auth_method="pat", username=None,
+    )
+    main._emit_mcp_tool_called_event(
+        auth=auth,
+        tool_name="workers.list",
+        arguments={},
+        result=None,
+        success=True,
+        duration_ms=7,
+    )
+
+    events = _events(stub, "mcp_tool_called")
+    assert len(events) == 1
+    assert events[0]["properties"]["source"] == "mcp"
+    assert events[0]["properties"]["tool_name"] == "workers.list"
