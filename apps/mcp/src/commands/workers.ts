@@ -946,7 +946,7 @@ export async function workersShareCommand(workerId: string, options: { json?: bo
     log.ok("Share link created");
     log.kv("Worker", workerId);
     log.kv("URL", link.url);
-    log.info("This unlisted link can be opened by anyone who has it. Running and importing still use the public share flow.");
+    log.info("This unlisted link can be opened by anyone who has it to view or import the worker.");
     return 0;
   } catch (error) {
     return emitLifecycleError(error, workerId, options.json);
