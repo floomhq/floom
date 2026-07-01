@@ -111,6 +111,7 @@ function logInstallSuccessNextStep(): void {
     "open PRs involving me, sorted by age, output the 5 stalest with owner/repo/age/URL and a recommended next action.",
     "Do not schedule anything yet — prove value with one completed run first.'",
   ].join("\n"));
+  log.info("After it runs, tell your agent to schedule it and set up your next worker.");
 }
 
 // HTTP MCP config — url + headers, no subprocess needed.
