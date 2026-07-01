@@ -80,15 +80,17 @@ def _set(client, key, value):
     assert client.put(f"/workspace/settings/{key}", json={"value": value}).status_code in (200, 204)
 
 
-def _seed_cost(worker_id, cost, created_at):
+def _seed_cost(worker_id, cost, created_at, *, actor_user_id=None):
     from db import get_db
 
+    columns = ["id", "worker_id", "status", "trigger_source", "runner", "created_at", "total_cost_usd"]
+    values = [f"r_{worker_id}_{int(cost*100)}", worker_id, "completed", "manual", "e2b", created_at, cost]
+    if actor_user_id is not None:
+        columns.insert(2, "actor_user_id")
+        values.insert(2, actor_user_id)
+    placeholders = ", ".join("?" for _ in columns)
     with get_db() as conn:
-        conn.execute(
-            "INSERT INTO runs (id, worker_id, status, trigger_source, runner, created_at, total_cost_usd) "
-            "VALUES (?, ?, 'completed', 'manual', 'e2b', ?, ?)",
-            (f"r_{worker_id}_{int(cost*100)}", worker_id, created_at, cost),
-        )
+        conn.execute(f"INSERT INTO runs ({', '.join(columns)}) VALUES ({placeholders})", tuple(values))
 
 
 class TestDefaultModel:
@@ -193,11 +195,143 @@ class TestTimeoutCeiling:
 
 
 class TestWorkspaceSpendCap:
-    def test_run_refused_at_workspace_cap(self, client_main):
+    def test_create_run_spend_cap_uses_repo_backend(self, client_main, monkeypatch):
+        import run_service
+
+        client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("repocapalpha"), "run_py": "print(1)"}).status_code == 200
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "100")
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD", "100")
+        _set(client, "daily_spend_cap_usd", "5.0")
+        _set(client, "monthly_spend_cap_usd", "100.0")
+
+        calls = []
+
+        class _Runs:
+            def cost_total_usd(self, **kwargs):
+                calls.append(kwargs)
+                if kwargs.get("workspace_scoped") and kwargs.get("since", "")[:10]:
+                    return 5.0
+                return 0.0
+
+            def create(self, **_kwargs):
+                raise AssertionError("run should be refused before insert")
+
+        class _Workers:
+            def get_recipe(self, *, worker_id, **_kwargs):
+                return {
+                    "owner_id": "local-user",
+                    "config": run_service.get_worker_config(worker_id),
+                    "enabled": True,
+                }
+
+            def get_owner(self, *, worker_id):
+                return "local-user"
+
+        repos = types.SimpleNamespace(workers=_Workers(), runs=_Runs())
+
+        with pytest.raises(run_service.SpendCapExceeded):
+            run_service.create_run("repocapalpha", {}, user_id="local-user", repos=repos)
+
+        assert any(call.get("workspace_scoped") is True for call in calls)
+
+    def test_run_refused_at_default_user_daily_cap_across_workspaces(self, client_main):
         from datetime import datetime, timezone
 
         client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("userdailyalpha"), "run_py": "print(1)"}).status_code == 200
+        assert client.post("/workers", json={"worker_yml": _yml("userdailybeta"), "run_py": "print(1)"}).status_code == 200
+        _set(client, "daily_spend_cap_usd", "100.0")
+        _set(client, "monthly_spend_cap_usd", "100.0")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%dT01:00:00+00:00")
+        _seed_cost("userdailyalpha", 2.0, today, actor_user_id="local-user")
+        _seed_cost("userdailybeta", 3.0, today, actor_user_id="local-user")
+        resp = client.post("/workers/userdailyalpha/runs", json={"inputs": {}, "trigger_source": "manual"})
+        assert resp.status_code == 402, resp.text
+        body = resp.json()["detail"]
+        assert body["error_code"] == "spend_cap_exceeded"
+        assert "user" in body["message"].lower()
+        assert "daily spend cap" in body["message"].lower()
+
+    def test_user_daily_cap_is_scoped_to_actor(self, client_main):
+        from datetime import datetime, timezone
+
+        client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("userdailygamma"), "run_py": "print(1)"}).status_code == 200
+        _set(client, "daily_spend_cap_usd", "100.0")
+        _set(client, "monthly_spend_cap_usd", "100.0")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%dT01:00:00+00:00")
+        _seed_cost("userdailygamma", 5.0, today, actor_user_id="other-user")
+        resp = client.post("/workers/userdailygamma/runs", json={"inputs": {}, "trigger_source": "manual"})
+        assert resp.status_code == 200, resp.text
+
+    def test_run_refused_at_default_user_monthly_cap(self, client_main, monkeypatch):
+        from datetime import datetime, timezone
+
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "100")
+        client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("usermonthlyalpha"), "run_py": "print(1)"}).status_code == 200
+        _set(client, "daily_spend_cap_usd", "100.0")
+        _set(client, "monthly_spend_cap_usd", "100.0")
+        this_month = datetime.now(timezone.utc).strftime("%Y-%m-05T00:00:00+00:00")
+        _seed_cost("usermonthlyalpha", 25.0, this_month, actor_user_id="local-user")
+        resp = client.post("/workers/usermonthlyalpha/runs", json={"inputs": {}, "trigger_source": "manual"})
+        assert resp.status_code == 402, resp.text
+        body = resp.json()["detail"]
+        assert body["error_code"] == "spend_cap_exceeded"
+        assert "user" in body["message"].lower()
+        assert "monthly spend cap" in body["message"].lower()
+
+    def test_run_refused_at_default_daily_workspace_cap(self, client_main):
+        from datetime import datetime, timezone
+
+        client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("dailydefaultalpha"), "run_py": "print(1)"}).status_code == 200
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%dT01:00:00+00:00")
+        _seed_cost("dailydefaultalpha", 5.0, today)
+        resp = client.post("/workers/dailydefaultalpha/runs", json={"inputs": {}, "trigger_source": "manual"})
+        assert resp.status_code == 402, resp.text
+        body = resp.json()["detail"]
+        assert body["error_code"] == "spend_cap_exceeded"
+        assert "daily spend cap" in body["message"].lower()
+
+    def test_run_allowed_when_daily_cap_overridden_above_default(self, client_main, monkeypatch):
+        from datetime import datetime, timezone
+
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "100")
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD", "100")
+        client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("dailyoverridealpha"), "run_py": "print(1)"}).status_code == 200
+        _set(client, "daily_spend_cap_usd", "10.0")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%dT01:00:00+00:00")
+        _seed_cost("dailyoverridealpha", 5.5, today)
+        resp = client.post("/workers/dailyoverridealpha/runs", json={"inputs": {}, "trigger_source": "manual"})
+        assert resp.status_code == 200, resp.text
+
+    def test_run_refused_at_default_monthly_workspace_cap(self, client_main, monkeypatch):
+        from datetime import datetime, timezone
+
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "100")
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD", "100")
+        client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("monthlydefaultalpha"), "run_py": "print(1)"}).status_code == 200
+        _set(client, "daily_spend_cap_usd", "100.0")
+        this_month = datetime.now(timezone.utc).strftime("%Y-%m-05T00:00:00+00:00")
+        _seed_cost("monthlydefaultalpha", 25.0, this_month)
+        resp = client.post("/workers/monthlydefaultalpha/runs", json={"inputs": {}, "trigger_source": "manual"})
+        assert resp.status_code == 402, resp.text
+        body = resp.json()["detail"]
+        assert body["error_code"] == "spend_cap_exceeded"
+        assert "monthly spend cap" in body["message"].lower()
+
+    def test_run_refused_at_workspace_cap(self, client_main, monkeypatch):
+        from datetime import datetime, timezone
+
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "100")
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD", "100")
+        client, _ = client_main
         assert client.post("/workers", json={"worker_yml": _yml("capworkeralpha"), "run_py": "print(1)"}).status_code == 200
+        _set(client, "daily_spend_cap_usd", "100.0")
         _set(client, "monthly_spend_cap_usd", "5.0")
         this_month = datetime.now(timezone.utc).strftime("%Y-%m-05T00:00:00+00:00")
         # two different workers' spend aggregates to the workspace total
@@ -210,11 +344,14 @@ class TestWorkspaceSpendCap:
         assert body["error_code"] == "spend_cap_exceeded"
         assert "workspace" in body["message"].lower()
 
-    def test_run_allowed_under_workspace_cap(self, client_main):
+    def test_run_allowed_under_workspace_cap(self, client_main, monkeypatch):
         from datetime import datetime, timezone
 
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "100")
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD", "100")
         client, _ = client_main
         assert client.post("/workers", json={"worker_yml": _yml("capworkergamma"), "run_py": "print(1)"}).status_code == 200
+        _set(client, "daily_spend_cap_usd", "100.0")
         _set(client, "monthly_spend_cap_usd", "100.0")
         this_month = datetime.now(timezone.utc).strftime("%Y-%m-05T00:00:00+00:00")
         _seed_cost("capworkergamma", 10.0, this_month)
@@ -231,5 +368,7 @@ class TestCurrentSpendSurfaced:
         this_month = datetime.now(timezone.utc).strftime("%Y-%m-05T00:00:00+00:00")
         _seed_cost("capworkerdelta", 4.25, this_month)
         settings = client.get("/workspace/settings").json()
+        assert "current_day_spend_usd" in settings
         assert "current_month_spend_usd" in settings
+        assert float(settings["current_day_spend_usd"]) >= 4.25
         assert float(settings["current_month_spend_usd"]) >= 4.25

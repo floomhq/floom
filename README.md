@@ -216,6 +216,9 @@ Write your first agent in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md), th
 
 Script workers (`.py`/`.sh`/`.js`) run in an **E2B sandbox microVM** by default: isolated dependencies, no host process access, contained resources. A bundle that dumps `os.environ` inside the sandbox sees only sandbox metadata - `FLOOM_SECRET`, provider keys, and `E2B_API_KEY` are all absent. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop and are governed by their declared connections and the approval gate; the current single-tenant policy permits only trusted agent bundles on that path. There is no in-process local script runner. Full trust model: [ARCHITECTURE.md](ARCHITECTURE.md).
 
+Data handling, connected-account safeguards, retention boundaries, and hosted
+Cloud legal surfaces are summarized in [docs/DATA-RETENTION.md](docs/DATA-RETENTION.md).
+
 ## Architecture
 
 ```text
@@ -261,6 +264,7 @@ Floom can expose work through MCP without making you hand-roll the whole app run
 - [Getting started](docs/GETTING-STARTED.md) - why Floom exists, first run, first agent, safe self-hosting checklist.
 - [Building Floom workers](BUILDING.md) - machine-readable build contract for agents and developers.
 - [Authoring agents](docs/AUTHORING.md) - full `worker.yml` schema, execution modes, secrets, connections, triggers, approvals.
+- [Data, retention, and safeguards](docs/DATA-RETENTION.md) - what Floom stores, how connected-account data is scoped, and what deletion/retention guarantees are safe to make.
 - [Agent cookbook](docs/AGENT-COOKBOOK.md) - agent-assisted authoring recipes.
 - [Architecture](ARCHITECTURE.md) - runtime topology and the sandbox trust model. Read before filing security findings.
 - [API overview](docs/API.md) - curated endpoint map; full reference at `http://localhost:8000/docs`.

@@ -8,6 +8,8 @@ accessor is lazy-imported from run_service.
 from __future__ import annotations
 
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger("floom.run_service")
@@ -15,6 +17,17 @@ logger = logging.getLogger("floom.run_service")
 
 class SpendCapExceeded(ValueError):
     """#793: the worker's month-to-date cost has reached its monthly spend cap."""
+
+
+def _default_spend_cap_usd(env_var: str, default: str) -> Optional[float]:
+    raw = (os.environ.get(env_var, default) or "").strip()
+    if not raw:
+        return None
+    try:
+        cap = float(raw)
+        return cap if cap >= 0 else None
+    except ValueError:
+        return float(default)
 
 
 def _persist_run_cost(
@@ -59,8 +72,23 @@ def _persist_run_cost(
         )
 
 
-def _worker_month_to_date_cost_usd(worker_id: str) -> float:
+def _worker_month_to_date_cost_usd(
+    worker_id: str,
+    *,
+    repos: Any = None,
+    user_id: str | None = None,
+) -> float:
     """Sum of total_cost_usd for this worker's runs in the current UTC month."""
+    if repos is not None and user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=user_id,
+            since=_utc_period_start_iso("month"),
+            worker_id=worker_id,
+        )
+        if repo_total is not None:
+            return repo_total
+
     from db import get_db
 
     try:
@@ -77,6 +105,42 @@ def _worker_month_to_date_cost_usd(worker_id: str) -> float:
         return 0.0
 
 
+def _utc_period_start_iso(period: str) -> str:
+    now = datetime.now(timezone.utc)
+    if period == "month":
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
+def _repo_cost_total_usd(
+    repos: Any,
+    *,
+    user_id: str,
+    since: str,
+    worker_id: str | None = None,
+    actor_user_id: str | None = None,
+    workspace_scoped: bool = False,
+) -> float | None:
+    runs = getattr(repos, "runs", None)
+    cost_total = getattr(runs, "cost_total_usd", None)
+    if not callable(cost_total):
+        return None
+    try:
+        return float(
+            cost_total(
+                user_id=user_id,
+                since=since,
+                worker_id=worker_id,
+                actor_user_id=actor_user_id,
+                workspace_scoped=workspace_scoped,
+            )
+            or 0.0
+        )
+    except Exception:
+        logger.debug("repo cost_total_usd lookup failed", exc_info=True)
+        return 0.0
+
+
 def _spend_cap_for_config(config: Any) -> Optional[float]:
     try:
         cap = config.runtime.limits.max_monthly_cost_usd if config and config.runtime and config.runtime.limits else None
@@ -86,20 +150,57 @@ def _spend_cap_for_config(config: Any) -> Optional[float]:
 
 
 def _workspace_monthly_spend_cap_usd() -> Optional[float]:
-    """#797: the workspace-level monthly spend cap from settings, or None."""
+    """#797: the workspace-level monthly spend cap from settings, then env default."""
     from run_service import _workspace_setting
     raw = (_workspace_setting("monthly_spend_cap_usd") or "").strip()
     if not raw:
-        return None
+        return _default_spend_cap_usd("WORKEROS_DEFAULT_MONTHLY_SPEND_CAP_USD", "25")
     try:
         cap = float(raw)
         return cap if cap >= 0 else None
     except ValueError:
-        return None
+        return _default_spend_cap_usd("WORKEROS_DEFAULT_MONTHLY_SPEND_CAP_USD", "25")
 
 
-def _workspace_month_to_date_cost_usd() -> float:
+def _workspace_daily_spend_cap_usd() -> Optional[float]:
+    """Workspace-level daily spend cap from settings, then env default."""
+    from run_service import _workspace_setting
+    raw = (_workspace_setting("daily_spend_cap_usd") or "").strip()
+    if not raw:
+        return _default_spend_cap_usd("WORKEROS_DEFAULT_DAILY_SPEND_CAP_USD", "5")
+    try:
+        cap = float(raw)
+        return cap if cap >= 0 else None
+    except ValueError:
+        return _default_spend_cap_usd("WORKEROS_DEFAULT_DAILY_SPEND_CAP_USD", "5")
+
+
+def _user_monthly_spend_cap_usd() -> Optional[float]:
+    """User-level monthly spend cap across all workspaces."""
+    return _default_spend_cap_usd("WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD", "25")
+
+
+def _user_daily_spend_cap_usd() -> Optional[float]:
+    """User-level daily spend cap across all workspaces."""
+    return _default_spend_cap_usd("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "5")
+
+
+def _workspace_month_to_date_cost_usd(
+    *,
+    repos: Any = None,
+    user_id: str | None = None,
+) -> float:
     """#797: sum of total_cost_usd across ALL runs in the current UTC month."""
+    if repos is not None and user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=user_id,
+            since=_utc_period_start_iso("month"),
+            workspace_scoped=True,
+        )
+        if repo_total is not None:
+            return repo_total
+
     from db import get_db
 
     try:
@@ -113,4 +214,105 @@ def _workspace_month_to_date_cost_usd() -> float:
         logger.debug("workspace month-to-date cost lookup failed", exc_info=True)
         return 0.0
 
+
+def _workspace_day_to_date_cost_usd(
+    *,
+    repos: Any = None,
+    user_id: str | None = None,
+) -> float:
+    """Sum of total_cost_usd across ALL runs since UTC midnight."""
+    if repos is not None and user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=user_id,
+            since=_utc_period_start_iso("day"),
+            workspace_scoped=True,
+        )
+        if repo_total is not None:
+            return repo_total
+
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(total_cost_usd), 0.0) AS spent FROM runs "
+                "WHERE created_at >= strftime('%Y-%m-%dT00:00:00+00:00', 'now')"
+            ).fetchone()
+        return float(row["spent"] or 0.0) if row else 0.0
+    except Exception:
+        logger.debug("workspace day-to-date cost lookup failed", exc_info=True)
+        return 0.0
+
+
+def _user_month_to_date_cost_usd(
+    user_id: str,
+    *,
+    repos: Any = None,
+    scope_user_id: str | None = None,
+) -> float:
+    """Sum total_cost_usd for runs triggered by this user in the current UTC month."""
+    if not user_id:
+        return 0.0
+    if repos is not None and scope_user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=scope_user_id,
+            since=_utc_period_start_iso("month"),
+            actor_user_id=user_id,
+        )
+        if repo_total is not None:
+            return repo_total
+
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(r.total_cost_usd), 0.0) AS spent "
+                "FROM runs r JOIN workers w ON w.id = r.worker_id "
+                "WHERE COALESCE(r.actor_user_id, w.owner_id) = ? "
+                "AND r.created_at >= strftime('%Y-%m-01T00:00:00+00:00', 'now')",
+                (user_id,),
+            ).fetchone()
+        return float(row["spent"] or 0.0) if row else 0.0
+    except Exception:
+        logger.debug("user month-to-date cost lookup failed for %s", user_id, exc_info=True)
+        return 0.0
+
+
+def _user_day_to_date_cost_usd(
+    user_id: str,
+    *,
+    repos: Any = None,
+    scope_user_id: str | None = None,
+) -> float:
+    """Sum total_cost_usd for runs triggered by this user since UTC midnight."""
+    if not user_id:
+        return 0.0
+    if repos is not None and scope_user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=scope_user_id,
+            since=_utc_period_start_iso("day"),
+            actor_user_id=user_id,
+        )
+        if repo_total is not None:
+            return repo_total
+
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(r.total_cost_usd), 0.0) AS spent "
+                "FROM runs r JOIN workers w ON w.id = r.worker_id "
+                "WHERE COALESCE(r.actor_user_id, w.owner_id) = ? "
+                "AND r.created_at >= strftime('%Y-%m-%dT00:00:00+00:00', 'now')",
+                (user_id,),
+            ).fetchone()
+        return float(row["spent"] or 0.0) if row else 0.0
+    except Exception:
+        logger.debug("user day-to-date cost lookup failed for %s", user_id, exc_info=True)
+        return 0.0
 

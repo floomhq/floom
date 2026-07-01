@@ -1310,7 +1310,7 @@ def get_workspace_settings(
 ) -> Dict[str, str]:
     """#794/#797: workspace behaviour toggles + model defaults (key→value map).
 
-    Also surfaces the read-only `current_month_spend_usd` (#797) so the Settings
+    Also surfaces read-only spend mirrors so the Settings
     System tab can render spend-against-cap without a separate fetch.
     """
     from db import get_db
@@ -1322,8 +1322,9 @@ def get_workspace_settings(
         ).fetchall()
     out = {str(r["key"]): str(r["value"]) for r in rows}
     try:
-        from run_service import _workspace_month_to_date_cost_usd
+        from run_service import _workspace_day_to_date_cost_usd, _workspace_month_to_date_cost_usd
 
+        out["current_day_spend_usd"] = f"{_workspace_day_to_date_cost_usd():.4f}"
         out["current_month_spend_usd"] = f"{_workspace_month_to_date_cost_usd():.4f}"
     except Exception:
         pass
@@ -1383,6 +1384,7 @@ _WORKSPACE_SETTING_BOOL_KEYS = {
 _WORKSPACE_SETTING_ALLOWED_KEYS = _WORKSPACE_SETTING_BOOL_KEYS | {
     "approval_default",
     "failure_email_to",
+    "daily_spend_cap_usd",
     "monthly_spend_cap_usd",
     "default_model",
     "fallback_model",
@@ -1393,7 +1395,7 @@ _WORKSPACE_SETTING_ALLOWED_KEYS = _WORKSPACE_SETTING_BOOL_KEYS | {
     "company_domain",
     "worker_call_fanout_limit",  # #1444: per-workspace fan-out cap (<= hard ceiling)
 }
-_WORKSPACE_SETTING_READ_ONLY_KEYS = {"current_month_spend_usd"}
+_WORKSPACE_SETTING_READ_ONLY_KEYS = {"current_day_spend_usd", "current_month_spend_usd"}
 _BOOL_SETTING_VALUES = {"true", "false", "1", "0", "yes", "no", "on", "off"}
 _EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -1436,13 +1438,13 @@ def _validate_workspace_setting(key: str, value: str) -> str:
             _setting_error("failure_email_to must be a comma-separated email list")
         return raw
 
-    if key == "monthly_spend_cap_usd":
+    if key in {"daily_spend_cap_usd", "monthly_spend_cap_usd"}:
         try:
             amount = float(raw)
         except ValueError:
-            _setting_error("monthly_spend_cap_usd must be a non-negative number")
+            _setting_error(f"{key} must be a non-negative number")
         if amount < 0 or amount > 1_000_000:
-            _setting_error("monthly_spend_cap_usd must be between 0 and 1000000")
+            _setting_error(f"{key} must be between 0 and 1000000")
         return raw
 
     if key in {"default_timeout_seconds", "max_output_tokens"}:
