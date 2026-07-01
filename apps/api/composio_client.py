@@ -61,6 +61,23 @@ class ComposioConfigurationError(RuntimeError):
     """Raised when the server is missing required Composio configuration."""
 
 
+class ComposioAPIError(requests.exceptions.HTTPError):
+    """Raised when Composio returns a non-2xx response with safe user detail."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        code: Optional[str] = None,
+        response: Optional[requests.Response] = None,
+    ) -> None:
+        self.user_message = message
+        self.status_code = status_code
+        self.code = code
+        super().__init__(message, response=response)
+
+
 def _api_key() -> str:
     key = os.environ.get("COMPOSIO_API_KEY", "")
     if not key:
@@ -77,10 +94,59 @@ def _headers() -> Dict[str, str]:
     }
 
 
+def _safe_error_text(value: Any, *, limit: int = 300) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    cleaned = " ".join(value.split()).strip()
+    if not cleaned:
+        return None
+    return cleaned[:limit]
+
+
+def _composio_api_error(response: requests.Response) -> ComposioAPIError:
+    status_code = response.status_code
+    message: Optional[str] = None
+    code: Optional[str] = None
+    upstream_status: Optional[str] = None
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            message = _safe_error_text(error.get("message"))
+            code = _safe_error_text(error.get("code"), limit=120)
+        upstream_status = _safe_error_text(body.get("status"), limit=120)
+
+    if not message:
+        message = f"Composio returned HTTP {status_code}."
+    if code:
+        message = f"{message} (code: {code})"
+    elif upstream_status:
+        message = f"{message} (status: {upstream_status})"
+
+    return ComposioAPIError(
+        message,
+        status_code=status_code,
+        code=code,
+        response=response,
+    )
+
+
+def _raise_for_status(response: requests.Response) -> None:
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as exc:
+        raise _composio_api_error(response) from exc
+
+
 def _get(path: str, **params: Any) -> Any:
     clean_params = {k: v for k, v in params.items() if v not in (None, "")}
     r = requests.get(f"{_BASE}{path}", headers=_headers(), params=clean_params, timeout=15)
-    r.raise_for_status()
+    _raise_for_status(r)
     return r.json()
 
 
@@ -106,19 +172,19 @@ def _get_with_retry(path: str, **params: Any) -> Any:
 
 def _post(path: str, body: Dict[str, Any]) -> Any:
     r = requests.post(f"{_BASE}{path}", headers=_headers(), json=body, timeout=15)
-    r.raise_for_status()
+    _raise_for_status(r)
     return r.json()
 
 
 def _patch(path: str, body: Dict[str, Any]) -> Any:
     r = requests.patch(f"{_BASE}{path}", headers=_headers(), json=body, timeout=15)
-    r.raise_for_status()
+    _raise_for_status(r)
     return r.json()
 
 
 def _delete(path: str) -> None:
     r = requests.delete(f"{_BASE}{path}", headers=_headers(), timeout=15)
-    r.raise_for_status()
+    _raise_for_status(r)
 
 
 def list_apps() -> List[Dict[str, str]]:

@@ -25,10 +25,12 @@ logger = logging.getLogger("floom.api")
 
 
 def _raise_composio_unavailable(exc: Exception) -> None:
-    from composio_client import ComposioConfigurationError
+    from composio_client import ComposioAPIError, ComposioConfigurationError
 
     if isinstance(exc, ComposioConfigurationError):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if isinstance(exc, ComposioAPIError):
+        raise HTTPException(status_code=503, detail=exc.user_message) from exc
     raise HTTPException(
         status_code=503,
         detail=(

@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
@@ -380,6 +380,11 @@ def _parse_json_string_list(value: Optional[str]) -> List[str]:
 _COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success"}
 _COMPOSIO_LIST_REFRESH_STATUSES = {"", "initiated", "pending", "unknown", "created"}
 _COMPOSIO_LIST_REFRESH_MIN_AGE_SECONDS = 60.0
+_COMPOSIO_RECONCILE_TERMINAL_STATUSES = {"active", "expired", "failed", "disabled", "revoked"}
+_PENDING_CONNECTION_RECONCILE_DEFAULT_MAX_SECONDS = 600.0
+_PENDING_CONNECTION_RECONCILE_BACKOFF_SECONDS = (5.0, 10.0, 20.0, 30.0, 60.0)
+_pending_connection_reconciler_lock = threading.Lock()
+_pending_connection_reconciler_active: set[str] = set()
 
 
 def _normalize_composio_connection_status(status: Optional[str]) -> str:
@@ -423,6 +428,163 @@ def _connection_list_status_refresh_is_due(row: Dict[str, Any], now_dt: datetime
     if updated_at is not None:
         return (now_dt - updated_at).total_seconds() >= _COMPOSIO_LIST_REFRESH_MIN_AGE_SECONDS
     return True
+
+
+def _pending_connection_reconcile_max_seconds() -> float:
+    try:
+        return max(
+            1.0,
+            float(
+                os.environ.get(
+                    "WORKEROS_PENDING_CONNECTION_RECONCILE_MAX_SECONDS",
+                    str(_PENDING_CONNECTION_RECONCILE_DEFAULT_MAX_SECONDS),
+                )
+            ),
+        )
+    except ValueError:
+        return _PENDING_CONNECTION_RECONCILE_DEFAULT_MAX_SECONDS
+
+
+def _reconcile_pending_connection_once(
+    *,
+    user_id: str,
+    connection_id: str,
+    composio_connection_id: str,
+    repos: Repositories | None = None,
+    checked_at: str | None = None,
+) -> str:
+    """Refresh one pending Composio row from upstream and persist the result."""
+    repos_obj = repos or get_repositories()
+    row = repos_obj.connections.get(user_id=user_id, composio_id=connection_id)
+    if not row:
+        return "missing"
+    if (row.get("kind") or "composio") != "composio":
+        return "skipped"
+    if str(row.get("composio_connection_id") or "") != composio_connection_id:
+        return "stale"
+
+    current_status = _normalize_composio_connection_status(row.get("status"))
+    if current_status == "active":
+        return "active"
+
+    from composio_client import check_status
+
+    checked = checked_at or now_iso()
+    remote_status = _normalize_composio_connection_status(check_status(composio_connection_id))
+    updates: Dict[str, Any] = {
+        "last_checked_at": checked,
+        "last_check_status": remote_status or "unknown",
+        "last_check_error": None,
+        "updated_at": checked,
+    }
+    if remote_status and remote_status != "not_found":
+        updates["status"] = remote_status
+    repos_obj.connections.update(
+        user_id=user_id,
+        composio_id=connection_id,
+        **updates,
+    )
+    if remote_status == "active":
+        _invalidate_connections_cache(user_id)
+        try:
+            _cache_connection_account_info(
+                repos=repos_obj,
+                user_id=user_id,
+                connection_id=connection_id,
+                composio_connection_id=composio_connection_id,
+                now=checked,
+            )
+        except Exception as exc:
+            logger.debug("Could not cache Composio account info for %s: %s", connection_id, exc)
+    return remote_status or "unknown"
+
+
+def _record_pending_connection_reconcile_error(
+    *,
+    user_id: str,
+    connection_id: str,
+    error: Exception,
+) -> None:
+    try:
+        repos = get_repositories()
+        checked = now_iso()
+        repos.connections.update(
+            user_id=user_id,
+            composio_id=connection_id,
+            last_checked_at=checked,
+            last_check_status="error",
+            last_check_error=str(error),
+            updated_at=checked,
+        )
+    except Exception as exc:
+        logger.debug("Could not record pending connection reconcile error for %s: %s", connection_id, exc)
+
+
+def _run_pending_connection_reconciler(
+    *,
+    user_id: str,
+    connection_id: str,
+    composio_connection_id: str,
+) -> None:
+    deadline = time.monotonic() + _pending_connection_reconcile_max_seconds()
+    attempt = 0
+    try:
+        while True:
+            try:
+                status = _reconcile_pending_connection_once(
+                    user_id=user_id,
+                    connection_id=connection_id,
+                    composio_connection_id=composio_connection_id,
+                )
+            except Exception as exc:
+                logger.debug("Pending connection reconcile failed for %s: %s", connection_id, exc)
+                _record_pending_connection_reconcile_error(
+                    user_id=user_id,
+                    connection_id=connection_id,
+                    error=exc,
+                )
+                status = "error"
+
+            if status in _COMPOSIO_RECONCILE_TERMINAL_STATUSES or status in {"missing", "skipped", "stale"}:
+                return
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            delay = _PENDING_CONNECTION_RECONCILE_BACKOFF_SECONDS[
+                min(attempt, len(_PENDING_CONNECTION_RECONCILE_BACKOFF_SECONDS) - 1)
+            ]
+            attempt += 1
+            time.sleep(min(delay, remaining))
+    finally:
+        with _pending_connection_reconciler_lock:
+            _pending_connection_reconciler_active.discard(connection_id)
+
+
+def _start_pending_connection_reconciler(
+    *,
+    user_id: str,
+    connection_id: str,
+    composio_connection_id: str,
+) -> None:
+    """Start best-effort polling for a single newly initiated OAuth row."""
+    if not user_id or not connection_id or not composio_connection_id:
+        return
+    with _pending_connection_reconciler_lock:
+        if connection_id in _pending_connection_reconciler_active:
+            return
+        _pending_connection_reconciler_active.add(connection_id)
+    thread = threading.Thread(
+        target=_run_pending_connection_reconciler,
+        kwargs={
+            "user_id": user_id,
+            "connection_id": connection_id,
+            "composio_connection_id": composio_connection_id,
+        },
+        daemon=True,
+        name=f"workeros-connection-reconcile-{connection_id[:8]}",
+    )
+    thread.start()
 
 
 def _callback_persisted_status(existing_status: str, remote_status: str) -> str:
@@ -1193,6 +1355,7 @@ def get_connection_for_app(
 @connections_router.post("/connections", response_model=ConnectionInitResponse)
 def initiate_connection(
     payload: ConnectionInitRequest,
+    background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ConnectionInitResponse:
@@ -1235,6 +1398,15 @@ def initiate_connection(
         created_at=now,
         updated_at=now,
     )
+    try:
+        background_tasks.add_task(
+            _start_pending_connection_reconciler,
+            user_id=auth.user_id,
+            connection_id=conn_id,
+            composio_connection_id=composio_conn_id,
+        )
+    except Exception as exc:
+        logger.debug("Could not schedule pending connection reconciler for %s: %s", conn_id, exc)
     _invalidate_connections_cache(auth.user_id)
     return ConnectionInitResponse(
         id=conn_id,
