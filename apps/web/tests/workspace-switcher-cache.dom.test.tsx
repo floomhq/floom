@@ -96,7 +96,7 @@ describe("WorkspaceSwitcher cache", () => {
     await screen.findByText("Acme");
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await user.click(screen.getByText("New workspace"));
+    await user.click(await screen.findByText("New workspace"));
     await user.type(screen.getByLabelText("Workspace name"), "Acme");
     await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -117,6 +117,6 @@ describe("WorkspaceSwitcher cache", () => {
     await screen.findByText("Acme");
     await userEvent.setup().click(screen.getByRole("button", { name: "Switch workspace" }));
 
-    expect(screen.getByText("New workspace")).toBeInTheDocument();
+    expect(await screen.findByText("New workspace")).toBeInTheDocument();
   });
 });

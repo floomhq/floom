@@ -98,7 +98,9 @@ def _seed_connection(client: TestClient, app_name: str = "gmail") -> dict:
     fake_conn_id = f"composio_{uuid.uuid4().hex[:8]}"
     fake_redirect = "https://auth.composio.dev/oauth/redirect"
 
-    with patch("composio_client.initiate_connection") as mock_init:
+    with patch("composio_client.initiate_connection") as mock_init, patch(
+        "routers.connections._start_pending_connection_reconciler"
+    ):
         mock_init.return_value = {
             "composio_connection_id": fake_conn_id,
             "redirect_url": fake_redirect,
@@ -348,15 +350,16 @@ class TestConnectionsListProjection:
         local_id = conn["id"]
         stale_time = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
 
-        with main.get_db() as db:
-            db.execute(
-                """
-                UPDATE composio_connections
-                SET status = 'initiated', updated_at = ?, last_checked_at = NULL, last_check_status = NULL
-                WHERE id = ?
-                """,
-                (stale_time, local_id),
-            )
+        main.get_repositories().connections.update(
+            user_id="local-user",
+            composio_id=local_id,
+            status="initiated",
+            updated_at=stale_time,
+            last_checked_at=None,
+            last_check_status=None,
+        )
+        from routers.connections import _connection_list_cache_clear
+        _connection_list_cache_clear()
 
         with patch("composio_client.check_status", return_value="valid") as mock_check:
             resp = client.get("/connections", headers=AUTH_HEADERS)
@@ -393,11 +396,14 @@ class TestConnectionsListProjection:
         conn = _seed_connection(client, app_name="github")
         local_id = conn["id"]
 
-        with main.get_db() as db:
-            db.execute(
-                "UPDATE composio_connections SET status = 'initiated', updated_at = ? WHERE id = ?",
-                (datetime.now(timezone.utc).isoformat(), local_id),
-            )
+        main.get_repositories().connections.update(
+            user_id="local-user",
+            composio_id=local_id,
+            status="initiated",
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        from routers.connections import _connection_list_cache_clear
+        _connection_list_cache_clear()
 
         with patch("composio_client.check_status") as mock_check:
             resp = client.get("/connections", headers=AUTH_HEADERS)
@@ -415,15 +421,15 @@ class TestConnectionsListProjection:
         local_id = conn["id"]
         stale_time = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
 
-        with main.get_db() as db:
-            db.execute(
-                """
-                UPDATE composio_connections
-                SET status = 'pending', updated_at = ?, last_checked_at = ?
-                WHERE id = ?
-                """,
-                (stale_time, datetime.now(timezone.utc).isoformat(), local_id),
-            )
+        main.get_repositories().connections.update(
+            user_id="local-user",
+            composio_id=local_id,
+            status="pending",
+            updated_at=stale_time,
+            last_checked_at=datetime.now(timezone.utc).isoformat(),
+        )
+        from routers.connections import _connection_list_cache_clear
+        _connection_list_cache_clear()
 
         with patch("composio_client.check_status") as mock_check:
             resp = client.get("/connections", headers=AUTH_HEADERS)

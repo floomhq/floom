@@ -2379,6 +2379,7 @@ def _write_connection_check(
     if status:
         updates["status"] = status
     repos_obj.connections.update(user_id=row["user_id"], composio_id=connection_id, **updates)
+    _invalidate_connections_cache(str(row["user_id"]))
 
 
 async def _run_connection_sweep(*, user_id: str | None = None) -> None:
