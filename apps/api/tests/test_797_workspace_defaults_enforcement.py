@@ -195,6 +195,46 @@ class TestTimeoutCeiling:
 
 
 class TestWorkspaceSpendCap:
+    def test_create_run_spend_cap_uses_repo_backend(self, client_main, monkeypatch):
+        import run_service
+
+        client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("repocapalpha"), "run_py": "print(1)"}).status_code == 200
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "100")
+        monkeypatch.setenv("WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD", "100")
+        _set(client, "daily_spend_cap_usd", "5.0")
+        _set(client, "monthly_spend_cap_usd", "100.0")
+
+        calls = []
+
+        class _Runs:
+            def cost_total_usd(self, **kwargs):
+                calls.append(kwargs)
+                if kwargs.get("workspace_scoped") and kwargs.get("since", "")[:10]:
+                    return 5.0
+                return 0.0
+
+            def create(self, **_kwargs):
+                raise AssertionError("run should be refused before insert")
+
+        class _Workers:
+            def get_recipe(self, *, worker_id, **_kwargs):
+                return {
+                    "owner_id": "local-user",
+                    "config": run_service.get_worker_config(worker_id),
+                    "enabled": True,
+                }
+
+            def get_owner(self, *, worker_id):
+                return "local-user"
+
+        repos = types.SimpleNamespace(workers=_Workers(), runs=_Runs())
+
+        with pytest.raises(run_service.SpendCapExceeded):
+            run_service.create_run("repocapalpha", {}, user_id="local-user", repos=repos)
+
+        assert any(call.get("workspace_scoped") is True for call in calls)
+
     def test_run_refused_at_default_user_daily_cap_across_workspaces(self, client_main):
         from datetime import datetime, timezone
 

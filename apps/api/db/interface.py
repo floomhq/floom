@@ -335,6 +335,22 @@ class RunRepository(Protocol):
         """
         ...
 
+    def cost_total_usd(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        worker_id: str | None = None,
+        actor_user_id: str | None = None,
+        workspace_scoped: bool = False,
+    ) -> float:
+        """Sum run cost in the repository backend for spend-cap enforcement.
+
+        Hosted deployments persist runs outside the engine's local sqlite DB.
+        Implementations may scope by worker, actor, or the active workspace.
+        """
+        ...
+
     def create(self, *, user_id: str, **fields: Any) -> RowDict: ...
 
     def update(self, *, user_id: str, run_id: str, **fields: Any) -> RowDict | None: ...

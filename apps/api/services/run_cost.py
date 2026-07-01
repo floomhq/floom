@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger("floom.run_service")
@@ -71,8 +72,23 @@ def _persist_run_cost(
         )
 
 
-def _worker_month_to_date_cost_usd(worker_id: str) -> float:
+def _worker_month_to_date_cost_usd(
+    worker_id: str,
+    *,
+    repos: Any = None,
+    user_id: str | None = None,
+) -> float:
     """Sum of total_cost_usd for this worker's runs in the current UTC month."""
+    if repos is not None and user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=user_id,
+            since=_utc_period_start_iso("month"),
+            worker_id=worker_id,
+        )
+        if repo_total is not None:
+            return repo_total
+
     from db import get_db
 
     try:
@@ -86,6 +102,42 @@ def _worker_month_to_date_cost_usd(worker_id: str) -> float:
         return float(row["spent"] or 0.0) if row else 0.0
     except Exception:
         logger.debug("month-to-date cost lookup failed for %s", worker_id, exc_info=True)
+        return 0.0
+
+
+def _utc_period_start_iso(period: str) -> str:
+    now = datetime.now(timezone.utc)
+    if period == "month":
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
+def _repo_cost_total_usd(
+    repos: Any,
+    *,
+    user_id: str,
+    since: str,
+    worker_id: str | None = None,
+    actor_user_id: str | None = None,
+    workspace_scoped: bool = False,
+) -> float | None:
+    runs = getattr(repos, "runs", None)
+    cost_total = getattr(runs, "cost_total_usd", None)
+    if not callable(cost_total):
+        return None
+    try:
+        return float(
+            cost_total(
+                user_id=user_id,
+                since=since,
+                worker_id=worker_id,
+                actor_user_id=actor_user_id,
+                workspace_scoped=workspace_scoped,
+            )
+            or 0.0
+        )
+    except Exception:
+        logger.debug("repo cost_total_usd lookup failed", exc_info=True)
         return 0.0
 
 
@@ -133,8 +185,22 @@ def _user_daily_spend_cap_usd() -> Optional[float]:
     return _default_spend_cap_usd("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "5")
 
 
-def _workspace_month_to_date_cost_usd() -> float:
+def _workspace_month_to_date_cost_usd(
+    *,
+    repos: Any = None,
+    user_id: str | None = None,
+) -> float:
     """#797: sum of total_cost_usd across ALL runs in the current UTC month."""
+    if repos is not None and user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=user_id,
+            since=_utc_period_start_iso("month"),
+            workspace_scoped=True,
+        )
+        if repo_total is not None:
+            return repo_total
+
     from db import get_db
 
     try:
@@ -149,8 +215,22 @@ def _workspace_month_to_date_cost_usd() -> float:
         return 0.0
 
 
-def _workspace_day_to_date_cost_usd() -> float:
+def _workspace_day_to_date_cost_usd(
+    *,
+    repos: Any = None,
+    user_id: str | None = None,
+) -> float:
     """Sum of total_cost_usd across ALL runs since UTC midnight."""
+    if repos is not None and user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=user_id,
+            since=_utc_period_start_iso("day"),
+            workspace_scoped=True,
+        )
+        if repo_total is not None:
+            return repo_total
+
     from db import get_db
 
     try:
@@ -165,10 +245,25 @@ def _workspace_day_to_date_cost_usd() -> float:
         return 0.0
 
 
-def _user_month_to_date_cost_usd(user_id: str) -> float:
+def _user_month_to_date_cost_usd(
+    user_id: str,
+    *,
+    repos: Any = None,
+    scope_user_id: str | None = None,
+) -> float:
     """Sum total_cost_usd for runs triggered by this user in the current UTC month."""
     if not user_id:
         return 0.0
+    if repos is not None and scope_user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=scope_user_id,
+            since=_utc_period_start_iso("month"),
+            actor_user_id=user_id,
+        )
+        if repo_total is not None:
+            return repo_total
+
     from db import get_db
 
     try:
@@ -186,10 +281,25 @@ def _user_month_to_date_cost_usd(user_id: str) -> float:
         return 0.0
 
 
-def _user_day_to_date_cost_usd(user_id: str) -> float:
+def _user_day_to_date_cost_usd(
+    user_id: str,
+    *,
+    repos: Any = None,
+    scope_user_id: str | None = None,
+) -> float:
     """Sum total_cost_usd for runs triggered by this user since UTC midnight."""
     if not user_id:
         return 0.0
+    if repos is not None and scope_user_id:
+        repo_total = _repo_cost_total_usd(
+            repos,
+            user_id=scope_user_id,
+            since=_utc_period_start_iso("day"),
+            actor_user_id=user_id,
+        )
+        if repo_total is not None:
+            return repo_total
+
     from db import get_db
 
     try:

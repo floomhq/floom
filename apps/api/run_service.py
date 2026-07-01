@@ -1073,7 +1073,7 @@ def create_run(
     # #793: refuse dispatch when the worker has already spent its monthly cap.
     _cap = _spend_cap_for_config(config)
     if _cap is not None:
-        _spent = _worker_month_to_date_cost_usd(worker_id)
+        _spent = _worker_month_to_date_cost_usd(worker_id, repos=repos_obj, user_id=owner_id)
         if _spent >= _cap:
             raise SpendCapExceeded(
                 f"Worker {worker_id} has reached its monthly spend cap "
@@ -1082,7 +1082,11 @@ def create_run(
     cap_user_id = str(user_id or owner_id or "").strip()
     _user_day_cap = _user_daily_spend_cap_usd()
     if cap_user_id and _user_day_cap is not None:
-        _user_day_spent = _user_day_to_date_cost_usd(cap_user_id)
+        _user_day_spent = _user_day_to_date_cost_usd(
+            cap_user_id,
+            repos=repos_obj,
+            scope_user_id=owner_id,
+        )
         if _user_day_spent >= _user_day_cap:
             raise SpendCapExceeded(
                 f"User has reached their daily spend cap "
@@ -1090,7 +1094,11 @@ def create_run(
             )
     _user_month_cap = _user_monthly_spend_cap_usd()
     if cap_user_id and _user_month_cap is not None:
-        _user_month_spent = _user_month_to_date_cost_usd(cap_user_id)
+        _user_month_spent = _user_month_to_date_cost_usd(
+            cap_user_id,
+            repos=repos_obj,
+            scope_user_id=owner_id,
+        )
         if _user_month_spent >= _user_month_cap:
             raise SpendCapExceeded(
                 f"User has reached their monthly spend cap "
@@ -1100,7 +1108,7 @@ def create_run(
     # default, even if no explicit workspace setting has been saved.
     _ws_day_cap = _workspace_daily_spend_cap_usd()
     if _ws_day_cap is not None:
-        _ws_day_spent = _workspace_day_to_date_cost_usd()
+        _ws_day_spent = _workspace_day_to_date_cost_usd(repos=repos_obj, user_id=owner_id)
         if _ws_day_spent >= _ws_day_cap:
             raise SpendCapExceeded(
                 f"Workspace has reached its daily spend cap "
@@ -1110,7 +1118,7 @@ def create_run(
     # date cost against the workspace budget.
     _ws_cap = _workspace_monthly_spend_cap_usd()
     if _ws_cap is not None:
-        _ws_spent = _workspace_month_to_date_cost_usd()
+        _ws_spent = _workspace_month_to_date_cost_usd(repos=repos_obj, user_id=owner_id)
         if _ws_spent >= _ws_cap:
             raise SpendCapExceeded(
                 f"Workspace has reached its monthly spend cap "
