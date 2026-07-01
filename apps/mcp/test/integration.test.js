@@ -594,7 +594,8 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
 
     const readRun = await client.callTool({ name: "runs.get", arguments: { id: "run_test" } });
     assert.equal(readRun.structuredContent.status, "completed");
-    assert.deepEqual(readRun.structuredContent.output, { result: "hello" });
+    assert.deepEqual(readRun.structuredContent.output_preview.fields.result.content, "hello");
+    assert.equal(readRun.structuredContent.output_preview.fields.result.truncated, false);
 
     const chat = await client.callTool({
       name: "workspace.chat",

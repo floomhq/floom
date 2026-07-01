@@ -133,7 +133,7 @@ test("install success prompt is concise and launch-safe", () => {
   );
   assert.match(prompt, /Floom is ready/);
   assert.match(prompt, /Installed MCP for your agent/);
-  assert.match(prompt, /log\.blank\(\);\n  log\.step\("Installed MCP for your agent"\);/);
+  assert.match(prompt, /log\.blank\(\);\r?\n  log\.step\("Installed MCP for your agent"\);/);
   assert.match(prompt, /log\.info\('  "Use Floom to create and run my first read-only worker\."'\);/);
   assert.match(prompt, /Use Floom to create and run my first read-only worker/);
   assert.doesNotMatch(prompt, /workeros-api\.floom\.dev/);

@@ -343,7 +343,11 @@ class AgentDriver(SandboxDriver):
                             reason=f"Run timed out after {timeout_seconds}s",
                         )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "agent timeout: failed to reject pending approval for run %s",
+                        run_id,
+                        exc_info=True,
+                    )
             return WorkerResult(
                 status="error",
                 error=f"Agent run exceeded timeout of {timeout_seconds}s",
@@ -2066,7 +2070,12 @@ class AgentDriver(SandboxDriver):
                         status=RunStatus.RUNNING.value,
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "request_approval: failed to restore run %s after decision %s",
+                        run_id,
+                        approval_id,
+                        exc_info=True,
+                    )
                 log_fn(
                     f"Approval {'approved' if approved else 'rejected'}: {label} (approval_id={approval_id})",
                     "info",
@@ -2077,7 +2086,11 @@ class AgentDriver(SandboxDriver):
                     if raw:
                         edited_output = json.loads(raw)
                 except Exception:
-                    pass
+                    logger.debug(
+                        "request_approval: failed to parse edited output for approval %s",
+                        approval_id,
+                        exc_info=True,
+                    )
                 return {
                     "ok": True,
                     "approved": approved,
@@ -2094,7 +2107,12 @@ class AgentDriver(SandboxDriver):
                         status=RunStatus.RUNNING.value,
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "request_approval: failed to restore run %s after approval timeout %s",
+                        run_id,
+                        approval_id,
+                        exc_info=True,
+                    )
                 try:
                     repos.approvals.reject(
                         owner_id=user_id,
@@ -2104,7 +2122,12 @@ class AgentDriver(SandboxDriver):
                         reason=f"Timed out after {timeout_seconds}s — no decision received",
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "request_approval: failed to reject timed-out approval %s for run %s",
+                        approval_id,
+                        run_id,
+                        exc_info=True,
+                    )
                 return {
                     "ok": False,
                     "approved": False,
@@ -2122,7 +2145,12 @@ class AgentDriver(SandboxDriver):
                         status=RunStatus.RUNNING.value,
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "request_approval: failed to restore cancelled run %s while waiting on %s",
+                        run_id,
+                        approval_id,
+                        exc_info=True,
+                    )
                 try:
                     repos.approvals.reject(
                         owner_id=user_id,
@@ -2132,7 +2160,12 @@ class AgentDriver(SandboxDriver):
                         reason="Run cancelled while awaiting approval",
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "request_approval: failed to reject cancelled approval %s for run %s",
+                        approval_id,
+                        run_id,
+                        exc_info=True,
+                    )
                 return {
                     "ok": False,
                     "approved": False,
