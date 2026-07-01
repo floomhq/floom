@@ -12,8 +12,11 @@ describe("workers empty state quick start", () => {
     expect(SRC).toContain("npx -y @floomhq/floom mcp install");
     expect(SRC).not.toContain("npm install -g @floomhq/floom");
     expect(SRC).not.toContain("floom login");
-    expect(SRC).toContain("apps/mcp/README.md");
+    expect(SRC).toContain("/connections/mcp?from_install=workers-empty");
+    expect(SRC).not.toContain("github.com/floomhq/floom/blob/main/apps/mcp/README.md");
     expect(SRC).toContain("Install MCP");
+    expect(SRC).toContain("https://floom.dev/v3/docs/worker-yml");
+    expect(SRC).not.toContain("github.com/floomhq/floom/blob/main/docs/AUTHORING.md");
   });
 
   it("shows concrete worker prompt examples instead of the old empty copy", () => {

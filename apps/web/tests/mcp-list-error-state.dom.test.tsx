@@ -6,10 +6,12 @@ import userEvent from "@testing-library/user-event";
 // error/retry state, NOT the old "ghost zebra rows" skeleton that hangs
 // forever and looks identical to an empty list.
 
+let mockSearchParams = "";
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/connections/mcp",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(mockSearchParams),
 }));
 
 vi.mock("sonner", () => ({
@@ -53,6 +55,7 @@ import McpConnectionsPage from "@/app/connections/mcp/page";
 
 describe("MCP connections list — load states", () => {
   beforeEach(() => {
+    mockSearchParams = "";
     listMock.mockReset();
     secretsListMock.mockReset();
     personalTokensListMock.mockReset();
@@ -88,6 +91,16 @@ describe("MCP connections list — load states", () => {
       expect(screen.getByText(/no mcp servers yet/i)).toBeInTheDocument();
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("opens the install panel when routed from an install CTA", async () => {
+    mockSearchParams = "from_install=workers-empty";
+    listMock.mockResolvedValue([]);
+    render(<McpConnectionsPage />);
+
+    const installToggle = screen.getByRole("button", { name: /use floom in your ai client/i });
+    expect(installToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getAllByText(/Codex/i).length).toBeGreaterThan(0);
   });
 
   it("expands MCP setup with personal tokens, workspace tokens, and CLI login copy", async () => {
