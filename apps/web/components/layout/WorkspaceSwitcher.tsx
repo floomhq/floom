@@ -169,6 +169,7 @@ export function WorkspaceSwitcher() {
   async function handleCreate() {
     const name = createName.trim();
     if (!name) return;
+    setError(null);
     setCreating(true);
     try {
       const created = await api.workspace.create(name);
@@ -176,7 +177,9 @@ export function WorkspaceSwitcher() {
       setActiveWorkspaceId(created.id);
       window.location.reload();
     } catch (err) {
-      setError((err as Error).message || "Failed to create workspace");
+      const message = (err as Error).message || "Failed to create workspace";
+      setError(message);
+      toast.error(message);
       setCreating(false);
     }
   }
@@ -375,6 +378,7 @@ export function WorkspaceSwitcher() {
                 setCreateName("");
                 setCreateCompany("");
                 setNameTouched(false);
+                setError(null);
                 setCreateOpen(true);
               }}
               className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
@@ -539,6 +543,7 @@ export function WorkspaceSwitcher() {
                   onChange={(event) => {
                     const v = event.target.value;
                     setCreateCompany(v);
+                    setError(null);
                     if (!nameTouched) setCreateName(prefillWorkspaceName(v));
                   }}
                   placeholder="e.g. Acme or acme.com"
@@ -554,6 +559,7 @@ export function WorkspaceSwitcher() {
                 value={createName}
                 onChange={(event) => {
                   setNameTouched(true);
+                  setError(null);
                   setCreateName(event.target.value);
                 }}
                 placeholder="e.g. Acme"
@@ -567,6 +573,11 @@ export function WorkspaceSwitcher() {
               />
             </div>
           </div>
+          {error && (
+            <p role="alert" className="text-sm text-[var(--negative)]">
+              {error}
+            </p>
+          )}
           <DialogFooter>
             <Button
               variant="ghost"
