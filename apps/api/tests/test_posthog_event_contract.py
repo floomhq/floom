@@ -205,6 +205,19 @@ def _drive_cli_command_invoked():
     )
 
 
+def _drive_api_request_completed():
+    product_events.emit_api_request_completed(
+        owner_id="owner-1",
+        method="GET",
+        route="/workers/{worker_id}/runs",
+        status_code=200,
+        duration_ms=12,
+        auth_method="pat",
+        deploy="cloud",
+        workspace_id="ws-1",
+    )
+
+
 def _drive_trigger_fired():
     scheduler._emit_trigger_fired(
         owner_id="owner-1",
@@ -282,6 +295,7 @@ _DRIVERS = {
     "worker_deleted": _drive_worker_deleted,
     "mcp_tool_called": _drive_mcp_tool_called,
     "cli_command_invoked": _drive_cli_command_invoked,
+    "api_request_completed": _drive_api_request_completed,
     "trigger_fired": _drive_trigger_fired,
     "connection_added": _drive_connection_added,
     "connection_failed": _drive_connection_failed,
@@ -348,7 +362,7 @@ def test_no_unexpected_required_drift(stub, event):
     )
 
 
-@pytest.mark.parametrize("event", ["mcp_tool_called", "cli_command_invoked"])
+@pytest.mark.parametrize("event", ["mcp_tool_called", "cli_command_invoked", "api_request_completed"])
 def test_programmatic_surface_events_do_not_capture_payloads(stub, event):
     _DRIVERS[event]()
     emitted = _events(stub, event)[0]

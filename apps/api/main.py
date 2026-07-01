@@ -1414,6 +1414,103 @@ def _is_context_upload_request(request: Request) -> bool:
     )
 
 
+_API_TELEMETRY_DYNAMIC_SEGMENT_RE = re.compile(
+    r"^(?:"
+    r"\d+|"
+    r"[0-9a-fA-F]{8,}|"
+    r"(?:run|wkr|ws|ctx|appr|conn|trg|pat|wos|wrt|fls)_[A-Za-z0-9_-]+|"
+    r"[A-Za-z0-9_-]{32,}"
+    r")$"
+)
+
+
+def _api_request_telemetry_excluded(path: str, method: str) -> bool:
+    if method.upper() == "OPTIONS":
+        return True
+    if path in {"/health", "/healthz", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}:
+        return True
+    excluded_prefixes = (
+        "/telemetry/",
+        "/webhooks/",
+        "/slack/",
+        "/whatsapp/",
+        "/uploads/",
+        "/runs/public/",
+        "/approvals/public/",
+        "/approvals/public-batch/",
+        "/drop/public/",
+        "/review/public/",
+        "/workers/public/",
+        "/workers/short-links/",
+        "/s/",
+        "/c/",
+    )
+    if any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in excluded_prefixes):
+        return True
+    # SSE/streaming endpoints can produce long-lived timing noise and already
+    # have run-level telemetry.
+    return path.endswith("/stream")
+
+
+def _api_request_route_label(request: Request, path: str) -> str:
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path.startswith("/"):
+        return route_path
+    segments = []
+    for segment in path.strip("/").split("/"):
+        if not segment:
+            continue
+        segments.append("{id}" if _API_TELEMETRY_DYNAMIC_SEGMENT_RE.fullmatch(segment) else segment)
+    return "/" + "/".join(segments) if segments else "/"
+
+
+def _api_request_workspace_id_for_auth(auth: AuthContext) -> str:
+    actor_prefix = "workspace:"
+    user_id = str(auth.user_id or "")
+    if user_id.startswith(actor_prefix):
+        workspace_id = user_id[len(actor_prefix):].strip()
+        if workspace_id:
+            return workspace_id
+    return derive_workspace_id(user_id)
+
+
+@app.middleware("http")
+async def api_request_telemetry_middleware(request: Request, call_next):
+    started = time.monotonic()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        path = _normalized_request_path(request)
+        method = request.method.upper()
+        if _api_request_telemetry_excluded(path, method):
+            continue_telemetry = False
+        else:
+            continue_telemetry = True
+        if continue_telemetry:
+            auth = getattr(request.state, "auth_context", None)
+            if auth is not None:
+                try:
+                    from services.product_events import emit_api_request_completed
+
+                    workspace_id = _api_request_workspace_id_for_auth(auth)
+                    emit_api_request_completed(
+                        owner_id=auth.user_id,
+                        method=method,
+                        route=_api_request_route_label(request, path),
+                        status_code=status_code,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                        auth_method=auth.auth_method,
+                        deploy=(os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() or "local",
+                        workspace_id=workspace_id,
+                    )
+                except Exception:
+                    logger.debug("API request telemetry emit failed", exc_info=True)
+
+
 _WST_ALLOWED_POST_RE = re.compile(r"^/workers/[^/]+/runs$")
 _WST_DENIED_PREFIXES = (
     "/secrets", "/connections", "/auth", "/workspace/tokens", "/workspace/secrets",
