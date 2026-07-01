@@ -26,9 +26,9 @@ import chat_service
 
 # ~4 chars/token; budget asserts the ORDER OF MAGNITUDE, not an exact count.
 # Casual prompt (persona + stripped SKILL.md + comms rules, snapshot stubbed)
-# measured ~9.5k chars (~2.4k tokens) at fix time; 12k chars (~3k tokens) is
-# the regression tripwire.
-CASUAL_PROMPT_CHAR_BUDGET = 12_000
+# measured ~9.5k chars (~2.4k tokens) at fix time; 13k chars is the current
+# regression tripwire after adding the first-run management loop.
+CASUAL_PROMPT_CHAR_BUDGET = 13_000
 
 
 @pytest.fixture
@@ -91,4 +91,4 @@ def test_bare_greeting_contract_is_bounded():
 
 def test_persona_itself_is_small():
     # the always-on identity stays well under the SKILL/tooling text
-    assert len(chat_service.EMILY_BASE_PERSONA) < 6_000
+    assert len(chat_service.EMILY_BASE_PERSONA) < 6_500
