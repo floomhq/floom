@@ -34,6 +34,12 @@ type WorkerDetail = {
   recent_runs?: Array<{ id: string; status: string; created_at?: string; duration_ms?: number }>;
 };
 
+type StandaloneShareLink = {
+  token: string;
+  url: string;
+  entity_type: string;
+};
+
 type WorkerSource = {
   dir: string;
   workerYml: string;
@@ -887,6 +893,7 @@ export async function workersShowCommand(workerId: string, options: { json?: boo
     process.stdout.write(`${worker.name} (${worker.id})\n`);
     if (worker.description) process.stdout.write(`${worker.description}\n`);
     process.stdout.write(`Entry: ${worker.config?.runtime?.entrypoint || "unknown"}\n`);
+    process.stdout.write(`Share: ${getCommandName()} workers share ${worker.id}\n`);
     const connections = formatConnections(worker.config?.connections);
     if (connections.length === 0) {
       process.stdout.write("Connections: none\n");
@@ -925,6 +932,24 @@ export async function workersShowCommand(workerId: string, options: { json?: boo
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
     }
     throw error;
+  }
+}
+
+export async function workersShareCommand(workerId: string, options: { json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const link = (await client.requestJson("POST", `/workers/${encodeURIComponent(workerId)}/share-link`)) as StandaloneShareLink;
+    if (options.json) {
+      printJson(link);
+      return 0;
+    }
+    log.ok("Share link created");
+    log.kv("Worker", workerId);
+    log.kv("URL", link.url);
+    log.info("This unlisted link can be opened by anyone who has it to view or import the worker.");
+    return 0;
+  } catch (error) {
+    return emitLifecycleError(error, workerId, options.json);
   }
 }
 

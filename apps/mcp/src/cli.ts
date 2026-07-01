@@ -18,6 +18,7 @@ import {
   workersListCommand,
   workersShowCommand,
   workersInfoCommand,
+  workersShareCommand,
   workersContractCommand,
   workersPushCommand,
   workersTemplatesGetCommand,
@@ -265,6 +266,11 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .argument("<id>", "Worker id")
     .option("--json", "Print raw JSON")
     .action(async (id: string, options: { json?: boolean }) => runAction(workersInfoCommand(id, options)));
+  workers.command("share")
+    .description("Create an unlisted standalone share link for a worker")
+    .argument("<id>", "Worker id")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { json?: boolean }) => runAction(workersShareCommand(id, options)));
   workers.command("contract")
     .description("Show the canonical worker authoring contract for agents")
     .option("--json", "Print raw JSON")
