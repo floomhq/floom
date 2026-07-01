@@ -11,8 +11,11 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 echo "== your apps =="
-bash "$LIB_DIR/floom-api.sh" GET /api/hub/mine || true
+status=0
+bash "$LIB_DIR/floom-api.sh" GET /api/hub/mine || status=1
 
 echo
 echo "== recent runs =="
-bash "$LIB_DIR/floom-api.sh" GET /api/me/runs?limit=10 || true
+bash "$LIB_DIR/floom-api.sh" GET /api/me/runs?limit=10 || status=1
+
+exit "$status"

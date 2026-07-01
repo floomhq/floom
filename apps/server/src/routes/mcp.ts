@@ -36,6 +36,7 @@ import {
   AUTH_HINT_CLOUD,
   checkAppVisibility,
 } from '../lib/auth.js';
+import { canAccessApp } from '../services/sharing.js';
 import { checkMcpIngestLimit, extractIp } from '../lib/rate-limit.js';
 import { runGate } from '../lib/run-gate.js';
 import { filterTestFixtures } from '../lib/hub-filter.js';
@@ -318,6 +319,13 @@ function createPerAppMcpServer(
             action: actionName,
             inputs: validated,
             perCallSecrets,
+            ctx:
+              ctx ?? {
+                workspace_id: fresh.workspace_id,
+                user_id: fresh.author || 'local',
+                device_id: '',
+                is_authenticated: Boolean(fresh.author),
+              },
           });
           const publicUrl =
             process.env.PUBLIC_URL ||
@@ -385,6 +393,7 @@ interface AdminToolContext {
   ctx: SessionContext;
   ip: string;
   baseUrl: string;
+  linkToken?: string | null;
 }
 
 function serializeHubApp(
@@ -419,7 +428,20 @@ function safeParseManifest(raw: string): NormalizedManifest | null {
   }
 }
 
-function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer {
+function appNotFoundContent(slug: string) {
+  return [
+    {
+      type: 'text' as const,
+      text: JSON.stringify(
+        { error: 'not_found', slug, message: `App not found: ${slug}` },
+        null,
+        2,
+      ),
+    },
+  ];
+}
+
+function createAdminMcpServer({ ctx, ip, baseUrl, linkToken = null }: AdminToolContext): McpServer {
   const server = new McpServer({
     name: 'floom-admin',
     version: '0.4.0',
@@ -988,16 +1010,27 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
       if (!row) {
         return {
           isError: true,
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                { error: 'not_found', slug, message: `App not found: ${slug}` },
-                null,
-                2,
-              ),
-            },
-          ],
+          content: appNotFoundContent(slug),
+        };
+      }
+      if (
+        !canAccessApp(
+          {
+            id: row.id,
+            slug: row.slug,
+            author: row.author,
+            workspace_id: row.workspace_id,
+            visibility: row.visibility,
+            link_share_token: row.link_share_token,
+            link_share_requires_auth: row.link_share_requires_auth,
+          },
+          ctx,
+          linkToken,
+        )
+      ) {
+        return {
+          isError: true,
+          content: appNotFoundContent(slug),
         };
       }
       const manifest = safeParseManifest(row.manifest);
@@ -1220,7 +1253,12 @@ mcpRouter.all('/', async (c: Context) => {
   }
   const ip = extractIp(c);
   const baseUrl = getPublicBaseUrl(c);
-  const server = createAdminMcpServer({ ctx, ip, baseUrl });
+  const server = createAdminMcpServer({
+    ctx,
+    ip,
+    baseUrl,
+    linkToken: c.req.query('key') || null,
+  });
   return handleMcp(server, c.req.raw);
 });
 

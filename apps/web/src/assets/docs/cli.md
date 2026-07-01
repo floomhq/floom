@@ -2,13 +2,13 @@
 
 The Floom CLI scaffolds, validates, and deploys apps from the terminal.
 
-- Install script: [`cli/floom/install.sh`](https://github.com/floomhq/floom/blob/main/cli/floom/install.sh)
+- Install script: [`https://floom.dev/install.sh`](https://floom.dev/install.sh)
 - Source: [`cli/floom/`](https://github.com/floomhq/floom/tree/main/cli/floom)
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/floomhq/floom/main/cli/floom/install.sh | bash
+curl -fsSL https://floom.dev/install.sh | bash
 ```
 
 The script installs the `floom` binary to `~/.local/bin/floom`. Add that to your `$PATH` if it isn't already.
@@ -21,63 +21,60 @@ floom --version
 
 ## `floom init`
 
-Scaffold a new hosted app in the current directory.
+Scaffold a new hosted app manifest in the current directory.
 
 ```bash
-floom init my-app
+mkdir my-app
 cd my-app
+floom init --name "My App" --description "Echo text input." --type custom
 ls
-# floom.yaml  main.py  requirements.txt  README.md
+# floom.yaml  main.py  Dockerfile
 ```
 
 The generated `floom.yaml` has a single `run` action with a text input and a text output. Edit it before your first deploy.
 
 ## `floom deploy`
 
-Deploy the current directory's app to Floom Cloud, or to a self-hosted instance.
+Deploy the current directory's app to Floom Cloud, or to a self-hosted instance configured with `floom auth <api-key> <api-url>`.
 
 ```bash
 # Deploy to Floom Cloud (default)
 floom deploy
 
 # Deploy to a self-hosted instance
-floom deploy --endpoint https://floom.mycompany.com
+floom auth <api-key> https://floom.mycompany.com
+floom deploy
 ```
 
 The CLI:
 
 1. Validates `floom.yaml` against the manifest schema.
-2. Builds a tarball of the working directory.
-3. Uploads via `POST /api/hub/ingest`.
-4. Prints the live app URL: `https://floom.dev/p/<slug>`.
+2. Publishes proxied OpenAPI apps via `POST /api/hub/ingest`.
+3. Prints the live app URL: `https://floom.dev/p/<slug>`.
 
 First deploy can take up to 10 minutes (container image build). Subsequent deploys reuse cached layers.
 
 ## `floom status`
 
-Check the status of the current app or a specific slug.
+List the apps owned by the caller and recent runs.
 
 ```bash
-# Status of the app in the current directory
 floom status
-
-# Status of any app by slug
-floom status --slug lead-scorer
 ```
 
-Prints: last deploy time, run count (last 24h), last run status, error rate.
+Prints: owned apps and recent runs. The command exits non-zero when either API request fails.
 
 ## `floom auth`
 
-Sign in to the CLI. Opens a browser to `floom.dev/me/settings` and pastes back the API key you create there.
+Save, inspect, or clear the CLI API key. Create the key at `https://floom.dev/me/api-keys`.
 
 ```bash
-floom auth login
-floom auth status
-floom auth logout
+floom auth <api-key>
+floom auth --show
+floom auth --clear
 ```
 
-The API key lives in `~/.config/floom/credentials`. Don't commit it.
+The API key lives in `~/.floom/config.json`. Do not commit it.
 
 ## Use with CI/CD
 
@@ -89,11 +86,11 @@ For GitHub Actions or any CI runner:
   env:
     FLOOM_API_KEY: ${{ secrets.FLOOM_API_KEY }}
   run: |
-    curl -fsSL https://raw.githubusercontent.com/floomhq/floom/main/cli/floom/install.sh | bash
+    curl -fsSL https://floom.dev/install.sh | bash
     ~/.local/bin/floom deploy
 ```
 
-`FLOOM_API_KEY` takes precedence over `~/.config/floom/credentials` when both are present.
+`FLOOM_API_KEY` takes precedence over `~/.floom/config.json` when both are present.
 
 ## Claude Code skill
 

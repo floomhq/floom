@@ -14,7 +14,9 @@ Score a company against an ICP description. JSON in, scored breakdown out.
 - **Source**: [`examples/lead-scorer/`](https://github.com/floomhq/floom/tree/main/examples/lead-scorer)
 
 ```bash
-floom run lead-scorer --input '{"company":"stripe.com","icp":"B2B SaaS, series A+"}'
+curl -X POST https://floom.dev/api/lead-scorer/run \
+  -H "Content-Type: application/json" \
+  -d '{"action":"score","inputs":{"company":"stripe.com","icp":"B2B SaaS, series A+"}}'
 ```
 
 ## Competitor analyzer
@@ -27,7 +29,9 @@ Given a domain, pull positioning, pricing, and differentiators. Single tool call
 - **Source**: [`examples/competitor-analyzer/`](https://github.com/floomhq/floom/tree/main/examples/competitor-analyzer)
 
 ```bash
-floom run competitor-analyzer --input '{"domain":"linear.app"}'
+curl -X POST https://floom.dev/api/competitor-analyzer/run \
+  -H "Content-Type: application/json" \
+  -d '{"action":"analyze","inputs":{"domain":"linear.app"}}'
 ```
 
 ## Resume screener
@@ -40,7 +44,9 @@ Score a CV against a job description. Returns strengths, gaps, fit score.
 - **Source**: [`examples/resume-screener/`](https://github.com/floomhq/floom/tree/main/examples/resume-screener)
 
 ```bash
-floom run resume-screener --input '{"jd":"Senior Backend Engineer","cv_url":"..."}'
+curl -X POST https://floom.dev/api/resume-screener/run \
+  -H "Content-Type: application/json" \
+  -d '{"action":"screen","inputs":{"jd":"Senior Backend Engineer","cv_url":"..."}}'
 ```
 
 ## More examples

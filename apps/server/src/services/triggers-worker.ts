@@ -186,6 +186,12 @@ function processTrigger(trigger: TriggerRecord, now: number): boolean {
       timeoutMsOverride: null,
       maxRetriesOverride: null,
       perCallSecrets: null,
+      ctx: {
+        workspace_id: trigger.workspace_id,
+        user_id: trigger.user_id,
+        device_id: '',
+        is_authenticated: true,
+      },
     });
     // Attach trigger context to the job for the webhook payload. We
     // store it in per_call_secrets_json is wrong; use a dedicated path.

@@ -5,7 +5,8 @@
 // Claiming uses an atomic UPDATE...WHERE status='queued' pattern so multiple
 // workers or concurrent replicas never double-dispatch a row.
 import { db } from '../db.js';
-import type { AppRecord, JobRecord, JobStatus } from '../types.js';
+import { isCloudMode } from '../lib/better-auth.js';
+import type { AppRecord, JobRecord, JobStatus, SessionContext } from '../types.js';
 
 export const DEFAULT_JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -17,6 +18,7 @@ export interface CreateJobInput {
   timeoutMsOverride?: number | null;
   maxRetriesOverride?: number | null;
   perCallSecrets?: Record<string, string> | null;
+  ctx: SessionContext;
 }
 
 export function createJob(jobId: string, args: CreateJobInput): JobRecord {
@@ -35,8 +37,9 @@ export function createJob(jobId: string, args: CreateJobInput): JobRecord {
   db.prepare(
     `INSERT INTO jobs (
        id, slug, app_id, action, status, input_json, webhook_url,
-       timeout_ms, max_retries, attempts, per_call_secrets_json
-     ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, 0, ?)`,
+       timeout_ms, max_retries, attempts, per_call_secrets_json,
+       workspace_id, user_id, device_id
+     ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
   ).run(
     jobId,
     args.app.slug,
@@ -47,6 +50,9 @@ export function createJob(jobId: string, args: CreateJobInput): JobRecord {
     timeout,
     maxRetries,
     perCallSecretsJson,
+    args.ctx.workspace_id,
+    args.ctx.user_id,
+    args.ctx.device_id,
   );
   const row = getJob(jobId);
   if (!row) throw new Error(`createJob: failed to re-read row ${jobId}`);
@@ -157,6 +163,17 @@ export function cancelJob(jobId: string): JobRecord | undefined {
     .run(jobId);
   if (res.changes === 0) return getJob(jobId);
   return getJob(jobId);
+}
+
+export function canAccessJob(row: JobRecord, ctx: SessionContext): boolean {
+  if (row.workspace_id !== ctx.workspace_id) return false;
+  if (ctx.is_authenticated) {
+    return Boolean(row.user_id && row.user_id === ctx.user_id);
+  }
+  if (row.device_id) {
+    return row.device_id === ctx.device_id;
+  }
+  return !isCloudMode() && row.user_id === ctx.user_id;
 }
 
 /**

@@ -6,7 +6,7 @@
 # The build context must be the repo root.
 
 # ── stage 1: builder ────────────────────────────────────────────────────────
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 
 RUN npm install -g pnpm@9.0.0
@@ -93,7 +93,7 @@ RUN cd apps/server && pnpm run build
 RUN cd apps/web && pnpm run build
 
 # ── stage 2: runtime ────────────────────────────────────────────────────────
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 WORKDIR /app
 
 # System deps

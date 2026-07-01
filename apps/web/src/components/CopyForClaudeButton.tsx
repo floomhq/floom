@@ -12,9 +12,9 @@ import { useLocation } from 'react-router-dom';
 //     said /mcp/sse; that was wrong, do NOT use it.
 //   • Row 2 — CLI install: curl -fsSL https://floom.dev/install.sh | bash
 //   • Row 3 — context-aware. Hidden on routes where it adds nothing:
-//       /p/:slug          → run THIS app via the CLI
+//       /p/:slug          → install THIS app via MCP
 //       /me, /me/*        → generic "use Floom from your agent" snippet
-//       /studio/:slug     → deploy-via-CLI snippet for THIS creator's app
+//       /studio/:slug     → deploy-via-CLI snippet for the current directory
 //       Other routes      → row 3 hidden (only Row 1 + Row 2)
 //
 // Behaviour: click toggles, click-outside closes, Esc closes. Per-row
@@ -35,7 +35,7 @@ function buildContextSnippet(pathname: string): ContextSnippet | null {
     const slug = pMatch[1];
     return {
       label: `For this app (${slug})`,
-      snippet: `floom run ${slug}`,
+      snippet: `{ "mcpServers": { "floom-${slug}": { "url": "https://floom.dev/mcp/app/${slug}" } } }`,
     };
   }
   // /studio/:slug — creator-side deploy snippet for THIS app. Skip the
@@ -45,14 +45,14 @@ function buildContextSnippet(pathname: string): ContextSnippet | null {
     const slug = studioMatch[1];
     return {
       label: `For this app (${slug})`,
-      snippet: `floom deploy ${slug}`,
+      snippet: `floom deploy`,
     };
   }
   // /me + sub-pages — generic agent snippet
   if (pathname === '/me' || pathname.startsWith('/me/')) {
     return {
       label: 'For this page (your account)',
-      snippet: `floom auth login\nfloom apps list`,
+      snippet: `floom auth --show\nfloom status`,
     };
   }
   // Elsewhere: hide row 3

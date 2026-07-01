@@ -233,6 +233,15 @@ try {
     typeof createJson.poll_url === 'string' && createJson.poll_url.includes(createJson.job_id),
     createJson.poll_url,
   );
+  const deviceCookie =
+    createRes.headers
+      .get('set-cookie')
+      ?.split(/,(?=\s*[^;,]+=)/)
+      .map((cookie) => cookie.trim().split(';')[0])
+      .reverse()
+      .find((cookie) => cookie.startsWith('floom_device=')) || '';
+  const ownerHeaders = deviceCookie ? { Cookie: deviceCookie } : {};
+  log('POST /jobs: device cookie set for owner polling', deviceCookie.length > 0, deviceCookie);
 
   // ---- 6. poll until done ----
   const jobId = createJson.job_id;
@@ -242,6 +251,7 @@ try {
   while (Date.now() < deadline) {
     const res = await fetch(
       `http://localhost:${FLOOM_PORT}/api/slow-echo/jobs/${jobId}`,
+      { headers: ownerHeaders },
     );
     if (res.ok) {
       const body = await res.json();
@@ -306,7 +316,7 @@ try {
   // ---- 8. cancelling an already-terminal job is a no-op ----
   const cancelRes = await fetch(
     `http://localhost:${FLOOM_PORT}/api/slow-echo/jobs/${jobId}/cancel`,
-    { method: 'POST' },
+    { method: 'POST', headers: ownerHeaders },
   );
   const cancelBody = await cancelRes.json();
   log(
@@ -318,6 +328,7 @@ try {
   // ---- 9. 404 on non-existent job ----
   const missingRes = await fetch(
     `http://localhost:${FLOOM_PORT}/api/slow-echo/jobs/job_doesnotexist`,
+    { headers: ownerHeaders },
   );
   log('GET /jobs/:missing: 404', missingRes.status === 404);
 

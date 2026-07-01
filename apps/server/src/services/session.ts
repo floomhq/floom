@@ -12,7 +12,7 @@
 //      In Cloud mode (post-W3.1) it reads the Better Auth session and
 //      returns the real workspace+user binding.
 //   3. rekeyDevice(...): atomic transaction that UPDATEs app_memory, runs,
-//      and run_threads to swap `device_id → user_id`. Idempotent — safe to
+//      jobs, and run_threads to swap `device_id → user_id`. Idempotent — safe to
 //      call multiple times. Per P.4 section 8, this is the Linear 2022
 //      opportunistic-rekey pattern that runs on the first authenticated
 //      request after login.
@@ -291,6 +291,7 @@ export function rekeyDevice(
   const result: RekeyResult = {
     app_memory: 0,
     runs: 0,
+    jobs: 0,
     run_threads: 0,
     connections: 0,
   };
@@ -323,6 +324,19 @@ export function rekeyDevice(
       )
       .run(user_id, workspace_id, device_id, DEFAULT_USER_ID);
     result.runs = runRes.changes;
+
+    // jobs: queued/running async work started pre-login must remain visible
+    // to the same user after auth, just like run rows.
+    const jobRes = db
+      .prepare(
+        `UPDATE jobs
+           SET user_id = ?,
+               workspace_id = ?
+         WHERE device_id = ?
+           AND (user_id IS NULL OR user_id = ?)`,
+      )
+      .run(user_id, workspace_id, device_id, DEFAULT_USER_ID);
+    result.jobs = jobRes.changes;
 
     // run_threads: same as runs.
     const threadRes = db

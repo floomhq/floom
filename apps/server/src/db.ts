@@ -452,6 +452,9 @@ db.exec(`
     max_retries INTEGER NOT NULL DEFAULT 0,
     attempts INTEGER NOT NULL DEFAULT 0,
     per_call_secrets_json TEXT,
+    workspace_id TEXT NOT NULL DEFAULT 'local',
+    user_id TEXT,
+    device_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     started_at TEXT,
     finished_at TEXT
@@ -459,7 +462,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_slug_status ON jobs(slug, status);
   CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
   CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+  CREATE INDEX IF NOT EXISTS idx_jobs_workspace_user ON jobs(workspace_id, user_id);
+  CREATE INDEX IF NOT EXISTS idx_jobs_workspace_device ON jobs(workspace_id, device_id);
 `);
+
+const jobCols = (db.prepare(`PRAGMA table_info(jobs)`).all() as { name: string }[]).map(
+  (r) => r.name,
+);
+if (!jobCols.includes('workspace_id')) {
+  db.exec(`ALTER TABLE jobs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'local'`);
+}
+if (!jobCols.includes('user_id')) {
+  db.exec(`ALTER TABLE jobs ADD COLUMN user_id TEXT`);
+}
+if (!jobCols.includes('device_id')) {
+  db.exec(`ALTER TABLE jobs ADD COLUMN device_id TEXT`);
+}
 
 // ---------- builds (Studio GitHub public-repo deploys, ADR-015) ----------
 // Each row tracks one async repo clone/build/publish attempt. Initial v1 launch
@@ -737,6 +755,14 @@ if (!appCols.includes('memory_keys')) {
   db.exec(`ALTER TABLE apps ADD COLUMN memory_keys TEXT`);
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_workspace ON apps(workspace_id)`);
+
+db.exec(`
+  UPDATE jobs
+     SET workspace_id = COALESCE((SELECT apps.workspace_id FROM apps WHERE apps.id = jobs.app_id), workspace_id, 'local'),
+         user_id = COALESCE(user_id, (SELECT apps.author FROM apps WHERE apps.id = jobs.app_id), 'local')
+   WHERE workspace_id = 'local'
+     AND user_id IS NULL
+`);
 
 // runs: workspace_id + user_id + device_id
 const runCols = (db.prepare(`PRAGMA table_info(runs)`).all() as { name: string }[]).map(

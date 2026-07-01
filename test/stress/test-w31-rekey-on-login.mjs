@@ -130,6 +130,18 @@ db.prepare(
    VALUES (?, ?, ?, ?, 'pending', ?, NULL, ?)`,
 ).run('run_rk_login', 'app_rk_login', 'r', '{}', DEFAULT_WORKSPACE_ID, 'dev-anon-99');
 db.prepare(
+  `INSERT INTO jobs (id, slug, app_id, action, status, input_json, workspace_id, user_id, device_id)
+   VALUES (?, ?, ?, ?, 'queued', ?, ?, NULL, ?)`,
+).run(
+  'job_rk_login',
+  'rk-login',
+  'app_rk_login',
+  'r',
+  '{}',
+  DEFAULT_WORKSPACE_ID,
+  'dev-anon-99',
+);
+db.prepare(
   `INSERT INTO run_threads (id, workspace_id, user_id, device_id) VALUES (?, ?, NULL, ?)`,
 ).run('thr_rk_login', DEFAULT_WORKSPACE_ID, 'dev-anon-99');
 db.prepare(
@@ -201,6 +213,12 @@ const runRow = db
   .get('run_rk_login');
 log('runs: user_id flipped', runRow?.user_id === 'usr_zara');
 log('runs: workspace_id flipped', runRow?.workspace_id === ctx2.workspace_id);
+
+const jobRow = db
+  .prepare('SELECT user_id, workspace_id FROM jobs WHERE id = ?')
+  .get('job_rk_login');
+log('jobs: user_id flipped', jobRow?.user_id === 'usr_zara');
+log('jobs: workspace_id flipped', jobRow?.workspace_id === ctx2.workspace_id);
 
 const threadRow = db
   .prepare('SELECT user_id, workspace_id FROM run_threads WHERE id = ?')

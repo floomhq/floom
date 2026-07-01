@@ -36,6 +36,7 @@ const betterAuth = await import('../../apps/server/dist/lib/better-auth.js');
 const { sessionRouter } = await import(
   '../../apps/server/dist/routes/workspaces.js'
 );
+const { meRouter } = await import('../../apps/server/dist/routes/run.js');
 
 betterAuth._resetAuthForTests();
 await betterAuth.runAuthMigrations();
@@ -190,6 +191,43 @@ console.log('\n[#387] guest role not admin');
     'authenticated call: role is a real membership role (admin/editor/viewer)',
     ['admin', 'editor', 'viewer'].includes(res2.json?.active_workspace?.role),
     `got=${res2.json?.active_workspace?.role}`,
+  );
+}
+
+// =====================================================================
+// /api/me/studio/* — cloud guests cannot read local synthetic workspace
+// stats/activity. These endpoints power owner-only dashboard surfaces.
+// =====================================================================
+console.log('\n[/api/me/studio] guest access blocked');
+
+{
+  betterAuth._resetAuthForTests();
+  await betterAuth.runAuthMigrations();
+  const auth = betterAuth.getAuth();
+  auth.api.getSession = async () => null;
+
+  const stats = await fetchRoute(meRouter, 'GET', '/studio/stats');
+  log(
+    'guest: GET /api/me/studio/stats returns 401',
+    stats.status === 401,
+    `got ${stats.status}: ${stats.text}`,
+  );
+  log(
+    'guest: studio stats error code is auth_required',
+    stats.json?.code === 'auth_required',
+    JSON.stringify(stats.json),
+  );
+
+  const activity = await fetchRoute(meRouter, 'GET', '/studio/activity?limit=1');
+  log(
+    'guest: GET /api/me/studio/activity returns 401',
+    activity.status === 401,
+    `got ${activity.status}: ${activity.text}`,
+  );
+  log(
+    'guest: studio activity error code is auth_required',
+    activity.json?.code === 'auth_required',
+    JSON.stringify(activity.json),
   );
 }
 

@@ -28,8 +28,8 @@ Three commands to publish an OpenAPI spec as a Floom app:
 
 ```bash
 export FLOOM_API_KEY=floom_...          # mint one at https://floom.dev/me/api-keys
-floom auth --check                      # verify the key reaches the API (prints "auth: OK")
-floom deploy <path-to-floom.yaml>       # or `floom init --openapi-url <spec-url>` first, then `floom deploy`
+floom status                            # verify the key reaches the API
+floom deploy                            # run from the directory containing floom.yaml
 ```
 
 `floom deploy` reads a `floom.yaml`. If you only have an OpenAPI URL, scaffold one first:
@@ -51,7 +51,7 @@ Run the server locally and point the CLI at it:
 docker run -d --name floom -p 3051:3051 -v floom_data:/data ghcr.io/floomhq/floom-monorepo:latest
 export FLOOM_API_URL=http://localhost:3051
 export FLOOM_API_KEY=local              # any non-empty value works in OSS mode
-floom auth --check
+floom status
 ```
 
 Full self-host guide: [docs/SELF_HOST.md](./docs/SELF_HOST.md).
@@ -60,7 +60,7 @@ Full self-host guide: [docs/SELF_HOST.md](./docs/SELF_HOST.md).
 
 If you see `auth_required` or `HTTP 401` from `floom deploy`:
 
-- Run `floom auth --check`. If it prints `FLOOM_API_KEY: not set` and config absent, export `FLOOM_API_KEY=<key>` or run `floom auth <key>`.
+- Run `floom auth --show` to inspect the saved config, then run `floom status` to verify it reaches the API. If config is absent, export `FLOOM_API_KEY=<key>` or run `floom auth <key>`.
 - If `auth: FAILED (HTTP 401)`, the key is wrong or revoked. Mint a fresh one at https://floom.dev/me/api-keys and re-run `floom auth <new-key>`.
 
 If you see `floom: No FLOOM_API_KEY found`: the CLI couldn't resolve a key from env, `~/.floom/config.json`, or the legacy skill config. Same fix as above.

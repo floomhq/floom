@@ -2,6 +2,9 @@
   "name": "@floom/monorepo",
   "version": "0.3.2",
   "private": true,
+  "engines": {
+    "node": ">=22 <26"
+  },
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "build": "turbo build",

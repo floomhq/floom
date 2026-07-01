@@ -29,23 +29,30 @@ FORBIDDEN_PATTERNS=(
 )
 
 violations=()
+files=()
 
 if [[ "$MODE" == "pre-commit" ]]; then
   # Only look at staged-for-commit files (added, copied, modified, renamed)
-  mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR)
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(git diff --cached --name-only --diff-filter=ACMR)
 else
   # CI mode: check the entire tracked tree
-  mapfile -t files < <(git ls-files)
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(git ls-files)
 fi
 
-for file in "${files[@]}"; do
-  for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-    if [[ "$file" =~ $pattern ]]; then
-      violations+=("$file")
-      break
-    fi
+if [[ ${#files[@]} -gt 0 ]]; then
+  for file in "${files[@]}"; do
+    for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+      if [[ "$file" =~ $pattern ]]; then
+        violations+=("$file")
+        break
+      fi
+    done
   done
-done
+fi
 
 if [[ ${#violations[@]} -gt 0 ]]; then
   cat >&2 <<EOF

@@ -162,6 +162,12 @@ webhookRouter.post('/:path', async (c) => {
       timeoutMsOverride: null,
       maxRetriesOverride: null,
       perCallSecrets: null,
+      ctx: {
+        workspace_id: trigger.workspace_id,
+        user_id: trigger.user_id,
+        device_id: '',
+        is_authenticated: true,
+      },
     });
     attachWebhookTriggerContext(jobId, trigger.id);
     markWebhookFired(trigger.id, Date.now());

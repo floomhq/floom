@@ -866,6 +866,9 @@ function loadStudioApps(
 
 meRouter.get('/studio/stats', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+
   const apps = loadStudioApps(ctx);
   const appIds = apps.map((app) => app.id);
   const appSlugs = new Set(apps.map((app) => app.slug));
@@ -953,6 +956,9 @@ meRouter.get('/studio/stats', async (c) => {
 
 meRouter.get('/studio/activity', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+
   const limit = Math.max(1, Math.min(100, Number(c.req.query('limit') || 5)));
   const apps = loadStudioApps(ctx);
   const appIds = apps.map((app) => app.id);

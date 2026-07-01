@@ -563,6 +563,104 @@ try {
       typeof getPayload?.mcp_url === 'string',
   );
 
+  const fixtureManifest = db
+    .prepare('SELECT manifest FROM apps WHERE slug = ?')
+    .get('fixture-petstore')?.manifest;
+  db.prepare(
+    `INSERT INTO apps (
+       id, slug, name, description, manifest, status, code_path, category,
+       author, app_type, visibility, workspace_id
+     )
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 'proxied', 'private', ?)`,
+  ).run(
+    'app-private-fixture',
+    'private-fixture',
+    'Private Fixture',
+    'Private app fixture used by get_app visibility tests.',
+    fixtureManifest,
+    '',
+    'qa',
+    'other-user',
+    'other-ws',
+  );
+  const getPrivate = await callAdmin({
+    jsonrpc: '2.0',
+    id: 131,
+    method: 'tools/call',
+    params: { name: 'get_app', arguments: { slug: 'private-fixture' } },
+  });
+  const getPrivatePayload = parseToolText(getPrivate);
+  log(
+    'get_app hides private apps owned by another user',
+    getPrivate.json?.result?.isError === true &&
+      getPrivatePayload?.error === 'not_found' &&
+      getPrivatePayload?.slug === 'private-fixture' &&
+      !Object.hasOwn(getPrivatePayload, 'manifest'),
+    JSON.stringify(getPrivatePayload),
+  );
+
+  db.prepare(
+    `INSERT INTO apps (
+       id, slug, name, description, manifest, status, code_path, category,
+       author, app_type, visibility, workspace_id, link_share_token
+     )
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 'proxied', 'link', ?, ?)`,
+  ).run(
+    'app-link-fixture',
+    'link-fixture',
+    'Link Fixture',
+    'Link-shared app fixture used by get_app visibility tests.',
+    fixtureManifest,
+    '',
+    'qa',
+    'other-user',
+    'other-ws',
+    'share-secret',
+  );
+  const getLinkWithoutKey = await callAdmin({
+    jsonrpc: '2.0',
+    id: 132,
+    method: 'tools/call',
+    params: { name: 'get_app', arguments: { slug: 'link-fixture' } },
+  });
+  const getLinkWithoutKeyPayload = parseToolText(getLinkWithoutKey);
+  log(
+    'get_app hides link-shared apps without the share key',
+    getLinkWithoutKey.json?.result?.isError === true &&
+      getLinkWithoutKeyPayload?.error === 'not_found' &&
+      !Object.hasOwn(getLinkWithoutKeyPayload, 'manifest'),
+    JSON.stringify(getLinkWithoutKeyPayload),
+  );
+  const linkWithKeyRouterCall = await mcpRouter.fetch(
+    new Request('http://localhost/?key=share-secret', {
+      method: 'POST',
+      headers: {
+        accept: 'application/json, text/event-stream',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 133,
+        method: 'tools/call',
+        params: { name: 'get_app', arguments: { slug: 'link-fixture' } },
+      }),
+    }),
+  );
+  const linkWithKeyText = await linkWithKeyRouterCall.text();
+  const linkWithKeyJson = JSON.parse(linkWithKeyText);
+  const linkWithKeyPayload = (() => {
+    const raw = linkWithKeyJson?.result?.content?.[0]?.text;
+    return typeof raw === 'string' ? JSON.parse(raw) : null;
+  })();
+  log(
+    'get_app returns link-shared apps with the valid share key',
+    linkWithKeyJson?.result?.isError !== true &&
+      linkWithKeyPayload?.slug === 'link-fixture' &&
+      linkWithKeyPayload?.manifest &&
+      typeof linkWithKeyPayload.manifest === 'object',
+    JSON.stringify(linkWithKeyPayload),
+  );
+
   // missing slug
   const getMissing = await callAdmin({
     jsonrpc: '2.0',

@@ -11,7 +11,7 @@
 import { Hono } from 'hono';
 import { db } from '../db.js';
 import { newJobId } from '../lib/ids.js';
-import { createJob, formatJob, getJobBySlug, cancelJob } from '../services/jobs.js';
+import { createJob, formatJob, getJobBySlug, cancelJob, canAccessJob } from '../services/jobs.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { checkAppVisibility } from '../lib/auth.js';
 import { resolveUserContext } from '../services/session.js';
@@ -127,6 +127,7 @@ jobsRouter.post('/', async (c) => {
         ? body.max_retries
         : null,
     perCallSecrets,
+    ctx,
   });
 
   const publicUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3051}`;
@@ -164,6 +165,7 @@ jobsRouter.get('/:job_id', async (c) => {
   if (blocked) return blocked;
   const job = getJobBySlug(slug, jobId);
   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
+  if (!canAccessJob(job, ctx)) return c.json({ error: `Job not found: ${jobId}` }, 404);
   return c.json(formatJob(job));
 });
 
@@ -190,6 +192,7 @@ jobsRouter.post('/:job_id/cancel', async (c) => {
   if (blocked) return blocked;
   const job = getJobBySlug(slug, jobId);
   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
+  if (!canAccessJob(job, ctx)) return c.json({ error: `Job not found: ${jobId}` }, 404);
   const updated = cancelJob(jobId);
   return c.json(formatJob(updated || job));
 });

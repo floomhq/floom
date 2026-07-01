@@ -15,7 +15,7 @@ Every authenticated endpoint accepts:
 Authorization: Bearer <api-key>
 ```
 
-Get an API key from `floom.dev/me/settings`. Keys start with `flm_live_` (production) or `flm_test_` (dev). Public endpoints (`/api/hub`, `/api/health`, and public app runs) accept unauthenticated calls.
+Get an API key from `floom.dev/me/api-keys`. Keys start with `floom_`. Agent tokens for MCP automation start with `floom_agent_`. Public endpoints (`/api/hub`, `/api/health`, and public app runs) accept unauthenticated calls.
 
 For self-host with a shared token, set `FLOOM_AUTH_TOKEN` and pass it as the bearer.
 
@@ -82,7 +82,7 @@ Delete an app. Creator-only. Irreversible.
 
 ## Running apps
 
-### `POST /api/apps/:slug/run`
+### `POST /api/:slug/run`
 
 Short form: `POST /api/:slug/run`. Start a synchronous run.
 

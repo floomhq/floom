@@ -28,7 +28,7 @@ pnpm dev
 - Web runs on `http://localhost:5173`
 - Server runs on `http://localhost:3051`
 
-Node `>=20`, pnpm `>=9`, Docker (for hosted-mode apps).
+Node `>=22`, pnpm `>=9`, Docker (for hosted-mode apps).
 
 ## Before you open a PR
 

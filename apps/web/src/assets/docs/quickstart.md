@@ -4,14 +4,14 @@ By the end of this page you'll have a live Floom app with:
 
 - a shareable URL at `https://floom.dev/p/<your-slug>`
 - an MCP server any AI agent can call
-- an HTTP endpoint (`POST /api/run/<your-slug>`)
+- an HTTP endpoint (`POST /api/<your-slug>/run`)
 
 All three from one `floom.yaml` manifest. No container ops, no API gateway wiring.
 
 ## 1. Install the CLI
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/floomhq/floom/main/cli/floom/install.sh | bash
+curl -fsSL https://floom.dev/install.sh | bash
 ```
 
 This installs the `floom` binary to `~/.local/bin/floom`. Add that to your `$PATH` if it isn't already, then verify:
@@ -23,28 +23,29 @@ floom --version
 ## 2. Sign in
 
 ```bash
-floom auth login
+floom auth <api-key>
 ```
 
-The CLI opens `floom.dev` in your browser. Sign in (email or GitHub / Google OAuth), create an API key, and paste it back. The key lives in `~/.config/floom/credentials` — don't commit it.
+Create an API key at `https://floom.dev/me/api-keys`, then save it with the command above. The key lives in `~/.floom/config.json` — don't commit it.
 
 ## 3. Scaffold your first app
 
 ```bash
-floom init hello-floom
+mkdir hello-floom
 cd hello-floom
+floom init \
+  --name "Petstore" \
+  --description "List and create pets from the Swagger Petstore API." \
+  --openapi-url https://petstore3.swagger.io/api/v3/openapi.json
 ```
 
-You'll get four files:
+You'll get one manifest:
 
 ```
-floom.yaml        # manifest — inputs, output, auth, secrets
-main.py           # your code — runs inside a sandbox
-requirements.txt  # Python deps
-README.md
+floom.yaml        # manifest — OpenAPI URL, slug, visibility, metadata
 ```
 
-Open `floom.yaml`. It's a single action called `run` with one text input and a text output. That's enough for your first deploy — no edits needed yet.
+Open `floom.yaml`. It wraps the OpenAPI service and lets Floom expose the same app through the web UI, MCP, and HTTP.
 
 ## 4. Deploy
 
@@ -64,8 +65,9 @@ The first deploy builds a container image (≤ 10 min). Subsequent deploys reuse
 When it's done you'll see:
 
 ```
-✓ Deployed hello-floom
-  https://floom.dev/p/hello-floom
+Published: Petstore
+  App page:    https://floom.dev/p/petstore
+  MCP URL:     https://floom.dev/mcp/app/petstore
 ```
 
 ## 5. Run it
@@ -84,28 +86,28 @@ Add this to your Claude Desktop or Cursor config (`~/.config/claude-desktop/clau
 {
   "mcpServers": {
     "floom": {
-      "url": "https://floom.dev/mcp/<your-slug>"
+      "url": "https://floom.dev/mcp/app/<your-slug>"
     }
   }
 }
 ```
 
-Restart the agent. Your app shows up as a callable tool. Ask Claude to "use hello-floom with input 'hi' and show me the output".
+Restart the agent. Your app shows up as callable tools from its OpenAPI actions.
 
 ### From a script
 
 ```bash
-curl -X POST https://floom.dev/api/run/<your-slug> \
+curl -X POST https://floom.dev/api/<your-slug>/run \
   -H "Authorization: Bearer $FLOOM_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"input_text": "hello"}'
+  -d '{"action": "listPets", "inputs": {}}'
 ```
 
 All three transports share the same auth, rate limits, secret injection, and output log.
 
 ## 6. Iterate
 
-Edit `main.py` — do whatever real work you want (call an LLM, hit an API, process a file). Bump a secret into `floom.yaml`'s `secrets_needed` list if you need one. Then:
+Edit `floom.yaml` to change metadata, visibility, retention, or the OpenAPI URL. Then:
 
 ```bash
 floom deploy

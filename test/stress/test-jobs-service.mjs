@@ -60,6 +60,12 @@ db.prepare(
 );
 
 const app = db.prepare('SELECT * FROM apps WHERE id = ?').get(appId);
+const ctx = {
+  workspace_id: 'ws_jobs',
+  user_id: 'user_jobs',
+  device_id: 'device_jobs',
+  is_authenticated: true,
+};
 
 console.log('jobs service tests');
 
@@ -70,6 +76,7 @@ const created = jobs.createJob(jobId, {
   action: 'run',
   inputs: { msg: 'hello' },
   perCallSecrets: { API_KEY: 'secret' },
+  ctx,
 });
 log('createJob: row is queued', created.status === 'queued', created.status);
 log('createJob: input_json captured', created.input_json.includes('hello'));
@@ -78,6 +85,9 @@ log('createJob: timeout_ms defaulted from app', created.timeout_ms === 60_000);
 log('createJob: max_retries from app', created.max_retries === 2);
 log('createJob: attempts=0', created.attempts === 0);
 log('createJob: per_call_secrets_json stored', created.per_call_secrets_json.includes('secret'));
+log('createJob: workspace_id stored', created.workspace_id === 'ws_jobs');
+log('createJob: user_id stored', created.user_id === 'user_jobs');
+log('createJob: device_id stored', created.device_id === 'device_jobs');
 
 // 2. getJob returns the row
 const fetched = jobs.getJob(jobId);
@@ -110,6 +120,7 @@ jobs.createJob(failedId, {
   app,
   action: 'run',
   inputs: { msg: 'fail' },
+  ctx,
 });
 jobs.claimJob(failedId);
 const failedRow = jobs.failJob(failedId, { message: 'boom', type: 'runtime_error' }, null);
@@ -118,7 +129,7 @@ log('failJob: error_json contains message', failedRow.error_json.includes('boom'
 
 // 8. cancelJob
 const cancelId = newJobId();
-jobs.createJob(cancelId, { app, action: 'run', inputs: {} });
+jobs.createJob(cancelId, { app, action: 'run', inputs: {}, ctx });
 const cancelled = jobs.cancelJob(cancelId);
 log('cancelJob: status=cancelled', cancelled.status === 'cancelled');
 
@@ -128,7 +139,7 @@ log('cancelJob: terminal row stays terminal', reCancel.status === 'failed');
 
 // 10. requeueJob flips failed → queued and clears state
 const requeueId = newJobId();
-jobs.createJob(requeueId, { app, action: 'run', inputs: {} });
+jobs.createJob(requeueId, { app, action: 'run', inputs: {}, ctx });
 jobs.claimJob(requeueId);
 jobs.failJob(requeueId, { message: 'fail' }, null);
 const requeued = jobs.requeueJob(requeueId);
@@ -140,6 +151,9 @@ log('requeueJob: attempts preserved', requeued.attempts === 1);
 const formatted = jobs.formatJob(done);
 log('formatJob: exposes parsed output', formatted.output && formatted.output.result === 42);
 log('formatJob: does not leak per_call_secrets_json', !('per_call_secrets_json' in formatted));
+log('formatJob: does not leak workspace_id', !('workspace_id' in formatted));
+log('formatJob: does not leak user_id', !('user_id' in formatted));
+log('formatJob: does not leak device_id', !('device_id' in formatted));
 
 // 12. countJobsByStatus
 const nQueued = jobs.countJobsByStatus('queued');

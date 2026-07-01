@@ -8,8 +8,8 @@ Floom surfaces three URLs that matter to an MCP client. Pick the one that matche
 
 | Surface | URL | What it does | Auth |
 |---|---|---|---|
-| **Run an app** | `https://mcp.floom.dev/app/<slug>` | One MCP endpoint per published app. Invoke with JSON input, get structured JSON back. | None for public apps. Bearer token for private / paid apps. |
-| **Discover apps** | `https://mcp.floom.dev/search` | List and search every public app. The agent can pick a tool at runtime. | None. |
+| **Run an app** | `https://floom.dev/mcp/app/<slug>` | One MCP endpoint per published app. Invoke with JSON input, get structured JSON back. | None for public apps. Bearer token for private / paid apps. |
+| **Discover apps** | `https://floom.dev/mcp/search` | List and search every public app. The agent can pick a tool at runtime. | None. |
 | **Manage your apps** | `https://floom.dev/studio` | Web UI to create, update, redeploy, rotate secrets. **Not** an MCP endpoint. | Your Floom account. |
 
 Most users wire `/search` plus one or two `/app/<slug>` endpoints and do everything else from the Studio.
@@ -24,11 +24,11 @@ Open the config file and add entries under `mcpServers`.
 ```json
 {
   "mcpServers": {
-    "floom-search":       { "url": "https://mcp.floom.dev/search" },
-    "floom-lead-scorer":  { "url": "https://mcp.floom.dev/app/lead-scorer" },
+    "floom-search":       { "url": "https://floom.dev/mcp/search" },
+    "floom-lead-scorer":  { "url": "https://floom.dev/mcp/app/lead-scorer" },
     "floom-resume-screener": {
-      "url": "https://mcp.floom.dev/app/resume-screener",
-      "headers": { "Authorization": "Bearer flm_live_..." }
+      "url": "https://floom.dev/mcp/app/resume-screener",
+      "headers": { "Authorization": "Bearer floom_agent_..." }
     }
   }
 }
@@ -43,7 +43,7 @@ Claude Code reads `~/.config/claude-code/mcp.json` (Mac / Linux) or the equivale
 ```json
 {
   "mcpServers": {
-    "floom-lead-scorer": { "url": "https://mcp.floom.dev/app/lead-scorer" }
+    "floom-lead-scorer": { "url": "https://floom.dev/mcp/app/lead-scorer" }
   }
 }
 ```
@@ -57,8 +57,8 @@ Cursor reads `~/.cursor/mcp.json`. Same shape as Claude Desktop.
 ```json
 {
   "mcpServers": {
-    "floom-lead-scorer": { "url": "https://mcp.floom.dev/app/lead-scorer" },
-    "floom-competitor":  { "url": "https://mcp.floom.dev/app/competitor-analyzer" }
+    "floom-lead-scorer": { "url": "https://floom.dev/mcp/app/lead-scorer" },
+    "floom-competitor":  { "url": "https://floom.dev/mcp/app/competitor-analyzer" }
   }
 }
 ```
@@ -72,8 +72,8 @@ Codex CLI reads `~/.codex/mcp.json`. Same schema.
 ```json
 {
   "mcpServers": {
-    "floom-search":     { "url": "https://mcp.floom.dev/search" },
-    "floom-competitor": { "url": "https://mcp.floom.dev/app/competitor-analyzer" }
+    "floom-search":     { "url": "https://floom.dev/mcp/search" },
+    "floom-competitor": { "url": "https://floom.dev/mcp/app/competitor-analyzer" }
   }
 }
 ```
@@ -82,21 +82,21 @@ Codex CLI reads `~/.codex/mcp.json`. Same schema.
 
 Anything that speaks the MCP spec works: VS Code Continue, Zed, OpenAI ChatGPT's MCP bridge. The URL shape never changes:
 
-- Specific app: `https://mcp.floom.dev/app/<slug>`
-- Discovery: `https://mcp.floom.dev/search`
+- Specific app: `https://floom.dev/mcp/app/<slug>`
+- Discovery: `https://floom.dev/mcp/search`
 
 If your client requires a different transport (stdio instead of HTTP), run the self-hosted Floom image locally and point the client at `http://localhost:3051/mcp/app/<slug>`.
 
 ## Authenticated apps
 
-Private apps and paid apps require a bearer token. Get one from `floom.dev/me/settings` and add it to the `headers` block for that specific server:
+Private apps and paid apps require an agent token. Get one from `floom.dev/me/agent-keys` and add it to the `headers` block for that specific server:
 
 ```json
 {
   "mcpServers": {
     "floom-private-app": {
-      "url": "https://mcp.floom.dev/app/my-private-app",
-      "headers": { "Authorization": "Bearer flm_live_..." }
+      "url": "https://floom.dev/mcp/app/my-private-app",
+      "headers": { "Authorization": "Bearer floom_agent_..." }
     }
   }
 }
