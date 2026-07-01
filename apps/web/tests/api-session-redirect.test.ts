@@ -95,6 +95,52 @@ describe("api session expiry handling", () => {
     expect(headers.get("x-workeros-workspace")).toBe("local-default");
   });
 
+  it("prefers workspace_id from the current URL over stored workspace", async () => {
+    const assign = vi.fn();
+    const storedGet = vi.fn(() => "ws_stored");
+    vi.stubGlobal("window", {
+      location: { pathname: "/workers", search: "?sel=w1&workspace_id=ws_url", assign },
+      localStorage: {
+        getItem: storedGet,
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+      },
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const { api, getActiveWorkspaceId, getPersistedActiveWorkspaceId } = await import("@/lib/api");
+
+    expect(getActiveWorkspaceId()).toBe("ws_url");
+    expect(getPersistedActiveWorkspaceId()).toBe("ws_stored");
+    await api.workers.list();
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("x-workeros-workspace")).toBe("ws_url");
+  });
+
+  it("accepts ws as a workspace_id alias in legacy inbound links", async () => {
+    stubBrowserLocation("/workers", "?sel=w1&ws=ws_alias");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const { api, getActiveWorkspaceId } = await import("@/lib/api");
+
+    expect(getActiveWorkspaceId()).toBe("ws_alias");
+    await api.workers.list();
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("x-workeros-workspace")).toBe("ws_alias");
+  });
+
   it("marks the active workspace cookie Secure on HTTPS only", async () => {
     let written = stubWorkspaceCookieBrowser("https:");
     let mod = await import("@/lib/api");

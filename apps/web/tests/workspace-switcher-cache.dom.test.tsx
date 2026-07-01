@@ -119,4 +119,24 @@ describe("WorkspaceSwitcher cache", () => {
 
     expect(await screen.findByText("New workspace")).toBeInTheDocument();
   });
+
+  it("replaces stale URL workspace params before reload after a workspace switch", async () => {
+    window.history.replaceState(null, "", "/workers?sel=w1&workspace_id=ws_old#source");
+    const { replaceUrlWorkspaceParam } = await import("@/components/layout/WorkspaceSwitcher");
+
+    replaceUrlWorkspaceParam("ws_new");
+
+    expect(window.location.pathname + window.location.search + window.location.hash).toBe(
+      "/workers?sel=w1&workspace_id=ws_new#source",
+    );
+  });
+
+  it("normalizes legacy ws params before reload after a workspace switch", async () => {
+    window.history.replaceState(null, "", "/workers?sel=w1&ws=ws_old");
+    const { replaceUrlWorkspaceParam } = await import("@/components/layout/WorkspaceSwitcher");
+
+    replaceUrlWorkspaceParam("ws_new");
+
+    expect(window.location.pathname + window.location.search).toBe("/workers?sel=w1&workspace_id=ws_new");
+  });
 });

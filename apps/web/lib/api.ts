@@ -19,7 +19,19 @@ function activeWorkspaceCookie(value: string, maxAge: number): string {
   return `${ACTIVE_WORKSPACE_COOKIE_KEY}=${value}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`;
 }
 
+function workspaceIdFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search || "");
+  return params.get("workspace_id") || params.get("ws");
+}
+
 export function getActiveWorkspaceId(): string | null {
+  const urlWorkspace = workspaceIdFromLocation();
+  if (urlWorkspace) return urlWorkspace;
+  return getPersistedActiveWorkspaceId();
+}
+
+export function getPersistedActiveWorkspaceId(): string | null {
   const value = safeStorageGet("local", ACTIVE_WORKSPACE_STORAGE_KEY);
   return value || "local-default";
 }

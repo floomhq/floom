@@ -62,6 +62,7 @@ const workerDetail = {
 };
 
 vi.mock("@/lib/api", () => ({
+  getPersistedActiveWorkspaceId: vi.fn(() => "local-default"),
   api: {
     workers: {
       list: vi.fn().mockResolvedValue([worker]),

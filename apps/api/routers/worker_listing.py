@@ -329,6 +329,7 @@ def list_workers(
         result.append(
             WorkerListSummary(
                 id=w["id"],
+                workspace_id=w.get("workspace_id") or "local-default",
                 name=w["name"],
                 created_at=w.get("created_at"),
                 updated_at=w.get("updated_at"),
