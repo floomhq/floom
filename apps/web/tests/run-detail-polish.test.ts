@@ -6,6 +6,12 @@ function read(path: string) {
   return readFileSync(join(process.cwd(), path), "utf8");
 }
 
+function sourceBetween(src: string, startName: string, endName: string) {
+  const start = src.indexOf(`function ${startName}`);
+  const end = src.indexOf(`function ${endName}`, start + 1);
+  return src.slice(start, end === -1 ? undefined : end);
+}
+
 describe("standalone run detail polish", () => {
   it("renders a structured skeleton instead of a plain loading sentence", () => {
     const src = read("app/runs/[id]/RunDetailPageClient.tsx");
@@ -17,9 +23,14 @@ describe("standalone run detail polish", () => {
 
   it("keeps the timeline rail compact and metrics adaptive", () => {
     const src = read("components/RunDetailSplitPane.tsx");
+    const metricsSource = sourceBetween(src, "RunMetricsStrip", "TimelineRow");
 
-    expect(src).toContain("md:w-[280px]");
-    expect(src).toContain("md:max-w-[320px]");
-    expect(src).toContain("lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]");
+    expect(src).toContain("showTimelineRail");
+    expect(src).toContain("timeline.length > 1");
+    expect(src).toContain("md:w-[240px]");
+    expect(src).toContain("md:max-w-[280px]");
+    expect(metricsSource).toContain("lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]");
+    expect(metricsSource).toContain("[border:var(--bd-card)] bg-card px-3 py-2");
+    expect(metricsSource).not.toContain("gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)]");
   });
 });
