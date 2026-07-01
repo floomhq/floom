@@ -119,6 +119,14 @@ def _drive_worker_created():
     worker_create._emit_worker_created(worker_id="wkr-1", owner_id="owner-1", config=_Config())
 
 
+def _drive_worker_scheduled():
+    product_events.emit_worker_scheduled(
+        owner_id="owner-1",
+        worker_id="wkr-1",
+        cadence="0 9 * * *",
+    )
+
+
 def _drive_approval_requested():
     run_service._emit_approval_requested(
         approval_id="appr-1",
@@ -290,6 +298,7 @@ _DRIVERS = {
     "run_failed": lambda: _drive_run_lifecycle("failed", error_code="timeout", error="timed out"),
     "run_cancelled": lambda: _drive_run_lifecycle("cancelled", error_code="cancelled"),
     "worker_created": _drive_worker_created,
+    "worker_scheduled": _drive_worker_scheduled,
     "worker_updated": _drive_worker_updated,
     "worker_archived": _drive_worker_archived,
     "worker_deleted": _drive_worker_deleted,

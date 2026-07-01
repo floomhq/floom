@@ -79,6 +79,8 @@ class TestRunLifecycleEmit:
         props = call["properties"]
         assert props["run_id"] == "run-1"
         assert props["worker_id"] == "wkr-1"
+        assert props["workspace_id"] == "local-default"
+        assert props["duration_ms"] == 0
         assert props["trigger_source"] == "manual"
         assert props["runner"] == "e2b"
         assert props["input_present"] is True
@@ -94,6 +96,8 @@ class TestRunLifecycleEmit:
         assert len(emit.calls) == 1
         props = emit.calls[0]["properties"]
         assert emit.calls[0]["event"] == "run_completed"
+        assert props["workspace_id"] == "local-default"
+        assert "duration_ms" in props
         assert props["total_tokens"] == 4242
         assert props["total_cost_usd"] == 0.05
         assert "error_category" not in props
@@ -103,6 +107,8 @@ class TestRunLifecycleEmit:
         assert len(emit.calls) == 1
         props = emit.calls[0]["properties"]
         assert emit.calls[0]["event"] == "run_failed"
+        assert props["workspace_id"] == "local-default"
+        assert "duration_ms" in props
         expected = run_metrics.classify_failure(
             error_code="timeout", error="Agent run exceeded timeout of 300s"
         )

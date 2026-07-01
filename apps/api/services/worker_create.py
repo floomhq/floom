@@ -127,6 +127,9 @@ def _emit_worker_created(*, worker_id: str, owner_id: str, config: Any) -> None:
         return
     try:
         has_schedule = bool(getattr(getattr(config, "trigger", None), "cron", None))
+        trigger_type = str(getattr(getattr(config, "trigger", None), "type", "") or "").strip()
+        if not trigger_type:
+            trigger_type = "schedule" if has_schedule else "manual"
         tool_count = len(getattr(config, "connections", None) or []) + len(
             getattr(config, "calls", None) or []
         )
@@ -134,16 +137,20 @@ def _emit_worker_created(*, worker_id: str, owner_id: str, config: Any) -> None:
         runtime = getattr(config, "runtime", None)
         if runtime is not None:
             runner = getattr(runtime, "runner", None)
+        workspace_id = derive_workspace_id(owner_id)
         analytics_posthog.capture_event(
             distinct_id=owner_id or "",
             event="worker_created",
             properties={
                 "worker_id": worker_id,
+                "workspace_id": workspace_id,
+                "trigger_type": trigger_type,
+                "created_via": analytics_posthog.current_source(),
                 "has_schedule": has_schedule,
                 "tool_count": tool_count,
                 "runner": runner or None,
             },
-            groups={"workspace": derive_workspace_id(owner_id)},
+            groups={"workspace": workspace_id},
         )
     except Exception:  # pragma: no cover
         logger.debug("PostHog worker_created emit failed for %s", worker_id, exc_info=True)

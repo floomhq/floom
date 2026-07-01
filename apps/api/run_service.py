@@ -1426,12 +1426,15 @@ def _emit_run_lifecycle_event(
         props: Dict[str, Any] = {
             "run_id": run_id,
             "worker_id": worker_id or None,
+            "workspace_id": workspace_id or None,
             "status": status,
             "trigger_source": trigger_source,
             "runner": runner,
+            "duration_ms": _run_duration_ms(run_row) if event == "run_started" else None,
         }
 
         if event == "run_started":
+            props["duration_ms"] = 0 if props["duration_ms"] is None else props["duration_ms"]
             props.update(
                 {
                     "input_bytes": input_bytes,

@@ -2991,6 +2991,13 @@ def update_worker(
     )
     if trigger_changed:
         base_trigger = (worker.get("config") or {}).get("trigger") or {}
+        previous_type = str(
+            worker.get("trigger_type")
+            or base_trigger.get("type")
+            or "manual"
+        ).strip().lower()
+        if previous_type == "cron":
+            previous_type = "schedule"
         effective_type = (
             payload.trigger_type
             or worker.get("trigger_type")
@@ -3023,6 +3030,18 @@ def update_worker(
             triggers=declared_triggers,
             enabled=bool(worker.get("enabled", True)),
         )
+        if previous_type == "manual" and effective_type == "schedule":
+            try:
+                from services.product_events import emit_worker_scheduled
+
+                emit_worker_scheduled(
+                    owner_id=auth.user_id,
+                    worker_id=worker_id,
+                    cadence=str(effective_cron or "0 9 * * *"),
+                    workspace_id=derive_workspace_id(auth.user_id),
+                )
+            except Exception:
+                logger.debug("PostHog worker_scheduled emit failed for %s", worker_id, exc_info=True)
 
         from worker_registry import WORKERS_DIR
         worker_yml_path = WORKERS_DIR / worker_id / "worker.yml"
