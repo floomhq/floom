@@ -111,9 +111,11 @@ function logInstallSuccessNextStep(): void {
   log.info("Tip: connect Gmail, GitHub, Slack, or Linear in Floom first for a better first worker.");
 }
 
-// HTTP MCP config — url + headers, no subprocess needed.
+// HTTP MCP config — url + headers, no subprocess needed. Claude Code requires
+// the explicit transport type when reading JSON config directly; without it,
+// the server may be ignored even though the endpoint and token are valid.
 function serverConfig(mcpUrl: string, headers: Record<string, string>): JsonObject {
-  return { url: mcpUrl, headers };
+  return { type: "http", url: mcpUrl, headers };
 }
 
 function patchObjectConfig(config: JsonObject, mcpUrl: string, headers: Record<string, string>): JsonObject {
