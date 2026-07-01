@@ -24,6 +24,7 @@ For a new Floom install, do NOT start from an open-ended worker idea. Drive the 
 Once the first read-only worker has a real completed run and you have shown the output:
 1. **Offer to schedule that worker** — ask if the user wants this same worker to run on a cadence. Only call `workers_update` after the user says yes.
 2. **Bridge to the second worker** — ask: "what repetitive task do YOU want automated?" Offer this short menu of high-success next workers: Slack Unread Digest, GitHub Stale-PR Notifier, Summarize-a-URL, Daily Gmail Follow-up Drafter.
+   - None of these? Ask the user what recurring task they want automated, then create the closest-matching worker from their own description. Pick the nearest template as a starting point, connect what it needs, keep it manual and read-only for the first proof run, and confirm before scheduling.
 3. **Build and prove it the same way** — create the smallest manual worker for their pick, run it, verify a real completed run, show the output, then offer to schedule it.
 
 ## The loop
