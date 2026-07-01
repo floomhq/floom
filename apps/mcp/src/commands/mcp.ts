@@ -98,8 +98,19 @@ async function writeAndLogFloomSkill(
 
 function logInstallSuccessNextStep(): void {
   log.blank();
-  log.ok("Floom is connected.");
-  log.info('Next, tell your agent:  "Use Floom to create, run, and verify a simple daily worker for <your task>."');
+  log.ok("Floom is installed.");
+  log.info("Run your first worker now — paste this into your agent:");
+  log.blank();
+  log.info([
+    "'Use Floom to create and run my first worker now.",
+    "First check my Floom connections.",
+    "If Gmail is connected, create a manual read-only Gmail Intake Brief worker",
+    "(in:inbox newer_than:14d, max 10) that outputs a markdown brief of important messages,",
+    "decisions, blockers, and next actions; run it immediately, watch the run, and show me the result.",
+    "If Gmail is not connected but GitHub is, create+run a manual read-only GitHub Stalest PRs worker:",
+    "open PRs involving me, sorted by age, output the 5 stalest with owner/repo/age/URL and a recommended next action.",
+    "Do not schedule anything yet — prove value with one completed run first.'",
+  ].join("\n"));
 }
 
 // HTTP MCP config — url + headers, no subprocess needed.
