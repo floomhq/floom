@@ -46,7 +46,7 @@ describe("medium issue batch source guards", () => {
     expect(source).toContain('aria-label="Supported MCP clients"');
     // The install snippet stays token-free, but the modal must also expose the
     // workspace-token create/copy path so first-run setup is complete.
-    expect(source).toContain("Agent install");
+    expect(source).toMatch(/<h2[^>]*>MCP setup<\/h2>/);
     expect(source).toContain("buildMcpJson");
     expect(source).not.toContain('href="/settings?sel=personal_tokens"');
     expect(source).toContain("api.workspace.tokens.create");
