@@ -109,9 +109,27 @@ test("login help shows hosted default and local override", async () => {
 test("package README documents hosted login default", () => {
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
   assert.match(readme, /\*\*Hosted\*\* \(default\)/);
+  assert.match(readme, /hosted Floom Cloud by default/);
   assert.match(readme, /floom login --local/);
   assert.doesNotMatch(readme, /Self-hosted\*\* \(default\)/);
   assert.doesNotMatch(readme, /floom login --api/);
+});
+
+test("bundled Floom skill opens with hosted cloud guidance", () => {
+  const skill = readFileSync(new URL("../assets/floom-skill.md", import.meta.url), "utf8");
+  const firstGuidance = skill.split("---", 3)[2].trimStart().split("\n").slice(0, 4).join("\n");
+  assert.match(firstGuidance, /You are using HOSTED Floom/);
+  assert.match(firstGuidance, /Do NOT set up or configure self-hosting/);
+  assert.match(firstGuidance, /do NOT create\/edit a \.env/);
+  assert.match(firstGuidance, /do NOT run a local server/);
+  assert.match(firstGuidance, /Everything runs on Floom's cloud; you only use the MCP tools/);
+});
+
+test("install success prompt keeps agents on hosted MCP tools", () => {
+  const src = readFileSync(new URL("../src/commands/mcp.ts", import.meta.url), "utf8");
+  assert.match(src, /hosted Floom Cloud at workeros-api\.floom\.dev/);
+  assert.match(src, /do not set up self-hosting, edit \.env files, or run a local server/);
+  assert.match(src, /use only the Floom MCP tools/);
 });
 
 test("auth error hint uses the invoked binary name (workeros login)", async () => {
