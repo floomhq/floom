@@ -151,6 +151,67 @@ def test_composio_proxy_accepts_script_worker_call_token_header(monkeypatch, tmp
     db.get_repositories.cache_clear()
 
 
+def test_composio_proxy_accepts_public_connection_row_id(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    repos = db.get_repositories()
+    manifest = {
+        "id": "gmail-worker",
+        "name": "Gmail Worker",
+        "trigger": {"type": "manual"},
+        "runtime": {"type": "python", "entrypoint": "run.py", "runner": "e2b"},
+        "connections": [{"app": "gmail", "allowed_tools": ["GMAIL_FETCH_EMAILS"]}],
+    }
+    repos.workers.create(
+        user_id="owner-a",
+        worker_id="gmail-worker",
+        name="Gmail Worker",
+        manifest_json=manifest,
+        bundle_path="workers/gmail-worker",
+    )
+    repos.runs.create(
+        user_id="owner-a",
+        run_id="run-gmail",
+        worker_id="gmail-worker",
+        status="running",
+        trigger_source="manual",
+        runner="e2b",
+    )
+    repos.connections.upsert(
+        user_id="owner-a",
+        id="public-conn-row",
+        app_name="gmail",
+        composio_connection_id="ca_private_gmail",
+        status="active",
+    )
+
+    captured = {}
+
+    class _Response:
+        def json(self):
+            return {"successful": True, "data": {"messages": []}}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return _Response()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    client = TestClient(main.app)
+    resp = client.post(
+        "/runs/run-gmail/composio-execute/GMAIL_FETCH_EMAILS",
+        headers=_run_headers("run-gmail"),
+        json={"connected_account_id": "public-conn-row", "arguments": {"query": "is:unread"}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["url"].endswith("/GMAIL_FETCH_EMAILS")
+    assert captured["json"]["connected_account_id"] == "ca_private_gmail"
+    assert captured["json"]["entity_id"] == "owner-a"
+    assert captured["json"]["arguments"] == {"query": "is:unread"}
+    db.get_repositories.cache_clear()
+
+
 def test_composio_proxy_simple_run_token_uses_shared_worker_call_secret(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     repos = db.get_repositories()

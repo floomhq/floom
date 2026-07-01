@@ -115,6 +115,27 @@ def _worker_yml(worker_id: str) -> str:
     ).strip()
 
 
+def _worker_ts_yml(worker_id: str) -> str:
+    return textwrap.dedent(
+        f"""
+        schema_version: "0.3"
+        name: "{worker_id}"
+        title: t
+        description: d
+        version: "0.1.0"
+        exec:
+          entry: run.ts
+          runtime: typescript
+          runner: e2b
+          command: npx tsx run.ts
+          inputs: []
+          outputs: []
+        trigger:
+          type: manual
+        """
+    ).strip()
+
+
 # ---------------------------------------------------------------------------
 # M-01 — workers.create via /api/mcp must create a worker (not -32603)
 # ---------------------------------------------------------------------------
@@ -150,6 +171,57 @@ def test_m01_workers_create_via_mcp_creates_worker(monkeypatch, tmp_path):
             headers=_auth_headers(),
         )
     assert listed.json()["result"]["isError"] is False
+
+
+def test_m01_workers_create_via_mcp_accepts_typescript_worker(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/call", params={
+                "name": "workers.create",
+                "arguments": {
+                    "worker_yml": _worker_ts_yml("m01-ts-created"),
+                    "run_ts": "console.log('hi');\n",
+                },
+            })),
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "error" not in body, body
+    result = body["result"]
+    assert result["isError"] is False, result
+    assert result["structuredContent"]["id"] == "m01-ts-created"
+
+    with TestClient(main.app) as client:
+        listed = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/call", request_id=2, params={
+                "name": "workers.get", "arguments": {"id": "m01-ts-created"},
+            })),
+            headers=_auth_headers(),
+        )
+    assert listed.json()["result"]["isError"] is False
+    file_paths = {item["path"] for item in listed.json()["result"]["structuredContent"]["files"]}
+    assert "worker.yml" in file_paths
+    assert "run.ts" in file_paths
+
+
+def test_m01_workers_create_schema_advertises_typescript_without_run_py_required(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/list")),
+            headers=_auth_headers(),
+        )
+    assert resp.status_code == 200, resp.text
+    create_tool = next(tool for tool in resp.json()["result"]["tools"] if tool["name"] == "workers.create")
+    schema = create_tool["inputSchema"]
+    assert "run_ts" in schema["properties"]
+    assert "files" in schema["properties"]
+    assert schema["required"] == ["worker_yml"]
 
 
 # ---------------------------------------------------------------------------

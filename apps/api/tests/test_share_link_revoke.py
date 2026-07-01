@@ -105,6 +105,28 @@ def test_create_then_revoke_worker_share_link(client_and_main):
     assert _token_count(main) == 1
 
 
+def test_reshare_keeps_prior_worker_link_until_revoke(client_and_main):
+    client, main = client_and_main
+    first = client.post("/workers/shareable/share-link")
+    second = client.post("/workers/shareable/share-link")
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["token"] != second.json()["token"]
+    assert _token_count(main) == 2
+
+    from fastapi.testclient import TestClient
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    assert anon.get(f"/s/{first.json()['token']}").status_code == 200
+    assert anon.get(f"/s/{second.json()['token']}").status_code == 200
+
+    revoked = client.delete("/workers/shareable/share-link")
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["revoked"] is True
+    assert _token_count(main) == 0
+    assert anon.get(f"/s/{first.json()['token']}").status_code == 404
+    assert anon.get(f"/s/{second.json()['token']}").status_code == 404
+
+
 def test_revoke_unknown_worker_404(client_and_main):
     client, _ = client_and_main
     assert client.delete("/workers/does-not-exist/share-link").status_code == 404

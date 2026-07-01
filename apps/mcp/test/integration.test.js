@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -266,6 +266,15 @@ async function startMockApi() {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/workers/mcp-test-worker/share-link") {
+      json(response, 200, {
+        token: "fls_mcpTestShareToken",
+        url: "https://floom.dev/s/fls_mcpTestShareToken",
+        entity_type: "worker",
+      });
+      return;
+    }
+
     if (request.method === "PATCH" && url.pathname === "/workers/missing") {
       await readBody(request);
       json(response, 404, { detail: "Worker not found" });
@@ -479,6 +488,7 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
       "workers.contract",
       "workers.list",
       "workers.run",
+      "workers.share",
       "workers.templates.get",
       "workers.templates.list",
       "workers.update",
@@ -567,6 +577,10 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     });
     assert.equal(updated.structuredContent.trigger_type, "schedule");
 
+    const shared = await client.callTool({ name: "workers.share", arguments: { id: "mcp-test-worker" } });
+    assert.equal(shared.structuredContent.entity_type, "worker");
+    assert.equal(shared.structuredContent.url, "https://floom.dev/s/fls_mcpTestShareToken");
+
     const run = await client.callTool({
       name: "workers.run",
       arguments: { id: "mcp-test-worker", inputs: { message: "hello" } },
@@ -612,6 +626,7 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     "POST /workers",
     "GET /workers/mcp-test-worker",
     "PATCH /workers/mcp-test-worker",
+    "POST /workers/mcp-test-worker/share-link",
     "POST /workers/mcp-test-worker/runs",
     "GET /runs",
     "GET /runs/run_test",
@@ -887,6 +902,9 @@ test("install subcommand patches agent config idempotently", async () => {
     assert.equal(config.mcpServers.floom.command, undefined);
     assert.equal(config.mcpServers.floom.args, undefined);
     assert.deepEqual(Object.keys(config.mcpServers).sort(), ["existing", "floom"]);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+    }
   } finally {
     await rm(home, { recursive: true, force: true });
   }
@@ -1013,6 +1031,9 @@ test("mcp add patches agent config", async () => {
     assert.equal(config.mcpServers.floom.headers["x-floom-secret"], "test-secret");
     assert.equal(config.mcpServers.floom.command, undefined);
     assert.equal(config.mcpServers.floom.args, undefined);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+    }
   } finally {
     await rm(home, { recursive: true, force: true });
   }

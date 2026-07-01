@@ -59,6 +59,7 @@ logger = logging.getLogger("floom.api")
 
 connections_router = APIRouter()
 _CONNECTION_LIST_CACHE_TTL_SECONDS = 10.0
+_AUTHORIZE_LINK_TTL_SECONDS = 900
 _connection_list_cache_lock = threading.Lock()
 _connection_list_cache: Dict[str, tuple[float, List["ConnectionItem"]]] = {}
 _OAUTH_STATE_FALLBACK_SECRET = pysecrets.token_urlsafe(32)
@@ -312,9 +313,31 @@ def _is_allowed_composio_redirect_url(redirect_url: str) -> bool:
     )
 
 
-def _branded_authorize_url(redirect_url: str, user_id: str) -> str:
-    token = _issue_authorize_token(redirect_url=redirect_url, user_id=user_id)
-    return f"{_get_frontend_url()}/api/proxy/connections/authorize/{token}"
+def _branded_authorize_url(connection_id: str) -> str:
+    return f"{_get_frontend_url()}/api/proxy/connections/{connection_id}/authorize"
+
+
+def _authorize_redirect_url_for_connection(connection_id: str, repos: Repositories) -> str:
+    try:
+        _uuid_mod.UUID(str(connection_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid authorization link") from exc
+
+    existing = repos.connections.get_by_id(composio_id=connection_id)
+    if not existing or (existing.get("kind") or "composio") != "composio":
+        raise HTTPException(status_code=400, detail="Invalid authorization link")
+
+    created_at = _parse_iso_timestamp(existing.get("created_at"))
+    if (
+        created_at is None
+        or (datetime.now(timezone.utc) - created_at).total_seconds() > _AUTHORIZE_LINK_TTL_SECONDS
+    ):
+        raise HTTPException(status_code=400, detail="Authorization link expired")
+
+    redirect_url = str(existing.get("oauth_redirect_url") or "")
+    if not _is_allowed_composio_redirect_url(redirect_url):
+        raise HTTPException(status_code=400, detail="Invalid authorization target")
+    return redirect_url
 
 
 def _callback_url_with_state(callback_url: str, state: str) -> str:
@@ -1381,19 +1404,20 @@ def initiate_connection(
         _raise_composio_unavailable(exc)
 
     composio_conn_id = result["composio_connection_id"]
-    redirect_url = _branded_authorize_url(result["redirect_url"], auth.user_id)
     # Always insert a new row — multiple accounts per app are allowed.
     # Each Composio connected_account is a distinct row identified by its own UUID.
     # (Stale expired siblings are hidden from the UI by list_connections once an
     # active connection exists for the app — see the suppression there. We do NOT
     # reuse/replace rows here, which would break genuine multi-account support.)
     conn_id = str(_uuid_mod.uuid4())
+    redirect_url = _branded_authorize_url(conn_id)
     now = now_iso()
     repos.connections.upsert(
         user_id=auth.user_id,
         id=conn_id,
         app_name=app_name,
         composio_connection_id=composio_conn_id,
+        oauth_redirect_url=result["redirect_url"],
         status="initiated",
         created_at=now,
         updated_at=now,
@@ -1414,6 +1438,16 @@ def initiate_connection(
         redirect_url=redirect_url,
         composio_connection_id=composio_conn_id,
     )
+
+
+@connections_router.get("/connections/{connection_id}/authorize")
+def authorize_connection_by_id(
+    connection_id: str,
+    repos: Repositories = Depends(get_repos),
+):
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url=_authorize_redirect_url_for_connection(connection_id, repos))
 
 
 @connections_router.get("/connections/authorize/{token}")

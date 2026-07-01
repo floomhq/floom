@@ -679,6 +679,12 @@ def _ensure_mcp_connection_columns(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_connection_oauth_redirect_url_column(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "composio_connections")
+    if "oauth_redirect_url" not in columns:
+        conn.execute("ALTER TABLE composio_connections ADD COLUMN oauth_redirect_url TEXT")
+
+
 def _ensure_runs_artifacts_archived_column(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "runs")
     if "artifacts_archived" not in columns:
@@ -2193,6 +2199,14 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_worker_rules_worker_active
         ON worker_rules(workspace_id, worker_id, archived_at, created_at);
     """,
+    # -- migration 90: short OAuth authorize URLs -----------------------------
+    _ensure_connection_oauth_redirect_url_column,
+    # -- migration 91: workspace stamp for local custom MCP tools -------------
+    """
+    ALTER TABLE mcp_tools ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'local-default';
+    CREATE INDEX IF NOT EXISTS idx_mcp_tools_workspace_user
+        ON mcp_tools(workspace_id, user_id);
+    """,
 ]
 
 
@@ -2211,7 +2225,7 @@ def get_current_version(conn: sqlite3.Connection) -> int:
 def apply_migrations():
     with get_db() as conn:
         current = get_current_version(conn)
-    duplicate_column_tolerant = {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82, 86}
+    duplicate_column_tolerant = {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82, 86, 91}
     for i, migration in enumerate(MIGRATIONS, start=1):
         if i > current:
             with get_db() as conn:

@@ -1411,7 +1411,7 @@ class WorkerLimits(BaseModel):
         return min(v, float(_ceiling_from_env("FLOOM_MAX_MONTHLY_COST_USD", 100_000)))
 
 
-_SCRIPT_ENTRY_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js")
+_SCRIPT_ENTRY_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js", ".ts")
 _AGENT_ENTRY_SUFFIXES: tuple[str, ...] = (".md",)
 
 
@@ -1422,7 +1422,7 @@ def _infer_mode_from_entry(entry: str) -> Literal["agent", "pure-script"]:
     if lower.endswith(_SCRIPT_ENTRY_SUFFIXES):
         return "pure-script"
     raise ValueError(
-        f"exec.entry must end in .md (agent) or .py/.sh/.js (script); got {entry!r}"
+        f"exec.entry must end in .md (agent) or .py/.sh/.js/.ts (script); got {entry!r}"
     )
 
 
@@ -1444,12 +1444,14 @@ def _default_command_from_entry(entry: str) -> Optional[str]:
         return f"bash {entry}"
     if lower.endswith(".js"):
         return f"node {entry}"
+    if lower.endswith(".ts"):
+        return f"npx --yes tsx {entry}"
     return None
 
 
 class WorkerContractExec(BaseModel):
     command: Optional[str] = None
-    runtime: Literal["python311", "node22", "bash", "skill", "none"] = "skill"
+    runtime: Literal["python311", "node22", "typescript", "ts", "bash", "skill", "none"] = "skill"
     # E2B-only execution. Workers must run in sandboxed microVMs. The
     # Legacy local runner declarations get coerced to `e2b` for
     # backward-compatibility with old worker.yml files (in-process executor
@@ -1461,7 +1463,7 @@ class WorkerContractExec(BaseModel):
     # template id via WORKEROS_E2B_TEMPLATE_PROFILE_<NAME>. Profiles are logical
     # names, not raw template ids, so hosted infra controls stay operator-owned.
     template_profile: Optional[str] = None
-    # PR S11: `entry` is the canonical mode signal. `.md` -> agent, `.py/.sh/.js` -> script.
+    # PR S11: `entry` is the canonical mode signal. `.md` -> agent, `.py/.sh/.js/.ts` -> script.
     # `mode` is a deprecated alias retained for back-compat; if both are absent we infer
     # from `command` / `runtime` (legacy path).
     entry: Optional[str] = None
@@ -1543,8 +1545,9 @@ class WorkerContractExec(BaseModel):
                 self.entry = "run.py"
         # Engine #211: default exec.command from exec.entry for script modes
         # when the author (often the LLM) omitted it. `.py` -> `python <entry>`,
-        # `.sh` -> `bash <entry>`, `.js` -> `node <entry>`. Only fall back to the
-        # hard error when we genuinely cannot derive a command (no entry).
+        # `.sh` -> `bash <entry>`, `.js` -> `node <entry>`, `.ts` -> `tsx <entry>`.
+        # Only fall back to the hard error when we genuinely cannot derive a
+        # command (no entry).
         if self.mode == "pure-script" and not self.command:
             if self.entry:
                 self.command = _default_command_from_entry(self.entry)
@@ -2334,6 +2337,7 @@ class WorkerSummaryInput(BaseModel):
 
 class WorkerSummary(BaseModel):
     id: str
+    workspace_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     long_description: Optional[str] = None
@@ -2368,9 +2372,11 @@ class WorkerSummary(BaseModel):
     missing_connections: List[str] = Field(default_factory=list)
     inputs: List[Union[WorkerInput, WorkerSummaryInput]] = Field(default_factory=list)  # input descriptors for worker-card icon composition
     runtime: Optional[str] = None  # exec.runtime ("skill", "python311", "node22", …)
-    # Owner-only signed share link to the standalone public worker page
-    # (/w/<id>?token=<hmac>). Lets the worker card render a Share affordance
-    # without a second fetch. Same deterministic HMAC as WorkerDetail.public_link.
+    # Authenticated response field for the signed public runner link
+    # (/w/<id>?token=<hmac>). Present only for workers whose visibility is
+    # public. Unlisted share/import links are minted explicitly by POST
+    # /workers/{id}/share-link because raw share tokens are hashed at rest and
+    # rotate on creation.
     public_link: Optional[str] = None
     # Members STEP 1: ownership + per-asset visibility + computed permissions.
     owner_id: Optional[str] = None
@@ -2389,6 +2395,7 @@ class WorkerFile(BaseModel):
 
 class WorkerDetail(BaseModel):
     id: str
+    workspace_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     long_description: Optional[str] = None
@@ -2438,11 +2445,11 @@ class WorkerDetail(BaseModel):
     # #556: specific secrets/connections required by the worker that are not yet configured.
     missing_secrets: List[str] = Field(default_factory=list)
     missing_connections: List[str] = Field(default_factory=list)
-    # Owner-only signed share link to the standalone public worker page
-    # (/w/<id>?token=<hmac>). Mirrors the approval `public_link` pattern: the
-    # token is a deterministic HMAC the /workers/public/* route verifies, so the
-    # owner can copy this URL to share a read-only "skill card" view of the
-    # worker with anyone — no secrets, source, or run history are exposed there.
+    # Authenticated response field for the signed public runner link
+    # (/w/<id>?token=<hmac>). Mirrors the approval public_link pattern and is
+    # present only for public workers. For private/unlisted source sharing,
+    # clients call POST /workers/{id}/share-link to mint a revocable /s/<token>
+    # URL.
     public_link: Optional[str] = None
     # Set on the response of an edit that transparently forked a read-only stock
     # worker into a user-owned editable copy (clone-on-edit). Carries the source
@@ -2810,8 +2817,8 @@ class WorkspaceStats(BaseModel):
 
 
 class VersionSummary(BaseModel):
-    id: str           # 7-char git SHA
-    sha: str          # same 7-char git SHA
+    id: str           # git SHA or synthetic current marker
+    sha: str          # git SHA or synthetic current marker
     message: str      # commit message
     author: str       # git author name
     timestamp: str    # ISO 8601 commit date

@@ -25,4 +25,8 @@ describe("collection toolbar layout", () => {
     const controlStripRule = cssSource.match(/\.c-controlstrip \{[\s\S]*?\}/)?.[0] ?? "";
     expect(controlStripRule).not.toContain("border-bottom");
   });
+
+  it("uses the design-system focus ring for selected search input focus", () => {
+    expect(cssSource).toContain(".c-srch:focus-within { box-shadow: var(--focus); }");
+  });
 });

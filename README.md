@@ -120,7 +120,7 @@ The full manifest adds `schema_version`, `title`, `version`, and declared `outpu
 
 | | runs in | host isolation | tools | side effects |
 |---|---|---|---|---|
-| **Script** (`run.py` / `.sh` / `.js`) | E2B sandbox microVM | isolated filesystem, env & process; platform secrets withheld | sandbox + declared connections | approval gate when declared |
+| **Script** (`run.py` / `.sh` / `.js` / `.ts`) | E2B sandbox microVM | isolated filesystem, env & process; platform secrets withheld | sandbox + declared connections | approval gate when declared |
 | **Agent** (`SKILL.md`) | AgentDriver in the API process (trusted bundles only) | not microVM-isolated by policy | declared connections, allow-listed | approval gate when declared |
 
 Sandboxes allow public network egress by default and block private/internal ranges; a stricter allowlist is optional. Full trust model: [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -131,7 +131,7 @@ Sandboxes allow public network egress by default and block private/internal rang
 |:---|:---|
 | **What it is** | Self-hosted runtime to create, run, and supervise background AI agents |
 | **Best for** | Recurring agent work: inbox triage, digests, outreach drafting, enrichment, monitoring |
-| **Agent types** | Script (`run.py`/`.sh`/`.js`) and plain-English agent (`SKILL.md`) |
+| **Agent types** | Script (`run.py`/`.sh`/`.js`/`.ts`) and plain-English agent (`SKILL.md`) |
 | **Isolation** | Script workers run in **E2B sandbox microVMs** - isolated host filesystem, env & process; platform secrets withheld |
 | **Triggers** | Manual, schedule (cron), webhook, Composio event |
 | **Safety** | Human-in-the-loop **approvals** for side-effecting agents; tools allow-listed per agent |
@@ -214,7 +214,7 @@ Write your first agent in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md), th
 
 ## How workers execute
 
-Script workers (`.py`/`.sh`/`.js`) run in an **E2B sandbox microVM** by default: isolated dependencies, no host process access, contained resources. A bundle that dumps `os.environ` inside the sandbox sees only sandbox metadata - `FLOOM_SECRET`, provider keys, and `E2B_API_KEY` are all absent. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop and are governed by their declared connections and the approval gate; the current single-tenant policy permits only trusted agent bundles on that path. There is no in-process local script runner. Full trust model: [ARCHITECTURE.md](ARCHITECTURE.md).
+Script workers (`.py`/`.sh`/`.js`/`.ts`) run in an **E2B sandbox microVM** by default: isolated dependencies, no host process access, contained resources. TypeScript workers use the Node runtime with `tsx` (`npx --yes tsx run.ts`) and the same `inputs.json`/`result.json` contract as Python workers. A bundle that dumps `os.environ` inside the sandbox sees only sandbox metadata - `FLOOM_SECRET`, provider keys, and `E2B_API_KEY` are all absent. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop and are governed by their declared connections and the approval gate; the current single-tenant policy permits only trusted agent bundles on that path. There is no in-process local script runner. Full trust model: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Data handling, connected-account safeguards, retention boundaries, and hosted
 Cloud legal surfaces are summarized in [docs/DATA-RETENTION.md](docs/DATA-RETENTION.md).

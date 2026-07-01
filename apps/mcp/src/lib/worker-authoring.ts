@@ -7,6 +7,7 @@ export type WorkerTemplate = {
   mode: "pure-script" | "agent";
   worker_yml: string;
   run_py?: string;
+  run_ts?: string;
   skill_md?: string;
   notes: string[];
 };
@@ -14,6 +15,7 @@ export type WorkerTemplate = {
 export type WorkerDraftValidationInput = {
   worker_yml: string;
   run_py?: string;
+  run_ts?: string;
   skill_md?: string;
 };
 
@@ -36,15 +38,15 @@ export type WorkerDraftValidationResult = {
 
 type JsonObject = Record<string, unknown>;
 
-const SUPPORTED_RUNTIMES = new Set(["python311", "node22", "bash", "skill", "none"]);
+const SUPPORTED_RUNTIMES = new Set(["python311", "node22", "typescript", "ts", "bash", "skill", "none"]);
 
 export const WORKER_AUTHORING_CONTRACT = {
   schema_version: "0.3",
-  required_files: ["worker.yml", "run.py or SKILL.md"],
+  required_files: ["worker.yml", "run.py, run.ts, or SKILL.md"],
   required_top_level_fields: ["schema_version", "name", "title", "description", "version", "exec", "trigger"],
   modes: {
     "pure-script": {
-      entrypoint: "run.py",
+      entrypoint: "run.py or run.ts",
       required_exec_fields: ["entry", "runtime", "runner", "command", "inputs", "outputs"],
       runtime_contract: [
         "Read inputs from inputs.json in the worker root.",
@@ -76,7 +78,7 @@ export const WORKER_AUTHORING_CONTRACT = {
   ],
   validation_order: [
     "Start from workers.templates.get.",
-    "Fill in worker.yml plus run.py or SKILL.md.",
+    "Fill in worker.yml plus run.py, run.ts, or SKILL.md.",
     "Call workers.validate.",
     "Repair all errors before calling workers.create.",
     "After create, run only a safe smoke input and inspect runs.get/runs.watch.",
@@ -276,8 +278,8 @@ if __name__ == "__main__":
   },
 ];
 
-export function listWorkerTemplates(): Array<Omit<WorkerTemplate, "worker_yml" | "run_py" | "skill_md">> {
-  return WORKER_TEMPLATES.map(({ worker_yml: _workerYml, run_py: _runPy, skill_md: _skillMd, ...template }) => template);
+export function listWorkerTemplates(): Array<Omit<WorkerTemplate, "worker_yml" | "run_py" | "run_ts" | "skill_md">> {
+  return WORKER_TEMPLATES.map(({ worker_yml: _workerYml, run_py: _runPy, run_ts: _runTs, skill_md: _skillMd, ...template }) => template);
 }
 
 export function getWorkerTemplate(id: string): WorkerTemplate | undefined {
@@ -353,6 +355,8 @@ function collectEnvReads(runPy: string): string[] {
     /\bos\.environ\s*\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\]/g,
     /\bos\.environ\.get\s*\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']/g,
     /\bos\.getenv\s*\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']/g,
+    /\bprocess\.env\.([A-Za-z_][A-Za-z0-9_]*)\b/g,
+    /\bprocess\.env\s*\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\]/g,
   ];
   for (const pattern of patterns) {
     for (const match of runPy.matchAll(pattern)) {
@@ -372,7 +376,7 @@ function inferMode(manifest: JsonObject): "pure-script" | "agent" | "unknown" {
   const explicit = nonEmptyString(exec?.mode);
   const entry = inferEntrypoint(manifest);
   if (explicit === "agent" || entry === "SKILL.md") return "agent";
-  if (explicit === "pure-script" || entry === "run.py") return "pure-script";
+  if (explicit === "pure-script" || /\.(py|sh|js|ts)$/i.test(entry || "")) return "pure-script";
   return "unknown";
 }
 
@@ -405,7 +409,9 @@ export function validateWorkerDraft(input: WorkerDraftValidationInput): WorkerDr
   const declaredOutputs = parsed.manifest ? collectOutputNames(manifest) : [];
   const declaredSecrets = parsed.manifest ? collectDeclaredSecrets(manifest) : [];
   const declaredConnections = parsed.manifest ? collectConnectionNames(manifest) : [];
-  const envReads = collectEnvReads(input.run_py || "");
+  const scriptSource = entrypoint?.toLowerCase().endsWith(".ts") ? input.run_ts || "" : input.run_py || "";
+  const scriptLabel = entrypoint?.toLowerCase().endsWith(".ts") ? "run.ts" : "run.py";
+  const envReads = collectEnvReads(scriptSource);
 
   if (parsed.manifest) {
     if (manifest.schema_version !== "0.3") errors.push('schema_version must be "0.3"');
@@ -433,8 +439,8 @@ export function validateWorkerDraft(input: WorkerDraftValidationInput): WorkerDr
       errors.push("trigger.type is required");
     }
 
-    if (mode === "unknown") errors.push('worker mode is unknown; use exec.mode "pure-script" with run.py or "agent" with SKILL.md');
-    if (mode === "pure-script" && entrypoint !== "run.py") errors.push('pure-script workers must use exec.entry: "run.py"');
+    if (mode === "unknown") errors.push('worker mode is unknown; use exec.mode "pure-script" with run.py/run.ts or "agent" with SKILL.md');
+    if (mode === "pure-script" && !/\.(py|sh|js|ts)$/i.test(entrypoint || "")) errors.push('pure-script workers must use a script exec.entry such as "run.py" or "run.ts"');
     if (mode === "agent" && entrypoint !== "SKILL.md") errors.push('agent workers must use exec.entry: "SKILL.md"');
 
     for (const field of fieldArray(manifest, "inputs")) {
@@ -449,7 +455,7 @@ export function validateWorkerDraft(input: WorkerDraftValidationInput): WorkerDr
     const capSecrets = collectCapabilityList(manifest, "secrets");
     for (const key of envReads) {
       if (!capSecrets.includes(key)) {
-        errors.push(`run.py reads env ${key}, but worker.yml does not declare it under capabilities.secrets`);
+        errors.push(`${scriptLabel} reads env ${key}, but worker.yml does not declare it under capabilities.secrets`);
       }
     }
 
@@ -462,22 +468,21 @@ export function validateWorkerDraft(input: WorkerDraftValidationInput): WorkerDr
   }
 
   if (mode === "pure-script") {
-    const runPy = input.run_py || "";
-    if (!runPy.trim()) {
-      errors.push("pure-script workers require non-empty run_py");
+    if (!scriptSource.trim()) {
+      errors.push(`pure-script workers require non-empty ${scriptLabel === "run.ts" ? "run_ts" : "run_py"}`);
     } else {
-      if (!/result\.json/.test(runPy)) {
-        errors.push("pure-script run.py must write result.json");
+      if (!/result\.json/.test(scriptSource)) {
+        errors.push(`pure-script ${scriptLabel} must write result.json`);
       }
-      if (/^\s*def\s+run\s*\(\s*inputs\s*,\s*context\s*\)\s*:/m.test(runPy) && /^\s*return\b/m.test(runPy) && !/result\.json/.test(runPy)) {
+      if (scriptLabel === "run.py" && /^\s*def\s+run\s*\(\s*inputs\s*,\s*context\s*\)\s*:/m.test(scriptSource) && /^\s*return\b/m.test(scriptSource) && !/result\.json/.test(scriptSource)) {
         errors.push("pure-script run.py must not rely on SDK-style def run() return values; write result.json instead");
       }
-      if (declaredOutputs.length > 0 && /["']outputs["']\s*:\s*\{\s*\}/.test(runPy)) {
-        errors.push("run.py writes an empty outputs object, but worker.yml declares outputs");
+      if (declaredOutputs.length > 0 && /["']outputs["']\s*:\s*\{\s*\}/.test(scriptSource)) {
+        errors.push(`${scriptLabel} writes an empty outputs object, but worker.yml declares outputs`);
       }
       for (const output of declaredOutputs) {
-        if (!new RegExp(`["']${output.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(runPy)) {
-          errors.push(`declared output ${output} does not appear in run.py; result.json.outputs must include every declared output`);
+        if (!new RegExp(`["']${output.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(scriptSource)) {
+          errors.push(`declared output ${output} does not appear in ${scriptLabel}; result.json.outputs must include every declared output`);
         }
       }
     }
@@ -486,12 +491,12 @@ export function validateWorkerDraft(input: WorkerDraftValidationInput): WorkerDr
 
   if (mode === "agent") {
     if (!input.skill_md?.trim()) errors.push("agent workers require non-empty skill_md / SKILL.md");
-    if (input.run_py?.trim()) warnings.push("agent workers execute SKILL.md; run_py should be omitted unless the API requires a compatibility stub");
+    if (input.run_py?.trim() || input.run_ts?.trim()) warnings.push("agent workers execute SKILL.md; script source should be omitted unless the API requires a compatibility stub");
   }
 
   const nextSteps = errors.length > 0
     ? ["Fix every validation error.", "Call workers.validate again before workers.create."]
-    : ["Call workers.create with this exact worker_yml plus run_py or skill_md.", "Run a safe smoke input, then inspect runs.get/runs.watch."];
+    : ["Call workers.create with this exact worker_yml plus run_py, run_ts, or skill_md.", "Run a safe smoke input, then inspect runs.get/runs.watch."];
 
   return {
     valid: errors.length === 0,

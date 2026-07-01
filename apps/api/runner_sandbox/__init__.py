@@ -21,14 +21,14 @@ def _resolve_mode_from_entry(entry: str | None) -> str | None:
     """Derive execution mode from the entry-point file suffix (PR S11).
 
     `.md`            -> agent mode (SKILL.md loop with tools via AgentDriver).
-    `.py`/`.sh`/`.js`-> pure-script mode (exec the file inside E2B sandbox).
+    `.py`/`.sh`/`.js`/`.ts` -> pure-script mode (exec the file inside E2B sandbox).
     """
     if not entry:
         return None
     lower = entry.lower()
     if lower.endswith(".md"):
         return "agent"
-    if lower.endswith((".py", ".sh", ".js")):
+    if lower.endswith((".py", ".sh", ".js", ".ts")):
         return "pure-script"
     return None
 

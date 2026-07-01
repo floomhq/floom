@@ -225,7 +225,7 @@ export function RunDetailSplitPane({
           with the same flex/gap/padding rhythm as /workers/<id>. */}
       {!inline && (
         <Link
-          href="/runs"
+          href={workspaceHref("/runs")}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <span aria-hidden="true">←</span>

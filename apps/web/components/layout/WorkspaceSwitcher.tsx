@@ -68,6 +68,15 @@ function cacheWorkspaceSwitcherState(next: WorkspaceSwitcherCache) {
   return next;
 }
 
+export function replaceUrlWorkspaceParam(workspaceId: string) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("workspace_id") && !url.searchParams.has("ws")) return;
+  url.searchParams.set("workspace_id", workspaceId);
+  url.searchParams.delete("ws");
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 function loadWorkspaceSwitcherState() {
   if (!workspaceSwitcherLoadPromise) {
     workspaceSwitcherLoadPromise = Promise.all([
@@ -159,6 +168,7 @@ export function WorkspaceSwitcher() {
     try {
       await api.workspace.select(workspaceId);
       setActiveWorkspaceId(workspaceId);
+      replaceUrlWorkspaceParam(workspaceId);
       window.location.reload();
     } catch (err) {
       setError((err as Error).message || "Failed to switch workspace");
@@ -175,6 +185,7 @@ export function WorkspaceSwitcher() {
       const created = await api.workspace.create(name);
       await api.workspace.select(created.id);
       setActiveWorkspaceId(created.id);
+      replaceUrlWorkspaceParam(created.id);
       window.location.reload();
     } catch (err) {
       const message = (err as Error).message || "Failed to create workspace";
@@ -261,6 +272,7 @@ export function WorkspaceSwitcher() {
       const created = await api.workspace.duplicate(state.activeId);
       await api.workspace.select(created.id);
       setActiveWorkspaceId(created.id);
+      replaceUrlWorkspaceParam(created.id);
       toast.success(`Duplicated to “${created.name}”`);
       window.location.reload();
     } catch (err) {

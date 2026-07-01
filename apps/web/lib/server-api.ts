@@ -86,9 +86,16 @@ export async function fetchOverview() {
 
 /** Fetch brain folders (30s cache). */
 export async function fetchBrainFolders() {
-  return serverFetch<import("./types").ContextSummary[]>("/contexts", {
-    next: { revalidate: 30 },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    return await serverFetch<import("./types").ContextSummary[]>("/contexts", {
+      next: { revalidate: 30 },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /** Fetch recent runs (10s cache — user-specific). */

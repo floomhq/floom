@@ -1,6 +1,6 @@
 "use client";
 
-// SHARED MCP-install panel — "Agent install". Rendered in BOTH the sidebar "MCP"
+// SHARED MCP-install panel — "MCP setup". Rendered in BOTH the sidebar "MCP"
 // popup (McpInstallModal wraps this in dialog chrome) and Settings → Connect &
 // automate → MCP setup.
 //
@@ -16,7 +16,8 @@ import { toast } from "sonner";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { api } from "@/lib/api";
 import { buildMcpJson } from "@/lib/mcp-config";
-import type { WorkspaceToken } from "@/lib/types";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
+import type { PersonalAccessToken, WorkspaceToken } from "@/lib/types";
 
 const MCP_CLIENTS = [
   { label: "Claude Code", icon: "claude-code" },
@@ -27,10 +28,13 @@ const MCP_CLIENTS = [
 const SNIPPET = buildMcpJson();
 
 export function McpInstallPanel() {
+  const workspaceHref = useWorkspaceHref();
   const [copied, setCopied] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokens, setTokens] = useState<WorkspaceToken[] | null>(null);
+  const [personalTokens, setPersonalTokens] = useState<PersonalAccessToken[] | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [personalTokenError, setPersonalTokenError] = useState<string | null>(null);
   const [creatingToken, setCreatingToken] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
 
@@ -47,6 +51,25 @@ export function McpInstallPanel() {
         if (!alive) return;
         setTokens([]);
         setTokenError(err instanceof Error ? err.message : "Could not load workspace tokens.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    api.tokens
+      .list()
+      .then((rows) => {
+        if (!alive) return;
+        setPersonalTokens(rows);
+        setPersonalTokenError(null);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setPersonalTokens([]);
+        setPersonalTokenError(err instanceof Error ? err.message : "Could not load personal tokens.");
       });
     return () => {
       alive = false;
@@ -99,11 +122,11 @@ export function McpInstallPanel() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-foreground">Agent install</h2>
+        <h2 className="text-base font-semibold text-foreground">MCP setup</h2>
         <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
           Copy this into Claude Code, Cursor, Codex, VS Code, Windsurf, Cline, or
-          any MCP client. Create a workspace token here, then paste it when Floom
-          asks on first run.
+          any MCP client. No token goes in this config: Floom MCP uses the same
+          saved login as the CLI. Run <code className="font-mono text-foreground">floom login</code> once on a new machine.
         </p>
       </div>
 
@@ -142,18 +165,45 @@ export function McpInstallPanel() {
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
               <KeyRound className="size-3.5 text-[var(--ink-mute)]" />
-              Workspace token
+              Optional API tokens
             </div>
             <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              Token values are shown once. Existing tokens: {tokens === null ? "loading" : tokens.length}.
+              MCP setup uses your saved CLI login. Use tokens only for scripts,
+              CI, or direct API calls that cannot use browser device login.
             </p>
           </div>
-          <Link
-            href="/settings?sel=workspace_token"
-            className="text-[12px] font-medium text-[var(--accent)] hover:underline"
-          >
-            Manage tokens
-          </Link>
+        </div>
+
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-2">
+          <div className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[12px] font-medium text-foreground">Personal tokens</span>
+              <Link
+                href={workspaceHref("/settings?sel=personal_tokens")}
+                className="text-[12px] font-medium text-[var(--accent)] hover:underline"
+              >
+                Manage
+              </Link>
+            </div>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+              Full access as you. Existing tokens: {personalTokens === null ? "loading" : personalTokens.length}.
+              {personalTokenError ? " Open Settings to manage them." : ""}
+            </p>
+          </div>
+          <div className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[12px] font-medium text-foreground">Workspace tokens</span>
+              <Link
+                href={workspaceHref("/settings?sel=workspace_token")}
+                className="text-[12px] font-medium text-[var(--accent)] hover:underline"
+              >
+                Manage
+              </Link>
+            </div>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+              Admin-only, read-and-run access for team automation. Existing tokens: {tokens === null ? "loading" : tokens.length}.
+            </p>
+          </div>
         </div>
 
         {createdToken ? (
@@ -181,7 +231,7 @@ export function McpInstallPanel() {
               className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-[12px] font-medium text-foreground transition-colors hover:bg-[var(--active-nav-bg)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {creatingToken ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
-              {creatingToken ? "Creating" : "Create token"}
+              {creatingToken ? "Creating" : "Create workspace token"}
             </button>
             {tokenError ? (
               <span className="text-[12px] text-muted-foreground">

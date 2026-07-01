@@ -34,10 +34,17 @@ type WorkerDetail = {
   recent_runs?: Array<{ id: string; status: string; created_at?: string; duration_ms?: number }>;
 };
 
+type StandaloneShareLink = {
+  token: string;
+  url: string;
+  entity_type: string;
+};
+
 type WorkerSource = {
   dir: string;
   workerYml: string;
   runPy?: string;
+  runTs?: string;
   skillMd?: string;
   files: Array<{ path: string; content: string }>;
   workerId: string;
@@ -48,15 +55,16 @@ type WorkerSource = {
 
 type WorkerSourcePayload = {
   worker_yml: string;
-  run_py: string;
+  run_py?: string;
   skill_md?: string;
+  files?: Array<{ path: string; content: string }>;
 };
 
 type WorkerFilesPayload = {
   files: Array<{ path: string; content: string }>;
 };
 
-const SERVER_WORKER_RUNTIMES = new Set(["python311", "node22", "bash", "skill", "none"]);
+const SERVER_WORKER_RUNTIMES = new Set(["python311", "node22", "typescript", "ts", "bash", "skill", "none"]);
 
 function emitError(message: string, hint: string, json?: boolean): number {
   if (json) {
@@ -273,40 +281,42 @@ function toolApp(toolSlug: string, declared: Map<string, Set<string> | null>): s
 
 function validateNativeRuntimeContract(
   manifest: Record<string, unknown>,
-  runPy: string | undefined,
+  scriptSource: string | undefined,
+  scriptLabel = "run.py",
 ): string[] {
-  if (!runPy?.trim()) return [];
+  if (!scriptSource?.trim()) return [];
   const errors: string[] = [];
   const declared = declaredComposioConnections(manifest);
   const secrets = declaredSecrets(manifest);
   const usesComposioCli =
-    /subprocess\.(?:run|Popen|call|check_call|check_output)\s*\(/.test(runPy) &&
-    /["']composio["']/.test(runPy) &&
-    /["']execute["']/.test(runPy);
+    scriptLabel === "run.py" &&
+    /subprocess\.(?:run|Popen|call|check_call|check_output)\s*\(/.test(scriptSource) &&
+    /["']composio["']/.test(scriptSource) &&
+    /["']execute["']/.test(scriptSource);
   if (usesComposioCli) {
     errors.push(
       "run.py shells out to `composio execute`; E2B workers must call the Floom proxy at /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}",
     );
   }
-  const definesSdkStyleRun = /^\s*def\s+run\s*\(\s*inputs\s*,\s*context\s*\)\s*:/m.test(runPy);
-  const returnsFromRun = /^\s*return\b/m.test(runPy);
-  if (definesSdkStyleRun && returnsFromRun && !/result\.json/.test(runPy)) {
+  const definesSdkStyleRun = scriptLabel === "run.py" && /^\s*def\s+run\s*\(\s*inputs\s*,\s*context\s*\)\s*:/m.test(scriptSource);
+  const returnsFromRun = /^\s*return\b/m.test(scriptSource);
+  if (definesSdkStyleRun && returnsFromRun && !/result\.json/.test(scriptSource)) {
     errors.push(
       "script run.py defines `run(inputs, context)` and returns a value, but production script workers must read inputs.json and write result.json",
     );
   }
 
-  const usesProxy = /composio-execute\//.test(runPy);
-  const readsConnections = /connections\.json/.test(runPy);
+  const usesProxy = /composio-execute\//.test(scriptSource);
+  const readsConnections = /connections\.json/.test(scriptSource);
   if ((usesProxy || readsConnections) && declared.size === 0) {
-    errors.push("run.py uses Composio/connections.json but worker.yml has no `connections:` declaration");
+    errors.push(`${scriptLabel} uses Composio/connections.json but worker.yml has no \`connections:\` declaration`);
   }
 
   const toolSlugs = new Set<string>();
-  for (const match of runPy.matchAll(/composio-execute\/([A-Z0-9_]+)/g)) {
+  for (const match of scriptSource.matchAll(/composio-execute\/([A-Z0-9_]+)/g)) {
     toolSlugs.add(match[1].toUpperCase());
   }
-  for (const match of runPy.matchAll(/["']([A-Z][A-Z0-9]+_[A-Z0-9_]+)["']/g)) {
+  for (const match of scriptSource.matchAll(/["']([A-Z][A-Z0-9]+_[A-Z0-9_]+)["']/g)) {
     const candidate = match[1].toUpperCase();
     if (["FLOOM_RUN_ID", "FLOOM_TRACE_ID", "WORKEROS_API_URL", "WORKEROS_API_BASE"].includes(candidate)) {
       continue;
@@ -322,17 +332,17 @@ function validateNativeRuntimeContract(
   for (const slug of toolSlugs) {
     const app = toolApp(slug, declared);
     if (!app || !declared.has(app)) {
-      errors.push(`run.py references ${slug}, but worker.yml does not declare connection '${app || "unknown"}'`);
+      errors.push(`${scriptLabel} references ${slug}, but worker.yml does not declare connection '${app || "unknown"}'`);
       continue;
     }
     const allowed = declared.get(app);
     if (allowed !== null && allowed && !allowed.has(slug)) {
-      errors.push(`run.py references ${slug}, but ${app}.allowed_tools does not include it`);
+      errors.push(`${scriptLabel} references ${slug}, but ${app}.allowed_tools does not include it`);
     }
   }
 
-  if (/FLOOM_RUN_ID/.test(runPy) && !/WORKEROS_API_URL/.test(runPy)) {
-    errors.push("run.py uses FLOOM_RUN_ID but does not read WORKEROS_API_URL for the API proxy base");
+  if (/FLOOM_RUN_ID/.test(scriptSource) && !/WORKEROS_API_URL/.test(scriptSource)) {
+    errors.push(`${scriptLabel} uses FLOOM_RUN_ID but does not read WORKEROS_API_URL for the API proxy base`);
   }
   return errors;
 }
@@ -421,6 +431,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
 
   const workerYmlPath = join(dir, "worker.yml");
   const runPyPath = join(dir, "run.py");
+  const runTsPath = join(dir, "run.ts");
   const skillMdPath = join(dir, "SKILL.md");
 
   let workerYml = "";
@@ -446,14 +457,16 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
   }
 
   const runPy = await readOptionalText(runPyPath);
+  const runTs = await readOptionalText(runTsPath);
   const skillMd = await readOptionalText(skillMdPath);
   const collected = await collectWorkerFiles(dir);
   errors.push(...collected.errors);
   const hasRunPy = Boolean(runPy?.trim());
+  const hasRunTs = Boolean(runTs?.trim());
   const hasSkillMd = Boolean(skillMd?.trim());
 
-  if (!hasRunPy && !hasSkillMd) {
-    errors.push("Worker directory must include a non-empty run.py or SKILL.md");
+  if (!hasRunPy && !hasRunTs && !hasSkillMd) {
+    errors.push("Worker directory must include a non-empty run.py, run.ts, or SKILL.md");
   }
 
   const workerId = nonEmptyString(manifest.id) || nonEmptyString(manifest.name);
@@ -481,11 +494,16 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
   if (entrypoint === "run.py" && !hasRunPy) {
     errors.push("worker.yml entrypoint is run.py, but run.py is missing or empty");
   }
+  if (entrypoint === "run.ts" && !hasRunTs) {
+    errors.push("worker.yml entrypoint is run.ts, but run.ts is missing or empty");
+  }
   if (entrypoint === "SKILL.md" && !hasSkillMd) {
     errors.push("worker.yml entrypoint is SKILL.md, but SKILL.md is missing or empty");
   }
   if (entrypoint !== "SKILL.md") {
-    errors.push(...validateNativeRuntimeContract(manifest, runPy));
+    const scriptLabel = entrypoint === "run.ts" ? "run.ts" : "run.py";
+    const scriptSource = scriptLabel === "run.ts" ? runTs : runPy;
+    errors.push(...validateNativeRuntimeContract(manifest, scriptSource, scriptLabel));
   }
 
   if (errors.length > 0 || !workerId || !displayName || !runtime) {
@@ -497,6 +515,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
       dir,
       workerYml,
       runPy,
+      runTs,
       skillMd,
       files: collected.files,
       workerId,
@@ -509,11 +528,17 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
 }
 
 function sourcePayload(source: WorkerSource): WorkerSourcePayload {
-  return {
+  const payload: WorkerSourcePayload = {
     worker_yml: source.workerYml,
-    run_py: source.runPy ?? "",
-    ...(source.skillMd !== undefined ? { skill_md: source.skillMd } : {}),
   };
+  if (source.runTs !== undefined) {
+    payload.files = source.files;
+    if (source.runPy !== undefined) payload.run_py = source.runPy;
+  } else {
+    payload.run_py = source.runPy ?? "";
+  }
+  if (source.skillMd !== undefined) payload.skill_md = source.skillMd;
+  return payload;
 }
 
 function filesPayload(source: WorkerSource): WorkerFilesPayload {
@@ -735,7 +760,7 @@ export async function workersValidateCommand(dir: string, options: { json?: bool
       directory: result.source.dir,
       name: result.source.displayName,
       runtime: result.source.runtime,
-      source: result.source.entrypoint === "SKILL.md" ? "SKILL.md" : result.source.runPy?.trim() ? "run.py" : "SKILL.md",
+      source: result.source.entrypoint === "SKILL.md" ? "SKILL.md" : result.source.entrypoint === "run.ts" ? "run.ts" : "run.py",
     });
     return 0;
   }
@@ -743,7 +768,7 @@ export async function workersValidateCommand(dir: string, options: { json?: bool
   log.kv("Directory", result.source.dir);
   log.kv("Name", result.source.displayName);
   log.kv("Runtime", result.source.runtime);
-  log.kv("Source", result.source.entrypoint === "SKILL.md" ? "SKILL.md" : result.source.runPy?.trim() ? "run.py" : "SKILL.md");
+  log.kv("Source", result.source.entrypoint === "SKILL.md" ? "SKILL.md" : result.source.entrypoint === "run.ts" ? "run.ts" : "run.py");
   return 0;
 }
 
@@ -794,7 +819,7 @@ export async function workersPushCommand(dir: string, options: { json?: boolean 
         }
         throw error;
       }
-      if (hasNonLegacyBundleFiles(source)) {
+      if (hasNonLegacyBundleFiles(source) && !payload.files) {
         try {
           await client.requestJson("PUT", `/workers/${encodeURIComponent(source.workerId)}/files`, { body: filesPayload(source) });
         } catch (error) {
@@ -887,6 +912,7 @@ export async function workersShowCommand(workerId: string, options: { json?: boo
     process.stdout.write(`${worker.name} (${worker.id})\n`);
     if (worker.description) process.stdout.write(`${worker.description}\n`);
     process.stdout.write(`Entry: ${worker.config?.runtime?.entrypoint || "unknown"}\n`);
+    process.stdout.write(`Share: ${getCommandName()} workers share ${worker.id}\n`);
     const connections = formatConnections(worker.config?.connections);
     if (connections.length === 0) {
       process.stdout.write("Connections: none\n");
@@ -925,6 +951,24 @@ export async function workersShowCommand(workerId: string, options: { json?: boo
       return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", options.json);
     }
     throw error;
+  }
+}
+
+export async function workersShareCommand(workerId: string, options: { json?: boolean }): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const link = (await client.requestJson("POST", `/workers/${encodeURIComponent(workerId)}/share-link`)) as StandaloneShareLink;
+    if (options.json) {
+      printJson(link);
+      return 0;
+    }
+    log.ok("Share link created");
+    log.kv("Worker", workerId);
+    log.kv("URL", link.url);
+    log.info("This unlisted link can be opened by anyone who has it to view or import the worker.");
+    return 0;
+  } catch (error) {
+    return emitLifecycleError(error, workerId, options.json);
   }
 }
 

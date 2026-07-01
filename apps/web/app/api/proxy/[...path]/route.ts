@@ -54,8 +54,11 @@ function safeProxyLocation(
     return resolved.pathname + resolved.search + resolved.hash;
   }
   const host = resolved.hostname.toLowerCase();
-  if (
+  const isConnectionAuthorizePath =
     upstreamPath.startsWith("/connections/authorize/")
+    || /^\/connections\/[0-9a-fA-F-]{36}\/authorize$/.test(upstreamPath);
+  if (
+    isConnectionAuthorizePath
     && resolved.protocol === "https:"
     && (host === "composio.dev" || host.endsWith(".composio.dev"))
   ) {

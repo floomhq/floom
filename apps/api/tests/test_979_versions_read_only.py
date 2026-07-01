@@ -91,5 +91,10 @@ def test_get_versions_with_empty_history_creates_no_commit(app_client, monkeypat
     after = _head_sha(workspace)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == []  # empty history, not a freshly-minted baseline
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["id"] == "current"
+    assert body[0]["sha"] == "current"
+    assert body[0]["message"] == "Current source"
+    assert body[0]["change_source"] == "current"
     assert before == after, "GET /versions must not advance git HEAD"

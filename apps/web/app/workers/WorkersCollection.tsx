@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, getPersistedActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
 import { useWorkers, useStreamedInitialData, qk, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
 import type {
@@ -217,6 +218,7 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
 function detailToSummary(d: WorkerDetail): WorkerSummary {
   return {
     id: d.id,
+    workspace_id: d.workspace_id,
     name: d.name,
     description: d.description,
     long_description: d.long_description,
@@ -249,6 +251,14 @@ function detailToSummary(d: WorkerDetail): WorkerSummary {
     permissions: d.permissions,
   } as WorkerSummary;
 }
+
+export const WORKSPACE_SCOPED_QUERY_ROOTS = new Set([
+  "workers",
+  "runs",
+  "contexts",
+  "connections",
+  "secrets",
+]);
 
 /** Build the worker.yml text from a detail (files take precedence). */
 function workerYml(d: WorkerDetail): string {
@@ -713,10 +723,6 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   return (
     <>
       <DetailGroup label="Source">
-        <p className="c-dctx">
-          {ordered.map((file) => file.path).slice(0, 4).join(" · ")}
-          {ordered.length > 4 ? ` · +${ordered.length - 4} more` : ""}
-        </p>
         {editable && (
           <div className="mb-3 flex justify-end">
             <button type="button" className="c-vpill" style={pillBtn} onClick={openEditor}>
@@ -734,19 +740,21 @@ function SourceTab({ w }: { w: WorkerSummary }) {
         />
       </DetailGroup>
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-h-[90vh] sm:max-w-6xl overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="grid h-[min(90vh,860px)] max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-6xl">
+          <DialogHeader className="px-6 pt-5 pb-3">
             <DialogTitle>Edit source</DialogTitle>
             <DialogDescription>Update this worker&apos;s source files.</DialogDescription>
           </DialogHeader>
-          <FilesEditor
-            mode="edit"
-            files={draftFiles}
-            selectedPath={draftPath}
-            onChange={setDraftFiles}
-            onSelectedPathChange={setDraftPath}
-          />
-          <DialogFooter>
+          <div className="min-h-0 overflow-y-auto px-6 pb-4">
+            <FilesEditor
+              mode="edit"
+              files={draftFiles}
+              selectedPath={draftPath}
+              onChange={setDraftFiles}
+              onSelectedPathChange={setDraftPath}
+            />
+          </div>
+          <DialogFooter className="sticky bottom-0 z-10 m-0 rounded-none">
             <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
@@ -2126,8 +2134,16 @@ export default function WorkersCollection({
   extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
+  const urlWorkspaceId = searchParams.get("workspace_id") || searchParams.get("ws");
+  const persistedWorkspaceId = getPersistedActiveWorkspaceId();
+  const urlWorkspaceNeedsActivation = Boolean(urlWorkspaceId && urlWorkspaceId !== persistedWorkspaceId);
   const workspaceHref = useWorkspaceHref();
-  useStreamedInitialData(qk.workers(WORKERS_LIST_QUERY_OPTS), initialWorkersPromise);
+  useStreamedInitialData(
+    qk.workers(WORKERS_LIST_QUERY_OPTS),
+    urlWorkspaceNeedsActivation ? undefined : initialWorkersPromise,
+  );
   // Cache-first workers list (TanStack Query): returning to /workers renders
   // instantly from cache with no skeleton; a slow/failed refetch keeps showing
   // the cached list instead of flashing "Something went wrong". Local `workers`
@@ -2135,7 +2151,8 @@ export default function WorkersCollection({
   // update, archive) still work.
   const workersQuery = useWorkers(
     WORKERS_LIST_QUERY_OPTS,
-    initialWorkers.length > 0 ? initialWorkers : undefined,
+    !urlWorkspaceNeedsActivation && initialWorkers.length > 0 ? initialWorkers : undefined,
+    !urlWorkspaceNeedsActivation,
   );
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -2156,6 +2173,15 @@ export default function WorkersCollection({
     },
     [router, workspaceHref],
   );
+
+  useEffect(() => {
+    if (!urlWorkspaceId || urlWorkspaceId === persistedWorkspaceId) return;
+    setWorkers([]);
+    for (const root of WORKSPACE_SCOPED_QUERY_ROOTS) {
+      queryClient.removeQueries({ queryKey: [root] });
+    }
+    setActiveWorkspaceId(urlWorkspaceId);
+  }, [persistedWorkspaceId, queryClient, urlWorkspaceId]);
 
   useEffect(() => {
     const saved = safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY);

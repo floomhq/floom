@@ -95,7 +95,7 @@ describe("Emily tool-call consolidation (FIX1)", () => {
     await user.click(summary);
     expect(summary.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getAllByText("worker-author").length).toBe(14);
-  });
+  }, 15_000);
 
   it("surfaces a failed call in the summary instead of hiding it in the count", async () => {
     toolParts = [

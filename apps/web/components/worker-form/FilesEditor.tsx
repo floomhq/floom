@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Code2, AlignLeft, Download, ExternalLink, File, FilePlus, FolderOpen, Trash2 } from "lucide-react";
+import { Code2, AlignLeft, Download, ExternalLink, File, FilePlus, FolderOpen, Trash2, Upload } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -87,6 +88,32 @@ function downloadSourceContent(path: string, content: string) {
   a.click();
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+function readUploadedFileText(file: File): Promise<string> {
+  if (typeof file.text === "function") return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read file"));
+    reader.readAsText(file);
+  });
+}
+
+const BINARY_UPLOAD_PATH = /\.(?:png|jpe?g|gif|webp|avif|ico|pdf|zip|gz|tgz|xz|bz2|7z|rar|tar|mp[34]|mov|webm|avi|wav|mp3|flac|ogg|woff2?|ttf|otf|eot|wasm|sqlite|db|parquet|xlsx?|docx?|pptx?)$/i;
+const SOURCE_TEXT_UPLOAD_PATH = /\.(?:bash|c|cc|cfg|conf|cpp|cs|css|csv|env|go|gql|graphql|h|hpp|htm|html|ini|java|js|json|jsx|kt|lua|md|mdx|mjs|php|pl|ps1|py|rb|rs|sass|scala|scss|sh|sql|swift|toml|ts|tsx|txt|xml|ya?ml|zsh)$/i;
+const SOURCE_TEXT_UPLOAD_NAME = /^(?:dockerfile|makefile|readme|license|gemfile|rakefile)$/i;
+const TEXT_UPLOAD_MIME = /^(?:text\/|application\/(?:json|x-ndjson|xml|javascript|x-javascript|typescript|x-typescript|yaml|x-yaml|toml|x-sh|graphql))/i;
+
+function canUploadAsTextSource(file: File, path: string): boolean {
+  if (BINARY_UPLOAD_PATH.test(path)) return false;
+  if (SOURCE_TEXT_UPLOAD_PATH.test(path) || SOURCE_TEXT_UPLOAD_NAME.test(path.split("/").pop() ?? "")) return true;
+  if (!file.type) return true;
+  return TEXT_UPLOAD_MIME.test(file.type);
+}
+
+function hasBinaryNullBytes(content: string): boolean {
+  return content.includes("\u0000");
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +360,7 @@ function defaultSourceMode(path: string, _hasForm: boolean, binary?: boolean): S
   return "raw";
 }
 
-function sourceModeLabel(mode: SourceMode, _isWorkerYaml = false): string {
+function sourceModeLabel(mode: SourceMode): string {
   if (mode === "raw") return "Raw";
   if (mode === "form") return "Form";
   // All rendered views use "Preview" — consistent with Brain file viewer.
@@ -641,36 +668,46 @@ function WorkerYamlPreviewContent({ content }: { content: string }) {
     return <SyntaxHighlightedCode content={content} path="worker.yml" language="yaml" />;
   }
 
-  const entries = [
-    ["ID", parsed.name],
-    ["Title", parsed.title],
-    ["Trigger", triggerLabel(parsed.trigger)],
-    ["Runtime", runtimeLabel(parsed.exec ?? parsed.runtime)],
-    ["Inputs", countLabel(parsed.inputs, "input")],
-    ["Connections", countLabel(parsed.connections, "connection")],
-    ["Brain resources", countLabel(parsed.contexts, "brain resource")],
-    ["Secrets", countLabel(parsed.secrets, "secret")],
+  const title = parsed.title || parsed.name || "Untitled worker";
+  const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
+  const trigger = triggerLabel(parsed.trigger);
+  const connections = connectionLabels(parsed.connections);
+  const output = outputLabel(parsed);
+  const runtime = runtimeLabel(parsed.exec ?? parsed.runtime);
+  const runtimeMode = runtimeModeLabel(parsed.exec ?? parsed.runtime);
+  const summaryParts = [
+    trigger ? `Runs ${lowercaseFirst(trigger)}` : "",
+    runtimeMode,
+    connections.length > 0 ? `uses ${formatList(connections)}` : "",
+  ].filter(Boolean);
+  const cadenceLine = summaryParts.length > 0 ? `${summaryParts.join(" · ")}.` : "";
+  const summaryLine = [
+    description || `Runs ${title}.`,
+    cadenceLine,
+    output ? `Outputs ${lowercaseFirst(output)}.` : "",
+  ].filter(Boolean).join(" ");
+
+  const essentials = [
+    ["Trigger", trigger],
+    ["Connects", connections.join(", ")],
+    ["Output", output],
+    ["Runtime", runtime],
   ].filter(([, value]) => value);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-base font-semibold text-foreground">{parsed.title || parsed.name || "Untitled worker"}</h3>
-        {parsed.description ? (
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{parsed.description}</p>
-        ) : null}
+    <div className="space-y-5 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-5 py-4">
+      <div className="max-w-3xl space-y-2">
+        <h3 className="text-lg font-semibold leading-7 text-foreground">{title}</h3>
+        <p className="text-sm leading-6 text-muted-foreground">{summaryLine}</p>
       </div>
-      <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-line text-sm sm:grid-cols-2">
-        {entries.map(([label, value]) => (
-          <div key={label} className="bg-card px-3 py-2">
-            <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
-            <dd className="mt-0.5 truncate text-foreground" title={String(value)}>{value}</dd>
+      <dl className="grid max-w-3xl gap-2 text-sm sm:grid-cols-2">
+        {essentials.map(([label, value]) => (
+          <div key={label} className="rounded-[var(--radius-card)] bg-card/80 px-3 py-2.5">
+            <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+            <dd className="mt-1 text-foreground" title={String(value)}>{value}</dd>
           </div>
         ))}
       </dl>
-      <YamlList title="Inputs" items={parsed.inputs} getLabel={(item) => itemLabel(item)} />
-      <YamlList title="Connections" items={parsed.connections} getLabel={(item) => itemLabel(item)} />
-      <YamlList title="Brain resources" items={parsed.contexts} getLabel={(item) => contextItemLabel(item)} />
     </div>
   );
 }
@@ -686,6 +723,7 @@ type WorkerYaml = Record<string, unknown> & {
   connections?: unknown[];
   contexts?: unknown[];
   secrets?: unknown[];
+  outputs?: unknown[];
 };
 
 function parseWorkerYaml(content: string): WorkerYaml | null {
@@ -698,44 +736,35 @@ function parseWorkerYaml(content: string): WorkerYaml | null {
   }
 }
 
-function countLabel(value: unknown, singular: string) {
-  const count = Array.isArray(value) ? value.length : 0;
-  if (count === 0) return "";
-  return `${count} ${singular}${count === 1 ? "" : "s"}`;
-}
-
 function triggerLabel(value: unknown) {
   if (!value || typeof value !== "object") return "";
   const type = String((value as Record<string, unknown>).type || "manual");
   const cron = (value as Record<string, unknown>).cron;
   const tz = (value as Record<string, unknown>).timezone;
-  return cron
-    ? `${type} · ${humanizeCron(String(cron), typeof tz === "string" ? tz : "UTC")}`
-    : type;
+  if (cron) return humanizeCron(String(cron), typeof tz === "string" ? tz : "UTC");
+  if (type === "manual") return "On demand";
+  if (type === "schedule" || type === "scheduled" || type === "cron") return "Scheduled";
+  return titleCaseToken(type);
 }
 
 const RUNTIME_DISPLAY: Record<string, string> = {
   python311: "Python 3.11",
   python: "Python",
+  node22: "Node.js 22",
   node20: "Node.js 20",
   node: "Node.js",
 };
 
 function runtimeLabel(value: unknown) {
   if (!value) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return titleCaseToken(value);
   if (typeof value !== "object") return "";
   const raw = value as Record<string, unknown>;
   // Show a meaningful runtime — the mode (agent vs script) plus the runtime
   // engine — NOT the entrypoint filename. The exec block's `command`/`entry`
   // often collapses to "SKILL.md"/"run.py", which is a file (already listed in
   // Files), not a runtime. e.g. "Agent" or "Script · Python 3.11".
-  const mode =
-    raw.mode === "agent"
-      ? "Agent"
-      : raw.mode === "pure-script" || raw.mode === "script"
-        ? "Script"
-        : undefined;
+  const mode = uppercaseFirst(runtimeModeLabel(value));
   const rt = raw.runtime ?? raw.type;
   const rtLabel = typeof rt === "string" ? (RUNTIME_DISPLAY[rt] ?? rt) : undefined;
   const label = [mode, rtLabel].filter(Boolean).join(" · ");
@@ -744,54 +773,78 @@ function runtimeLabel(value: unknown) {
   return label || String(raw.command || raw.entry || "");
 }
 
-function itemLabel(value: unknown) {
+function runtimeModeLabel(value: unknown) {
+  if (!value || typeof value === "string") return "";
+  if (typeof value !== "object") return "";
+  const mode = (value as Record<string, unknown>).mode;
+  if (mode === "agent") return "agent mode";
+  if (mode === "pure-script" || mode === "script") return "script mode";
+  const command = (value as Record<string, unknown>).command;
+  const entry = (value as Record<string, unknown>).entry;
+  if (typeof command === "string" && command) return "script mode";
+  if (typeof entry === "string" && entry && entry !== "SKILL.md") return "script mode";
+  return "";
+}
+
+function connectionLabels(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => connectionLabel(item)).filter(Boolean);
+}
+
+function connectionLabel(value: unknown) {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return "";
   const raw = value as Record<string, unknown>;
+  if (raw.app) return titleCaseToken(String(raw.app));
+  if (raw.provider) return titleCaseToken(String(raw.provider));
   if (raw.name) return String(raw.name);
   if (raw.label) return String(raw.label);
   if (raw.type) return String(raw.type);
+  if (raw.composio && typeof raw.composio === "object") {
+    const composio = raw.composio as Record<string, unknown>;
+    if (composio.app) return titleCaseToken(String(composio.app));
+  }
   if (raw.mcp && typeof raw.mcp === "object") {
     return String((raw.mcp as Record<string, unknown>).label || "MCP server");
   }
-  return JSON.stringify(raw);
+  return "";
 }
 
-function contextItemLabel(value: unknown) {
-  if (typeof value === "string") return `${value} · Read-only`;
-  if (!value || typeof value !== "object") return "";
-  const raw = value as Record<string, unknown>;
-  const name = raw.name || raw.label || "Unnamed resource";
-  const access = raw.writeable === true ? "Read/write" : "Read-only";
-  return `${String(name)} · ${access}`;
+function outputLabel(parsed: WorkerYaml) {
+  const exec = parsed.exec && typeof parsed.exec === "object" ? (parsed.exec as Record<string, unknown>) : null;
+  const outputs = Array.isArray(exec?.outputs) ? exec.outputs : parsed.outputs;
+  if (!Array.isArray(outputs) || outputs.length === 0) return "";
+  const first = outputs[0];
+  if (typeof first === "string") return first;
+  if (!first || typeof first !== "object") return "";
+  const raw = first as Record<string, unknown>;
+  const label = String(raw.label || raw.name || raw.kind || "Artifact");
+  const path = typeof raw.path === "string" ? raw.path : "";
+  return path ? `${label} (${path})` : label;
 }
 
-function YamlList({
-  title,
-  items,
-  getLabel,
-}: {
-  title: string;
-  items?: unknown[];
-  getLabel: (item: unknown) => string;
-}) {
-  if (!Array.isArray(items) || items.length === 0) return null;
-  return (
-    <section className="space-y-2">
-      <h4 className="text-xs font-medium uppercase text-muted-foreground">{title}</h4>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((item, index) => (
-          <span
-            key={`${title}-${index}`}
-            className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card px-2 py-1 text-xs text-foreground"
-            title={getLabel(item)}
-          >
-            {getLabel(item)}
-          </span>
-        ))}
-      </div>
-    </section>
-  );
+function formatList(items: string[]) {
+  if (items.length <= 1) return items[0] || "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function lowercaseFirst(value: string) {
+  if (!value) return "";
+  return `${value.charAt(0).toLowerCase()}${value.slice(1)}`;
+}
+
+function uppercaseFirst(value: string) {
+  if (!value) return "";
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+function titleCaseToken(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +861,8 @@ function FilesEditorEdit({
 }: FilesEditorEditProps) {
   const [addingFile, setAddingFile] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
+  const [deletePath, setDeletePath] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const effectiveSelected = selectedPath ?? files[0]?.path ?? "worker.yml";
   const selectedFile = files.find((f) => f.path === effectiveSelected) || null;
@@ -850,31 +905,102 @@ function FilesEditorEdit({
     setAddingFile(false);
   }
 
-  function deleteFile(path: string) {
-    if (path === "worker.yml") { toast.error("Cannot delete the worker file"); return; } /* #1708: soften jargon */
-    if (!confirm(`Delete "${path}"?`)) return;
-    const updated = files.filter((f) => f.path !== path);
+  function requestDeleteFile(path: string) {
+    if (path === "worker.yml") {
+      toast.error("Cannot delete the worker file");
+      return;
+    }
+    setDeletePath(path);
+  }
+
+  function confirmDeleteFile() {
+    if (!deletePath) return;
+    const updated = files.filter((f) => f.path !== deletePath);
     onChange(updated);
-    if (effectiveSelected === path) selectPath("worker.yml");
+    if (effectiveSelected === deletePath) selectPath("worker.yml");
+    setDeletePath(null);
+  }
+
+  async function addUploadedFiles(fileList: FileList | null) {
+    const picked = Array.from(fileList ?? []);
+    if (picked.length === 0) return;
+    const existing = new Set(files.map((f) => f.path));
+    const additions: FilesEditorEditEntry[] = [];
+
+    for (const file of picked) {
+      const path = (file.webkitRelativePath || file.name).replace(/^\/+/, "");
+      if (!path) continue;
+      if (existing.has(path) || additions.some((f) => f.path === path)) {
+        toast.error(`File "${path}" already exists`);
+        continue;
+      }
+      if (!canUploadAsTextSource(file, path)) {
+        toast.error(`File "${path}" is not a text source file`);
+        continue;
+      }
+      const content = await readUploadedFileText(file);
+      if (hasBinaryNullBytes(content)) {
+        toast.error(`File "${path}" is not a text source file`);
+        continue;
+      }
+      additions.push({ path, content, size: file.size, language: detectLanguage(path) });
+    }
+
+    if (additions.length === 0) return;
+    onChange([...files, ...additions]);
+    selectPath(additions[0].path);
+    toast.success(additions.length === 1 ? `Added ${additions[0].path}` : `Added ${additions.length} files`);
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 items-start">
+    <div className="grid min-h-0 grid-cols-1 gap-4 lg:grid-cols-[260px_1fr] lg:items-start">
+      <ConfirmDialog
+        open={deletePath !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletePath(null);
+        }}
+        title={deletePath ? `Delete ${deletePath}?` : "Delete file?"}
+        body="This removes the file from the draft source bundle. The worker is not changed until you save."
+        confirmLabel="Delete file"
+        destructive
+        onConfirm={confirmDeleteFile}
+      />
       <Card size="sm" className="[border:var(--bd-card)] shadow-none bg-card self-start lg:sticky lg:top-3">
         <CardHeader className="px-3 py-2 flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <FolderOpen className="w-3.5 h-3.5" />
             Files
           </CardTitle>
-          <button
-            type="button"
-            onClick={() => setAddingFile((v) => !v)}
-            className="-m-1.5 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground sm:-m-1 sm:h-7 sm:w-7"
-            title="Add file"
-            aria-label="Add file"
-          >
-            <FilePlus className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => uploadInputRef.current?.click()}
+              className="-m-1.5 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground sm:-m-1 sm:h-7 sm:w-7"
+              title="Upload files"
+              aria-label="Upload files"
+            >
+              <Upload className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setAddingFile((v) => !v)}
+              className="-m-1.5 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground sm:-m-1 sm:h-7 sm:w-7"
+              title="Add file by path"
+              aria-label="Add file by path"
+            >
+              <FilePlus className="w-3.5 h-3.5" />
+            </button>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                void addUploadedFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+          </div>
         </CardHeader>
         <CardContent className="p-0 pb-1">
           {addingFile && (
@@ -913,7 +1039,7 @@ function FilesEditorEdit({
               {f.path !== "worker.yml" && !f.binary && (
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); deleteFile(f.path); }}
+                  onClick={(e) => { e.stopPropagation(); requestDeleteFile(f.path); }}
                   className="-my-1.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground opacity-100 transition-all hover:text-[var(--negative)] sm:-my-1 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"
                   title={`Delete ${f.path}`}
                   aria-label={`Delete ${f.path}`}
@@ -927,7 +1053,7 @@ function FilesEditorEdit({
         </CardContent>
       </Card>
 
-      <Card className="[border:var(--bd-card)] shadow-none bg-card min-w-0">
+      <Card className="[border:var(--bd-card)] shadow-none bg-card min-h-0 min-w-0">
         <CardHeader className="py-2 px-4 [border-bottom:var(--bd-div)]">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
@@ -935,7 +1061,7 @@ function FilesEditorEdit({
             </CardTitle>
             {selectedFile && selectedHasPreview && (
               <div className="flex items-center gap-0 rounded-md [border:var(--bd-card)] overflow-hidden shrink-0">
-                {(["raw", "preview"] as SourceMode[]).map((mode) => (
+                {(["preview", "raw"] as SourceMode[]).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -959,25 +1085,7 @@ function FilesEditorEdit({
             sourceMode === "form" && selectedFile.path === "worker.yml" && renderYamlPreview ? (
               <div className="p-4">{renderYamlPreview}</div>
             ) : sourceMode === "preview" ? (
-              selectedFile.binary ? (
-                <UnsupportedSourcePreview
-                  title="Binary source file"
-                  detail="This worker source listing does not include inline bytes for binary files, so this file cannot be rendered or edited here."
-                  path={selectedFile.path}
-                />
-              ) : supportsRenderedPreview(selectedFile.path) || hasWorkerYamlSummary(selectedFile.path, selectedFile.binary) ? (
-                <RenderedFilePreview
-                  path={selectedFile.path}
-                  content={selectedFile.content}
-                  language={selectedFile.language || detectLanguage(selectedFile.path)}
-                />
-              ) : (
-                <UnsupportedSourcePreview
-                  title="Rendered preview unavailable"
-                  detail="This source file type does not have a renderer in the worker Source editor. Use Raw, Open, or Download."
-                  path={selectedFile.path}
-                />
-              )
+              <ReadOnlyFileContent file={selectedFile as WorkerFile} />
             ) : (
               <>
                 {selectedFile.binary ? (

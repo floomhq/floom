@@ -1,28 +1,21 @@
 "use client";
 
-// v6 Worker share card. ONE fixed-height card that flips: the FRONT face is the
-// employee summary (name, one-line what-it-does, trigger, tools as real brand
-// logos, example/last result via the GENERIC renderer); the BACK face is a TOP
-// TAB BAR that swaps file/setup content in a single pane (no scroll-through). A pinned
-// "Add to workspace" CTA sits at the bottom of both faces.
-//
-// The data is the strict allow-list `PublicWorker` (no source, no secrets). The
-// back-face "files" are therefore SYNTHESIZED from the public fields
-// (SKILL.md from the description/use-cases/how-it-works, a readable setup view
-// from trigger + tools + I/O) plus an Output tab that renders the example result
-// through the same GenericOutput primitive used on the run page. The old `npx
-// ... add <token>` install artifact is intentionally dropped.
-import { useState, type ReactNode } from "react";
+// Public worker share card: overview first, with source/setup available as
+// secondary panes for agents and technical users.
+import { useState } from "react";
+import type { ComponentType } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { Clock, MousePointerClick, Webhook, Zap } from "lucide-react";
+import { Check, Clipboard, Clock, Copy, Download, MousePointerClick, Settings2, Terminal, Webhook, Zap } from "lucide-react";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { Avatar } from "@/components/ui/Avatar";
-import { GenericOutput } from "@/components/generic-output";
 import { SHARE_CARD_BODY_HEIGHT } from "@/components/share/ShareCardShell";
 import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
-import type { PublicWorker } from "@/lib/types";
+import { sanitizeOutputText } from "@/lib/strip-citations";
+import type { PublicShareFile, PublicWorker } from "@/lib/types";
+
+type IconComponent = ComponentType<{ className?: string }>;
 
 const SLUG_ALIASES: Record<string, string> = {
   googlecalendar: "google-calendar",
@@ -36,7 +29,7 @@ function normalizeSlug(slug: string): string {
   return SLUG_ALIASES[lower] ?? lower;
 }
 
-function triggerMeta(type: string): { label: string; Icon: typeof Clock } {
+function triggerMeta(type: string): { label: string; Icon: IconComponent } {
   switch (type) {
     case "schedule":
       return { label: "Runs on a schedule", Icon: Clock };
@@ -47,16 +40,6 @@ function triggerMeta(type: string): { label: string; Icon: typeof Clock } {
     default:
       return { label: "Runs on demand", Icon: MousePointerClick };
   }
-}
-
-function exampleType(worker: PublicWorker): string {
-  // Infer the example-result type from the declared outputs (first output's
-  // type), falling back to markdown/text. Keeps the GenericOutput call honest.
-  const first = worker.outputs?.[0]?.type;
-  if (first === "json" || first === "csv" || first === "markdown" || first === "text" || first === "file") return first;
-  const ex = (worker.example_output ?? "").trim();
-  if (ex.startsWith("{") || ex.startsWith("[")) return "json";
-  return "markdown";
 }
 
 function buildSkillMd(worker: PublicWorker): string {
@@ -80,117 +63,84 @@ function buildSkillMd(worker: PublicWorker): string {
   return lines.join("\n").trim();
 }
 
-function formatField(field: { label?: string; name: string; type: string; required?: boolean }) {
-  const label = field.label || field.name;
-  const required = field.required ? "Required" : "Optional";
-  return { label, meta: `${field.type}${field.required == null ? "" : ` · ${required}`}` };
+function buildWorkerYml(worker: PublicWorker): string {
+  const tools = (worker.connections ?? []).map(normalizeSlug);
+  const lines: string[] = [`name: ${worker.name}`, "trigger:", `  type: ${worker.trigger_type}`];
+  if (worker.runtime) lines.push(`runtime: ${worker.runtime}`);
+  if (tools.length > 0) {
+    lines.push("tools:");
+    for (const tool of tools) lines.push(`  - ${tool}`);
+  }
+  if (worker.outputs.length > 0) {
+    lines.push("outputs:");
+    for (const output of worker.outputs) lines.push(`  - ${output.name}: ${output.type}`);
+  }
+  return lines.join("\n");
 }
 
-function SetupSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-2">
-      <h2 className="text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--ink-faint)]">{title}</h2>
-      {children}
-    </section>
-  );
+type FileTab = "overview" | "source" | "setup";
+
+function sourceText(file: PublicShareFile): string {
+  return file.content ?? file.content_text ?? "";
 }
 
-function SetupLine({
-  label,
-  meta,
-  icon,
-}: {
-  label: string;
-  meta?: string;
-  icon?: ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-2 rounded-[10px] bg-[var(--bg-2)] px-3 py-2 text-sm">
-      {icon ? <span className="grid size-5 shrink-0 place-items-center text-[var(--ink-soft)]">{icon}</span> : null}
-      <span className="min-w-0 flex-1 truncate text-[var(--ink)]">{label}</span>
-      {meta ? <span className="shrink-0 text-xs text-[var(--ink-soft)]">{meta}</span> : null}
-    </div>
-  );
+function displayPath(file: PublicShareFile): string {
+  return file.path || "file";
 }
 
-function WorkerSetupSummary({
+function findFile(files: PublicShareFile[], names: string[]): PublicShareFile | null {
+  return files.find((file) => names.includes(displayPath(file))) ?? null;
+}
+
+function sourceBundle(files: PublicShareFile[], worker: PublicWorker): string {
+  if (files.length > 0) {
+    return files
+      .map((file) => `# ${displayPath(file)}\n\n${sourceText(file)}`)
+      .join("\n\n---\n\n")
+      .trim();
+  }
+  return buildSkillMd(worker);
+}
+
+function downloadText(filename: string, content: string) {
+  if (typeof window === "undefined") return;
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function WorkerShareCard({
   worker,
-  tools,
-  triggerLabel,
-  TriggerIcon,
+  authed = false,
+  token,
+  files = [],
+  sharedBy,
 }: {
   worker: PublicWorker;
-  tools: string[];
-  triggerLabel: string;
-  TriggerIcon: typeof Clock;
+  authed?: boolean;
+  token?: string;
+  files?: PublicShareFile[];
+  sharedBy?: { label: string; display_name?: string; email?: string } | null;
 }) {
-  return (
-    <div className="space-y-4 px-5 py-4">
-      <SetupSection title="Trigger">
-        <SetupLine label={triggerLabel} meta={worker.trigger_type} icon={<TriggerIcon className="size-3.5" />} />
-      </SetupSection>
-
-      <SetupSection title="Tools">
-        {tools.length > 0 ? (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {tools.map((slug) => (
-              <SetupLine
-                key={slug}
-                label={slug.replace(/-/g, " ")}
-                icon={<BrandLogo icon={slug} className="size-3.5" />}
-              />
-            ))}
-          </div>
-        ) : (
-          <p className="rounded-[10px] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink-soft)]">
-            No external tool connection required.
-          </p>
-        )}
-      </SetupSection>
-
-      {worker.inputs.length > 0 && (
-        <SetupSection title="Inputs">
-          <div className="space-y-2">
-            {worker.inputs.map((input) => {
-              const field = formatField(input);
-              return <SetupLine key={input.name} label={field.label} meta={field.meta} />;
-            })}
-          </div>
-        </SetupSection>
-      )}
-
-      {worker.outputs.length > 0 && (
-        <SetupSection title="Outputs">
-          <div className="space-y-2">
-            {worker.outputs.map((output) => {
-              const field = formatField(output);
-              return <SetupLine key={output.name} label={field.label} meta={field.meta} />;
-            })}
-          </div>
-        </SetupSection>
-      )}
-    </div>
-  );
-}
-
-type FileTab = "skill" | "setup" | "output";
-
-export function WorkerShareCard({ worker, authed = false, token }: { worker: PublicWorker; authed?: boolean; token?: string }) {
   const router = useRouter();
   const workspaceHref = useWorkspaceHref();
-  const [tab, setTab] = useState<FileTab>("skill");
+  const [tab, setTab] = useState<FileTab>("overview");
   const [importing, setImporting] = useState(false);
   const [importedId, setImportedId] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const { label: triggerLabel, Icon: TriggerIcon } = triggerMeta(worker.trigger_type);
   const tools = (worker.connections ?? []).map(normalizeSlug);
-  const hasExample = Boolean((worker.example_output ?? "").trim());
+  const skillFile = findFile(files, ["SKILL.md"]);
+  const workerFile = findFile(files, ["worker.yml", "worker.yaml"]);
+  const visibleFiles = files.filter((file) => sourceText(file).trim());
+  const shareUrl = typeof window !== "undefined" ? window.location.href : "";
+  const installPrompt = `Import this Floom worker template into my workspace and keep it in test mode first: ${shareUrl}`;
+  const sharerLabel = sharedBy?.label || "a Floom user";
 
   async function handleImport() {
     if (!token || importing) return;
@@ -201,6 +151,17 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
       router.push(workspaceHref(`/workers?sel=${encodeURIComponent(result.worker_id)}`));
     } catch {
       setImporting(false);
+    }
+  }
+
+  async function copyText(kind: string, value: string) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(kind);
+      window.setTimeout(() => setCopied(null), 1400);
+    } catch {
+      setCopied(null);
     }
   }
 
@@ -226,59 +187,52 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
     </Link>
   );
 
-  // S8: the standalone worker share is the worker's FILES — its skill file and
-  // worker.yml (+ an example output when present). One compact identity line,
-  // then the files front-and-center. No flip, no heavy summary card, no boxed
-  // chrome: flat, files-first, separated by a soft inset surface.
   return (
-    <div className="px-7 pb-5 pt-5">
-      {/* Compact identity */}
-      <div className="mb-3 flex items-start gap-3">
-        <Avatar role="worker" id={worker.id} name={worker.name} size={32} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-base font-semibold tracking-tight">{worker.name}</h1>
-            {worker.is_example && (
-              <span className="text-[10px] uppercase tracking-wide text-[var(--ink-faint)]">Example</span>
+    <div className="min-w-0 px-3 pb-5 pt-5 sm:px-7">
+      <div className="mb-4 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="flex min-w-0 items-start gap-3">
+          <Avatar role="worker" id={worker.id} name={worker.name} size={40} />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-[var(--ink-soft)]">
+              {sharerLabel} is sharing this worker with you
+            </p>
+            <h1 className="mt-1 text-xl font-semibold tracking-tight text-[var(--ink)] sm:text-2xl">{worker.name}</h1>
+            {worker.description && (
+              <p className="mt-2 max-w-[620px] text-sm leading-6 text-[var(--ink-soft)]">{worker.description}</p>
             )}
           </div>
-          {worker.description && (
-            <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--ink-soft)]">{worker.description}</p>
-          )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ink-soft)]">
-            <span className="inline-flex items-center gap-1.5">
-              <TriggerIcon className="size-3.5" />
-              {triggerLabel}
-            </span>
-            {tools.map((slug) => (
-              <span key={slug} className="inline-flex items-center gap-1.5">
-                <BrandLogo icon={slug} className="size-3.5" />
-                <span className="capitalize">{slug.replace(/-/g, " ")}</span>
-              </span>
-            ))}
-          </div>
+        </div>
+        <div className="flex min-w-0 flex-wrap gap-2 sm:ml-auto sm:shrink-0">
+          <ActionButton
+            icon={Copy}
+            label={copied === "link" ? "Copied" : "Copy link"}
+            onClick={() => void copyText("link", shareUrl)}
+          />
+          <ActionButton
+            icon={Clipboard}
+            label={copied === "agent" ? "Copied" : "Copy agent prompt"}
+            onClick={() => void copyText("agent", installPrompt)}
+          />
         </div>
       </div>
 
-      {/* FILES — the center of the share. Soft inset surface, hairline tab bar. */}
       <div
-        className="flex flex-col overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)]"
+        className="flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)] [border:var(--bd-div)]"
         style={{ height: SHARE_CARD_BODY_HEIGHT }}
       >
-        {/* Tab bar */}
-        <div className="flex shrink-0 [border-bottom:var(--bd-div)]">
+        <div className="flex min-w-0 shrink-0 overflow-x-auto [border-bottom:var(--bd-div)] bg-[var(--bg-card)]">
           {([
-            ["skill", "SKILL.md"],
+            ["overview", "Overview"],
+            ["source", "Source"],
             ["setup", "Setup"],
-            ...(hasExample ? ([["output", "output"]] as const) : []),
           ] as [FileTab, string][]).map(([key, labelText]) => (
             <button
               key={key}
               type="button"
               onClick={() => setTab(key)}
-              className={`px-4 py-2.5 font-mono text-xs transition-colors ${
+              className={`inline-flex h-11 shrink-0 items-center gap-2 px-4 text-sm transition-colors ${
                 tab === key
-                  ? "bg-[var(--bg-card)] font-medium text-[var(--ink)]"
+                  ? "bg-[var(--bg-2)] font-medium text-[var(--ink)]"
                   : "text-[var(--ink-soft)] hover:text-[var(--ink)]"
               }`}
             >
@@ -287,21 +241,28 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
           ))}
         </div>
 
-        {/* Active file — white "paper" sheet, scrolls within itself */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--bg-card)]">
-          {tab === "skill" && (
-            <GenericOutput type="markdown" value={buildSkillMd(worker)} className="px-5 py-4" />
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[var(--bg-card)]">
+          {tab === "overview" && (
+            <OverviewPane worker={worker} tools={tools} triggerLabel={triggerLabel} TriggerIcon={TriggerIcon} />
           )}
-          {tab === "setup" && (
-            <WorkerSetupSummary
+          {tab === "source" && (
+            <SourcePane
               worker={worker}
-              tools={tools}
-              triggerLabel={triggerLabel}
-              TriggerIcon={TriggerIcon}
+              files={visibleFiles}
+              skillFile={skillFile}
+              onCopy={() => void copyText("source", sourceBundle(visibleFiles, worker))}
+              onDownload={() => downloadText(`${worker.id || "worker"}-source.txt`, sourceBundle(visibleFiles, worker))}
+              copied={copied === "source"}
             />
           )}
-          {tab === "output" && hasExample && (
-            <GenericOutput type={exampleType(worker)} value={worker.example_output} className="px-5 py-4" />
+          {tab === "setup" && (
+            <SetupPane
+              worker={worker}
+              workerFile={workerFile}
+              installPrompt={installPrompt}
+              onCopyPrompt={() => void copyText("agent", installPrompt)}
+              copiedPrompt={copied === "agent"}
+            />
           )}
         </div>
       </div>
@@ -315,6 +276,198 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
         </p>
         {importButton}
       </div>
+    </div>
+  );
+}
+
+function ActionButton({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: IconComponent;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-button)] bg-[var(--bg-card)] px-3 text-[13px] font-medium text-[var(--ink)] [border:var(--bd-div)] hover:bg-[var(--bg-2)]"
+    >
+      <Icon className="size-3.5" />
+      {label}
+    </button>
+  );
+}
+
+function OverviewPane({
+  worker,
+  tools,
+  triggerLabel,
+  TriggerIcon,
+}: {
+  worker: PublicWorker;
+  tools: string[];
+  triggerLabel: string;
+  TriggerIcon: IconComponent;
+}) {
+  return (
+    <div className="space-y-5 px-5 py-5">
+      {worker.long_description && worker.long_description !== worker.description && (
+        <section>
+          <h2 className="text-sm font-semibold text-[var(--ink)]">What this worker does</h2>
+          <p className="mt-2 text-sm leading-6 text-[var(--ink-soft)]">{worker.long_description}</p>
+        </section>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <InfoTile label="Run mode" value={triggerLabel} icon={TriggerIcon} />
+        <InfoTile label="Runtime" value={worker.runtime || "Worker"} icon={Terminal} />
+        <InfoTile label="Tools" value={tools.length ? `${tools.length} connected` : "No tools"} icon={Settings2} />
+      </div>
+
+      {tools.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-[var(--ink)]">Tools used</h2>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {tools.map((slug) => (
+              <span key={slug} className="inline-flex h-8 items-center gap-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 text-sm text-[var(--ink)]">
+                <BrandLogo icon={slug} className="size-4" />
+                <span className="capitalize">{slug.replace(/-/g, " ")}</span>
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {worker.use_cases && worker.use_cases.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-[var(--ink)]">Use cases</h2>
+          <div className="mt-2 grid gap-2">
+            {worker.use_cases.map((item) => (
+              <div key={item} className="flex gap-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-sm leading-6 text-[var(--ink-soft)]">
+                <Check className="mt-1 size-3.5 shrink-0 text-[var(--ink)]" />
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {worker.inputs.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-[var(--ink)]">Inputs</h2>
+          <div className="mt-2 grid gap-2">
+            {worker.inputs.map((input) => (
+              <div key={input.name} className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="rounded-[var(--radius-button)] bg-[var(--bg-card)] px-2 py-1 font-mono text-xs text-[var(--ink)] [border:var(--bd-div)]">
+                    {input.name}
+                  </code>
+                  <span className="text-xs font-medium text-[var(--ink-soft)]">{input.type}</span>
+                  {input.required && <span className="text-xs text-[var(--warning)]">required</span>}
+                </div>
+                {input.description && (
+                  <p className="mt-2 text-sm leading-6 text-[var(--ink-soft)]">{input.description}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function InfoTile({ label, value, icon: Icon }: { label: string; value: string; icon: IconComponent }) {
+  return (
+    <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
+      <div className="flex items-center gap-2 text-xs font-medium text-[var(--ink-soft)]">
+        <Icon className="size-3.5" />
+        {label}
+      </div>
+      <p className="mt-2 text-sm font-medium text-[var(--ink)]">{value}</p>
+    </div>
+  );
+}
+
+function SourcePane({
+  worker,
+  files,
+  skillFile,
+  onCopy,
+  onDownload,
+  copied,
+}: {
+  worker: PublicWorker;
+  files: PublicShareFile[];
+  skillFile: PublicShareFile | null;
+  onCopy: () => void;
+  onDownload: () => void;
+  copied: boolean;
+}) {
+  const primary = skillFile ? sourceText(skillFile) : buildSkillMd(worker);
+  return (
+    <div className="flex min-h-full flex-col">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3">
+        <div>
+          <h2 className="text-sm font-semibold text-[var(--ink)]">Source files</h2>
+          <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+            {files.length ? `${files.length} shared files` : "Public summary generated from the worker metadata"}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <ActionButton icon={Copy} label={copied ? "Copied" : "Copy source"} onClick={onCopy} />
+          <ActionButton icon={Download} label="Download" onClick={onDownload} />
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <pre className="whitespace-pre-wrap break-words rounded-[var(--radius-card)] bg-[var(--bg-2)] p-4 font-mono text-xs leading-5 text-[var(--ink)] [border:var(--bd-div)]">
+          {sanitizeOutputText(primary)}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+function SetupPane({
+  worker,
+  workerFile,
+  installPrompt,
+  onCopyPrompt,
+  copiedPrompt,
+}: {
+  worker: PublicWorker;
+  workerFile: PublicShareFile | null;
+  installPrompt: string;
+  onCopyPrompt: () => void;
+  copiedPrompt: boolean;
+}) {
+  const manifest = workerFile ? sourceText(workerFile) : buildWorkerYml(worker);
+  return (
+    <div className="space-y-4 px-5 py-5">
+      <section className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--ink)]">Agent install prompt</h2>
+            <p className="mt-1 text-sm leading-6 text-[var(--ink-soft)]">
+              Give this to an agent that has access to Floom. It imports the template and keeps the first run in preview mode.
+            </p>
+          </div>
+          <ActionButton icon={Clipboard} label={copiedPrompt ? "Copied" : "Copy prompt"} onClick={onCopyPrompt} />
+        </div>
+        <pre className="mt-3 whitespace-pre-wrap rounded-[var(--radius-card)] bg-[var(--bg-card)] p-3 font-mono text-xs leading-5 text-[var(--ink)] [border:var(--bd-div)]">
+          {installPrompt}
+        </pre>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-[var(--ink)]">Worker setup</h2>
+        <pre className="mt-2 overflow-x-auto rounded-[var(--radius-card)] bg-[var(--bg-2)] p-4 font-mono text-xs leading-5 text-[var(--ink)] [border:var(--bd-div)]">
+          {sanitizeOutputText(manifest)}
+        </pre>
+      </section>
     </div>
   );
 }

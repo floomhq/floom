@@ -284,6 +284,7 @@ export interface TimeseriesDay {
 
 export interface WorkerSummary {
   id: string;
+  workspace_id?: string | null;
   name: string;
   created_at?: string | null;
   updated_at?: string | null;
@@ -321,7 +322,7 @@ export interface WorkerSummary {
   missing_connections?: string[];  // #556: required connections not yet configured
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
-  public_link?: string;   // owner-only signed share link to /w/<id>?token=
+  public_link?: string;   // owner-only public runner link to /w/<id>?token=, public workers only
   // Members STEP 1: ownership + per-asset visibility + computed permissions.
   owner_id?: string | null;
   visibility?: AssetVisibility;
@@ -351,6 +352,7 @@ export interface WorkerFile {
 
 export interface WorkerDetail {
   id: string;
+  workspace_id?: string | null;
   name: string;
   description?: string;
   long_description?: string;
@@ -386,8 +388,8 @@ export interface WorkerDetail {
   last_fired_at?: string | null;
   missing_secrets?: string[];      // #556: required secrets not yet configured
   missing_connections?: string[];  // #556: required connections not yet configured
-  // Owner-only signed share link to the standalone public worker page
-  // (/w/<id>?token=<hmac>). Only present on the owner's authenticated fetch.
+  // Owner-only public runner link to /w/<id>?token=. Private/unlisted source
+  // sharing uses api.workers.shareLink(id), which mints a revocable /s/<token>.
   public_link?: string;
   // Set when an edit to a read-only stock worker transparently forked it into a
   // user-owned editable copy (clone-on-edit). Carries the source stock worker id;
@@ -494,10 +496,12 @@ export interface StandaloneShareLink {
 
 export interface PublicShareFile {
   path: string;
-  size: number;
-  mime_type: string;
+  size?: number;
+  mime_type?: string;
   display_type?: string | null;
-  is_binary: boolean;
+  is_binary?: boolean;
+  binary?: boolean;
+  content?: string | null;
   updated_at?: string | null;
   description?: string | null;
   tags?: string[];
@@ -541,6 +545,11 @@ export interface StandaloneShare {
   entity_type: "worker" | "brain_file" | "brain_pack" | "run" | "approvals_batch";
   title: string;
   description?: string | null;
+  shared_by?: {
+    label: string;
+    display_name?: string;
+    email?: string;
+  } | null;
   worker?: PublicWorker;
   pack?: PublicSharePack;
   file?: PublicShareFile | null;
@@ -1290,13 +1299,14 @@ export interface CatalogToolItem {
 }
 
 export interface VersionSummary {
-  id: string;       // 7-char git SHA
-  sha: string;      // same 7-char git SHA
+  id: string;       // git SHA or synthetic current marker
+  sha: string;      // git SHA or synthetic current marker
   message: string;  // commit message
   author: string;   // git author name
   timestamp: string; // ISO 8601 commit date
   asset_type: string;
   asset_id: string;
+  change_source?: string | null;
 }
 
 /** Unified git timeline entry (#772 /workspace/changelog). */

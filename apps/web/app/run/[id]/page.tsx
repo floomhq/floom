@@ -93,6 +93,7 @@ function WorkerConnectionRow({
   slug: string;
   connection: ConnectionItem | undefined;
 }) {
+  const searchParams = useSearchParams();
   const app = getSupportedApp(slug);
   const accountLabel = connection
     ? maskAccountLabel(getConnectionAccountLabel(connection as ConnectionRecord))
@@ -108,7 +109,7 @@ function WorkerConnectionRow({
           <span className="block truncate text-xs text-muted-foreground">{accountLabel}</span>
         ) : (
           <Link
-            href="/connections"
+            href={withWorkspaceParam("/connections", searchParams)}
             className="block text-xs text-[var(--accent)] no-underline hover:underline"
           >
             Not connected · Connect

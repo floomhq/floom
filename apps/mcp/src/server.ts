@@ -6,7 +6,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { readCredentials } from "./lib/credentials.js";
+import { FloomApiClient } from "./lib/api.js";
+import { readCredentials, type StoredCredentials } from "./lib/credentials.js";
 import {
   WORKER_AUTHORING_CONTRACT,
   getWorkerTemplate,
@@ -39,7 +40,7 @@ class FloomApiError extends Error {
 }
 
 function apiBase(): string {
-  return (process.env.FLOOM_API_BASE || process.env.WORKEROS_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, "");
+  return (process.env.FLOOM_API_BASE || process.env.WORKEROS_API_BASE || resolvedCredentials?.api_base || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
 function hostedModeRequested(): boolean {
@@ -48,7 +49,7 @@ function hostedModeRequested(): boolean {
 }
 
 function isHostedApi(): boolean {
-  return Boolean(process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN) || hostedModeRequested();
+  return Boolean(process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN) || hostedModeRequested() || resolvedCredentials?.mode === "cloud";
 }
 
 function resolvePath(path: string): string {
@@ -59,9 +60,10 @@ function resolvePath(path: string): string {
   return `/api${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
-// #1455: the workspace id resolved once at startup from readCredentials() (env
-// OR ~/.config/floom/credentials.json). authHeader() is synchronous and runs
-// per-request, so we cache it here instead of reading the creds file each call.
+// #1455/#1229: credentials resolved once at startup from env or saved
+// ~/.config/floom/credentials.json. The MCP server mirrors the CLI auth client,
+// so a token-free MCP config works after `floom login`.
+let resolvedCredentials: StoredCredentials | null = null;
 let resolvedWorkspaceId: string | undefined;
 
 // #1455: hosted APIs may require x-workeros-workspace on worker WRITES
@@ -74,7 +76,14 @@ function activeWorkspaceId(): string | undefined {
   return process.env.WORKEROS_WORKSPACE_ID?.trim() || resolvedWorkspaceId;
 }
 
-function authHeader(): Record<string, string> {
+async function authHeaders(): Promise<Record<string, string>> {
+  if (resolvedCredentials) {
+    const workspaceId = process.env.WORKEROS_WORKSPACE_ID?.trim();
+    const credentials = workspaceId
+      ? { ...resolvedCredentials, workspace_id: workspaceId }
+      : resolvedCredentials;
+    return new FloomApiClient(apiBase(), credentials).authHeaders();
+  }
   const headers: Record<string, string> = {};
   const token = (process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN || "").trim();
   if (token) {
@@ -82,7 +91,7 @@ function authHeader(): Record<string, string> {
   } else {
     const secret = process.env.WORKEROS_API_SECRET?.trim();
     if (!secret) {
-      throw new Error("FLOOM_TOKEN, WORKEROS_API_TOKEN, or WORKEROS_API_SECRET is required");
+      throw new Error("Run `floom login`, or set FLOOM_TOKEN, WORKEROS_API_TOKEN, or WORKEROS_API_SECRET");
     }
     headers["x-floom-secret"] = secret;
     // Self-hosted engines with user-header scope require x-floom-user (OSS only).
@@ -276,7 +285,7 @@ async function request(
     headers: {
       "accept": "application/json, text/event-stream",
       "content-type": "application/json",
-      ...authHeader(),
+      ...(await authHeaders()),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -308,7 +317,7 @@ async function requestBytes(
     headers: {
       "accept": "application/json",
       "content-type": contentType,
-      ...authHeader(),
+      ...(await authHeaders()),
     },
     body: Buffer.from(body),
   });
@@ -353,7 +362,7 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
     method: "GET",
     headers: {
       "accept": "text/plain, application/json, text/*",
-      ...authHeader(),
+      ...(await authHeaders()),
     },
   });
   if (!response.ok) {
@@ -444,7 +453,7 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
       method: "GET",
       headers: {
         "accept": "text/event-stream",
-        ...authHeader(),
+        ...(await authHeaders()),
       },
       signal: controller.signal,
     });
@@ -699,7 +708,7 @@ async function consumeChatStream(
       headers: {
         "accept": "text/event-stream",
         "content-type": "application/json",
-        ...authHeader(),
+        ...(await authHeaders()),
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -809,7 +818,7 @@ export function createServer(): McpServer {
   const workerContractYamlDescription =
     "WorkerContract YAML content. Required top-level fields: schema_version: \"0.3\", name, title, description, version, exec, and trigger. " +
     "Before creating a worker, call workers.contract, choose a starting point with workers.templates.get, then call workers.validate. " +
-    "For script workers, exec must include mode: \"pure-script\", entry: \"run.py\", runtime: \"python311\", runner: \"e2b\", command: \"python run.py\", plus exec.inputs and exec.outputs arrays. " +
+    "For script workers, exec must include mode: \"pure-script\", entry: \"run.py\" or \"run.ts\", runtime: \"python311\" or \"node22\", runner: \"e2b\", command: \"python run.py\" or \"npx --yes tsx run.ts\", plus exec.inputs and exec.outputs arrays. " +
     "Script workers must read inputs.json and write result.json at the worker root.";
 
   server.registerTool(
@@ -839,7 +848,7 @@ export function createServer(): McpServer {
     {
       title: "Get Worker Authoring Contract",
       description:
-        "Return the canonical Floom worker authoring contract for agents. Call this before drafting worker.yml, run.py, or SKILL.md.",
+        "Return the canonical Floom worker authoring contract for agents. Call this before drafting worker.yml, run.py, run.ts, or SKILL.md.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
@@ -863,7 +872,7 @@ export function createServer(): McpServer {
     {
       title: "Get Worker Template",
       description:
-        "Return a full worker template with worker.yml plus run.py or SKILL.md. Use this as the starting point for workers.create.",
+        "Return a full worker template with worker.yml plus run.py, run.ts, or SKILL.md. Use this as the starting point for workers.create.",
       inputSchema: {
         id: z.string().min(1).describe("Template id from workers.templates.list, for example python-script."),
       },
@@ -884,16 +893,17 @@ export function createServer(): McpServer {
     {
       title: "Validate Worker Draft",
       description:
-        "Validate worker.yml plus run.py or SKILL.md before create. This catches schema, runtime contract, secrets, connections, and output-shape mistakes.",
+        "Validate worker.yml plus run.py, run.ts, or SKILL.md before create. This catches schema, runtime contract, secrets, connections, and output-shape mistakes.",
       inputSchema: {
         worker_yml: z.string().min(1).describe(workerContractYamlDescription),
         run_py: z.string().optional().describe("Python source for run.py when exec.mode is pure-script."),
+        run_ts: z.string().optional().describe("TypeScript source for run.ts when exec.mode is pure-script."),
         skill_md: z.string().optional().describe("SKILL.md content when exec.mode is agent."),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ worker_yml, run_py, skill_md }) =>
-      callTool(async () => jsonResult(validateWorkerDraft({ worker_yml, run_py, skill_md }))),
+    async ({ worker_yml, run_py, run_ts, skill_md }) =>
+      callTool(async () => jsonResult(validateWorkerDraft({ worker_yml, run_py, run_ts, skill_md }))),
   );
 
   server.registerTool(
@@ -903,27 +913,37 @@ export function createServer(): McpServer {
       description:
         "Create a Floom worker from WorkerContract YAML. First call workers.contract, workers.templates.get, and workers.validate. " +
         "The YAML must include schema_version, name, title, description, version, exec, and trigger. " +
-        "For script-mode workers supply run_py that reads inputs.json and writes result.json. For agent/skill-mode workers supply skill_md.",
+        "For script-mode workers supply run_py or run_ts that reads inputs.json and writes result.json. For agent/skill-mode workers supply skill_md.",
       inputSchema: {
         worker_yml: z.string().min(1).describe(workerContractYamlDescription),
         run_py: z.string().optional().describe("Python source for run.py. Required for pure-script workers."),
+        run_ts: z.string().optional().describe("TypeScript source for run.ts. Required for TypeScript pure-script workers."),
         skill_md: z.string().optional().describe("Agent system prompt (SKILL.md) for skill/agent-mode workers. Omit for script-mode workers."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ worker_yml, run_py, skill_md }) =>
+    async ({ worker_yml, run_py, run_ts, skill_md }) =>
       callTool(async () => {
-        const source = run_py || "";
+        const source = run_ts || run_py || "";
         const filledWorkerYml = autoFillCapabilities(worker_yml, source);
-        const validation = validateWorkerDraft({ worker_yml: filledWorkerYml, run_py: source, skill_md });
+        const validation = validateWorkerDraft({ worker_yml: filledWorkerYml, run_py, run_ts, skill_md });
         if (!validation.valid) {
           throw new FloomApiError("Worker draft validation failed; call workers.validate for repair details", 400, validation);
         }
+        const files = run_ts
+          ? [
+              { path: "worker.yml", content: filledWorkerYml },
+              { path: "run.ts", content: run_ts },
+              ...(run_py ? [{ path: "run.py", content: run_py }] : []),
+              ...(skill_md ? [{ path: "SKILL.md", content: skill_md }] : []),
+            ]
+          : undefined;
         return jsonResult(
           await request("POST", "/workers", {
             worker_yml: filledWorkerYml,
-            run_py: source,
+            ...(run_py ? { run_py } : {}),
             ...(skill_md ? { skill_md } : {}),
+            ...(files ? { files } : {}),
           }),
           "Worker created.",
         );
@@ -949,6 +969,21 @@ export function createServer(): McpServer {
     async ({ id, ...updates }) =>
       callTool(async () =>
         jsonResult(await request("PATCH", `/workers/${encodeURIComponent(id)}`, updates), "Worker updated."),
+      ),
+  );
+
+  server.registerTool(
+    "workers.share",
+    {
+      title: "Share Worker",
+      description:
+        "Create an unlisted standalone share link for a Floom worker. The link opens the public share page and can be used to import the worker.",
+      inputSchema: workerIdSchema.shape,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(await request("POST", `/workers/${encodeURIComponent(id)}/share-link`), "Worker share link created."),
       ),
   );
 
@@ -1924,15 +1959,16 @@ export function createServer(): McpServer {
 }
 
 export async function main(): Promise<void> {
-  // #1455: resolve the active workspace once (env or creds file) so authHeader()
-  // can attach x-workeros-workspace to every request, matching the CLI.
+  // #1455/#1229: resolve credentials once so stdio MCP can use the same saved
+  // login as the CLI and attach x-workeros-workspace to every request.
   try {
     const creds = await readCredentials();
+    resolvedCredentials = creds;
     if (creds?.workspace_id) {
       resolvedWorkspaceId = creds.workspace_id;
     }
   } catch {
-    // Non-fatal: fall back to the WORKEROS_WORKSPACE_ID env read in authHeader().
+    // Non-fatal: fall back to the WORKEROS_WORKSPACE_ID env read in authHeaders().
   }
   const server = createServer();
   const transport = new StdioServerTransport();

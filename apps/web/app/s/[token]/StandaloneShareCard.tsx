@@ -237,16 +237,22 @@ function StandaloneLibraryShareCard({
   // Worker shares reuse the simplified, files-first worker card (DRY).
   if (share.entity_type === "worker" && share.worker) {
     return (
-      <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+      <div className="mx-auto min-w-0 py-10" style={{ width: "calc(100vw - 24px)", maxWidth: 680 }}>
+        <div className="overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
           {/* Nav — same Floom header the file/pack shares carry */}
-          <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] px-5 py-3">
+          <div className="flex min-w-0 items-center justify-between gap-3 rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] px-5 py-3">
             <FloomMark />
-            <Link href={ctaHref} className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
+            <Link href={ctaHref} className="shrink-0 text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
               {ctaLabel}
             </Link>
           </div>
-          <WorkerShareCard worker={share.worker} authed={authed} token={token} />
+          <WorkerShareCard
+            worker={share.worker}
+            authed={authed}
+            token={token}
+            files={share.files}
+            sharedBy={share.shared_by}
+          />
         </div>
       </div>
     );
@@ -438,7 +444,7 @@ function PackView({
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-mono text-xs font-medium">{baseName(node.file.path)}</p>
                     <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
-                      {formatBytes(node.file.size)}
+                      {node.file.size != null ? formatBytes(node.file.size) : "Shared file"}
                       {node.file.display_type ? ` · ${node.file.display_type}` : ""}
                     </p>
                   </div>
@@ -490,7 +496,7 @@ function FileView({
         <div className="min-w-0 flex-1">
           <p className="truncate font-mono text-[13px] font-medium">{baseName(file.path)}</p>
           <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
-            {[file.display_type, formatBytes(file.size)].filter(Boolean).join(" · ")}
+            {[file.display_type, file.size != null ? formatBytes(file.size) : null].filter(Boolean).join(" · ")}
           </p>
         </div>
         {file.download_url && (

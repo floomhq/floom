@@ -28,10 +28,30 @@ exec:
   entry: SKILL.md
 `;
 
+const typescriptWorkerYml = `schema_version: "0.3"
+name: cli-test-worker
+title: CLI Test Worker
+description: Worker used by CLI push tests.
+entrypoint: run.ts
+exec:
+  runtime: node22
+  command: npx --yes tsx run.ts
+  entry: run.ts
+`;
+
 const runPy = `import json
 
 with open("result.json", "w", encoding="utf-8") as f:
     json.dump({"status": "success", "outputs": {"ok": True}, "artifacts": []}, f)
+`;
+
+const runTs = `import { writeFileSync } from "node:fs";
+
+writeFileSync("result.json", JSON.stringify({
+  status: "success",
+  outputs: { ok: true },
+  artifacts: [],
+}));
 `;
 
 const skillMd = `# CLI Test Worker
@@ -55,11 +75,15 @@ async function makeTempHome(apiBase, apiSecret = "test-secret") {
 async function makeWorkerDir(options = {}) {
   const workerYml = options.workerYml ?? scriptWorkerYml;
   const run = Object.hasOwn(options, "run") ? options.run : runPy;
+  const runTsSource = options.runTs;
   const skill = options.skill;
   const dir = await mkdtemp(join(tmpdir(), "workeros-cli-worker-"));
   await writeFile(join(dir, "worker.yml"), workerYml);
   if (run !== undefined) {
     await writeFile(join(dir, "run.py"), run);
+  }
+  if (runTsSource !== undefined) {
+    await writeFile(join(dir, "run.ts"), runTsSource);
   }
   if (skill !== undefined) {
     await writeFile(join(dir, "SKILL.md"), skill);
@@ -206,6 +230,19 @@ async function startMockApi({
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/workers/cli-test-worker/share-link") {
+      if (!existing) {
+        json(response, 404, { detail: "Worker not found" });
+        return;
+      }
+      json(response, 200, {
+        token: "fls_cliTestShareToken",
+        url: "https://floom.dev/s/fls_cliTestShareToken",
+        entity_type: "worker",
+      });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/workers/cli-test-worker/runs") {
       const body = await readBody(request);
       bodies.push(body);
@@ -264,6 +301,23 @@ test("workers validate accepts worker.yml plus run.py", async () => {
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Validated cli-test-worker/);
   assert.match(result.stdout, /Runtime\s+python311/);
+  assert.equal(result.stderr, "");
+});
+
+test("workers validate accepts worker.yml plus run.ts", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: typescriptWorkerYml,
+    run: undefined,
+    runTs,
+  });
+  const result = await runCli(["workers", "validate", dir, "--json"]);
+
+  assert.equal(result.code, 0);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.valid, true);
+  assert.equal(body.runtime, "node22");
+  assert.equal(body.source, "run.ts");
+  assert.deepEqual(body.errors, []);
   assert.equal(result.stderr, "");
 });
 
@@ -578,6 +632,31 @@ test("workers push creates a new worker with POST /workers", async (t) => {
   assert.equal(mock.bodies[0].skill_md, undefined);
 });
 
+test("workers push creates TypeScript workers with full files payload", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+  const dir = await makeWorkerDir({
+    workerYml: typescriptWorkerYml,
+    run: undefined,
+    runTs,
+  });
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Created cli-test-worker/);
+  assert.deepEqual(mock.seen, [
+    "GET /workers/cli-test-worker",
+    "POST /workers",
+  ]);
+  assert.equal(mock.bodies[0].run_py, undefined);
+  assert.ok(Array.isArray(mock.bodies[0].files));
+  const files = new Map(mock.bodies[0].files.map((file) => [file.path, file.content]));
+  assert.match(files.get("worker.yml"), /entrypoint: run\.ts/);
+  assert.match(files.get("run.ts"), /result\.json/);
+});
+
 test("workers push explains hidden cross-workspace id conflicts", async (t) => {
   const mock = await startMockApi({
     existing: false,
@@ -672,6 +751,21 @@ test("workers show renders structured connections for humans", async (t) => {
   assert.match(result.stdout, /google_search_console \(allowed_tools: GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY\)/);
   assert.match(result.stdout, /github/);
   assert.doesNotMatch(result.stdout, /\[object Object\]/);
+});
+
+test("workers share creates an unlisted standalone worker share link", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "share", "cli-test-worker", "--json"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.entity_type, "worker");
+  assert.equal(body.url, "https://floom.dev/s/fls_cliTestShareToken");
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/share-link"]);
+  assert.equal(result.stderr, "");
 });
 
 test("workers push reports unsupported in-place source updates", async (t) => {

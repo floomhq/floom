@@ -11,6 +11,7 @@ in lockstep with main by the worker test fixtures.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -34,11 +35,13 @@ from services.worker_registry_ops import (
     _persist_discovered_workers,
 )
 from services.worker_create import _build_worker_detail_after_write
-from services.worker_serialize import _build_worker_detail, _should_ignore_worker_file
+from services.worker_serialize import _build_worker_detail, _read_worker_files, _should_ignore_worker_file
 
 logger = logging.getLogger("floom.api")
 
 worker_versions_router = APIRouter()
+
+_CURRENT_VERSION_ID = "current"
 
 
 def _manifest_approvals_required(manifest: Dict[str, Any] | None) -> bool:
@@ -108,6 +111,56 @@ def _validate_rollback_target_files(
     if reason:
         raise HTTPException(status_code=409, detail=reason)
 
+
+def _current_worker_version_summary(worker_id: str, worker: Dict[str, Any]) -> VersionSummary:
+    timestamp = worker.get("updated_at") or worker.get("created_at")
+    if isinstance(timestamp, datetime):
+        timestamp = timestamp.isoformat()
+    elif timestamp is None:
+        timestamp = datetime.now(timezone.utc).isoformat()
+    else:
+        timestamp = str(timestamp)
+
+    return VersionSummary(
+        id=_CURRENT_VERSION_ID,
+        sha=_CURRENT_VERSION_ID,
+        message="Current source",
+        author="Floom",
+        timestamp=timestamp,
+        asset_type="worker",
+        asset_id=worker_id,
+        change_source="current",
+    )
+
+
+def _visible_worker_version_id(requested_worker_id: str, worker: Dict[str, Any]) -> str:
+    return str(worker.get("id") or requested_worker_id)
+
+
+def _worker_file_entries(worker_files: List[Any]) -> List[Dict[str, str]]:
+    files: List[Dict[str, str]] = []
+    for file in worker_files:
+        if getattr(file, "binary", False) or getattr(file, "content", None) is None:
+            continue
+        files.append({"path": str(getattr(file, "path")), "content": str(getattr(file, "content"))})
+    return files
+
+
+def _current_worker_version_files(
+    worker_id: str,
+    *,
+    user_id: str | None = None,
+    repos: Repositories | None = None,
+) -> List[Dict[str, str]]:
+    if user_id is not None and repos is not None:
+        detail = _build_worker_detail(worker_id, user_id=user_id, repos=repos)
+        return _worker_file_entries(detail.files or [])
+
+    from worker_registry import WORKERS_DIR
+
+    return _worker_file_entries(_read_worker_files(WORKERS_DIR / worker_id))
+
+
 @worker_versions_router.get("/workers/{worker_id}/versions", response_model=List[VersionSummary])
 def list_worker_versions(
     worker_id: str,
@@ -120,20 +173,23 @@ def list_worker_versions(
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    visible_worker_id = _visible_worker_version_id(worker_id, worker)
     prefix = _workers_git_prefix()
     workspace = _git_workspace()
     rows = _git_ops.get_log(
         workspace,
-        rel_path=f"{prefix}/{worker_id}",
+        rel_path=f"{prefix}/{visible_worker_id}",
         limit=min(limit, 100),
         asset_type="worker",
-        asset_id=worker_id,
+        asset_id=visible_worker_id,
     )
     # #979: a GET must be side-effect free. The old path committed a baseline
     # when history was empty, so a read (incl. a browser prefetch or crawler)
     # mutated server-side git state and could snapshot a wrongly-visible private
-    # worker. Baseline creation now happens on worker create/update/import; an
-    # empty history just returns [].
+    # worker. Keep that contract, but still surface the current worker source as
+    # a synthetic read-only version so every visible worker has version history.
+    if not rows and limit != 0:
+        return [_current_worker_version_summary(visible_worker_id, worker)]
     return [VersionSummary(**r) for r in rows]
 
 
@@ -149,14 +205,17 @@ def get_worker_version(
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    visible_worker_id = _visible_worker_version_id(worker_id, worker)
+    if sha == _CURRENT_VERSION_ID:
+        return {"files": _current_worker_version_files(visible_worker_id, user_id=auth.user_id, repos=repos)}
     workspace = _git_workspace()
     prefix = _workers_git_prefix()
-    file_paths = _git_ops.list_files_at_sha(workspace, sha, f"{prefix}/{worker_id}")
+    file_paths = _git_ops.list_files_at_sha(workspace, sha, f"{prefix}/{visible_worker_id}")
     if not file_paths:
         raise HTTPException(status_code=404, detail="Version not found or worker had no files at this commit")
     files = []
     for fp in file_paths:
-        rel = fp[len(f"{prefix}/{worker_id}/"):]
+        rel = fp[len(f"{prefix}/{visible_worker_id}/"):]
         # #1681: never surface credential/secret-bearing files (vertex-wif-cred.json,
         # .env, *.pem, ...) or build cruft in the version-history file tree.
         if _should_ignore_worker_file(rel):

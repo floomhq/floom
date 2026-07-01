@@ -42,6 +42,10 @@ vi.mock("@/components/ui/sonner", () => ({
   Toaster: () => null,
 }));
 
+vi.mock("@/components/TermsAcceptanceGate", () => ({
+  TermsAcceptanceGate: () => <div>Terms gate overlay</div>,
+}));
+
 describe("AppShell standalone scroll container (#1717)", () => {
   beforeEach(() => {
     pathname.mockReturnValue("/approvals/review");
@@ -76,6 +80,21 @@ describe("AppShell standalone scroll container (#1717)", () => {
       </AppShell>,
     );
 
+    expect(queryByText("authed user identity")).not.toBeInTheDocument();
+  });
+
+  it("renders legal review pages without authenticated chrome or the terms gate", async () => {
+    pathname.mockReturnValue("/terms");
+
+    const { AppShell } = await import("@/components/layout/AppShell");
+    const { queryByText } = render(
+      <AppShell>
+        <div>Terms page content</div>
+      </AppShell>,
+    );
+
+    expect(queryByText("Terms page content")).toBeInTheDocument();
+    expect(queryByText("Terms gate overlay")).not.toBeInTheDocument();
     expect(queryByText("authed user identity")).not.toBeInTheDocument();
   });
 });

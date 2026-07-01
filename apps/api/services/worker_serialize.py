@@ -718,6 +718,7 @@ def _build_worker_detail(
 
     return WorkerDetail(
         id=worker["id"],
+        workspace_id=worker.get("workspace_id") or "local-default",
         name=worker["name"],
         description=worker.get("description"),
         long_description=worker.get("long_description"),

@@ -125,11 +125,19 @@ test("bundled Floom skill opens with hosted cloud guidance", () => {
   assert.match(firstGuidance, /Everything runs on Floom's cloud; you only use the MCP tools/);
 });
 
-test("install success prompt keeps agents on hosted MCP tools", () => {
+test("install success prompt is concise and launch-safe", () => {
   const src = readFileSync(new URL("../src/commands/mcp.ts", import.meta.url), "utf8");
-  assert.match(src, /hosted Floom Cloud at workeros-api\.floom\.dev/);
-  assert.match(src, /do not set up self-hosting, edit \.env files, or run a local server/);
-  assert.match(src, /use only the Floom MCP tools/);
+  const prompt = src.slice(
+    src.indexOf("function logInstallSuccessNextStep"),
+    src.indexOf("// HTTP MCP config"),
+  ).replace(/\r\n/g, "\n");
+  assert.match(prompt, /Floom is ready/);
+  assert.match(prompt, /Installed MCP for your agent/);
+  assert.match(prompt, /log\.blank\(\);\n  log\.step\("Installed MCP for your agent"\);/);
+  assert.match(prompt, /log\.info\('  "Use Floom to create and run my first read-only worker\."'\);/);
+  assert.match(prompt, /Use Floom to create and run my first read-only worker/);
+  assert.doesNotMatch(prompt, /workeros-api\.floom\.dev/);
+  assert.doesNotMatch(prompt, /Do not set up self-hosting/);
 });
 
 test("auth error hint uses the invoked binary name (workeros login)", async () => {

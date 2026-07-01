@@ -33,6 +33,10 @@ describe("Sign-in split page (§5a2 / #822)", () => {
     expect(await screen.findByLabelText("Username")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("username")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
+    expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute("href", "/privacy");
+    expect(screen.getByRole("link", { name: "Security" })).toHaveAttribute("href", "https://github.com/floomhq/floom/security/policy");
+    expect(screen.getByRole("link", { name: "Docs" })).toHaveAttribute("href", "https://github.com/floomhq/floom#readme");
   });
 
   it("shows 'Sign in with admin secret' toggle when in username mode", async () => {
