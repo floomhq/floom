@@ -333,7 +333,7 @@ function defaultSourceMode(path: string, _hasForm: boolean, binary?: boolean): S
   return "raw";
 }
 
-function sourceModeLabel(mode: SourceMode, _isWorkerYaml = false): string {
+function sourceModeLabel(mode: SourceMode): string {
   if (mode === "raw") return "Raw";
   if (mode === "form") return "Form";
   // All rendered views use "Preview" — consistent with Brain file viewer.
@@ -641,36 +641,46 @@ function WorkerYamlPreviewContent({ content }: { content: string }) {
     return <SyntaxHighlightedCode content={content} path="worker.yml" language="yaml" />;
   }
 
-  const entries = [
-    ["ID", parsed.name],
-    ["Title", parsed.title],
-    ["Trigger", triggerLabel(parsed.trigger)],
-    ["Runtime", runtimeLabel(parsed.exec ?? parsed.runtime)],
-    ["Inputs", countLabel(parsed.inputs, "input")],
-    ["Connections", countLabel(parsed.connections, "connection")],
-    ["Brain resources", countLabel(parsed.contexts, "brain resource")],
-    ["Secrets", countLabel(parsed.secrets, "secret")],
+  const title = parsed.title || parsed.name || "Untitled worker";
+  const description = typeof parsed.description === "string" ? parsed.description.trim() : "";
+  const trigger = triggerLabel(parsed.trigger);
+  const connections = connectionLabels(parsed.connections);
+  const output = outputLabel(parsed);
+  const runtime = runtimeLabel(parsed.exec ?? parsed.runtime);
+  const runtimeMode = runtimeModeLabel(parsed.exec ?? parsed.runtime);
+  const summaryParts = [
+    trigger ? `Runs ${lowercaseFirst(trigger)}` : "",
+    runtimeMode,
+    connections.length > 0 ? `uses ${formatList(connections)}` : "",
+  ].filter(Boolean);
+  const cadenceLine = summaryParts.length > 0 ? `${summaryParts.join(" · ")}.` : "";
+  const summaryLine = [
+    description || `Runs ${title}.`,
+    cadenceLine,
+    output ? `Outputs ${lowercaseFirst(output)}.` : "",
+  ].filter(Boolean).join(" ");
+
+  const essentials = [
+    ["Trigger", trigger],
+    ["Connects", connections.join(", ")],
+    ["Output", output],
+    ["Runtime", runtime],
   ].filter(([, value]) => value);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-base font-semibold text-foreground">{parsed.title || parsed.name || "Untitled worker"}</h3>
-        {parsed.description ? (
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{parsed.description}</p>
-        ) : null}
+    <div className="space-y-5 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-5 py-4">
+      <div className="max-w-3xl space-y-2">
+        <h3 className="text-lg font-semibold leading-7 text-foreground">{title}</h3>
+        <p className="text-sm leading-6 text-muted-foreground">{summaryLine}</p>
       </div>
-      <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-line text-sm sm:grid-cols-2">
-        {entries.map(([label, value]) => (
-          <div key={label} className="bg-card px-3 py-2">
-            <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
-            <dd className="mt-0.5 truncate text-foreground" title={String(value)}>{value}</dd>
+      <dl className="grid max-w-3xl gap-2 text-sm sm:grid-cols-2">
+        {essentials.map(([label, value]) => (
+          <div key={label} className="rounded-[var(--radius-card)] bg-card/80 px-3 py-2.5">
+            <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+            <dd className="mt-1 text-foreground" title={String(value)}>{value}</dd>
           </div>
         ))}
       </dl>
-      <YamlList title="Inputs" items={parsed.inputs} getLabel={(item) => itemLabel(item)} />
-      <YamlList title="Connections" items={parsed.connections} getLabel={(item) => itemLabel(item)} />
-      <YamlList title="Brain resources" items={parsed.contexts} getLabel={(item) => contextItemLabel(item)} />
     </div>
   );
 }
@@ -686,6 +696,7 @@ type WorkerYaml = Record<string, unknown> & {
   connections?: unknown[];
   contexts?: unknown[];
   secrets?: unknown[];
+  outputs?: unknown[];
 };
 
 function parseWorkerYaml(content: string): WorkerYaml | null {
@@ -698,20 +709,15 @@ function parseWorkerYaml(content: string): WorkerYaml | null {
   }
 }
 
-function countLabel(value: unknown, singular: string) {
-  const count = Array.isArray(value) ? value.length : 0;
-  if (count === 0) return "";
-  return `${count} ${singular}${count === 1 ? "" : "s"}`;
-}
-
 function triggerLabel(value: unknown) {
   if (!value || typeof value !== "object") return "";
   const type = String((value as Record<string, unknown>).type || "manual");
   const cron = (value as Record<string, unknown>).cron;
   const tz = (value as Record<string, unknown>).timezone;
-  return cron
-    ? `${type} · ${humanizeCron(String(cron), typeof tz === "string" ? tz : "UTC")}`
-    : type;
+  if (cron) return humanizeCron(String(cron), typeof tz === "string" ? tz : "UTC");
+  if (type === "manual") return "On demand";
+  if (type === "schedule" || type === "scheduled" || type === "cron") return "Scheduled";
+  return titleCaseToken(type);
 }
 
 const RUNTIME_DISPLAY: Record<string, string> = {
@@ -723,19 +729,14 @@ const RUNTIME_DISPLAY: Record<string, string> = {
 
 function runtimeLabel(value: unknown) {
   if (!value) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return titleCaseToken(value);
   if (typeof value !== "object") return "";
   const raw = value as Record<string, unknown>;
   // Show a meaningful runtime — the mode (agent vs script) plus the runtime
   // engine — NOT the entrypoint filename. The exec block's `command`/`entry`
   // often collapses to "SKILL.md"/"run.py", which is a file (already listed in
   // Files), not a runtime. e.g. "Agent" or "Script · Python 3.11".
-  const mode =
-    raw.mode === "agent"
-      ? "Agent"
-      : raw.mode === "pure-script" || raw.mode === "script"
-        ? "Script"
-        : undefined;
+  const mode = uppercaseFirst(runtimeModeLabel(value));
   const rt = raw.runtime ?? raw.type;
   const rtLabel = typeof rt === "string" ? (RUNTIME_DISPLAY[rt] ?? rt) : undefined;
   const label = [mode, rtLabel].filter(Boolean).join(" · ");
@@ -744,54 +745,78 @@ function runtimeLabel(value: unknown) {
   return label || String(raw.command || raw.entry || "");
 }
 
-function itemLabel(value: unknown) {
+function runtimeModeLabel(value: unknown) {
+  if (!value || typeof value === "string") return "";
+  if (typeof value !== "object") return "";
+  const mode = (value as Record<string, unknown>).mode;
+  if (mode === "agent") return "agent mode";
+  if (mode === "pure-script" || mode === "script") return "script mode";
+  const command = (value as Record<string, unknown>).command;
+  const entry = (value as Record<string, unknown>).entry;
+  if (typeof command === "string" && command) return "script mode";
+  if (typeof entry === "string" && entry && entry !== "SKILL.md") return "script mode";
+  return "";
+}
+
+function connectionLabels(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => connectionLabel(item)).filter(Boolean);
+}
+
+function connectionLabel(value: unknown) {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return "";
   const raw = value as Record<string, unknown>;
+  if (raw.app) return titleCaseToken(String(raw.app));
+  if (raw.provider) return titleCaseToken(String(raw.provider));
   if (raw.name) return String(raw.name);
   if (raw.label) return String(raw.label);
   if (raw.type) return String(raw.type);
+  if (raw.composio && typeof raw.composio === "object") {
+    const composio = raw.composio as Record<string, unknown>;
+    if (composio.app) return titleCaseToken(String(composio.app));
+  }
   if (raw.mcp && typeof raw.mcp === "object") {
     return String((raw.mcp as Record<string, unknown>).label || "MCP server");
   }
-  return JSON.stringify(raw);
+  return "";
 }
 
-function contextItemLabel(value: unknown) {
-  if (typeof value === "string") return `${value} · Read-only`;
-  if (!value || typeof value !== "object") return "";
-  const raw = value as Record<string, unknown>;
-  const name = raw.name || raw.label || "Unnamed resource";
-  const access = raw.writeable === true ? "Read/write" : "Read-only";
-  return `${String(name)} · ${access}`;
+function outputLabel(parsed: WorkerYaml) {
+  const exec = parsed.exec && typeof parsed.exec === "object" ? (parsed.exec as Record<string, unknown>) : null;
+  const outputs = Array.isArray(exec?.outputs) ? exec.outputs : parsed.outputs;
+  if (!Array.isArray(outputs) || outputs.length === 0) return "";
+  const first = outputs[0];
+  if (typeof first === "string") return first;
+  if (!first || typeof first !== "object") return "";
+  const raw = first as Record<string, unknown>;
+  const label = String(raw.label || raw.name || raw.kind || "Artifact");
+  const path = typeof raw.path === "string" ? raw.path : "";
+  return path ? `${label} (${path})` : label;
 }
 
-function YamlList({
-  title,
-  items,
-  getLabel,
-}: {
-  title: string;
-  items?: unknown[];
-  getLabel: (item: unknown) => string;
-}) {
-  if (!Array.isArray(items) || items.length === 0) return null;
-  return (
-    <section className="space-y-2">
-      <h4 className="text-xs font-medium uppercase text-muted-foreground">{title}</h4>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((item, index) => (
-          <span
-            key={`${title}-${index}`}
-            className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card px-2 py-1 text-xs text-foreground"
-            title={getLabel(item)}
-          >
-            {getLabel(item)}
-          </span>
-        ))}
-      </div>
-    </section>
-  );
+function formatList(items: string[]) {
+  if (items.length <= 1) return items[0] || "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function lowercaseFirst(value: string) {
+  if (!value) return "";
+  return `${value.charAt(0).toLowerCase()}${value.slice(1)}`;
+}
+
+function uppercaseFirst(value: string) {
+  if (!value) return "";
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+function titleCaseToken(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 // ---------------------------------------------------------------------------
