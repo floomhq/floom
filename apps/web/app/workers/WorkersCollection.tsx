@@ -734,19 +734,21 @@ function SourceTab({ w }: { w: WorkerSummary }) {
         />
       </DetailGroup>
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-h-[90vh] sm:max-w-6xl overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="grid h-[min(90vh,860px)] max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-6xl">
+          <DialogHeader className="px-6 pt-5 pb-3">
             <DialogTitle>Edit source</DialogTitle>
             <DialogDescription>Update this worker&apos;s source files.</DialogDescription>
           </DialogHeader>
-          <FilesEditor
-            mode="edit"
-            files={draftFiles}
-            selectedPath={draftPath}
-            onChange={setDraftFiles}
-            onSelectedPathChange={setDraftPath}
-          />
-          <DialogFooter>
+          <div className="min-h-0 overflow-y-auto px-6 pb-4">
+            <FilesEditor
+              mode="edit"
+              files={draftFiles}
+              selectedPath={draftPath}
+              onChange={setDraftFiles}
+              onSelectedPathChange={setDraftPath}
+            />
+          </div>
+          <DialogFooter className="sticky bottom-0 z-10 m-0 rounded-none">
             <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
