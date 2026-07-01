@@ -2057,7 +2057,7 @@ function WorkersEmptyQuickStart() {
       <div>
         <div className="text-sm font-medium text-ink">Quick start</div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Go to your coding agent, install the Floom CLI or MCP, and ask it to create workers like these:
+          Go to your coding agent, install the Floom MCP server, and ask it to create workers like these:
         </p>
       </div>
 
@@ -2073,19 +2073,17 @@ function WorkersEmptyQuickStart() {
       </div>
 
       <div className="grid gap-1.5 font-mono text-[12px] leading-5 text-muted-foreground">
-        <div>npm install -g @floomhq/floom</div>
-        <div>floom login</div>
-        <div>floom mcp install</div>
+        <div>npx -y @floomhq/floom mcp install</div>
       </div>
 
       <div className="flex flex-wrap justify-center gap-2">
         <Link
           className="c-addbtn"
-          href="https://github.com/floomhq/floom/blob/main/BUILDING.md"
+          href="https://github.com/floomhq/floom/blob/main/apps/mcp/README.md"
           target="_blank"
           rel="noreferrer"
         >
-          Install CLI
+          Install MCP
         </Link>
         <Link
           className="c-vpill"
