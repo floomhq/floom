@@ -134,22 +134,30 @@ def _public_share_actor(worker: Dict[str, Any], repos: "Repositories" | None) ->
     workspace_id = str(worker.get("workspace_id") or "local-default").strip() or "local-default"
     if not owner_id:
         return None
+    actor = None
     try:
-        member = repos.members.get(workspace_id=workspace_id, user_id=owner_id)
+        actor = repos.members.get(workspace_id=workspace_id, user_id=owner_id)
     except Exception:
-        member = None
-    if not member:
+        actor = None
+    if not actor:
+        try:
+            users = getattr(repos, "users", None)
+            actor = users.get(user_id=owner_id) if users is not None else None
+        except Exception:
+            actor = None
+    if not actor:
         return None
-    display_name = str(member.get("display_name") or "").strip()
-    email = str(member.get("email") or "").strip()
-    label = display_name or email
+    display_name = str(actor.get("display_name") or "").strip()
+    email = str(actor.get("email") or "").strip()
+    username = str(actor.get("username") or "").strip()
+    label = display_name or email or username
     if not label:
         return None
     out = {"label": label}
     if display_name:
         out["display_name"] = display_name
-    if email:
-        out["email"] = email
+    if email or "@" in username:
+        out["email"] = email or username
     return out
 
 
