@@ -2053,37 +2053,46 @@ const WORKER_PROMPT_EXAMPLES = [
 
 function WorkersEmptyQuickStart() {
   return (
-    <div
-      className="mt-5 w-full rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] p-4 text-left"
-      style={{ maxWidth: 620 }}
-    >
-      <div className="text-sm font-medium text-ink">Quick start</div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Go to your coding agent, install the Floom CLI or MCP, and ask it to create workers like these:
-      </p>
+    <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-4 text-center">
+      <div>
+        <div className="text-sm font-medium text-ink">Quick start</div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Go to your coding agent, install the Floom CLI or MCP, and ask it to create workers like these:
+        </p>
+      </div>
 
-      <div className="mt-3 grid gap-2">
+      <div className="grid w-full gap-2 text-left">
         {WORKER_PROMPT_EXAMPLES.map((example) => (
           <div
             key={example}
-            className="rounded-[var(--radius-button)] bg-[var(--bg)] px-3 py-2 font-mono text-[12px] leading-5 text-ink"
+            className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-[12px] leading-5 text-ink [border:var(--bd-card)]"
           >
             {example}
           </div>
         ))}
       </div>
 
-      <div className="mt-4 grid gap-2 rounded-[var(--radius-button)] bg-[var(--bg)] p-3 font-mono text-[12px] leading-5 text-ink">
+      <div className="grid gap-1.5 font-mono text-[12px] leading-5 text-muted-foreground">
         <div>npm install -g @floomhq/floom</div>
         <div>floom login</div>
         <div>floom mcp install</div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Link className="c-addbtn" href="https://github.com/floomhq/floom/blob/main/BUILDING.md" target="_blank">
+      <div className="flex flex-wrap justify-center gap-2">
+        <Link
+          className="c-addbtn"
+          href="https://github.com/floomhq/floom/blob/main/BUILDING.md"
+          target="_blank"
+          rel="noreferrer"
+        >
           Install CLI
         </Link>
-        <Link className="c-addbtn" href="https://github.com/floomhq/floom/blob/main/docs/AUTHORING.md" target="_blank">
+        <Link
+          className="c-vpill"
+          href="https://github.com/floomhq/floom/blob/main/docs/AUTHORING.md"
+          target="_blank"
+          rel="noreferrer"
+        >
           Worker guide
         </Link>
       </div>

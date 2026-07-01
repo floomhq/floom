@@ -26,4 +26,10 @@ describe("workers empty state quick start", () => {
     expect(SRC).toContain("No workers found");
     expect(SRC).toContain("Clear the search or filters to see your workers.");
   });
+
+  it("keeps the quick start visually aligned with collection empty states", () => {
+    expect(SRC).toContain("max-w-[620px] flex-col items-center");
+    expect(SRC).not.toContain("rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] p-4");
+    expect(SRC).toContain('className="c-vpill"');
+  });
 });
