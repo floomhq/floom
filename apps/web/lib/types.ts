@@ -494,10 +494,12 @@ export interface StandaloneShareLink {
 
 export interface PublicShareFile {
   path: string;
-  size: number;
-  mime_type: string;
+  size?: number;
+  mime_type?: string;
   display_type?: string | null;
-  is_binary: boolean;
+  is_binary?: boolean;
+  binary?: boolean;
+  content?: string | null;
   updated_at?: string | null;
   description?: string | null;
   tags?: string[];
@@ -541,6 +543,11 @@ export interface StandaloneShare {
   entity_type: "worker" | "brain_file" | "brain_pack" | "run" | "approvals_batch";
   title: string;
   description?: string | null;
+  shared_by?: {
+    label: string;
+    display_name?: string;
+    email?: string;
+  } | null;
   worker?: PublicWorker;
   pack?: PublicSharePack;
   file?: PublicShareFile | null;

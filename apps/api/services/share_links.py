@@ -21,13 +21,23 @@ from fastapi import HTTPException
 
 from core.urls import _frontend_base_url, _short_link_base_url
 
-def _standalone_share_url(token: str) -> str:
+_API_PUBLIC_HOSTS = {"workeros-api.floom.dev", "workers-api.floom.dev"}
+
+
+def _public_share_frontend_base_url() -> str:
     base = _frontend_base_url()
-    # Cloud hosts the dashboard under /app, but public standalone shares must be
-    # top-level, no-auth URLs. The web app rewrites /s/* back to the basePath
-    # route internally, so the URL we hand to reviewers can stay clean.
+    parsed = urllib.parse.urlparse(base)
+    if parsed.hostname in _API_PUBLIC_HOSTS:
+        base = "https://floom.dev"
+    # Cloud hosts the dashboard under /app, but public standalone shares are
+    # top-level, no-auth URLs. The apex rewrites /s/* into the dashboard route.
     if base.endswith("/app"):
         base = base[:-len("/app")]
+    return base.rstrip("/")
+
+
+def _standalone_share_url(token: str) -> str:
+    base = _public_share_frontend_base_url()
     return f"{base}/s/{urllib.parse.quote(token, safe='')}"
 
 
@@ -54,12 +64,54 @@ _SHARE_LINKS_TABLE_SQL = """
         entity_id TEXT NOT NULL,
         file_path TEXT NOT NULL DEFAULT '',
         owner_id TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        UNIQUE(entity_type, entity_id, file_path, owner_id)
+        created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
         ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
 """
+
+
+def _standalone_share_links_has_entity_unique(conn: sqlite3.Connection) -> bool:
+    for index in conn.execute("PRAGMA index_list(standalone_share_links)").fetchall():
+        if not int(index["unique"]):
+            continue
+        cols = [
+            row["name"]
+            for row in conn.execute(f"PRAGMA index_info({index['name']})").fetchall()
+        ]
+        if cols == ["entity_type", "entity_id", "file_path", "owner_id"]:
+            return True
+    return False
+
+
+def _rebuild_standalone_share_links_without_entity_unique(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        "SELECT token_hash, entity_type, entity_id, file_path, owner_id, created_at "
+        "FROM standalone_share_links"
+    ).fetchall()
+    conn.execute("ALTER TABLE standalone_share_links RENAME TO standalone_share_links_legacy")
+    conn.executescript(_SHARE_LINKS_TABLE_SQL)
+    for row in rows:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO standalone_share_links
+                (token_hash, entity_type, entity_id, file_path, owner_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["token_hash"],
+                row["entity_type"],
+                row["entity_id"],
+                row["file_path"],
+                row["owner_id"],
+                row["created_at"],
+            ),
+        )
+    conn.execute("DROP TABLE standalone_share_links_legacy")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity "
+        "ON standalone_share_links(entity_type, entity_id, file_path, owner_id)"
+    )
 
 
 def _ensure_standalone_share_links_table() -> None:
@@ -92,8 +144,14 @@ def _ensure_standalone_share_links_table() -> None:
                     ),
                 )
             conn.execute("DROP TABLE standalone_share_links_legacy")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity "
+                "ON standalone_share_links(entity_type, entity_id, file_path, owner_id)"
+            )
             return
         conn.executescript(_SHARE_LINKS_TABLE_SQL)
+        if cols and _standalone_share_links_has_entity_unique(conn):
+            _rebuild_standalone_share_links_without_entity_unique(conn)
 
 
 def _create_or_get_standalone_share_link(
@@ -108,10 +166,10 @@ def _create_or_get_standalone_share_link(
     if not entity_id or not owner_id:
         raise HTTPException(status_code=409, detail="Item cannot be shared")
     _ensure_standalone_share_links_table()
-    # #934: only SHA-256(token) is stored, so the raw value of an existing row
-    # cannot be returned — re-sharing ROTATES the link (the old URL stops
-    # resolving). Revocation already deleted-and-reminted, so rotation is the
-    # established product semantic for share links.
+    # #2144: only SHA-256(token) is stored, so the raw value of an existing row
+    # cannot be returned. Re-sharing mints an additional active token instead of
+    # overwriting the old hash; explicit revoke deletes every token for the
+    # shared entity.
     token = ""
     ts = now_iso()
     with get_db() as conn:
@@ -123,9 +181,6 @@ def _create_or_get_standalone_share_link(
                     INSERT INTO standalone_share_links
                         (token_hash, entity_type, entity_id, file_path, owner_id, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(entity_type, entity_id, file_path, owner_id) DO UPDATE SET
-                        token_hash = excluded.token_hash,
-                        created_at = excluded.created_at
                     """,
                     (_hash_share_token(candidate), entity_type, entity_id, safe_file_path, owner_id, ts),
                 )

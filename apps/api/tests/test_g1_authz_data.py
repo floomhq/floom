@@ -292,7 +292,7 @@ class TestShareTokenHashing:
         assert row["entity_id"] == "w1"
         assert main._load_standalone_share_row("fls_" + "x" * 24) is None
 
-    def test_reshare_rotates_token(self, monkeypatch, tmp_path):
+    def test_reshare_keeps_prior_token_active(self, monkeypatch, tmp_path):
         main = _load_main(monkeypatch, tmp_path)
         first = main._create_or_get_standalone_share_link(
             entity_type="worker", entity_id="w1", owner_id="alice"
@@ -301,8 +301,16 @@ class TestShareTokenHashing:
             entity_type="worker", entity_id="w1", owner_id="alice"
         )
         assert first["token"] != second["token"]
-        assert main._load_standalone_share_row(first["token"]) is None
+        assert main._load_standalone_share_row(first["token"]) is not None
         assert main._load_standalone_share_row(second["token"]) is not None
+
+    def test_share_url_never_uses_api_host(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workeros-api.floom.dev")
+        main = _load_main(monkeypatch, tmp_path)
+        result = main._create_or_get_standalone_share_link(
+            entity_type="worker", entity_id="w1", owner_id="alice"
+        )
+        assert result["url"] == f"https://floom.dev/s/{result['token']}"
 
     def test_legacy_plaintext_rows_migrate_to_hashes(self, monkeypatch, tmp_path):
         main = _load_main(monkeypatch, tmp_path)

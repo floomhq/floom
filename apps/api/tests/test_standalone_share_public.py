@@ -119,9 +119,19 @@ def test_worker_standalone_share_wraps_public_worker_projection():
             def list_for_worker(self, **kwargs):
                 return []
 
+        class MembersRepo:
+            def get(self, *, workspace_id: str, user_id: str):
+                if workspace_id == "local-default" and user_id == "local-user":
+                    return {
+                        "display_name": "Floom Builder",
+                        "email": "builder@example.com",
+                    }
+                return None
+
         class Repos:
             workers = WorkersRepo()
             runs = RunsRepo()
+            members = MembersRepo()
 
         main.app.dependency_overrides[main.get_repos] = lambda: Repos()
         try:
@@ -138,6 +148,11 @@ def test_worker_standalone_share_wraps_public_worker_projection():
         assert body["entity_type"] == "worker"
         assert body["worker"]["name"] == "Share Worker"
         assert body["worker"]["connections"] == ["gmail"]
+        assert body["shared_by"] == {
+            "label": "Floom Builder",
+            "display_name": "Floom Builder",
+            "email": "builder@example.com",
+        }
         assert "OPENAI_API_KEY" not in public.text
         assert "owner_id" not in public.text
 
