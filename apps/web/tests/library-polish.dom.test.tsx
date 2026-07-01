@@ -55,6 +55,31 @@ beforeEach(() => {
 });
 
 describe("Library polish — empty state (FIX 1)", () => {
+  it("shows a retryable error instead of a perpetual loader when folders fail to load", async () => {
+    const folder = { name: "recovered", file_count: 0, updated_at: "", visibility: "private" };
+    listSpy
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce([folder]);
+    const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
+
+    render(
+      <TestQueryProvider>
+        <BrainCollection initialFolders={[]} />
+      </TestQueryProvider>,
+    );
+
+    expect(
+      await screen.findByText("Could not load your Library. Check your connection and try again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Loading")).toBeNull();
+    expect(screen.queryByText("Your Library is empty")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    await screen.findByText("recovered");
+    expect(listSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("does not route-crash if initial context data is not an array", async () => {
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
 

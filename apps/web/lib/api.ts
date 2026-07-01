@@ -889,7 +889,17 @@ export const api = {
       }),
   },
   contexts: {
-    list: () => fetchJson<import("./types").ContextSummary[]>("/contexts"),
+    list: async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        return await fetchJson<import("./types").ContextSummary[]>("/contexts", {
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
     get: (name: string) =>
       fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`),
     create: async (name: string, writeable = false) => {
