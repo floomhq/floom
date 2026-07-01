@@ -25,6 +25,10 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+vi.mock("@/lib/useWorkspaceHref", () => ({
+  useWorkspaceHref: () => (href: string) => `/app${href}`,
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
@@ -87,12 +91,12 @@ describe("McpInstallPanel", () => {
     const manageLinks = screen.getAllByRole("link", { name: "Manage" });
     expect(manageLinks[0]).toHaveAttribute(
       "href",
-      "/settings?sel=personal_tokens",
+      "/app/settings?sel=personal_tokens",
     );
     expect(screen.getByText(/Workspace tokens/i)).toBeInTheDocument();
     expect(manageLinks[1]).toHaveAttribute(
       "href",
-      "/settings?sel=workspace_token",
+      "/app/settings?sel=workspace_token",
     );
 
     await user.click(screen.getByRole("button", { name: "Create workspace token" }));

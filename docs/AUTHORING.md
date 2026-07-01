@@ -185,7 +185,7 @@ resources:                   # optional sandbox sizing request
 
 exec:
   command: python run.py     # script mode only
-  runtime: python311         # python311 | node20
+  runtime: python311         # python311 | node22
   runner: e2b                # e2b (default) | local (zero cold-start, trusted only)
   entry: run.py              # legacy field; should match `entrypoint`
 
@@ -730,15 +730,16 @@ Inside the worker, write the secret to a temp file and pass it to Playwright:
 ```python
 import os
 import tempfile
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 
-def run(context):
-    state = context.secrets["MEDIUM_STORAGE_STATE_JSON"]
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-        f.write(state)
-        state_path = f.name
+state = os.environ["MEDIUM_STORAGE_STATE_JSON"]
+with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+    f.write(state)
+    state_path = f.name
 
+try:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page_context = browser.new_context(storage_state=state_path)
@@ -746,9 +747,10 @@ def run(context):
         page.goto("https://medium.com/new-story")
         # Drive the logged-in editor here.
         browser.close()
-
+finally:
     os.unlink(state_path)
-    return {"ok": True}
+
+Path("result.json").write_text('{"status":"success","outputs":{}}')
 ```
 
 Keep the storage-state JSON out of Git. It contains bearer-equivalent cookies.

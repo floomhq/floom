@@ -4497,33 +4497,39 @@ class SqliteWorkerRuleRepository:
 
 
 class SqliteMcpToolRepository:
-    _cols = "id, user_id, name, description, input_schema, worker_id, created_at, updated_at"
+    _cols = "id, user_id, workspace_id, name, description, input_schema, worker_id, created_at, updated_at"
 
     def _deserialize(self, row: dict[str, Any]) -> dict[str, Any]:
         row["input_schema"] = json.loads(row.get("input_schema") or "{}")
         return row
 
+    def _workspace_id(self, user_id: str) -> str:
+        return derive_workspace_id(user_id)
+
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
+        workspace_id = self._workspace_id(user_id)
         with get_db() as conn:
             rows = conn.execute(
-                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? ORDER BY created_at",
-                (user_id,),
+                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? AND workspace_id = ? ORDER BY created_at",
+                (user_id, workspace_id),
             ).fetchall()
         return [self._deserialize(_row_dict(r)) for r in rows]
 
     def get(self, *, user_id: str, tool_id: str) -> dict[str, Any] | None:
+        workspace_id = self._workspace_id(user_id)
         with get_db() as conn:
             row = conn.execute(
-                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? AND id = ? LIMIT 1",
-                (user_id, tool_id),
+                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? AND workspace_id = ? AND id = ? LIMIT 1",
+                (user_id, workspace_id, tool_id),
             ).fetchone()
         return self._deserialize(_row_dict(row)) if row else None
 
     def get_by_name(self, *, user_id: str, name: str) -> dict[str, Any] | None:
+        workspace_id = self._workspace_id(user_id)
         with get_db() as conn:
             row = conn.execute(
-                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? AND name = ? LIMIT 1",
-                (user_id, name),
+                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? AND workspace_id = ? AND name = ? LIMIT 1",
+                (user_id, workspace_id, name),
             ).fetchone()
         return self._deserialize(_row_dict(row)) if row else None
 
@@ -4537,15 +4543,16 @@ class SqliteMcpToolRepository:
         worker_id: str,
     ) -> dict[str, Any]:
         tool_id = str(uuid.uuid4())
+        workspace_id = self._workspace_id(user_id)
         now = now_iso()
         with get_db() as conn:
             conn.execute(
                 """
                 INSERT INTO mcp_tools
-                    (id, user_id, name, description, input_schema, worker_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, user_id, workspace_id, name, description, input_schema, worker_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (tool_id, user_id, name, description, json.dumps(input_schema), worker_id, now, now),
+                (tool_id, user_id, workspace_id, name, description, json.dumps(input_schema), worker_id, now, now),
             )
         item = self.get(user_id=user_id, tool_id=tool_id)
         if item is None:
@@ -4566,18 +4573,20 @@ class SqliteMcpToolRepository:
             return existing
         updates["updated_at"] = now_iso()
         set_clause = ", ".join(f"{k} = ?" for k in updates)
+        workspace_id = self._workspace_id(user_id)
         with get_db() as conn:
             conn.execute(
-                f"UPDATE mcp_tools SET {set_clause} WHERE user_id = ? AND id = ?",
-                [*updates.values(), user_id, tool_id],
+                f"UPDATE mcp_tools SET {set_clause} WHERE user_id = ? AND workspace_id = ? AND id = ?",
+                [*updates.values(), user_id, workspace_id, tool_id],
             )
         return self.get(user_id=user_id, tool_id=tool_id)
 
     def delete(self, *, user_id: str, tool_id: str) -> bool:
+        workspace_id = self._workspace_id(user_id)
         with get_db() as conn:
             cursor = conn.execute(
-                "DELETE FROM mcp_tools WHERE user_id = ? AND id = ?",
-                (user_id, tool_id),
+                "DELETE FROM mcp_tools WHERE user_id = ? AND workspace_id = ? AND id = ?",
+                (user_id, workspace_id, tool_id),
             )
         return cursor.rowcount > 0
 

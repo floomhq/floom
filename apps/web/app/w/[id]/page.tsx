@@ -58,7 +58,7 @@ export default async function PublicWorkerPage({
         )
       }
     >
-      <WorkerShareCard worker={worker} authed={authed} />
+      <WorkerShareCard worker={worker} authed={authed} token={token} />
       <div className="px-7 pb-5 pt-1">
         <p className="text-xs text-[var(--ink-soft)]">
           Built with{" "}

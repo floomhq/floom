@@ -750,6 +750,7 @@ function triggerLabel(value: unknown) {
 const RUNTIME_DISPLAY: Record<string, string> = {
   python311: "Python 3.11",
   python: "Python",
+  node22: "Node.js 22",
   node20: "Node.js 20",
   node: "Node.js",
 };

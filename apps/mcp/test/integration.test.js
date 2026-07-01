@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -902,6 +902,9 @@ test("install subcommand patches agent config idempotently", async () => {
     assert.equal(config.mcpServers.floom.command, undefined);
     assert.equal(config.mcpServers.floom.args, undefined);
     assert.deepEqual(Object.keys(config.mcpServers).sort(), ["existing", "floom"]);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+    }
   } finally {
     await rm(home, { recursive: true, force: true });
   }
@@ -1028,6 +1031,9 @@ test("mcp add patches agent config", async () => {
     assert.equal(config.mcpServers.floom.headers["x-floom-secret"], "test-secret");
     assert.equal(config.mcpServers.floom.command, undefined);
     assert.equal(config.mcpServers.floom.args, undefined);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+    }
   } finally {
     await rm(home, { recursive: true, force: true });
   }

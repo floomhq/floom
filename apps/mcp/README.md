@@ -21,9 +21,10 @@ The CLI targets hosted Floom Cloud by default. Self-hosted/local mode is only fo
 npx -y @floomhq/floom mcp install --target claude
 ```
 
-`mcp install` is the one-command hosted setup path. It targets Floom Cloud by
-default, starts browser login only when no valid hosted credentials are saved,
-selects the active workspace, and writes the MCP config for the client. Use
+`mcp install` targets Floom Cloud by default, selects the active workspace, and
+writes the MCP config for the client. Hosted HTTP MCP configs need a durable
+Personal Access Token because browser login JWTs expire; generate one in the
+dashboard, then set `FLOOM_TOKEN` or `WORKEROS_API_TOKEN` before running install. Use
 `--target cursor`, `--target vscode`, `--target windsurf`, `--target continue`,
 or `--target generic` for other clients.
 
@@ -366,18 +367,27 @@ capabilities:
 trigger: { type: manual }
 `,
   run_py: `
-def run(inputs, context):
-    client = context.openai()
-    r = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {"role": "system", "content": "Summarize in 3 bullets."},
-            {"role": "user", "content": inputs["text"]},
-        ],
-    )
-    summary = r.choices[0].message.content
-    context.write_output("summary", summary)
-    return {"summary": summary}
+import json
+import os
+from pathlib import Path
+from openai import OpenAI
+
+inputs = json.loads(Path("inputs.json").read_text())
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+response = client.chat.completions.create(
+    model="gpt-4.1-mini",
+    messages=[
+        {"role": "system", "content": "Summarize in 3 bullets."},
+        {"role": "user", "content": inputs["text"]},
+    ],
+)
+summary = response.choices[0].message.content or ""
+Path("out").mkdir(exist_ok=True)
+Path("out/summary.md").write_text(summary)
+Path("result.json").write_text(json.dumps({
+    "status": "success",
+    "outputs": {"summary": "out/summary.md"},
+}))
 `,
 });
 

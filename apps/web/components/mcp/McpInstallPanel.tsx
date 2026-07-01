@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { api } from "@/lib/api";
 import { buildMcpJson } from "@/lib/mcp-config";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { PersonalAccessToken, WorkspaceToken } from "@/lib/types";
 
 const MCP_CLIENTS = [
@@ -27,6 +28,7 @@ const MCP_CLIENTS = [
 const SNIPPET = buildMcpJson();
 
 export function McpInstallPanel() {
+  const workspaceHref = useWorkspaceHref();
   const [copied, setCopied] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokens, setTokens] = useState<WorkspaceToken[] | null>(null);
@@ -177,7 +179,7 @@ export function McpInstallPanel() {
             <div className="flex items-center justify-between gap-3">
               <span className="text-[12px] font-medium text-foreground">Personal tokens</span>
               <Link
-                href="/settings?sel=personal_tokens"
+                href={workspaceHref("/settings?sel=personal_tokens")}
                 className="text-[12px] font-medium text-[var(--accent)] hover:underline"
               >
                 Manage
@@ -192,7 +194,7 @@ export function McpInstallPanel() {
             <div className="flex items-center justify-between gap-3">
               <span className="text-[12px] font-medium text-foreground">Workspace tokens</span>
               <Link
-                href="/settings?sel=workspace_token"
+                href={workspaceHref("/settings?sel=workspace_token")}
                 className="text-[12px] font-medium text-[var(--accent)] hover:underline"
               >
                 Manage
