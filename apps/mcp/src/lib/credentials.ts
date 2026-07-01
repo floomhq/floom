@@ -44,7 +44,7 @@ const LEGACY_PLACEHOLDER_CLOUD_API_BASES = new Set([
 ]);
 
 function envApiBase(defaultBase: string): string {
-  return (process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE || defaultBase).replace(/\/+$/, "");
+  return (process.env.FLOOM_API_BASE || process.env.WORKEROS_API_BASE || defaultBase).replace(/\/+$/, "");
 }
 
 function envUser(): string | undefined {
@@ -85,10 +85,6 @@ export function credentialsPath(): string {
   return join(resolveConfigDir(), "floom", "credentials.json");
 }
 
-export function floomConfigDir(): string {
-  return dirname(credentialsPath());
-}
-
 export function credentialsAccountsDir(): string {
   return join(dirname(credentialsPath()), "credentials");
 }
@@ -102,7 +98,7 @@ function legacyCredentialsPath(): string {
 }
 
 export async function readCredentials(): Promise<StoredCredentials | null> {
-  const envCloudToken = process.env.WORKEROS_API_TOKEN?.trim();
+  const envCloudToken = (process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN || "").trim();
   if (envCloudToken) {
     return {
       api_base: envApiBase(DEFAULT_CLOUD_API_BASE),

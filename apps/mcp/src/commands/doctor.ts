@@ -4,7 +4,6 @@ import { FloomApiClient, FloomApiError } from "../lib/api.js";
 import { getCommandName } from "../lib/command-name.js";
 import { readCredentials } from "../lib/credentials.js";
 import { log, printJson } from "../lib/output.js";
-import { telemetryRequestHeaders } from "../lib/telemetry-config.js";
 
 type Check = {
   name: string;
@@ -30,10 +29,9 @@ async function checkApiReachable(apiBase: string): Promise<Check> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const hostedHealth =
-      apiBase.includes("workeros-api.floom.dev") || Boolean(process.env.WORKEROS_API_TOKEN?.trim());
+      apiBase.includes("workeros-api.floom.dev") || Boolean((process.env.FLOOM_TOKEN || process.env.WORKEROS_API_TOKEN || "").trim());
     const healthPath = hostedHealth ? "/api/health" : "/health";
     const response = await fetch(`${apiBase.replace(/\/+$/, "")}${healthPath}`, {
-      headers: telemetryRequestHeaders("cli"),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
     if (response.ok) {
@@ -123,8 +121,8 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
   const credentials = await readCredentials();
   const apiBase =
     credentials?.api_base ||
-    process.env.WORKEROS_API_BASE ||
     process.env.FLOOM_API_BASE ||
+    process.env.WORKEROS_API_BASE ||
     API_DEFAULT;
   const client = credentials ? new FloomApiClient(apiBase, credentials) : null;
 

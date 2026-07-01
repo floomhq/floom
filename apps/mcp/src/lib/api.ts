@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { getCommandName } from "./command-name.js";
 import { readCredentials, updateCredentials, type StoredCredentials } from "./credentials.js";
-import { telemetryRequestHeaders } from "./telemetry-config.js";
 
 const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 
@@ -226,7 +225,6 @@ export class FloomApiClient {
     const auth = options.auth ?? true;
     const headers: Record<string, string> = {
       accept: "application/json, text/plain, text/event-stream",
-      ...telemetryRequestHeaders("cli"),
       ...(options.headers || {}),
     };
     if (auth) {
@@ -259,7 +257,6 @@ export class FloomApiClient {
     const auth = options.auth ?? true;
     const headers: Record<string, string> = {
       accept: "*/*",
-      ...telemetryRequestHeaders("cli"),
       ...(options.headers || {}),
     };
     if (auth) {
@@ -293,7 +290,6 @@ export class FloomApiClient {
       method: "POST",
       headers: {
         accept: "application/json",
-        ...telemetryRequestHeaders("cli"),
         ...(await this.authHeaders()),
       },
       body: form,
@@ -333,7 +329,6 @@ export class FloomApiClient {
       method: "POST",
       headers: {
         accept: "application/json",
-        ...telemetryRequestHeaders("cli"),
         ...(await this.authHeaders()),
       },
       body: form,
@@ -367,7 +362,7 @@ export async function createAuthenticatedClient(): Promise<{
 }
 
 export function createPublicClient(
-  base = process.env.WORKEROS_API_BASE || "https://localhost:8000",
+  base = process.env.FLOOM_API_BASE || process.env.WORKEROS_API_BASE || "https://localhost:8000",
 ): FloomApiClient {
   return new FloomApiClient(normalizeBase(base));
 }
@@ -375,7 +370,7 @@ export function createPublicClient(
 // Used by `floom login` to talk to the API base before credentials exist.
 // Hosted Floom is the zero-config default; --local opts into self-hosted OSS.
 export function resolveLoginApiBase(opts: { cloud?: boolean; local?: boolean } = {}): string {
-  const explicit = process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE;
+  const explicit = process.env.FLOOM_API_BASE || process.env.WORKEROS_API_BASE;
   if (explicit) return normalizeBase(explicit);
   if (opts.local === true) return "http://localhost:8000";
   return DEFAULT_CLOUD_API_BASE;

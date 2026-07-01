@@ -4,7 +4,7 @@ import { inspect } from "node:util";
 import { parse as parseYaml } from "yaml";
 import { createAuthenticatedClient, FloomApiError, FloomConnectionError } from "../lib/api.js";
 import { getCommandName } from "../lib/command-name.js";
-import { log, printJson, renderTable } from "../lib/output.js";
+import { log, printJson, printJsonError, renderTable } from "../lib/output.js";
 import { promptYesNo } from "../lib/prompt.js";
 import {
   WORKER_AUTHORING_CONTRACT,
@@ -60,8 +60,7 @@ const SERVER_WORKER_RUNTIMES = new Set(["python311", "node22", "bash", "skill", 
 
 function emitError(message: string, hint: string, json?: boolean): number {
   if (json) {
-    // In JSON mode: keep stdout clean; write error to stderr only
-    process.stderr.write(`{"error": ${JSON.stringify(message)}, "hint": ${JSON.stringify(hint)}}\n`);
+    printJsonError(message, hint);
   } else {
     log.err(message);
     log.info(hint);
@@ -618,31 +617,33 @@ function isExpiredAuthError(error: FloomApiError): boolean {
   return detail.includes("expired") || detail.includes("invalid token") || detail.includes("invalid jwt");
 }
 
-function emitApiError(error: unknown): number {
+function emitApiError(error: unknown, json?: boolean): number {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("Not logged in")) {
-    return emitError("Not authenticated.", `Run: ${getCommandName()} login`);
+    return emitError("Not authenticated.", `Run: ${getCommandName()} login`, json);
   }
   if (error instanceof FloomConnectionError) {
     return emitError(
       "Floom API is unreachable.",
       `Tried ${error.apiBase}. Check WORKEROS_API_BASE/FLOOM_API_BASE and network connectivity.`,
+      json,
     );
   }
   if (error instanceof FloomApiError && isExpiredAuthError(error)) {
-    return emitError("Your session expired.", `Re-run: ${getCommandName()} login`);
+    return emitError("Your session expired.", `Re-run: ${getCommandName()} login`, json);
   }
   if (error instanceof FloomApiError && error.status === 403) {
     return emitError(
       "Request was forbidden.",
       `API said: ${apiErrorDetail(error)}. Check that this token can access the target worker/workspace.`,
+      json,
     );
   }
   if (error instanceof FloomApiError && error.status && error.status >= 500) {
-    return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues");
+    return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/floom/issues", json);
   }
   if (error instanceof FloomApiError && error.status && error.status >= 400) {
-    return emitError(`API rejected worker source: ${apiErrorDetail(error)}`, `Fix the worker files and retry: ${getCommandName()} workers validate <dir>`);
+    return emitError(`API rejected worker source: ${apiErrorDetail(error)}`, `Fix the worker files and retry: ${getCommandName()} workers validate <dir>`, json);
   }
   throw error;
 }
@@ -746,9 +747,20 @@ export async function workersValidateCommand(dir: string, options: { json?: bool
   return 0;
 }
 
-export async function workersPushCommand(dir: string): Promise<number> {
+function workerUrl(apiBase: string, workerId: string, mode: string): string {
+  if (mode === "cloud") {
+    return `https://floom.dev/app/workers/${encodeURIComponent(workerId)}`;
+  }
+  return `${apiBase.replace(/\/+$/, "")}/workers/${encodeURIComponent(workerId)}`;
+}
+
+export async function workersPushCommand(dir: string, options: { json?: boolean } = {}): Promise<number> {
   const result = await loadWorkerSource(dir);
   if (!result.source) {
+    if (options.json) {
+      printJson({ valid: false, errors: result.errors });
+      return 1;
+    }
     return emitValidationErrors(result.errors);
   }
 
@@ -756,7 +768,7 @@ export async function workersPushCommand(dir: string): Promise<number> {
   const payload = sourcePayload(source);
 
   try {
-    const { client } = await createAuthenticatedClient();
+    const { client, credentials } = await createAuthenticatedClient();
     let exists = false;
     try {
       await client.requestJson("GET", `/workers/${encodeURIComponent(source.workerId)}`);
@@ -777,6 +789,7 @@ export async function workersPushCommand(dir: string): Promise<number> {
           return emitError(
             `Worker id '${source.workerId}' already exists outside the active workspace.`,
             `Choose a unique worker id in worker.yml, then run: ${getCommandName()} workers validate <dir> && ${getCommandName()} workers push <dir>`,
+            options.json,
           );
         }
         throw error;
@@ -789,12 +802,17 @@ export async function workersPushCommand(dir: string): Promise<number> {
             return emitError(
               "This Floom API created the worker but does not support full worker bundle uploads.",
               `PUT /workers/${source.workerId}/files returned HTTP ${error.status}. Upgrade the API before pushing workers with data/ or lib/ files.`,
+              options.json,
             );
           }
           throw error;
         }
       }
-      log.ok(`Created ${source.workerId}`);
+      if (options.json) {
+        printJson({ id: source.workerId, action: "created", url: workerUrl(credentials.api_base, source.workerId, credentials.mode) });
+      } else {
+        log.ok(`Created ${source.workerId}`);
+      }
       return 0;
     }
 
@@ -805,15 +823,20 @@ export async function workersPushCommand(dir: string): Promise<number> {
         return emitError(
           "This Floom API does not support full worker bundle updates.",
           `PUT /workers/${source.workerId}/files returned HTTP ${error.status}. Upgrade the API or use a new worker id.`,
+          options.json,
         );
       }
       throw error;
     }
 
-    log.ok(`Updated ${source.workerId}`);
+    if (options.json) {
+      printJson({ id: source.workerId, action: "updated", url: workerUrl(credentials.api_base, source.workerId, credentials.mode) });
+    } else {
+      log.ok(`Updated ${source.workerId}`);
+    }
     return 0;
   } catch (error) {
-    return emitApiError(error);
+    return emitApiError(error, options.json);
   }
 }
 

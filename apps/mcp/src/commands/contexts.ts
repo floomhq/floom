@@ -75,7 +75,7 @@ export async function contextsListCommand(options: { json?: boolean }): Promise<
     ) + "\n");
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -98,7 +98,7 @@ export async function contextsCreateCommand(
     else log.ok(`Created brain pack ${safeName}.`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -128,7 +128,7 @@ export async function contextsReadCommand(
     }
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -157,7 +157,7 @@ export async function contextsWriteCommand(
     else log.ok(`Wrote ${safeName}/${safePath}.`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -177,7 +177,7 @@ export async function contextsUploadCommand(
     else log.ok(`Uploaded ${targetPath} to ${safeName}.`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -194,7 +194,7 @@ export async function contextsDeleteCommand(name: string, options: { force?: boo
     else log.ok(`Deleted brain pack ${safeName}.`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -210,7 +210,7 @@ export async function contextsDeleteFileCommand(name: string, path: string, opti
     else log.ok(`Deleted ${safeName}/${safePath}.`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -245,7 +245,7 @@ export async function contextsVersionsCommand(name: string, options: { limit?: n
     ]) + "\n");
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }
@@ -261,7 +261,7 @@ export async function contextsRollbackCommand(name: string, versionId: string, o
     else log.ok(`Rolled back ${safeName} to ${safeVersion}.`);
     return 0;
   } catch (error) {
-    const handled = handleAuthError(error);
+    const handled = handleAuthError(error, options);
     if (handled !== null) return handled;
     throw error;
   }

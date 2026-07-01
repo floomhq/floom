@@ -139,9 +139,7 @@ test("doctor warning summary does not claim all checks passed", () => {
   assert.match(src, /optional warning/);
 });
 
-test("bare command in a terminal prints help and exits non-zero", async (t) => {
-  // main() gates the help-vs-MCP-server choice on process.stdin.isTTY; MCP
-  // clients launch with a piped stdin (covered by integration.test.js).
+test("bare floom in a terminal prints onboarding help and exits zero", async (t) => {
   const { main } = await import("../dist/cli.js");
   const originalIsTTY = process.stdin.isTTY;
   const originalWrite = process.stdout.write.bind(process.stdout);
@@ -158,10 +156,12 @@ test("bare command in a terminal prints help and exits non-zero", async (t) => {
     chunks.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
     return true;
   };
-  await main(["node", "workeros"]);
+  await main(["node", "floom"]);
   process.stdout.write = originalWrite;
 
   const output = chunks.join("");
-  assert.equal(process.exitCode, 1);
-  assert.match(output, /Usage: workeros/);
+  assert.equal(process.exitCode, originalExitCode);
+  assert.match(output, /Floom .* run AI workers in the cloud/);
+  assert.match(output, /Usage: floom/);
+  assert.match(output, /floom mcp install --target <client>/);
 });

@@ -2,7 +2,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { runLoginCommand } from "./commands/login.js";
 import { runLogoutCommand } from "./commands/logout.js";
 import { runWhoamiCommand } from "./commands/whoami.js";
@@ -80,6 +80,7 @@ import {
 } from "./commands/support.js";
 import { completionCommand, type CompletionShell } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
+import { initCommand } from "./commands/init.js";
 import { main as runServer } from "./server.js";
 import {
   type CommandName,
@@ -92,6 +93,21 @@ import { emitCliCommandTelemetry } from "./lib/telemetry.js";
 type RunResult = Promise<number> | number;
 type TelemetryState = { command: string; startedAt: number };
 const telemetryState = new WeakMap<Command, TelemetryState>();
+const IDENTITY_LINE = "Floom — run AI workers in the cloud. https://floom.dev";
+let epipeGuardInstalled = false;
+
+function installEpipeGuard(): void {
+  if (epipeGuardInstalled) return;
+  epipeGuardInstalled = true;
+  const swallowEpipe = (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") {
+      process.exit(0);
+    }
+    throw error;
+  };
+  process.stdout.on("error", swallowEpipe);
+  process.stderr.on("error", swallowEpipe);
+}
 
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -117,6 +133,25 @@ function commandPath(command: Command): string {
   return parts.join(".");
 }
 
+function showGroupHelp(command: Command): () => void {
+  return () => {
+    command.outputHelp();
+  };
+}
+
+function printBareHelp(program: Command, commandName: CommandName): void {
+  process.stdout.write(`${IDENTITY_LINE}\n\n`);
+  program.outputHelp();
+  process.stdout.write([
+    "",
+    "Next steps:",
+    `  1. ${commandName} mcp install --target <client>`,
+    `  2. ${commandName} login`,
+    `  3. ${commandName} init`,
+    "",
+  ].join("\n"));
+}
+
 export function buildCliProgram(commandName: CommandName = "floom"): Command {
   const program = new Command();
   program
@@ -126,8 +161,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .showHelpAfterError()
     // OSS/self-hosted: identity sent as x-floom-user (engines with user-header
     // scope require it). Also settable via WORKEROS_USER / FLOOM_USER.
-    .option("--user <user>", "OSS self-hosted: send x-floom-user header")
-    .option("--no-telemetry", "Disable CLI telemetry for this command");
+    .option("--user <user>", "OSS self-hosted: send x-floom-user header");
 
   // A global --user must reach readCredentials(), which reads from env. Mirror
   // the flag into WORKEROS_USER before any subcommand action runs.
@@ -135,9 +169,6 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     const user = thisCommand.opts().user;
     if (typeof user === "string" && user.trim()) {
       process.env.WORKEROS_USER = user.trim();
-    }
-    if (thisCommand.opts().telemetry === false) {
-      process.env.FLOOM_CLI_TELEMETRY_DISABLED = "1";
     }
   });
 
@@ -175,7 +206,15 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .option("--json", "Print raw JSON")
     .action(async (options: { json?: boolean }) => runAction(runWhoamiCommand(options)));
 
+  program.command("init")
+    .description("Scaffold a local worker directory")
+    .argument("[dir]", "Directory to create or use", ".")
+    .option("--template <id>", "Worker template id", "python-script")
+    .option("--json", "Print raw JSON")
+    .action(async (dir: string, options: { template?: string; json?: boolean }) => runAction(initCommand(dir, options)));
+
   const auth = program.command("auth").description("Manage saved accounts");
+  auth.action(showGroupHelp(auth));
   auth.command("list")
     .description("List saved accounts")
     .option("--json", "Print raw JSON")
@@ -211,6 +250,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     ) => runAction(runWorkerCommand(id, options)));
 
   const workers = program.command("workers").description("List, inspect, and manage workers");
+  workers.action(showGroupHelp(workers));
   workers.command("list")
     .description("List workers")
     .option("--json", "Print raw JSON")
@@ -231,6 +271,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .action(async (options: { json?: boolean }) => runAction(workersContractCommand(options)));
   const workerTemplates = workers.command("templates")
     .description("List and inspect golden worker templates");
+  workerTemplates.action(showGroupHelp(workerTemplates));
   workerTemplates.command("list")
     .description("List worker templates")
     .option("--json", "Print raw JSON")
@@ -248,7 +289,8 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
   workers.command("push")
     .description("Create or update a worker from a local worker directory")
     .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
-    .action(async (dir: string) => runAction(workersPushCommand(dir)));
+    .option("--json", "Print raw JSON")
+    .action(async (dir: string, options: { json?: boolean }) => runAction(workersPushCommand(dir, options)));
   workers.command("delete")
     .alias("rm")
     .description("Permanently delete a worker and its runs/artifacts")
@@ -281,6 +323,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
   const workspaces = program.command("workspaces")
     .alias("workspace")
     .description("Manage workspaces");
+  workspaces.action(showGroupHelp(workspaces));
   workspaces.command("list")
     .description("List workspaces your credentials can access")
     .option("--json", "Print raw JSON")
@@ -301,6 +344,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .action(async (target: string) => runAction(workspacesSwitchCommand(target)));
 
   const runs = program.command("runs").description("Inspect worker runs");
+  runs.action(showGroupHelp(runs));
   runs.command("list")
     .description("List runs")
     .option("--worker <id>", "Filter by worker id")
@@ -318,7 +362,8 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .description("Show run logs")
     .argument("<id>", "Run id")
     .option("-f, --follow", "Follow live run events")
-    .action(async (id: string, options: { follow?: boolean }) => runAction(runsLogsCommand(id, options)));
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { follow?: boolean; json?: boolean }) => runAction(runsLogsCommand(id, options)));
   runs.command("download")
     .description("Download run bundle archive")
     .argument("<id>", "Run id")
@@ -346,6 +391,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
       runAction(runsCancelCommand(id, options)));
 
   const secrets = program.command("secrets").description("Manage secrets");
+  secrets.action(showGroupHelp(secrets));
   secrets.command("list")
     .description("List secret names")
     .option("--json", "Print raw JSON")
@@ -362,6 +408,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .action(async (key: string, options: { yes?: boolean }) => runAction(secretsDeleteCommand(key, options)));
 
   const connections = program.command("connections").description("Manage app and MCP connections");
+  connections.action(showGroupHelp(connections));
   connections.command("list")
     .description("List saved connections")
     .option("--json", "Print raw JSON")
@@ -383,6 +430,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
   const contexts = program.command("contexts")
     .alias("context")
     .description("Manage brain pack context folders");
+  contexts.action(showGroupHelp(contexts));
   contexts.command("list")
     .description("List brain packs")
     .option("--json", "Print raw JSON")
@@ -449,6 +497,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
       runAction(contextsRollbackCommand(name, versionId, options)));
 
   const mcp = program.command("mcp").description("Manage MCP servers and client config");
+  mcp.action(showGroupHelp(mcp));
   mcp.command("list")
     .description("List configured MCP servers and mark the active one")
     .option("--json", "Print raw JSON")
@@ -484,6 +533,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
   // #806 — support tickets (cloud-only). 1:1 with the member API; `feedback`
   // is `support file` plus the local session transcript.
   const support = program.command("support").description("File and track support tickets");
+  support.action(showGroupHelp(support));
   support.command("file")
     .description("File a support ticket")
     .requiredOption("--subject <subject>", "Ticket subject")
@@ -541,7 +591,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
       await runAction(completionCommand(shell));
     });
 
-  program.command("install")
+  program.command("install", { hidden: true })
     .description("Install MCP config (deprecated alias for mcp install)")
     .action(async () => runAction(mcpInstallCommand({})));
 
@@ -554,20 +604,18 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
 }
 
 export async function main(argv = process.argv): Promise<void> {
+  installEpipeGuard();
   const commandName = resolveCommandName(argv);
   setCommandName(commandName);
   const program = buildCliProgram(commandName);
   const args = argv.slice(2);
   if (args.length === 0) {
-    // MCP clients launch the server with a piped stdin (no TTY). A human running
-    // the bare command in a terminal instead gets help and a non-zero exit,
-    // rather than a silently-hanging stdio server.
-    if (process.stdin.isTTY) {
-      program.outputHelp();
-      process.exitCode = 1;
+    const invokedBasename = basename(argv[1] || "");
+    if ((commandName === "workeros" || invokedBasename === "cli.js") && !process.stdin.isTTY) {
+      await runServer();
       return;
     }
-    await runServer();
+    printBareHelp(program, commandName);
     return;
   }
   await program.parseAsync(argv);
@@ -587,6 +635,7 @@ function resolveExecutedPath(argv1?: string): string {
 
 const executedPath = resolveExecutedPath(process.argv[1]);
 if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
+  installEpipeGuard();
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`${getCommandName()} failed: ${message}`);
