@@ -79,6 +79,37 @@ def _is_litellm_model(model: str) -> bool:
     return not model.startswith(("openai/", "litellm/openai/"))
 
 
+_GEMINI_KEY_FALLBACK_RE = re.compile(
+    r"invalid api key|api[_ -]?key|authentication|permission|unauthorized|forbidden"
+    r"|billing|quota|exceeded your current quota|rate.?limit|resource_exhausted"
+    r"|429|401|403",
+    re.IGNORECASE,
+)
+
+
+def _is_direct_gemini_api_key_model(model: str) -> bool:
+    normalized = model.lower()
+    if normalized.startswith("litellm/"):
+        normalized = normalized.removeprefix("litellm/")
+    return normalized.startswith("gemini/")
+
+
+def _gemini_primary_key() -> Optional[str]:
+    return (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip() or None
+
+
+def _gemini_fallback_key() -> Optional[str]:
+    return (
+        os.environ.get("GEMINI_API_KEY_FALLBACK")
+        or os.environ.get("GOOGLE_API_KEY_FALLBACK")
+        or ""
+    ).strip() or None
+
+
+def _should_retry_gemini_with_fallback(exc: BaseException) -> bool:
+    return bool(_GEMINI_KEY_FALLBACK_RE.search(str(exc)))
+
+
 def _is_anthropic_model(model: str) -> bool:
     m = model.lower()
     return "anthropic" in m or "claude" in m
@@ -160,10 +191,11 @@ def _extract_json_object(raw: str) -> Dict[str, Any]:
 
 def _provider_credentials_error(model: str) -> Optional[str]:
     if _is_litellm_model(model):
-        if "gemini" in model.lower() and not (
-            os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        ):
-            return "Gemini model configured but GEMINI_API_KEY or GOOGLE_API_KEY is not available in the worker-author sandbox"
+        if _is_direct_gemini_api_key_model(model) and not (_gemini_primary_key() or _gemini_fallback_key()):
+            return (
+                "Gemini model configured but GEMINI_API_KEY, GOOGLE_API_KEY, "
+                "GEMINI_API_KEY_FALLBACK, or GOOGLE_API_KEY_FALLBACK is not available in the worker-author sandbox"
+            )
         if "bedrock" in model.lower():
             has_auth = bool(
                 os.environ.get("AWS_ACCESS_KEY_ID")
@@ -204,11 +236,30 @@ def _codegen_chat(
         }
         if response_format is not None:
             kwargs["response_format"] = response_format
+        last_kwargs = kwargs
         try:
+            if _is_direct_gemini_api_key_model(model) and "api_key" not in kwargs:
+                primary_key = _gemini_primary_key()
+                fallback_key = _gemini_fallback_key()
+                if primary_key:
+                    kwargs["api_key"] = primary_key
+                last_kwargs = kwargs
+                try:
+                    return litellm.completion(temperature=temperature, **kwargs)
+                except Exception as exc:  # noqa: BLE001 - litellm/provider exception classes vary
+                    if (
+                        not fallback_key
+                        or fallback_key == primary_key
+                        or not _should_retry_gemini_with_fallback(exc)
+                    ):
+                        raise
+                    retry_kwargs = {**kwargs, "api_key": fallback_key}
+                    last_kwargs = retry_kwargs
+                    return litellm.completion(temperature=temperature, **retry_kwargs)
             return litellm.completion(temperature=temperature, **kwargs)
         except Exception as exc:  # noqa: BLE001 - some providers reject temperature
             if "temperature" in str(exc).lower():
-                return litellm.completion(**kwargs)
+                return litellm.completion(**last_kwargs)
             raise
 
     ml = model.lower()
