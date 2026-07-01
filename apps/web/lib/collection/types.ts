@@ -215,6 +215,12 @@ export interface CollectionStates {
      *  surfaces such as the Library). */
     dropzone?: boolean;
   };
+  filteredEmpty?: {
+    title: string;
+    help?: string;
+    icon?: import("react").ComponentType<{ size?: number }>;
+    action?: ReactNode;
+  };
   errorRetry?: () => void;
 }
 

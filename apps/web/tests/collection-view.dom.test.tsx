@@ -461,11 +461,25 @@ describe("CollectionView — states (§7)", () => {
   it("keeps the toolbar when a filter narrows a non-empty list to zero", () => {
     const { container } = render(
       <Harness
-        config={makeConfig()}
+        config={makeConfig({
+          states: {
+            empty: {
+              title: "Create your first worker",
+              action: <div>First-worker onboarding</div>,
+            },
+            filteredEmpty: {
+              title: "No workers found",
+              help: "Clear the search or filters to see your workers.",
+            },
+          },
+        })}
         initial={{ ...emptyState("list"), q: "zzz-no-match" }}
       />,
     );
-    expect(screen.getByText("No workers yet")).toBeInTheDocument();
+    expect(screen.getByText("No workers found")).toBeInTheDocument();
+    expect(screen.getByText("Clear the search or filters to see your workers.")).toBeInTheDocument();
+    expect(screen.queryByText("Create your first worker")).not.toBeInTheDocument();
+    expect(screen.queryByText("First-worker onboarding")).not.toBeInTheDocument();
     expect(container.querySelector(".c-controlstrip")).toBeInTheDocument();
     expect(container.querySelector(".c-srch")).toBeInTheDocument();
   });

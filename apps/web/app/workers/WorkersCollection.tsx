@@ -2043,6 +2043,54 @@ function WorkerDetailActions({
   );
 }
 
+// ---- Workers empty-state quick start -----------------------------------------
+
+const WORKER_PROMPT_EXAMPLES = [
+  "Create a Floom worker that summarizes my latest 5 Gmail emails every hour and sends the summary to Slack.",
+  "Create a Floom worker that checks new Linear issues every morning and posts a priority digest to Slack.",
+  "Create a Floom worker that watches a Google Sheet for new rows and drafts follow-up emails.",
+];
+
+function WorkersEmptyQuickStart() {
+  return (
+    <div
+      className="mt-5 w-full rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] p-4 text-left"
+      style={{ maxWidth: 620 }}
+    >
+      <div className="text-sm font-medium text-ink">Quick start</div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Go to your coding agent, install the Floom CLI or MCP, and ask it to create workers like these:
+      </p>
+
+      <div className="mt-3 grid gap-2">
+        {WORKER_PROMPT_EXAMPLES.map((example) => (
+          <div
+            key={example}
+            className="rounded-[var(--radius-button)] bg-[var(--bg)] px-3 py-2 font-mono text-[12px] leading-5 text-ink"
+          >
+            {example}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-2 rounded-[var(--radius-button)] bg-[var(--bg)] p-3 font-mono text-[12px] leading-5 text-ink">
+        <div>npm install -g @floomhq/floom</div>
+        <div>floom login</div>
+        <div>floom mcp install</div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Link className="c-addbtn" href="https://github.com/floomhq/floom/blob/main/BUILDING.md" target="_blank">
+          Install CLI
+        </Link>
+        <Link className="c-addbtn" href="https://github.com/floomhq/floom/blob/main/docs/AUTHORING.md" target="_blank">
+          Worker guide
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 /**
  * A downstream host can inject a top-level view (#1006) and compose
  * `WorkersCollection` without forking the full component. The host decides
@@ -2421,8 +2469,13 @@ export default function WorkersCollection({
     },
     states: {
       empty: {
-        title: "No workers yet",
-        help: "Workers are AI agents that run on a schedule, webhook, or on demand. Dashboard worker creation is temporarily unavailable; create workers from CLI/API bundles for now.",
+        title: "Create your first worker",
+        help: "Workers are YAML-defined automations with code, tools, secrets, memory, and run history.",
+        action: <WorkersEmptyQuickStart />,
+      },
+      filteredEmpty: {
+        title: "No workers found",
+        help: "Clear the search or filters to see your workers.",
       },
       errorRetry: () => {
         void workersQuery.refetch();
