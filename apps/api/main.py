@@ -5978,21 +5978,33 @@ def _emit_mcp_tool_called_event(
     error_category: Optional[str] = None,
 ) -> None:
     try:
+        from services import analytics_posthog
         from services.product_events import emit_mcp_tool_called
 
         props = _mcp_tool_tracking_properties(tool_name, arguments, result)
-        emit_mcp_tool_called(
-            owner_id=auth.user_id,
-            tool_name=tool_name,
-            success=success,
-            duration_ms=duration_ms,
-            auth_method=auth.auth_method,
-            worker_id=props.get("worker_id"),
-            run_id=props.get("run_id"),
-            status_code=props.get("status_code"),
-            error_category=error_category,
-            is_custom_tool=bool(props.get("is_custom_tool")),
+        # This is the cloud MCP dispatcher (serves /mcp/{workspace} and
+        # /mcp-tools/serve); those requests carry no X-Floom-Source header, so
+        # force source="mcp" instead of the default "api". Preserve any opt-out
+        # already set for this request; reset after.
+        tokens = analytics_posthog.set_request_context(
+            source="mcp",
+            do_not_track=analytics_posthog._request_do_not_track.get(),
         )
+        try:
+            emit_mcp_tool_called(
+                owner_id=auth.user_id,
+                tool_name=tool_name,
+                success=success,
+                duration_ms=duration_ms,
+                auth_method=auth.auth_method,
+                worker_id=props.get("worker_id"),
+                run_id=props.get("run_id"),
+                status_code=props.get("status_code"),
+                error_category=error_category,
+                is_custom_tool=bool(props.get("is_custom_tool")),
+            )
+        finally:
+            analytics_posthog.reset_request_context(tokens)
     except Exception:
         logger.debug("MCP analytics emit failed for tool=%r", tool_name, exc_info=True)
 
