@@ -6407,14 +6407,27 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         },
         {
             "name": "workers.create",
-            "description": "Create a Floom worker from WorkerContract YAML and Python source.",
+            "description": "Create a Floom worker from WorkerContract YAML and source files.",
             "inputSchema": _mcp_json_schema(
                 {
                     "worker_yml": {"type": "string", "description": worker_contract_yaml_description},
                     "run_py": {"type": "string", "description": "Python source for run.py."},
+                    "run_ts": {"type": "string", "description": "TypeScript source for run.ts."},
                     "skill_md": {"type": "string", "description": "Optional SKILL.md content."},
+                    "files": {
+                        "type": "array",
+                        "description": "Optional complete worker bundle files. Must include worker.yml when supplied.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["path", "content"],
+                        },
+                    },
                 },
-                ["worker_yml", "run_py"],
+                ["worker_yml"],
             ),
         },
         {
@@ -6527,6 +6540,49 @@ def _mcp_arg(arguments: Dict[str, Any], name: str) -> str:
     return value
 
 
+def _mcp_workers_create_body(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Build workers.create body for in-process and HTTP MCP surfaces.
+
+    TypeScript workers are sent through the files bundle because the create
+    route accepts persisted files, not a top-level run_ts field.
+    """
+    worker_yml = _mcp_arg(arguments, "worker_yml")
+    body: Dict[str, Any] = {"worker_yml": worker_yml}
+
+    run_py = arguments.get("run_py")
+    run_ts = arguments.get("run_ts")
+    skill_md = arguments.get("skill_md")
+    files_arg = arguments.get("files")
+
+    if isinstance(run_py, str) and run_py:
+        body["run_py"] = run_py
+    if isinstance(skill_md, str) and skill_md:
+        body["skill_md"] = skill_md
+
+    files: List[Dict[str, str]] = []
+    if isinstance(files_arg, list):
+        for item in files_arg:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            content = item.get("content")
+            if isinstance(path, str) and isinstance(content, str):
+                files.append({"path": path, "content": content})
+
+    if isinstance(run_ts, str) and run_ts and not any(item["path"] == "run.ts" for item in files):
+        if not any(item["path"] == "worker.yml" for item in files):
+            files.insert(0, {"path": "worker.yml", "content": worker_yml})
+        files.append({"path": "run.ts", "content": run_ts})
+        if isinstance(run_py, str) and run_py and not any(item["path"] == "run.py" for item in files):
+            files.append({"path": "run.py", "content": run_py})
+        if isinstance(skill_md, str) and skill_md and not any(item["path"] == "SKILL.md" for item in files):
+            files.append({"path": "SKILL.md", "content": skill_md})
+
+    if files:
+        body["files"] = files
+    return body
+
+
 def _mcp_arg_str(arguments: Dict[str, Any], name: str) -> str:
     """Like _mcp_arg but preserves falsy non-None values (0, False, "").
 
@@ -6604,11 +6660,7 @@ def _mcp_call_workers_get(arguments: Dict[str, Any], auth: AuthContext, repos: R
 
 
 def _mcp_call_workers_create(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
-    payload = WorkerCreateRequest(
-        worker_yml=_mcp_arg(arguments, "worker_yml"),
-        run_py=_mcp_arg(arguments, "run_py"),
-        skill_md=arguments.get("skill_md"),
-    )
+    payload = WorkerCreateRequest(**_mcp_workers_create_body(arguments))
     data = create_worker(payload, _internal_asgi_request(), auth=auth, repos=repos)
     return _mcp_call_result(data, "Worker created.")
 
@@ -7456,11 +7508,11 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     # --- workers ---
     {"name": "workers.list", "description": "List Floom workers.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "workers.get", "description": "Get a Floom worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
-    {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md and a minimal run_py stub.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}}, "required": ["worker_yml", "run_py"]}},
+    {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py or run_ts. For agent/skill-mode workers supply skill_md.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "run_ts": {"type": "string", "description": "TypeScript source for run.ts."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Optional complete worker bundle files. Must include worker.yml when supplied."}}, "required": ["worker_yml"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
     {"name": "workers.delete", "description": "Delete a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.run", "description": "Start a Floom worker run through MCP.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run."}}, "required": ["id"]}},
-    {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
+    {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, run.ts, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
     {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
     {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.timeseries", "description": "Get daily run counts and success/failure breakdown for a worker over the last N days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "days": {"type": "integer", "default": 30, "description": "Days of history (1–90)."}}, "required": ["id"]}},
@@ -7665,9 +7717,7 @@ async def _mcp_dispatch(
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}", request)
         return _mcp_api_result(data, s)
     if name == "workers.create":
-        body = {k: a[k] for k in ("worker_yml", "run_py") if k in a}
-        if "skill_md" in a: body["skill_md"] = a["skill_md"]
-        data, s = await _api_call("POST", "/workers", request, body=body)
+        data, s = await _api_call("POST", "/workers", request, body=_mcp_workers_create_body(a))
         return _mcp_api_result(data, s)
     if name == "workers.update":
         body = {k: a[k] for k in a if k != "id"}

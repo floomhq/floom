@@ -267,6 +267,9 @@ def test_langdock_mcp_lists_remote_workeros_control_plane_tools(monkeypatch, tmp
     assert 'schema_version: "0.3"' in create_desc
     assert "inputs.json" in create_desc
     assert "result.json" in create_desc
+    assert "run_ts" in create_tool["inputSchema"]["properties"]
+    assert "files" in create_tool["inputSchema"]["properties"]
+    assert create_tool["inputSchema"]["required"] == ["worker_yml"]
 
 
 def test_langdock_mcp_tool_call_forwards_to_workspace_agent(monkeypatch, tmp_path):
