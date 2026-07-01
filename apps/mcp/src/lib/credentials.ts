@@ -85,6 +85,10 @@ export function credentialsPath(): string {
   return join(resolveConfigDir(), "floom", "credentials.json");
 }
 
+export function floomConfigDir(): string {
+  return dirname(credentialsPath());
+}
+
 export function credentialsAccountsDir(): string {
   return join(dirname(credentialsPath()), "credentials");
 }

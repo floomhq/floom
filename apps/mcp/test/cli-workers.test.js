@@ -916,12 +916,14 @@ test("npm CLI run emits telemetry and marks worker run as cli", async (t) => {
   ]);
   assert.deepEqual(mock.bodies[0], { inputs: {}, trigger_source: "cli" });
   assert.deepEqual(mock.bodies[1], {
+    anonymous_distinct_id: mock.bodies[1].anonymous_distinct_id,
     command: "run",
     success: true,
     duration_ms: mock.bodies[1].duration_ms,
     exit_code: 0,
     api_base_kind: "local",
   });
+  assert.match(mock.bodies[1].anonymous_distinct_id, /^anon_/);
   assert.equal(typeof mock.bodies[1].duration_ms, "number");
   assert.equal("inputs" in mock.bodies[1], false);
   assert.equal("output" in mock.bodies[1], false);

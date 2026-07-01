@@ -3,6 +3,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { createAuthenticatedClient, FloomApiError } from "../lib/api.js";
 import { getCommandName } from "../lib/command-name.js";
 import { log, printJson, renderTable } from "../lib/output.js";
+import { telemetryRequestHeaders } from "../lib/telemetry-config.js";
 
 type RunSummary = {
   id: string;
@@ -178,6 +179,7 @@ export async function runsLogsCommand(runId: string, options: { follow?: boolean
       method: "GET",
       headers: {
         accept: "text/event-stream",
+        ...telemetryRequestHeaders("cli"),
         ...authHeaders,
       },
     });

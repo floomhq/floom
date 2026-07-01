@@ -7,6 +7,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { readCredentials } from "./lib/credentials.js";
+import { telemetryRequestHeaders } from "./lib/telemetry-config.js";
 import {
   WORKER_AUTHORING_CONTRACT,
   getWorkerTemplate,
@@ -75,7 +76,7 @@ function activeWorkspaceId(): string | undefined {
 }
 
 function authHeader(): Record<string, string> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...telemetryRequestHeaders("mcp") };
   const token = process.env.WORKEROS_API_TOKEN?.trim();
   if (token) {
     headers["x-floom-token"] = token;

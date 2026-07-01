@@ -18,6 +18,7 @@ import sys
 import time
 import subprocess
 import threading
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -41,8 +42,50 @@ API_SECRET = os.environ.get("FLOOM_API_SECRET", "")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _telemetry_disabled() -> bool:
+    return (
+        _truthy(os.environ.get("DO_NOT_TRACK"))
+        or _truthy(os.environ.get("FLOOM_CLI_TELEMETRY_DISABLED"))
+        or _truthy(os.environ.get("WORKEROS_CLI_TELEMETRY_DISABLED"))
+    )
+
+
+def _config_dir() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    root = Path(xdg) if xdg else Path.home() / ".config"
+    return root / "floom"
+
+
+def _anonymous_distinct_id() -> str:
+    path = _config_dir() / "telemetry.json"
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        existing = str(parsed.get("anonymous_distinct_id") or "").strip()
+        if existing:
+            return existing
+    except Exception:
+        pass
+
+    # Distinct ID strategy: one random, non-PII id per install, shared through
+    # the config dir; authenticated API telemetry links it to the real user id.
+    anon_id = f"anon_{uuid.uuid4()}"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"anonymous_distinct_id": anon_id}, indent=2) + "\n", encoding="utf-8")
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+    return anon_id
+
+
 def _headers() -> dict:
-    h = {"Content-Type": "application/json"}
+    h = {"Content-Type": "application/json", "X-Floom-Source": "cli"}
+    if _telemetry_disabled():
+        h["X-Floom-Do-Not-Track"] = "1"
     if API_TOKEN:
         h["Authorization"] = f"Bearer {API_TOKEN}"
     elif API_SECRET:
@@ -75,7 +118,10 @@ def _emit_cli_command(
     worker_id: str | None = None,
     run_id: str | None = None,
 ) -> None:
+    if _telemetry_disabled():
+        return
     payload = {
+        "anonymous_distinct_id": _anonymous_distinct_id(),
         "command": command,
         "success": bool(success),
         "duration_ms": max(0, int(duration_ms)),
@@ -100,11 +146,14 @@ def _emit_cli_command(
 @click.option("--secret", envvar="FLOOM_API_SECRET", default="", help="x-floom-secret header value (or set FLOOM_API_SECRET)")
 @click.option("--token", envvar="FLOOM_API_TOKEN", default="", help="Bearer token / PAT (or set FLOOM_API_TOKEN)")
 @click.option("--api-base", envvar="FLOOM_API_BASE", default="http://localhost:8000", help="API base URL")
+@click.option("--no-telemetry", is_flag=True, help="Disable CLI telemetry for this command")
 @click.pass_context
-def cli(ctx: click.Context, secret: str, token: str, api_base: str):
+def cli(ctx: click.Context, secret: str, token: str, api_base: str, no_telemetry: bool):
     """floom â€” Floom operator CLI."""
     # #598: allow --secret / --token flags to override env vars at call time
     ctx.ensure_object(dict)
+    if no_telemetry:
+        os.environ["FLOOM_CLI_TELEMETRY_DISABLED"] = "1"
     if secret:
         ctx.obj["secret"] = secret
     if token:

@@ -4,6 +4,7 @@ import { FloomApiClient, FloomApiError } from "../lib/api.js";
 import { getCommandName } from "../lib/command-name.js";
 import { readCredentials } from "../lib/credentials.js";
 import { log, printJson } from "../lib/output.js";
+import { telemetryRequestHeaders } from "../lib/telemetry-config.js";
 
 type Check = {
   name: string;
@@ -32,6 +33,7 @@ async function checkApiReachable(apiBase: string): Promise<Check> {
       apiBase.includes("workeros-api.floom.dev") || Boolean(process.env.WORKEROS_API_TOKEN?.trim());
     const healthPath = hostedHealth ? "/api/health" : "/health";
     const response = await fetch(`${apiBase.replace(/\/+$/, "")}${healthPath}`, {
+      headers: telemetryRequestHeaders("cli"),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
     if (response.ok) {

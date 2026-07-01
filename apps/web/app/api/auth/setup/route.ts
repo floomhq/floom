@@ -13,7 +13,7 @@ const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 export async function GET(_req: NextRequest) {
   // Proxy GET /auth/setup-required to the backend
   const upstream = await fetch(`${API_BASE}/auth/setup-required`, {
-    headers: { "x-floom-secret": process.env.FLOOM_API_SECRET || "" },
+    headers: { "x-floom-secret": process.env.FLOOM_API_SECRET || "", "X-Floom-Source": "web" },
   });
   const body = await upstream.json();
   return NextResponse.json(body, {
@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
     method: "POST",
     headers: {
       "content-type": req.headers.get("content-type") || "application/json",
+      "X-Floom-Source": "web",
     },
     body,
   });

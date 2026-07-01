@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   if (typeof body.username === "string") {
     const upstream = await fetch(`${API_BASE}/auth/login`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "X-Floom-Source": "web" },
       body: JSON.stringify({ username: body.username, password: body.password ?? "" }),
     });
     const upstreamBody = await upstream.text();
