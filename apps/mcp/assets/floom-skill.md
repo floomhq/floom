@@ -7,6 +7,14 @@ description: Run and manage Floom AI workers — background automations that run
 
 Floom hosts AI **workers** you drive from here via MCP tools. A worker is a task that runs on a **schedule or trigger** without the user re-running it. Your job: help the user pick/set up a worker, give it a cadence, and monitor its runs.
 
+## Your first worker
+When the user asks for a first worker, run this flow end to end:
+1. **Pick or scaffold** — call `workers_list` first; if nothing fits, start from a golden template such as an inbox cleaner.
+2. **Author** — write `worker.yml` (trigger/schedule/inputs) plus `run.py` or `SKILL.md`; keep v1 minimal.
+3. **Validate** — use `workers_create` or the validate path, then fix every error before running.
+4. **Run + verify** — call `workers_run`, then `runs_get` / `runs_logs`; confirm a real successful run before telling the user it is done.
+5. **Schedule** — call `workers_update` to set the cadence so the worker loops.
+
 ## The loop
 1. **Pick** — `workers_list` to see existing workers, or start from a template.
 2. **Set up** — `workers_create` (new worker) · `workers_write_file` (edit an existing worker's source — do NOT use create to overwrite) · `workers_update` (settings: trigger_type = manual|cron|webhook, schedule, input defaults).
@@ -25,7 +33,9 @@ Floom hosts AI **workers** you drive from here via MCP tools. A worker is a task
 
 ## Rules of thumb
 - A worker = **worker.yml** (config: trigger, schedule, inputs) + **run.py** or **SKILL.md** (what it does).
+- Keep first-worker authoring small: one trigger, clear inputs, one observable success condition.
 - Prefer setting a **schedule** over manual runs — that's the point (set once, never run again).
+- Never claim success until a run has completed successfully and you have checked details/logs.
 - Reference secrets by name; never echo their values.
 - Run `floom doctor` in the terminal if MCP/auth seems off.
 

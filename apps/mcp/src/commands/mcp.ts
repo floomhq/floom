@@ -96,6 +96,12 @@ async function writeAndLogFloomSkill(
   }
 }
 
+function logInstallSuccessNextStep(): void {
+  log.blank();
+  log.ok("Floom is connected.");
+  log.info('Next, tell your agent:  "Use Floom to create, run, and verify a simple daily worker for <your task>."');
+}
+
 // HTTP MCP config — url + headers, no subprocess needed.
 function serverConfig(mcpUrl: string, headers: Record<string, string>): JsonObject {
   return { url: mcpUrl, headers };
@@ -353,6 +359,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
     log.kv("Config path", displayPath);
     log.kv("MCP URL", mcpUrl);
     await writeAndLogFloomSkill(client, configPath);
+    logInstallSuccessNextStep();
     return 0;
   }
 
@@ -372,6 +379,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
     log.kv("Config path", displayPath);
     log.kv("MCP URL", mcpUrl);
     await writeAndLogFloomSkill(client, configPath);
+    logInstallSuccessNextStep();
     return 0;
   }
 
