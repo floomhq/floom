@@ -43,6 +43,7 @@ async def get_auth_context(request: Request) -> AuthContext:
     else:
         ctx = await get_auth_provider().verify(request)
     ctx = scope_local_auth_context(request, ctx)
+    request.state.auth_context = ctx
     set_current_auth_context(ctx)
     return ctx
 

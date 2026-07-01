@@ -126,3 +126,29 @@ def emit_cli_command_invoked(
             "run_id": run_id,
         },
     )
+
+
+def emit_api_request_completed(
+    *,
+    owner_id: str,
+    method: str,
+    route: str,
+    status_code: int,
+    duration_ms: int,
+    auth_method: Optional[str] = None,
+    deploy: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+) -> None:
+    emit_product_event(
+        owner_id=owner_id,
+        event="api_request_completed",
+        workspace_id=workspace_id,
+        properties={
+            "method": method.upper(),
+            "route": route,
+            "status_code": int(status_code),
+            "duration_ms": max(0, int(duration_ms)),
+            "auth_method": auth_method,
+            "deploy": deploy,
+        },
+    )

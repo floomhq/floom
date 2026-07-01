@@ -199,6 +199,19 @@ EVENT_CONTRACT: Dict[str, Dict[str, Any]] = {
             "run_id",
         },
     },
+    "api_request_completed": {
+        "emitter": EMITTER_SERVER,
+        "surface": "main.api_request_telemetry_middleware",
+        "required_props": {
+            "method",
+            "route",
+            "status_code",
+            "duration_ms",
+            "auth_method",
+            "deploy",
+        },
+        "optional_props": set(),
+    },
     # --- connections (server, routers.connections._emit_connection_resolved) -
     # OAuth activation outcome, emitted once per callback resolution.
     "connection_added": {
