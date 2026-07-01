@@ -100,7 +100,7 @@ describe("MCP connections list — load states", () => {
 
     const installToggle = screen.getByRole("button", { name: /use floom in your ai client/i });
     expect(installToggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText(/Codex/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Codex/i).length).toBeGreaterThan(0);
   });
 
   it("expands MCP setup with personal tokens, workspace tokens, and CLI login copy", async () => {
