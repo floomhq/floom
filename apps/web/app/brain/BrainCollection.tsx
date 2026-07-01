@@ -476,6 +476,10 @@ export default function BrainCollection({
   // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
   // Cached revisits bypass this because the query already has data.
   const loading = foldersQuery.isLoading && !foldersQuery.data;
+  const listError =
+    foldersQuery.isError && !foldersQuery.data
+      ? "Could not load your Library. Check your connection and try again."
+      : null;
   const [listDragOver, setListDragOver] = useState(false);
   // Guards the auto-create folder paths against double-fires.
   const [creating, setCreating] = useState(false);
@@ -575,6 +579,7 @@ export default function BrainCollection({
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: displayFolders,
     loading,
+    error: listError,
     // No banner and no prominent toolbar addButton: dropping files is the
     // primary affordance (outer wrapper handles file drops; the empty state
     // leads with a drop CTA). Folder-creation is the quiet secondary path in
@@ -694,6 +699,9 @@ export default function BrainCollection({
         title: "Your Library is empty",
         help: "Drag any docs onto this page and a folder is created for them automatically. Your workers read these before they act.",
         action: <EmptyStateActions onBrowse={openBrowse} />,
+      },
+      errorRetry: () => {
+        void foldersQuery.refetch();
       },
     },
   };
