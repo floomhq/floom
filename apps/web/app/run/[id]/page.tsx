@@ -93,6 +93,7 @@ function WorkerConnectionRow({
   slug: string;
   connection: ConnectionItem | undefined;
 }) {
+  const searchParams = useSearchParams();
   const app = getSupportedApp(slug);
   const accountLabel = connection
     ? maskAccountLabel(getConnectionAccountLabel(connection as ConnectionRecord))
