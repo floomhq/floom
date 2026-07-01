@@ -2334,6 +2334,7 @@ class WorkerSummaryInput(BaseModel):
 
 class WorkerSummary(BaseModel):
     id: str
+    workspace_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     long_description: Optional[str] = None
@@ -2391,6 +2392,7 @@ class WorkerFile(BaseModel):
 
 class WorkerDetail(BaseModel):
     id: str
+    workspace_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     long_description: Optional[str] = None

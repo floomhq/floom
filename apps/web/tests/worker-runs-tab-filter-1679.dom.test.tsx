@@ -55,6 +55,7 @@ const workerScopedRuns = [
 const runsListMock = vi.fn().mockResolvedValue(workerScopedRuns);
 
 vi.mock("@/lib/api", () => ({
+  getPersistedActiveWorkspaceId: vi.fn(() => "local-default"),
   api: {
     me: vi.fn().mockResolvedValue({ is_admin: true, role: "admin" }),
     workers: {

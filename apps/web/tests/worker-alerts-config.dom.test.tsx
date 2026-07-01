@@ -68,6 +68,7 @@ const alertsCreate = vi.fn().mockResolvedValue(createdAlert);
 const alertsRemove = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/api", () => ({
+  getPersistedActiveWorkspaceId: vi.fn(() => "local-default"),
   api: {
     workers: {
       list: vi.fn().mockResolvedValue([worker]),

@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { withWorkspaceParam } from "@/lib/workspaceHref";
 
 describe("workspace href helper", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("appends workspace_id when present in current search params", () => {
     expect(withWorkspaceParam("/workers?sel=w1", new URLSearchParams("workspace_id=ws_123"))).toBe(
       "/workers?sel=w1&workspace_id=ws_123",
@@ -23,5 +27,22 @@ describe("workspace href helper", () => {
     expect(withWorkspaceParam("/workers?sel=w1&workspace_id=existing", new URLSearchParams("workspace_id=ws_123"))).toBe(
       "/workers?sel=w1&workspace_id=existing",
     );
+  });
+
+  it("normalizes ws alias from inbound worker links", () => {
+    expect(withWorkspaceParam("/workers?sel=w1", new URLSearchParams("ws=ws_123"))).toBe(
+      "/workers?sel=w1&workspace_id=ws_123",
+    );
+  });
+
+  it("uses the stored active workspace when no URL workspace is present", () => {
+    vi.stubGlobal("window", {
+      location: { search: "" },
+      localStorage: {
+        getItem: vi.fn((key: string) => key === "workeros.activeWorkspaceId" ? "ws_stored" : null),
+      },
+    });
+
+    expect(withWorkspaceParam("/workers?sel=w1")).toBe("/workers?sel=w1&workspace_id=ws_stored");
   });
 });

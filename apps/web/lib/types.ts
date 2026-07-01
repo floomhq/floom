@@ -284,6 +284,7 @@ export interface TimeseriesDay {
 
 export interface WorkerSummary {
   id: string;
+  workspace_id?: string | null;
   name: string;
   created_at?: string | null;
   updated_at?: string | null;
@@ -351,6 +352,7 @@ export interface WorkerFile {
 
 export interface WorkerDetail {
   id: string;
+  workspace_id?: string | null;
   name: string;
   description?: string;
   long_description?: string;

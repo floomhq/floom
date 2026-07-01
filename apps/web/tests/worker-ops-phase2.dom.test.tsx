@@ -59,6 +59,7 @@ const pause = vi.fn().mockResolvedValue({ ...workerDetail, enabled: false });
 const resume = vi.fn().mockResolvedValue({ ...workerDetail, enabled: true });
 
 vi.mock("@/lib/api", () => ({
+  getPersistedActiveWorkspaceId: vi.fn(() => "local-default"),
   api: {
     workers: {
       list: vi.fn().mockResolvedValue([worker]),
