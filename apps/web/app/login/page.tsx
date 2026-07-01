@@ -3,6 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,19 +16,38 @@ type LoginMode = "loading" | "setup" | "username" | "secret";
 
 function BrandPanel() {
   return (
-    <section className="order-2 flex min-h-[220px] flex-col justify-between gap-12 bg-[var(--bg-app)] px-6 py-8 text-[var(--ink)] sm:px-12 lg:order-1 lg:min-h-screen lg:px-14 lg:py-12">
+    <section className="order-2 flex min-h-[240px] flex-col justify-between gap-10 bg-[var(--bg-app)] px-6 py-8 text-[var(--ink)] sm:px-12 lg:order-1 lg:min-h-screen lg:px-14 lg:py-12">
       <div className="flex items-center gap-2.5">
         <FloomMark size={22} />
         <span className="text-sm font-semibold tracking-tight">Floom</span>
       </div>
 
-      <div className="max-w-xs space-y-3">
+      <div className="max-w-sm space-y-5">
         <h2 className="text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
           Hire AI workers for your company.
         </h2>
         <p className="text-sm leading-relaxed text-[var(--muted-text)]">
           Jobs that run themselves on a schedule, from a message, or on demand. You get the output, not the mechanics.
         </p>
+        <div className="grid gap-2 text-xs text-[var(--muted-text)] sm:grid-cols-2">
+          {["Connected accounts stay yours", "No telemetry key by default", "Sandboxed worker runtime", "Open-source engine"].map((item) => (
+            <div key={item} className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2">
+              {item}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="hidden max-w-sm rounded-[var(--radius-card)] bg-[var(--bg-2)] p-4 text-xs text-[var(--muted-text)] lg:block">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="font-medium text-[var(--ink)]">Daily revenue report</span>
+          <span className="rounded-[var(--radius-pill)] bg-[var(--bg-3)] px-2 py-0.5 text-[11px] text-[var(--ink-soft)]">Ready</span>
+        </div>
+        <div className="space-y-2 font-mono text-[11px] leading-5">
+          <p>09:00 Read Stripe payouts</p>
+          <p>09:02 Match invoices in Sheets</p>
+          <p>09:04 Send Slack summary</p>
+        </div>
       </div>
     </section>
   );
@@ -179,8 +199,9 @@ function LoginContent() {
     <div className="grid min-h-screen w-full bg-[var(--bg-app)] text-[var(--ink)] lg:grid-cols-2">
       <BrandPanel />
 
-      <section className="order-1 flex min-h-screen flex-col justify-center bg-[var(--bg-card)] px-6 py-10 sm:px-12 lg:order-2">
-        <div className="mx-auto w-full max-w-[340px]">
+      <section className="order-1 flex min-h-screen flex-col bg-[var(--bg-card)] px-6 py-8 sm:px-12 lg:order-2">
+        <div className="flex flex-1 items-center">
+        <div className="mx-auto w-full max-w-[360px]">
           {/* Logo mark -- visible only on mobile (brand panel hidden on small screens) */}
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <FloomMark size={22} />
@@ -293,6 +314,13 @@ function LoginContent() {
             </>
           )}
         </div>
+        </div>
+        <footer className="mx-auto flex w-full max-w-[520px] flex-wrap items-center justify-center gap-x-4 gap-y-2 pt-8 text-xs text-[var(--ink-faint)]">
+          <Link className="hover:text-[var(--muted-text)]" href="/terms">Terms</Link>
+          <Link className="hover:text-[var(--muted-text)]" href="/privacy">Privacy</Link>
+          <a className="hover:text-[var(--muted-text)]" href="https://github.com/floomhq/floom/security/policy" rel="noreferrer" target="_blank">Security</a>
+          <a className="hover:text-[var(--muted-text)]" href="https://github.com/floomhq/floom#readme" rel="noreferrer" target="_blank">Docs</a>
+        </footer>
       </section>
     </div>
   );

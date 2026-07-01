@@ -13,6 +13,7 @@ import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { BootSplash } from "@/components/layout/BootSplash";
 import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
+import { TermsAcceptanceGate } from "@/components/TermsAcceptanceGate";
 
 // Render exactly one Emily surface so only one chat instance mounts: the
 // desktop dock (≥1024px) or the mobile/tablet bottom-sheet (<1024px).
@@ -25,7 +26,17 @@ import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 // sidebar / command palette. /w and /s are standalone public share pages.
 // /login is the access gate -- it must render without sidebar chrome (and is
 // the one page reachable while logged out, see middleware.ts).
-const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login", "/run", "/preview", "/cli-auth"];
+const standalonePrefixes = [
+  "/approvals/review",
+  "/w",
+  "/s",
+  "/login",
+  "/run",
+  "/preview",
+  "/cli-auth",
+  "/terms",
+  "/privacy",
+];
 
 // `/chat` uses the same persistent Emily dock/fullscreen surface as the rest of
 // the app. Keeping one mounted stream instance prevents route navigation from
@@ -104,6 +115,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
         <StandardShellBody fullBleed={fullBleed} isDesktop={isDesktop}>
           {children}
         </StandardShellBody>
+        <TermsAcceptanceGate />
         <CommandPalette />
         <Toaster position="bottom-right" closeButton />
       </EmilyFullscreenProvider>

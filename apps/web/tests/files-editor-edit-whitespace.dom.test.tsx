@@ -9,7 +9,7 @@
  * the wiring so the regression can't silently come back.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FilesEditor } from "@/components/worker-form";
 
@@ -64,5 +64,51 @@ describe("FilesEditor edit mode — code renders normally (not one char per line
     setter.call(textarea, pyContent + "# edited\n");
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     expect(onChange).toHaveBeenCalled();
+  });
+
+  it("adds source files from upload", async () => {
+    const onChange = vi.fn();
+    const { container } = renderEdit(onChange);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+
+    const file = new File(["export const answer = 42;\n"], "helper.ts", { type: "video/mp2t" });
+    await userEvent.upload(input!, file);
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "helper.ts", content: "export const answer = 42;\n" }),
+      ]),
+    );
+  });
+
+  it("rejects binary uploads from the text source editor", async () => {
+    const onChange = vi.fn();
+    const { container } = renderEdit(onChange);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "image.png", { type: "image/png" });
+    await userEvent.upload(input!, file);
+
+    await waitFor(() => expect(onChange).not.toHaveBeenCalled());
+  });
+
+  it("uses the designed confirm dialog for file deletion", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const onChange = vi.fn();
+    renderEdit(onChange);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete run.py" }));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Delete run.py?");
+    fireEvent.click(screen.getByRole("button", { name: "Delete file" }));
+
+    expect(onChange.mock.calls.at(-1)?.[0]).toEqual([
+      { path: "worker.yml", content: "name: demo\n" },
+    ]);
+    confirmSpy.mockRestore();
   });
 });
