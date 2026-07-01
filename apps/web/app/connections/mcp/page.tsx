@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Check,
@@ -257,6 +257,8 @@ function truncateUrl(url: string, max = 48): string {
 // ---------- component ----------
 
 export default function McpConnectionsPage() {
+  const searchParams = useSearchParams();
+  const fromInstall = searchParams.get("from_install");
   const [connections, setConnections] = useState<McpConnection[]>([]);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -269,7 +271,7 @@ export default function McpConnectionsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Concept A: install Floom Workers into an AI client (secondary, collapsed)
-  const [installOpen, setInstallOpen] = useState(false);
+  const [installOpen, setInstallOpen] = useState(() => Boolean(fromInstall));
   const [installTarget, setInstallTarget] = useState<(typeof MCP_INSTALL_TARGETS)[number]["target"]>("generic");
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
 

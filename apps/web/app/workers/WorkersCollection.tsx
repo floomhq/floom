@@ -2079,15 +2079,13 @@ function WorkersEmptyQuickStart() {
       <div className="flex flex-wrap justify-center gap-2">
         <Link
           className="c-addbtn"
-          href="https://github.com/floomhq/floom/blob/main/apps/mcp/README.md"
-          target="_blank"
-          rel="noreferrer"
+          href="/connections/mcp?from_install=workers-empty"
         >
           Install MCP
         </Link>
         <Link
           className="c-vpill"
-          href="https://github.com/floomhq/floom/blob/main/docs/AUTHORING.md"
+          href="https://floom.dev/v3/docs/worker-yml"
           target="_blank"
           rel="noreferrer"
         >
