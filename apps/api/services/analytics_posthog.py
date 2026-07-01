@@ -31,6 +31,7 @@ import hashlib
 import logging
 import os
 import threading
+from contextvars import ContextVar, Token
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("floom.analytics")
@@ -47,10 +48,64 @@ _DEFAULT_HOST = "https://us.i.posthog.com"
 _client: Optional[Any] = None
 _init_lock = threading.Lock()
 _init_attempted = False
+_request_source: ContextVar[str] = ContextVar("floom_analytics_source", default="api")
+_request_do_not_track: ContextVar[bool] = ContextVar("floom_analytics_do_not_track", default=False)
+_ALLOWED_SOURCES = {"web", "api", "cli", "mcp", "schedule"}
+_ANALYTICS_OPT_OUT_KEY = "analytics_opt_out"
 
 
 def _env(name: str) -> str:
     return (os.environ.get(name) or "").strip()
+
+
+def normalize_source(value: Optional[str]) -> str:
+    source = (value or "").strip().lower()
+    return source if source in _ALLOWED_SOURCES else "api"
+
+
+def set_request_context(*, source: Optional[str] = None, do_not_track: bool = False) -> tuple[Token[str], Token[bool]]:
+    return (
+        _request_source.set(normalize_source(source)),
+        _request_do_not_track.set(bool(do_not_track)),
+    )
+
+
+def reset_request_context(tokens: tuple[Token[str], Token[bool]]) -> None:
+    source_token, dnt_token = tokens
+    _request_source.reset(source_token)
+    _request_do_not_track.reset(dnt_token)
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _workspace_analytics_opted_out(workspace_id: str) -> bool:
+    if not workspace_id:
+        return False
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = ? LIMIT 1",
+                (workspace_id, _ANALYTICS_OPT_OUT_KEY),
+            ).fetchone()
+        return bool(row and _truthy(row["value"]))
+    except Exception:
+        return False
+
+
+def _workspace_id_from_groups(groups: Optional[Dict[str, str]]) -> str:
+    if not groups:
+        return ""
+    return str(groups.get("workspace") or "").strip()
+
+
+def _capture_suppressed(groups: Optional[Dict[str, str]]) -> bool:
+    if _request_do_not_track.get():
+        return True
+    return _workspace_analytics_opted_out(_workspace_id_from_groups(groups))
 
 
 def _on_delivery_error(error: Any, items: Any = None) -> None:
@@ -132,6 +187,7 @@ def _base_properties(extra: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     props: Dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "emitter": EMITTER,
+        "source": _request_source.get(),
     }
     if extra:
         # Drop None-valued keys so PostHog property breakdowns stay clean, but
@@ -162,6 +218,8 @@ def capture_event(
     client = _get_client()
     if client is None:
         return
+    if _capture_suppressed(groups):
+        return
     if not distinct_id:
         logger.debug("Dropping PostHog event %s: empty distinct_id", event)
         return
@@ -174,6 +232,35 @@ def capture_event(
         )
     except Exception:  # pragma: no cover - belt-and-suspenders; capture is @no_throw
         logger.debug("PostHog capture failed for %s", event, exc_info=True)
+
+
+def identify_user(
+    *,
+    distinct_id: str,
+    anonymous_distinct_id: str,
+    properties: Optional[Dict[str, Any]] = None,
+    groups: Optional[Dict[str, str]] = None,
+) -> None:
+    """Link a stable anonymous install id to the authenticated user id."""
+    client = _get_client()
+    if client is None:
+        return
+    if _capture_suppressed(groups):
+        return
+    if not distinct_id or not anonymous_distinct_id:
+        return
+    try:
+        identify_props = {"$anon_distinct_id": str(anonymous_distinct_id)}
+        if properties:
+            identify_props.update(properties)
+        client.capture(
+            "$identify",
+            distinct_id=str(distinct_id),
+            properties=_base_properties(identify_props),
+            groups={k: str(v) for k, v in (groups or {}).items() if v},
+        )
+    except Exception:  # pragma: no cover
+        logger.debug("PostHog identify failed", exc_info=True)
 
 
 def flush() -> None:

@@ -14,6 +14,8 @@ import {
   credentialsPath,
   type StoredCredentials,
 } from "../lib/credentials.js";
+import { telemetryRequestHeaders } from "../lib/telemetry-config.js";
+import { identifyTelemetryUser } from "../lib/telemetry.js";
 
 type DeviceResponse = {
   device_code: string;
@@ -183,7 +185,7 @@ async function fetchCloudBootstrap(apiBase: string): Promise<CloudBootstrap | nu
   // the cli-exchange response carries the same fields and we still succeed.
   try {
     const response = await fetch(`${apiBase}/auth/cli-bootstrap`, {
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", ...telemetryRequestHeaders("cli") },
     });
     if (!response.ok) return null;
     const parsed = (await response.json()) as Partial<CloudBootstrap>;
@@ -292,6 +294,7 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
           authed_at: new Date().toISOString(),
         };
         await writeCredentials(creds);
+        await identifyTelemetryUser(creds);
         log.ok(`Logged in`);
         log.kv("API", polled.api_base);
         log.kv("Token saved to", credentialsPath());
@@ -415,6 +418,7 @@ async function saveCloudCredentials(creds: StoredCredentials, apiBase: string): 
       : {}),
   };
   await writeCredentials(savedCreds);
+  await identifyTelemetryUser(savedCreds);
   log.ok(`Logged in`);
   log.kv("API", apiBase);
   if (workspace) {

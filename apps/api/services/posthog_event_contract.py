@@ -26,9 +26,9 @@ CONTRACT SHAPE
 * ``emitter`` — ``server`` (product events via ``analytics_posthog``, which
   injects ``schema_version``+``emitter``) or ``ai`` (AI-obs events via
   ``ai_observability``, which carry ``ai_schema_version``).
-* The injected envelope keys (``schema_version``/``emitter`` for product,
-  ``ai_schema_version`` for AI) are asserted by the test from these tags, not
-  re-listed per event.
+* The injected envelope keys (``schema_version``/``emitter``/``source`` for
+  product, ``ai_schema_version`` for AI) are asserted by the test from these
+  tags, not re-listed per event.
 
 This contract reflects what the code emits TODAY. Add new events only when the
 real emit path lands.
@@ -38,11 +38,11 @@ from __future__ import annotations
 from typing import Any, Dict
 
 # Envelope keys auto-injected by each surface (asserted by the test per emitter).
-# Product events get schema_version+emitter from analytics_posthog._base_properties.
-# AI events route through the SAME funnel, so they carry schema_version+emitter
-# TOO, plus their own ai_schema_version.
-SERVER_ENVELOPE_PROPS = {"schema_version", "emitter"}
-AI_ENVELOPE_PROPS = {"schema_version", "emitter", "ai_schema_version"}
+# Product events get schema_version+emitter+source from
+# analytics_posthog._base_properties. AI events route through the SAME funnel, so
+# they carry those too, plus their own ai_schema_version.
+SERVER_ENVELOPE_PROPS = {"schema_version", "emitter", "source"}
+AI_ENVELOPE_PROPS = {"schema_version", "emitter", "source", "ai_schema_version"}
 
 # Canonical id keys that the test recognizes as identity props.
 CANONICAL_IDS = {"run_id", "worker_id", "workspace_id", "approval_id"}

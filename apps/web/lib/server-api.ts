@@ -29,6 +29,10 @@ export async function serverFetch<T>(
   const activeWorkspace = workspaceCookie ? decodeURIComponent(workspaceCookie) : "local-default";
   const headers = new Headers(fetchOptions.headers);
   headers.set("content-type", "application/json");
+  headers.set("X-Floom-Source", "web");
+  if (process.env.DO_NOT_TRACK === "1") {
+    headers.set("X-Floom-Do-Not-Track", "1");
+  }
   if (includeSecret) {
     headers.set("x-floom-secret", API_SECRET);
   }
