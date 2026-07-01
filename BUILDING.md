@@ -209,7 +209,7 @@ Required fields:
 
 Common script-mode fields:
 
-- `exec.command`: shell command to run, usually `python run.py`.
+- `exec.command`: shell command to run, usually `python run.py`; TypeScript workers use `npx --yes tsx run.ts`.
 - `exec.runtime`: `python311` or `node22`.
 - `exec.runner`: `e2b`.
 - `exec.inputs`: fields shown in the UI and passed through `inputs.json`.

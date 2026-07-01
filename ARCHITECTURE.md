@@ -24,7 +24,7 @@ without reload.
 
 **Script workers run in E2B sandbox microVMs. Agent workers run in the API process through AgentDriver.** There is no local in-process script runner.
 
-- `runner_sandbox/__init__.py` returns `AgentDriver` for `.md`/agent workers and `E2BSandboxDriver` for `.py`, `.sh`, and `.js` script workers.
+- `runner_sandbox/__init__.py` returns `AgentDriver` for `.md`/agent workers and `E2BSandboxDriver` for `.py`, `.sh`, `.js`, and `.ts` script workers.
 - The `runner_local.py` module that existed in earlier commits was renamed to `runner_utils.py` in PR R. Its `run_worker_local` executor function was deleted in PR #28. The remaining contents are pure utility helpers consumed by the E2B driver to prepare the per-run payload.
 - E2B sandboxes are Firecracker microVMs hosted by E2B. They do not share a Python interpreter, filesystem, network namespace, or environment variables with the API service.
 - AgentDriver runs the OpenAI Agents SDK loop in the API process. Its file tools operate on host-staged worker, input, output, and context paths, and its MCP/Composio clients are created by the API process. The `run_command` tool follows the configured E2B runner, but that does not move the AgentDriver loop or its other tools into the microVM.
@@ -43,7 +43,7 @@ For pure-script workers, this means attacks like:
 
 These do not apply to the pure-script Floom path. Pure-script workers do not
 share a Python interpreter with the API. If a security audit produces these
-findings for a `.py`/`.sh`/`.js` worker, the audit was run against the wrong
+findings for a `.py`/`.sh`/`.js`/`.ts` worker, the audit was run against the wrong
 execution path.
 
 Agent workers have a different trust model. `.md`/`mode: agent` workers run
@@ -78,7 +78,7 @@ referrer policy, permissions policy, and content security policy.
 ## How To Run A Real Audit
 
 1. Test the API endpoint for the deployment you are auditing with its configured auth secret, rather than an unrelated local dev server.
-2. Test pure-script isolation with a malicious `.py`/`.sh`/`.js` bundle. The E2B sandbox isolates that execution path.
+2. Test pure-script isolation with a malicious `.py`/`.sh`/`.js`/`.ts` bundle. The E2B sandbox isolates that execution path.
 3. Test agent workers against their actual boundary: trusted in-process AgentDriver execution, host-side file tools, configured MCP/Composio access, declared-secret handling, approvals, cancellation, and resource limits.
 4. If you want to test the API surface, point your tools at the real API origin for that deployment and test auth, rate limit, input validation, path traversal, upload caps, and token-gated webhooks there.
 5. Read this file before filing any "workers can compromise the platform" finding.

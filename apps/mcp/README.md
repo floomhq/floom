@@ -407,4 +407,8 @@ console.log(run.status); // "succeeded"
 console.log(run.output?.summary);
 ```
 
+For TypeScript script workers, use `entrypoint: run.ts`, `exec.runtime:
+node22`, `exec.command: npx --yes tsx run.ts`, and pass the source as
+`run_ts`. The worker still reads `inputs.json` and writes `result.json`.
+
 See [docs/AGENT-COOKBOOK.md section 1](../../docs/AGENT-COOKBOOK.md) for the full annotated walkthrough plus six more recipes (agent mode, Gmail trigger, cron schedule, webhook, approval gate, claude-skill port).

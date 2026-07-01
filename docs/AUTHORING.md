@@ -23,9 +23,10 @@ A **worker** is a folder under `workers/<name>/` containing exactly:
 ```
 workers/<name>/
   worker.yml          # configuration (required)
-  run.py              # entry code (script mode) OR
+  run.py or run.ts    # entry code (script mode) OR
   SKILL.md            # agent prompt (agent mode)
-  requirements.txt    # Python deps (optional but recommended)
+  requirements.txt    # Python deps (optional)
+  package.json        # Node/TypeScript deps (optional)
   <any other files>   # bundled into the sandbox at runtime
 ```
 
@@ -47,9 +48,9 @@ When the worker runs, the runtime:
 
 There are two modes; they are mutually exclusive per worker.
 
-### Script mode (`run.py`)
+### Script mode (`run.py` or `run.ts`)
 
-Plain Python entry. Predictable, deterministic, no LLM tool loop. Use for:
+Plain code entry. Predictable, deterministic, no LLM tool loop. Use for:
 
 - ETL: CSV enrichment, format conversion, deterministic transforms.
 - Webhook fan-out: receive a payload, call an API, write a row.
@@ -87,6 +88,22 @@ Script mode is a process contract, not a callable shim: `exec.command` runs
 available as environment variables. Declared Composio connection identifiers are
 available in `connections.json` when the worker needs them. There is no
 runtime-provided `context` object for script workers.
+
+TypeScript workers use the same contract with the Node runtime:
+
+```yaml
+entrypoint: run.ts
+exec:
+  mode: pure-script
+  entry: run.ts
+  runtime: node22
+  runner: e2b
+  command: npx --yes tsx run.ts
+```
+
+`run.ts` must read `inputs.json` and write `result.json` just like `run.py`.
+For lower cold-start latency in production, bake `tsx` into the Node E2B
+template or include it in the worker's `package.json`.
 
 ### Agent mode (`SKILL.md`)
 
@@ -187,7 +204,7 @@ exec:
   command: python run.py     # script mode only
   runtime: python311         # python311 | node22
   runner: e2b                # e2b (default) | local (zero cold-start, trusted only)
-  entry: run.py              # legacy field; should match `entrypoint`
+  entry: run.py              # should match `entrypoint`; run.ts is supported for TypeScript
 
   inputs:
     - name: topic            # field name (passed to run())
