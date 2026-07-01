@@ -392,13 +392,16 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     if (config.loading) return <LoadingState />;
     if (config.error) return <ErrorState message={config.error} onRetry={config.states?.errorRetry} />;
     if (filtered.length === 0) {
+      const empty = items.length === 0
+        ? config.states?.empty
+        : config.states?.filteredEmpty;
       return (
         <EmptyState
-          title={config.states?.empty?.title ?? `No ${config.title.toLowerCase()} yet`}
-          help={config.states?.empty?.help}
-          icon={config.states?.empty?.icon}
-          action={config.states?.empty?.action ?? addButton}
-          dropzone={config.states?.empty?.dropzone}
+          title={empty?.title ?? `No ${config.title.toLowerCase()} yet`}
+          help={empty?.help}
+          icon={empty?.icon}
+          action={items.length === 0 ? (empty?.action ?? addButton) : empty?.action}
+          dropzone={items.length === 0 ? config.states?.empty?.dropzone : undefined}
         />
       );
     }
