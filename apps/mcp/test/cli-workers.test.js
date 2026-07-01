@@ -206,6 +206,19 @@ async function startMockApi({
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/workers/cli-test-worker/share-link") {
+      if (!existing) {
+        json(response, 404, { detail: "Worker not found" });
+        return;
+      }
+      json(response, 200, {
+        token: "fls_cliTestShareToken",
+        url: "https://floom.dev/s/fls_cliTestShareToken",
+        entity_type: "worker",
+      });
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/workers/cli-test-worker/runs") {
       const body = await readBody(request);
       bodies.push(body);
@@ -672,6 +685,21 @@ test("workers show renders structured connections for humans", async (t) => {
   assert.match(result.stdout, /google_search_console \(allowed_tools: GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY\)/);
   assert.match(result.stdout, /github/);
   assert.doesNotMatch(result.stdout, /\[object Object\]/);
+});
+
+test("workers share creates an unlisted standalone worker share link", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "share", "cli-test-worker", "--json"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.entity_type, "worker");
+  assert.equal(body.url, "https://floom.dev/s/fls_cliTestShareToken");
+  assert.deepEqual(mock.seen, ["POST /workers/cli-test-worker/share-link"]);
+  assert.equal(result.stderr, "");
 });
 
 test("workers push reports unsupported in-place source updates", async (t) => {

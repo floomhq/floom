@@ -953,6 +953,21 @@ export function createServer(): McpServer {
   );
 
   server.registerTool(
+    "workers.share",
+    {
+      title: "Share Worker",
+      description:
+        "Create an unlisted standalone share link for a Floom worker. The link opens the public share page and can be used to import the worker.",
+      inputSchema: workerIdSchema.shape,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(await request("POST", `/workers/${encodeURIComponent(id)}/share-link`), "Worker share link created."),
+      ),
+  );
+
+  server.registerTool(
     "workers.delete",
     {
       title: "Delete Worker",

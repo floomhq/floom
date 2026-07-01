@@ -321,7 +321,7 @@ export interface WorkerSummary {
   missing_connections?: string[];  // #556: required connections not yet configured
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
-  public_link?: string;   // owner-only signed share link to /w/<id>?token=
+  public_link?: string;   // owner-only public runner link to /w/<id>?token=, public workers only
   // Members STEP 1: ownership + per-asset visibility + computed permissions.
   owner_id?: string | null;
   visibility?: AssetVisibility;
@@ -386,8 +386,8 @@ export interface WorkerDetail {
   last_fired_at?: string | null;
   missing_secrets?: string[];      // #556: required secrets not yet configured
   missing_connections?: string[];  // #556: required connections not yet configured
-  // Owner-only signed share link to the standalone public worker page
-  // (/w/<id>?token=<hmac>). Only present on the owner's authenticated fetch.
+  // Owner-only public runner link to /w/<id>?token=. Private/unlisted source
+  // sharing uses api.workers.shareLink(id), which mints a revocable /s/<token>.
   public_link?: string;
   // Set when an edit to a read-only stock worker transparently forked it into a
   // user-owned editable copy (clone-on-edit). Carries the source stock worker id;
