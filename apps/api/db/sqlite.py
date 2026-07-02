@@ -1022,6 +1022,19 @@ class SqliteWorkerRepository:
             ).fetchone()
         return _worker_record_from_row(row) if row else None
 
+    def list_public_for_workspace(self, *, workspace_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        bounded_limit = _bounded_positive_int(limit, default=50, maximum=100)
+        with get_db() as conn:
+            rows = conn.execute(
+                _worker_select_sql(
+                    "WHERE COALESCE(w.workspace_id, 'local-default') = ? "
+                    "AND COALESCE(w.visibility, 'private') = 'public'",
+                    f"LIMIT {bounded_limit}",
+                ),
+                (workspace_id or "local-default",),
+            ).fetchall()
+        return [_worker_record_from_row(row) for row in rows]
+
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
         manifest_json = fields.get("manifest_json") or {}

@@ -23,7 +23,7 @@ import { TermsAcceptanceGate } from "@/components/TermsAcceptanceGate";
 // (768–1023), where the 3-column shell would crush the content pane.
 
 // Public, shareable "skill card" pages render full-bleed without the app
-// sidebar / command palette. /w and /s are standalone public share pages.
+// sidebar / command palette. /w, /s, and /@handle are standalone public share pages.
 // /login is the access gate -- it must render without sidebar chrome (and is
 // the one page reachable while logged out, see middleware.ts).
 const standalonePrefixes = [
@@ -63,7 +63,8 @@ function pathMatchesPrefixes(pathname: string, prefixes: string[]) {
 export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   const pathname = usePathname();
   const isDesktop = useIsDesktop();
-  const standalone = pathMatchesPrefixes(pathname, standalonePrefixes)
+  const standalone = pathname.startsWith("/@")
+    || pathMatchesPrefixes(pathname, standalonePrefixes)
     || pathMatchesPrefixes(pathname, noSidebarPaths);
   const noDock = pathMatchesPrefixes(pathname, noDockPrefixes);
   const fullBleed = pathMatchesPrefixes(pathname, fullBleedCollectionPaths);

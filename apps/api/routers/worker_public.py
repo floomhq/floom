@@ -54,6 +54,7 @@ from services.public_view import _json_noindex, _public_noindex_headers
 from services.public_worker import (
     _load_public_worker,
     _public_worker_response,
+    _public_workspace_profile,
     _standalone_share_payload,
 )
 from services.run_access import _sanitize_download_name
@@ -130,6 +131,21 @@ def get_public_worker(
             runtime={"type": "python", "entrypoint": "run.py"},
         )
     return _public_worker_response(worker, config)
+
+
+@worker_public_router.get("/workspaces/public/{handle}")
+def get_public_workspace_profile(
+    handle: str,
+    limit: int = Query(50, ge=1, le=100),
+    repos: Repositories = Depends(get_repos),
+) -> JSONResponse:
+    """Return a no-login public workspace profile.
+
+    The payload lists only assets that already have public worker visibility and
+    reuses the strict PublicWorker projection. It never returns secrets, source
+    files, run history, private memory, owner ids, or connection identifiers.
+    """
+    return _json_noindex(_public_workspace_profile(handle, repos, limit=limit))
 
 
 @worker_public_router.get("/workers/public/{worker_id}/run-meta")
@@ -337,4 +353,3 @@ def get_standalone_share(
     repos: Repositories = Depends(get_repos),
 ) -> JSONResponse:
     return _json_noindex(_standalone_share_payload(token, repos, request=request))
-

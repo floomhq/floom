@@ -1521,6 +1521,7 @@ def _api_request_telemetry_excluded(path: str, method: str) -> bool:
         "/drop/public/",
         "/review/public/",
         "/workers/public/",
+        "/workspaces/public/",
         "/workers/short-links/",
         "/s/",
         "/c/",
@@ -1911,6 +1912,7 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/drop/public/")
             or path.startswith("/review/public/")
             or path.startswith("/workers/public/")
+            or path.startswith("/workspaces/public/")
             or path.startswith("/runs/public/")  # #765: token-gated read-only run view
             # #1338 #1329: public SSE stream for share-link viewers. The route
             # handler (stream_run_parts) validates the token (RUN-share OR

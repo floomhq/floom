@@ -146,3 +146,11 @@ export async function fetchStandaloneShare(token: string) {
     { next: { revalidate: false }, includeWorkspace: false, includeSecret: false }
   );
 }
+
+/** Fetch a no-login public workspace profile for /@<handle>. */
+export async function fetchPublicWorkspaceProfile(handle: string) {
+  return serverFetch<import("./types").PublicWorkspaceProfile>(
+    `/workspaces/public/${encodeURIComponent(handle)}`,
+    { next: { revalidate: 30 }, includeWorkspace: false, includeSecret: false }
+  );
+}
