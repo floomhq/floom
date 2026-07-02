@@ -1,15 +1,21 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ChatSSEEvent } from "@/lib/emily-chat-types";
 import {
   decideRunAutoOpen,
+  getAutoOpenCreatedWorkerHref,
   getAutoOpenRunDetailsHref,
   getStreamingActivity,
   getToolCardTitle,
   isInternalToolName,
   normalizeToolName,
+  reconcileRunCardFinishPart,
   reduceSSEEvent,
   safeRunPartsStreamPath,
+  shouldAutoOpenCreatedWorker,
   shouldAutoOpenRunDetails,
+  useChatStream,
 } from "@/lib/useChatStream";
 
 function toolCards(messages: ChatMessage[]) {
@@ -18,7 +24,75 @@ function toolCards(messages: ChatMessage[]) {
   );
 }
 
+function assistantTexts(messages: ChatMessage[]) {
+  return messages.flatMap((message) =>
+    message.role === "assistant"
+      ? (message.parts ?? [])
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+      : []
+  );
+}
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  listeners = new Map<string, Array<(event: { data: string }) => void>>();
+  closed = false;
+
+  constructor(public url: string) {
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: { data: string }) => void) {
+    const current = this.listeners.get(type) ?? [];
+    current.push(listener);
+    this.listeners.set(type, current);
+  }
+
+  emit(type: string, data: unknown) {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ data: JSON.stringify(data) });
+    }
+  }
+
+  close() {
+    this.closed = true;
+  }
+}
+
 describe("Emily chat tool cards", () => {
+  it("stops streaming after a terminal finish event even if the response body stays open", async () => {
+    const encoder = new TextEncoder();
+    const cancel = vi.fn(async () => undefined);
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce({
+        done: false,
+        value: encoder.encode('data: {"type":"finish"}\n\n'),
+      })
+      .mockImplementation(() => new Promise(() => undefined));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: { getReader: () => ({ read, cancel }) },
+      }),
+    );
+
+    const { result } = renderHook(() => useChatStream({ ephemeral: true }));
+
+    act(() => {
+      result.current.sendMessage("What workers do I have?");
+    });
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(result.current.isStreaming).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
+
   it("allowlists only run parts SSE stream paths from tool cards", () => {
     expect(safeRunPartsStreamPath("/runs/run_123/stream")).toBe("/runs/run_123/stream");
     expect(safeRunPartsStreamPath(" /runs/run-abc_123/stream ")).toBe("/runs/run-abc_123/stream");
@@ -220,7 +294,7 @@ describe("Emily chat tool cards", () => {
     expect(card.toolName).toBe("workers.run");
   });
 
-  it("materializes create-from-prompt results into a progress run card", () => {
+  it("materializes create-from-prompt results into an internal worker-create card", () => {
     const call: ChatSSEEvent = {
       type: "tool-call",
       callId: "call_create_prompt",
@@ -245,16 +319,128 @@ describe("Emily chat tool cards", () => {
     const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
     const card = toolCards(messages)[0]?.card;
 
-    expect(card?.kind).toBe("run");
-    if (card?.kind !== "run") throw new Error("expected run card");
-    expect(card.runId).toBe("run_author_123");
+    expect(card?.kind).toBe("worker-create");
+    if (card?.kind !== "worker-create") throw new Error("expected worker-create card");
     expect(card.workerName).toBe("Creating worker");
-    expect(card.actions?.[0]).toEqual({
-      id: "open_run",
-      label: "View progress",
-      method: "GET",
-      href: "/runs?sel=run_author_123&tab=Logs",
+    expect(card.step).toBe("drafting");
+    expect(card.actions).toBeUndefined();
+    expect(card.streams).toBeUndefined();
+  });
+
+  it("turns completed create-from-prompt finishes into open-worker cards", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_create_prompt",
+      toolName: "workers__create_from_prompt",
+      args: { prompt: "Email me a daily summary" },
+      args_preview: { prompt: "Email me a daily summary" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_create_prompt",
+      toolName: "workers__create_from_prompt",
+      isError: false,
+      result: { ok: true, run_id: "run_author_123", worker_id: "worker-author" },
+    };
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+    if (card?.kind !== "worker-create") throw new Error("expected worker-create card");
+
+    const completed = reconcileRunCardFinishPart(card, {
+      status: "completed",
+      created_worker_id: "gmail-summary",
+      smoke_status: "passed",
     });
+
+    expect(completed.kind).toBe("worker-create");
+    if (completed.kind !== "worker-create") throw new Error("expected worker-create card");
+    expect(completed.workerId).toBe("gmail-summary");
+    expect(completed.workerName).toBe("gmail-summary");
+    expect(completed.step).toBe("ready");
+    expect(completed.status).toBe("completed");
+    expect(completed.actions?.[0]).toEqual({
+      id: "open_worker",
+      label: "Open worker",
+      method: "GET",
+      href: "/workers/gmail-summary?edit=1",
+    });
+    expect(shouldAutoOpenCreatedWorker(completed)).toBe(true);
+    expect(getAutoOpenCreatedWorkerHref(completed)).toBe("/workers/gmail-summary?edit=1");
+  });
+
+  it("appends a review-before-running message when worker authoring finishes later", async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
+
+    const encoder = new TextEncoder();
+    const frames = [
+      {
+        type: "tool-call",
+        callId: "call_create_prompt",
+        toolName: "workers__create_from_prompt",
+        args: { prompt: "Email me a daily summary" },
+      },
+      {
+        type: "tool-result",
+        callId: "call_create_prompt",
+        toolName: "workers__create_from_prompt",
+        isError: false,
+        result: { ok: true, run_id: "run_author_123", worker_id: "worker-author" },
+        streams: { events: "/runs/run_author_123/events", parts: "/runs/run_author_123/stream" },
+      },
+      { type: "finish", conversation_id: "conv_1" },
+    ]
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join("");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi
+              .fn()
+              .mockResolvedValueOnce({ done: false, value: encoder.encode(frames) })
+              .mockResolvedValueOnce({ done: true }),
+            cancel: vi.fn(async () => undefined),
+          }),
+        },
+      }),
+    );
+
+    const { result } = renderHook(() => useChatStream({ ephemeral: true }));
+
+    act(() => {
+      result.current.sendMessage("Create this worker");
+    });
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("part", {
+        type: "finish",
+        status: "completed",
+        created_worker_id: "gmail-summary",
+        smoke_status: "passed",
+      });
+    });
+
+    await waitFor(() =>
+      expect(assistantTexts(result.current.messages)).toContain(
+        "I drafted the worker. Review it before running.",
+      ),
+    );
+
+    const card = toolCards(result.current.messages)[0]?.card;
+    expect(card?.kind).toBe("worker-create");
+    if (card?.kind !== "worker-create") throw new Error("expected worker-create card");
+    expect(card.status).toBe("completed");
+    expect(card.step).toBe("ready");
+    expect(card.workerId).toBe("gmail-summary");
+    expect(card.actions?.[0]?.href).toBe("/workers/gmail-summary?edit=1");
+
+    vi.unstubAllGlobals();
   });
 
   it("marks completed runs.get cards for automatic navigation to run details", () => {
@@ -281,7 +467,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.toolName).toBe("runs.get");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_123&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_123?tab=logs");
   });
 
   // #1992: creating + running a worker from Emily must not yank the user across
@@ -315,7 +501,7 @@ describe("Emily chat tool cards", () => {
       expect(decideRunAutoOpen(runCard(), false)).toEqual({
         action: "navigate",
         runId: "run_123",
-        href: "/runs?sel=run_123&tab=Logs",
+        href: "/runs/run_123?tab=logs",
       });
     });
 
@@ -381,11 +567,11 @@ describe("Emily chat tool cards", () => {
         id: "open_run",
         label: "View run",
         method: "GET",
-        href: "/runs?sel=run_live_123&tab=Logs",
+        href: "/runs/run_live_123?tab=logs",
       },
     ]);
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_123&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_live_123?tab=logs");
   });
 
   it("keeps run auto-open href stable after finish reconciliation", () => {
@@ -437,7 +623,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.status).toBe("completed");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_456&tab=Logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_live_456?tab=logs");
   });
 
   it("preserves run stream handles while reconciling worker-run card progress", () => {
@@ -543,14 +729,121 @@ describe("Emily streaming activity", () => {
         type: "tool-progress",
         callId: "call_workers",
         status: "running",
-        label: "Checking worker runs",
+        label: "Checking agent runs",
       },
       "assistant_1"
     );
     expect(getStreamingActivity(progressed, true)).toEqual({
       kind: "tool",
-      title: "Checking worker runs",
+      title: "Checking agent runs",
     });
+  });
+
+  it("materializes progress-only streams into visible activity", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-progress",
+        callId: "call_run",
+        card_id: "card_run",
+        status: "starting",
+        stage: "started",
+        label: "Starting agent run",
+      },
+      "assistant_1"
+    );
+
+    const card = toolCards(messages)[0]?.card;
+    expect(card?.kind).toBe("generic");
+    if (card?.kind !== "generic") throw new Error("expected generic card");
+    expect(card.card_id).toBe("card_run");
+    expect(card.status).toBe("starting");
+    expect(card.title).toBe("Starting agent run");
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Starting agent run",
+    });
+  });
+
+  it("appends progress-only tool cards to an existing assistant message", () => {
+    const assistantText = reduceSSEEvent(
+      [],
+      {
+        type: "text",
+        text: "I will check.",
+        conversation_id: "conv_1",
+      },
+      "assistant_1"
+    );
+    const messages = reduceSSEEvent(
+      assistantText,
+      {
+        type: "tool-progress",
+        callId: "call_approvals",
+        card_id: "card_approvals",
+        toolName: "approvals.list_pending",
+        status: "running",
+        label: "Checking approvals",
+      },
+      "assistant_1"
+    );
+
+    expect(messages).toHaveLength(1);
+    const assistant = messages[0];
+    expect(assistant.role).toBe("assistant");
+    expect(assistant.parts?.map((part) => part.type)).toEqual(["text", "tool-card"]);
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Checking approvals",
+    });
+  });
+
+  it("materializes action-required events without assuming stream handles", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-action-required",
+        callId: "call_approval",
+        card_id: "card_approval",
+        reason: "approval_required",
+        actions: [{ id: "approve", method: "POST", href: "/runs/run_1/approve" }],
+      },
+      "assistant_1"
+    );
+
+    const card = toolCards(messages)[0]?.card;
+    expect(card?.kind).toBe("generic");
+    if (card?.kind !== "generic") throw new Error("expected generic card");
+    expect(card.status).toBe("pending_approval");
+    expect(card.actions).toEqual([{ id: "approve", method: "POST", href: "/runs/run_1/approve" }]);
+    expect(getStreamingActivity(messages, true)).toEqual({
+      kind: "tool",
+      title: "Working",
+    });
+  });
+
+  it("renders missing required connections as visible connection cards", () => {
+    const messages = reduceSSEEvent(
+      [],
+      {
+        type: "tool-action-required",
+        callId: "call_create",
+        card_id: "card_create",
+        toolName: "workers.create_from_prompt",
+        reason: "missing_connection",
+        resource: { kind: "connection", app_name: "gmail", status: "missing" },
+        actions: [{ id: "connect", method: "POST", href: "/connections", body: { app_name: "gmail" } }],
+      },
+      "assistant_1"
+    );
+
+    const card = toolCards(messages)[0]?.card;
+    expect(card?.kind).toBe("connect-service");
+    if (card?.kind !== "connect-service") throw new Error("expected connect-service card");
+    expect(card.appName).toBe("gmail");
+    expect(card.label).toBe("Gmail");
+    expect(card.connected).toBe(false);
+    expect(card.actions?.[0]?.id).toBe("connect");
   });
 
   it("shows writing while assistant text is streaming", () => {
@@ -564,7 +857,7 @@ describe("Emily streaming activity", () => {
     expect(getStreamingActivity(messages, true)).toEqual({ kind: "writing" });
   });
 
-  it("shows thinking after a tool completes but before reply text starts", () => {
+  it("shows concrete next-step preparation after a tool completes before reply text starts", () => {
     const messages = reduceSSEEvent(
       [],
       {
@@ -585,6 +878,9 @@ describe("Emily streaming activity", () => {
       },
       "assistant_1"
     );
-    expect(getStreamingActivity(completed, true)).toEqual({ kind: "thinking" });
+    expect(getStreamingActivity(completed, true)).toEqual({
+      kind: "tool",
+      title: "Preparing next steps",
+    });
   });
 });

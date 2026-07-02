@@ -106,6 +106,86 @@ function attentionToFix(item: SystemOverviewAttentionItem, idx: number): FixItem
   return { id: item.worker_id || item.connection_id || `attn-${idx}`, name, why };
 }
 
+function formatCount(value: number | null | undefined) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value ?? 0);
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
+}
+
+type HomeStat = {
+  label: string;
+  value: string;
+  detail: string;
+  attention?: boolean;
+};
+
+function HomeStatsRow({
+  stats,
+  needsAttentionCount,
+}: {
+  stats: SystemOverview["stats"];
+  needsAttentionCount: number;
+}) {
+  const totalWorkers = (stats.active_workers_count ?? 0) + (stats.paused_workers_count ?? 0);
+  const runningOrQueued = (stats.running_now ?? 0) + (stats.queued_now ?? 0);
+  const healthyConnections = stats.connections_healthy ?? 0;
+  const totalConnections = stats.connections_total ?? 0;
+  const completedThisWeek = stats.work_shipped_7d ?? 0;
+  const items: HomeStat[] = [
+    {
+      label: "Total workers",
+      value: formatCount(totalWorkers),
+      detail: `${formatCount(stats.paused_workers_count)} paused`,
+    },
+    {
+      label: "Active workers",
+      value: formatCount(stats.active_workers_count),
+      detail:
+        stats.queued_now && stats.queued_now > 0
+          ? `${formatCount(stats.running_now)} running, ${formatCount(stats.queued_now)} queued`
+          : `${formatCount(runningOrQueued)} ${pluralize(runningOrQueued, "run")} live`,
+    },
+    {
+      label: "Runs this week",
+      value: formatCount(completedThisWeek),
+      detail: "completed",
+    },
+    {
+      label: "Connections",
+      value: totalConnections > 0 ? `${formatCount(healthyConnections)}/${formatCount(totalConnections)}` : "0",
+      detail: totalConnections > 0 ? "healthy" : "none connected",
+    },
+    {
+      label: "Needs attention",
+      value: formatCount(needsAttentionCount),
+      detail: needsAttentionCount > 0 ? "ready to triage" : "clear",
+      attention: needsAttentionCount > 0,
+    },
+  ];
+
+  return (
+    <div className="my-5 grid w-full max-w-[760px] grid-cols-2 gap-2.5 md:grid-cols-5">
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className={
+            "min-h-[98px] min-w-0 rounded-[var(--radius-card)] px-3.5 py-3 text-left " +
+            (item.attention
+              ? "bg-[color-mix(in_srgb,var(--warning)_10%,var(--bg-card))]"
+              : "bg-[var(--bg-2)]")
+          }
+        >
+          <div className="text-[10.5px] font-medium leading-tight text-[var(--ink-mute)]">{item.label}</div>
+          <div className="mt-2 text-[22px] font-semibold leading-none tracking-normal text-ink">{item.value}</div>
+          <div className="mt-2 text-[11.5px] leading-tight text-[var(--text-muted)]">{item.detail}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── pills ─────────────────────────────────────────────────────────────────────
 
 // Inline tool tokens (Federico 2026-06-21): render an example prompt with its
@@ -167,9 +247,9 @@ function Pill({
 }
 
 const CREATE_PILLS = [
-  "Summarise my Granola meetings → HubSpot",
+  "Create a Linear triage worker",
   "Daily GitHub PR digest",
-  "Alert me on big Stripe charges",
+  "Daily Slack standup reminder",
 ] as const;
 
 const ACTIVE_PILLS = [
@@ -184,6 +264,7 @@ export function EmilyHomeEmpty({
   initialData = null,
   onSeed,
   onPickMcp,
+  createMode = false,
 }: {
   /** Server-rendered overview for the pulse, hydrates without a round-trip. */
   initialData?: SystemOverview | null;
@@ -191,6 +272,8 @@ export function EmilyHomeEmpty({
   onSeed: (text: string) => void;
   /** Open the MCP-server browse modal. */
   onPickMcp: () => void;
+  /** New-worker entry: show worker-building prompts, not ops/status prompts. */
+  createMode?: boolean;
 }) {
   const assistantName = useAssistantName();
   const { greeting, firstName } = useGreeting();
@@ -211,6 +294,7 @@ export function EmilyHomeEmpty({
     isError: workersQuery.isError,
   });
   const isFirstWorker = gate.isFirstWorker;
+  const showCreatePrompts = createMode || isFirstWorker;
 
   // Fix-as-prompt: needs-attention items + per-worker fix pills.
   const attention = useMemo(() => overview?.needs_attention ?? [], [overview]);
@@ -220,6 +304,7 @@ export function EmilyHomeEmpty({
     overview?.stats.work_shipped_7d ??
     overview?.outcomes?.reduce((total, item) => total + item.count, 0) ??
     0;
+  const overviewStats = pulseOk ? overview?.stats : null;
   const [fixMode, setFixMode] = useState(false);
 
   // Seed the REAL composer from a fix (whole-batch or per-worker) without
@@ -240,12 +325,12 @@ export function EmilyHomeEmpty({
   );
 
   return (
-    <div className="flex w-full max-w-[600px] flex-col items-center px-6">
+    <div className="flex w-full max-w-[760px] flex-col items-center px-6">
       {/* greeting / hero */}
-      {isFirstWorker ? (
+      {showCreatePrompts ? (
         <div className="flex flex-col items-center pb-[22px]">
           <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
-            Let&apos;s hire your first worker
+            {isFirstWorker ? "Let's hire your first worker" : "What should this worker do?"}
           </div>
           <div className="mt-[7px] max-w-[360px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
             Describe what you want automated. {assistantName} builds it, connects the
@@ -253,39 +338,47 @@ export function EmilyHomeEmpty({
           </div>
         </div>
       ) : (
-        <div className="pb-[22px] text-center">
-          <div className="text-[21px] font-semibold tracking-[-0.02em] text-ink">
-            {greeting}
-            {firstName ? `, ${firstName}` : ""}
-          </div>
-          <div className="mt-[3px] text-[12.5px] text-[var(--text-muted)]">{todayLabel}</div>
-          {/* Lean pulse — only when the overview actually loaded (degrade to
-              just the greeting on a failed/loading overview, never a broken pulse). */}
-          {pulseOk && (
-            <div className="mt-3.5 inline-flex flex-wrap items-center justify-center gap-2.5 text-[13px] text-[var(--text-muted)]">
-              <span>
-                <b className="font-semibold text-ink">{workDoneThisWeek}</b>&nbsp;done this week
-              </span>
-              {needsAttentionCount > 0 && (
-                <>
-                  <span className="opacity-35">·</span>
-                  <button
-                    type="button"
-                    onClick={seedFixAll}
-                    className="-mx-1.5 -my-0.5 inline-flex items-center gap-1.5 rounded-[var(--radius-button)] px-1.5 py-0.5 font-medium text-[var(--ink-mute)] outline-none transition-colors hover:bg-[color-mix(in_srgb,var(--warning)_9%,transparent)] hover:text-[var(--warning)] focus-visible:bg-[color-mix(in_srgb,var(--warning)_9%,transparent)] focus-visible:text-[var(--warning)]"
-                  >
-                    <span className="size-1.5 shrink-0 rounded-[2px] bg-[var(--warning)]" aria-hidden="true" />
-                    {needsAttentionCount} need attention
-                  </button>
-                </>
-              )}
+        <>
+          <div className="text-center">
+            <div className="text-[21px] font-semibold tracking-[-0.02em] text-ink">
+              {greeting}
+              {firstName ? `, ${firstName}` : ""}
             </div>
+            <div className="mt-[3px] text-[12.5px] text-[var(--text-muted)]">{todayLabel}</div>
+            {/* Lean pulse — only when the overview actually loaded (degrade to
+                just the greeting on a failed/loading overview, never a broken pulse). */}
+            {pulseOk && (
+              <div className="mt-3.5 inline-flex flex-wrap items-center justify-center gap-2.5 text-[13px] text-[var(--text-muted)]">
+                <span>
+                  <b className="font-semibold text-ink">{workDoneThisWeek}</b>&nbsp;done this week
+                </span>
+                {needsAttentionCount > 0 && (
+                  <>
+                    <span className="opacity-35">·</span>
+                    <button
+                      type="button"
+                      onClick={seedFixAll}
+                      className="-mx-1.5 -my-0.5 inline-flex items-center gap-1.5 rounded-[var(--radius-button)] px-1.5 py-0.5 font-medium text-[var(--ink-mute)] outline-none transition-colors hover:bg-[color-mix(in_srgb,var(--warning)_9%,transparent)] hover:text-[var(--warning)] focus-visible:bg-[color-mix(in_srgb,var(--warning)_9%,transparent)] focus-visible:text-[var(--warning)]"
+                    >
+                      <span className="size-1.5 shrink-0 rounded-[2px] bg-[var(--warning)]" aria-hidden="true" />
+                      {needsAttentionCount} need attention
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          {overviewStats && (
+            <HomeStatsRow
+              stats={overviewStats}
+              needsAttentionCount={needsAttentionCount}
+            />
           )}
-        </div>
+        </>
       )}
 
       {/* pills (BELOW the hero, ABOVE the real composer the host renders next) */}
-      {isFirstWorker ? (
+      {showCreatePrompts ? (
         <>
           <div className="flex flex-wrap justify-center gap-2">
             {CREATE_PILLS.map((p) => (

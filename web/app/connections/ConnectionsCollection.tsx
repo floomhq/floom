@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
+import { Check, ChevronDown, Copy, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useConnections, useMembers, useSecrets, useWorkers, useStreamedInitialData, qk } from "@/lib/query/hooks";
@@ -34,6 +34,7 @@ import {
   humaniseAppName,
 } from "@/lib/connections/unify";
 import { resolveUserLabel } from "@/lib/workspace/display-name";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 // ---------------------------------------------------------------------------
 // #1233: Resolve owner_id to display name / email.
@@ -105,39 +106,13 @@ function CopyIconButton({ value, label }: { value: string; label?: string }) {
 }
 
 /**
- * Masked secret value field: dots + eye toggle + copy affordance.
- * Reveal calls the backend name-only test endpoint to surface the masked
- * value from env; if no reveal endpoint exists, shows dots with copy only.
- * Per v4 spec: monospace, reveal button, copy button inline.
+ * Masked secret value field: values are write-only and never revealed.
  */
 function SecretValueField({ name }: { name: string }) {
-  const [revealed, setRevealed] = useState(false);
   const MASKED = "••••••••••••";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "var(--font-mono)", fontSize: 12.5 }}>
-      <span style={{ letterSpacing: revealed ? undefined : "0.08em" }}>{MASKED}</span>
-      <button
-        type="button"
-        onClick={() => setRevealed((v: boolean) => !v)}
-        title={revealed ? "Hide" : "Reveal: values are write-only and not returned by the API"}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 22,
-          height: 22,
-          borderRadius: "var(--radius-pill)",
-          border: "var(--bd-pill)",
-          background: "var(--bg-2)",
-          color: "var(--muted-foreground)",
-          cursor: "pointer",
-          flexShrink: 0,
-        }}
-      >
-        {revealed
-          ? <EyeOff style={{ width: 11, height: 11 }} />
-          : <Eye style={{ width: 11, height: 11 }} />}
-      </button>
+      <span style={{ letterSpacing: "0.08em" }} title="Secret values are write-only and not returned by the API">{MASKED}</span>
       <CopyIconButton value={name} label="Copy secret name" />
     </span>
   );
@@ -218,6 +193,7 @@ function EmailPeekPanel({ connectionId }: { connectionId: string }) {
 }
 
 function ActivityPanel({ connectionId }: { connectionId: string }) {
+  const workspaceHref = useWorkspaceHref();
   const [activity, setActivity] = useState<RunSummary[]>([]);
   const [loadingActivity, setLoadingActivity] = useState(true);
 
@@ -249,7 +225,7 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
           {activity.map((run) => (
             <Link
               key={run.id}
-              href={`/runs?sel=${encodeURIComponent(run.id)}`}
+              href={workspaceHref(`/runs/${encodeURIComponent(run.id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto", textDecoration: "none" }}
             >
@@ -560,6 +536,7 @@ function workersUsing(connection: ConnectionItem, workers: WorkerSummary[]): Wor
 }
 
 function UsedByPanel({ connection, workers }: { connection: ConnectionItem; workers: WorkerSummary[] }) {
+  const workspaceHref = useWorkspaceHref();
   const using = workersUsing(connection, workers);
   return (
     <DetailGroup label="Used by">
@@ -573,7 +550,7 @@ function UsedByPanel({ connection, workers }: { connection: ConnectionItem; work
           {using.map((w) => (
             <Link
               key={w.id}
-              href={`/workers/${encodeURIComponent(w.id)}`}
+              href={workspaceHref(`/workers/${encodeURIComponent(w.id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
             >
@@ -646,6 +623,7 @@ export default function ConnectionsCollection({
   // useStreamedInitialData). The page no longer blocks the RSC on this fetch.
   initialConnectionsPromise?: Promise<ConnectionItem[]>;
 }) {
+  const workspaceHref = useWorkspaceHref();
   useStreamedInitialData(qk.connections, initialConnectionsPromise);
   // Pass undefined (not []) as initialData when empty so the query still fetches
   // on a cold start — an empty-array initialData would mark the query "fresh" and
@@ -1060,7 +1038,7 @@ export default function ConnectionsCollection({
                     value:
                       usedByCount > 0 ? (
                         <Link
-                          href={`?tab=Used+by`}
+                          href={`?sel=${encodeURIComponent(i.id)}&tab=Used+by`}
                           style={{
                             color: "var(--accent)",
                             textDecoration: "underline",
@@ -1092,7 +1070,7 @@ export default function ConnectionsCollection({
                       return workerId ? (
                         <Link
                           key={workerName}
-                          href={`/workers/${encodeURIComponent(workerId)}`}
+                          href={workspaceHref(`/workers/${encodeURIComponent(workerId)}`)}
                           className="c-lrow"
                           style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
                         >

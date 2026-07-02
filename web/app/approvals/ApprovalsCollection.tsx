@@ -28,6 +28,7 @@ import {
 } from "@/lib/approvals/decision";
 import { notifyApprovalsChanged, useApprovalsListSync } from "@/lib/useApprovalsSync";
 import { useApprovals, useWorkers } from "@/lib/query/hooks";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 function itemCount(a: ApprovalRow): number {
   const di = parseDecisionInput(a.decision_input_json);
@@ -180,6 +181,7 @@ function ApprovalReviewTabBody({
 }
 
 export default function ApprovalsCollection() {
+  const workspaceHref = useWorkspaceHref();
   const approvalsQuery = useApprovals("pending");
   const workersQuery = useWorkers();
   const { refetch: refetchApprovals } = approvalsQuery;
@@ -332,12 +334,12 @@ export default function ApprovalsCollection() {
                 onApprove={() => void decide(a, true)}
                 onReject={() => void decide(a, false)}
                 runLink={
-                  <Link href={`/runs/${a.run_id}`} style={{ color: "var(--accent)" }}>
+                  <Link href={workspaceHref(`/runs/${a.run_id}`)} style={{ color: "var(--accent)" }}>
                     #{a.run_id}
                   </Link>
                 }
                 workerLink={
-                  <Link href={`/workers?sel=${encodeURIComponent(a.worker_id)}`} style={{ color: "var(--accent)" }}>
+                  <Link href={workspaceHref(`/workers?sel=${encodeURIComponent(a.worker_id)}`)} style={{ color: "var(--accent)" }}>
                     {a.worker_name ?? a.worker_id}
                   </Link>
                 }

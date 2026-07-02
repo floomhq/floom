@@ -40,7 +40,7 @@ describe("PromptInput a11y (#1711)", () => {
   it("renders a visible focus ring on the composer wrapper", () => {
     renderComposer();
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
-    const wrapper = textarea.parentElement as HTMLElement;
+    const wrapper = textarea.closest(".rounded-xl") as HTMLElement;
     // Token-based focus-within ring (replaces the removed outline on the textarea).
     expect(wrapper.className).toMatch(/focus-within:ring-2/);
     expect(wrapper.className).toMatch(/focus-within:ring-\[var\(--ring\)\]/);

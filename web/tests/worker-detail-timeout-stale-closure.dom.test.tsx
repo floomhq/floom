@@ -91,6 +91,7 @@ describe("useWorkerDetail stale-closure timeout bug (P0)", () => {
       });
 
       vi.doMock("@/lib/api", () => ({
+        getPersistedActiveWorkspaceId: vi.fn(() => "local-default"),
         api: {
           workers: {
             list: vi.fn().mockResolvedValue([worker]),

@@ -35,7 +35,7 @@ import { RunTranscript } from "@/components/RunDetailSplitPane";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
 import { useRunLogStream } from "@/lib/useRunLogStream";
 import { contentTagOptions } from "@/lib/workers/derive";
-import { createWorkerHref } from "@/lib/create-worker-nav";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import {
   formatDuration,
   formatTrigger,
@@ -48,6 +48,12 @@ import {
 
 const detailCache = new Map<string, RunDetail>();
 
+type RunDetailLoadState = {
+  data: RunDetail | undefined;
+  error: Error | undefined;
+  loading: boolean;
+};
+
 // gap N2: a run can be cancelled only while it is in-progress (running or
 // queued). Terminal runs (completed / failed / cancelled) expose no Cancel.
 // Single source of truth shared by the detail header and the row menu so the
@@ -58,23 +64,27 @@ export function isCancellableRunStatus(status?: string): boolean {
 
 // Exported for the cache-on-cancel regression test (P0-2). The cache write must
 // survive a fetch that resolves after unmount so a remount reads it synchronously.
-export function useRunDetail(id: string, status?: string): RunDetail | undefined {
+export function useRunDetailState(id: string, status?: string): RunDetailLoadState {
   // Derive the initial state synchronously from the cache so a REMOUNT shows
   // data immediately (no skeleton, no waiting on a fresh fetch). The cache is
   // only served as the seed for terminal runs — active runs still refetch below
   // (§2.1) so the detail updates when the run completes.
   const isActive = status === "running" || status === "queued";
-  const [d, setD] = useState<RunDetail | undefined>(() =>
+  const [data, setData] = useState<RunDetail | undefined>(() =>
     isActive ? undefined : detailCache.get(id),
   );
+  const [error, setError] = useState<Error | undefined>();
   // §2.1: never serve a cached entry for an active (running/queued) run so the
   // detail re-fetches when the run completes and the OutputTab shows final output.
   useEffect(() => {
     if (!isActive && detailCache.has(id)) {
-      setD(detailCache.get(id));
+      setData(detailCache.get(id));
+      setError(undefined);
       return;
     }
     let alive = true;
+    setData(undefined);
+    setError(undefined);
     api.runs
       .get(id)
       .then((rd) => {
@@ -84,15 +94,32 @@ export function useRunDetail(id: string, status?: string): RunDetail | undefined
         // synchronously via the lazy initial state above. (Terminal runs only;
         // an active run's pre-completion snapshot is not cached so it refetches.)
         if (!isActive) detailCache.set(id, rd);
-        if (alive) setD(rd);
+        if (alive) setData(rd);
       })
       // #1446: per-run detail; log only to avoid a toast per expanded run.
-      .catch((err) => logError("Could not load run details.", err));
+      .catch((err) => {
+        logError("Could not load run details.", err);
+        if (alive) setError(err instanceof Error ? err : new Error("Could not load run details."));
+      });
     return () => {
       alive = false;
     };
   }, [id, isActive]);
-  return d;
+  return { data, error, loading: data == null && error == null };
+}
+
+export function useRunDetail(id: string, status?: string): RunDetail | undefined {
+  return useRunDetailState(id, status).data;
+}
+
+function RunDetailLoadError({ runId }: { runId: string }) {
+  return (
+    <DetailGroup label="Run detail">
+      <DetailEmpty>
+        Could not load run details for {runId}. Refresh this run or try again in a moment.
+      </DetailEmpty>
+    </DetailGroup>
+  );
 }
 
 // Humane RESULT render (rule #2): reuse the shared OutputRenderer/GenericOutput
@@ -101,6 +128,19 @@ export function useRunDetail(id: string, status?: string): RunDetail | undefined
 // output_schema renders per field; otherwise each output key is rendered by its
 // inferred type. A Preview/Raw toggle (rule #1 — same content, two view modes,
 // NOT a separate tab) flips this humane view to the raw JSON source in place.
+export function isFileOnlyOutputField(
+  field: import("@/lib/types").OutputField,
+  artifacts?: import("@/lib/types").Artifact[],
+): boolean {
+  if ((field.kind !== "file" && field.type !== "file") || typeof field.value !== "string") return false;
+  const value = field.value.replace(/\\/g, "/");
+  return (artifacts ?? []).some((artifact) => {
+    const name = artifact.name.replace(/\\/g, "/");
+    const path = (artifact.relative_path || artifact.path || "").replace(/\\/g, "/");
+    return value === path || value.endsWith(`/${name}`) || path.endsWith(`/${value}`);
+  });
+}
+
 function ResultPreview({ d }: { d: RunDetail }) {
   const output = d.output ?? {};
   const hasSchema = (d.output_schema?.length ?? 0) > 0;
@@ -109,9 +149,13 @@ function ResultPreview({ d }: { d: RunDetail }) {
     return <div style={muted}>Run completed with no structured output.</div>;
   }
   if (hasSchema) {
+    const visibleFields = d.output_schema.filter((field) => !isFileOnlyOutputField(field, d.artifacts));
+    if (visibleFields.length === 0) {
+      return <div style={muted}>Output is available in the file section above.</div>;
+    }
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-        {d.output_schema.map((field) => (
+        {visibleFields.map((field) => (
           <OutputRenderer key={field.name} field={field} runId={d.id} />
         ))}
       </div>
@@ -152,9 +196,10 @@ function RunMetricsStrip({ d }: { d: RunDetail }) {
 // Preview/Raw toggle (#1289) for code/markdown/text. PNG artifacts render as
 // images (shared InlineFileOpen, rule #5).
 function OutputTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id, r.status);
+  const { data: d, error } = useRunDetailState(r.id, r.status);
   // rule #1: Preview (humane) vs Raw (JSON source) on the SAME result.
   const [resultMode, setResultMode] = useState<"preview" | "raw">("preview");
+  if (error) return <RunDetailLoadError runId={r.id} />;
   if (!d) return <LoadingState rows={4} />;
   const files: InlineFile[] = (d.artifacts ?? []).map((a) => ({
     id: a.id,
@@ -273,10 +318,11 @@ function resolveTokenCount(d: import("@/lib/types").RunDetail): number | null {
 // for logs. We still load the run detail (useRunDetail) for steps, tokens, and
 // raw JSON -- those are not in the log stream.
 function LogsTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id, r.status);
+  const { data: d, error } = useRunDetailState(r.id, r.status);
   // Live SSE log stream -- connects immediately and accumulates log lines.
   const { logs: streamLogs, connected: logConnected, done: logDone } = useRunLogStream(r.id);
 
+  if (error) return <RunDetailLoadError runId={r.id} />;
   if (!d) return <LoadingState rows={4} />;
   // Prefer the live stream logs while the run is active or the stream is
   // open; fall back to the static d.logs once the stream is done and the
@@ -361,7 +407,8 @@ function renderInputValue(v: unknown): { node: React.ReactNode; mono: boolean } 
   return { node: JSON.stringify(v, null, 2), mono: true };
 }
 function InputsTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id, r.status);
+  const { data: d, error } = useRunDetailState(r.id, r.status);
+  if (error) return <RunDetailLoadError runId={r.id} />;
   if (!d) return <LoadingState rows={3} />;
   const input = d.input ?? {};
   const keys = Object.keys(input);
@@ -445,6 +492,7 @@ export default function RunsCollection({
   // perf: streamed first-load fetch (see runs/page.tsx + useStreamedInitialData).
   initialRunsPromise?: Promise<RunSummary[]>;
 }) {
+  const workspaceHref = useWorkspaceHref();
   useStreamedInitialData(qk.runs(RUNS_FIRST_PAGE_QUERY_PARAMS), initialRunsPromise);
   // Cache-first first page (TanStack Query): /runs renders instantly from cache
   // on return; a slow or failed refetch keeps the cached rows instead of going
@@ -617,6 +665,7 @@ export default function RunsCollection({
 
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
+    subtitle: "Every run, on the record.",
     items: sorted,
     loading,
     idOf: (r) => r.id,
@@ -754,7 +803,7 @@ export default function RunsCollection({
         actions: (
           <>
             {/* SPEC §4: ↑ worker link (worker_id on every run — BUILT). */}
-            <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
+            <Link href={workspaceHref(`/workers?sel=${encodeURIComponent(r.worker_id)}`)} className="c-vpill" style={{ padding: "6px 11px" }}>
               ↑ Open worker
             </Link>
             {/* #765: run share link — opens the real Share modal. */}
@@ -794,19 +843,9 @@ export default function RunsCollection({
       }),
     }),
     states: {
-      // #1365 — add action CTA to runs empty state
       empty: {
         title: "No runs yet",
         help: "Runs appear here when your workers execute.",
-        action: (
-          <Link
-            href={createWorkerHref()}
-            className="c-addbtn"
-            style={{ display: "inline-block", marginTop: 8, padding: "6px 16px", fontSize: 13 }}
-          >
-            Create your first worker →
-          </Link>
-        ),
       },
     },
     // B37: "Load more" append footer — replaces numeric pagination.

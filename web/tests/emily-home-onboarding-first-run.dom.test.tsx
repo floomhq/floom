@@ -99,6 +99,7 @@ describe("#1699 zero-state home gate", () => {
     // The teaching zero-state, NOT the data-assuming populated greeting.
     expect(await screen.findByText(/hire your first worker/i)).toBeInTheDocument();
     expect(screen.queryByText(/done this week/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Total workers")).not.toBeInTheDocument();
   });
 
   it("renders the populated home for a workspace WITH workers (not ripped out)", async () => {

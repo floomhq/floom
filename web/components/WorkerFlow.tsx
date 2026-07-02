@@ -11,6 +11,11 @@ import {
   List,
   Clock,
 } from "lucide-react";
+import {
+  BrandLogo,
+  KNOWN_BRAND_SLUGS,
+  normalizeBrandSlug,
+} from "@/components/connections/BrandLogo";
 import { type WorkerIconInput } from "@/lib/worker-icon";
 
 // ---------------------------------------------------------------------------
@@ -74,6 +79,18 @@ const div = "var(--bd-div)";
 const mono = "var(--font-mono)";
 
 type Pt = { x: number; y: number };
+
+const TOOL_LABELS: Record<string, string> = {
+  gmail: "Gmail",
+  hubspot: "HubSpot",
+  linear: "Linear",
+  "google-calendar": "Google Calendar",
+  "google-drive": "Google Drive",
+  "google-docs": "Google Docs",
+  "google-sheets": "Google Sheets",
+  "google-meet": "Google Meet",
+  "google-search-console": "Google Search Console",
+};
 
 export function WorkerFlow({
   workerName,
@@ -186,12 +203,7 @@ export function WorkerFlow({
         {tools.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 12px 11px", flexWrap: "wrap" }}>
             {tools.slice(0, 4).map((t) => (
-              <span
-                key={t}
-                style={{ height: 18, borderRadius: 5, background: bgCard, color: inkSoft, display: "inline-flex", alignItems: "center", padding: "0 7px", fontSize: 9.5, fontWeight: 500, fontFamily: mono }}
-              >
-                {t}
-              </span>
+              <ToolChip key={t} value={t} />
             ))}
           </div>
         )}
@@ -206,6 +218,57 @@ export function WorkerFlow({
         ))}
       </div>
     </div>
+  );
+}
+
+function ToolChip({ value }: { value: string }) {
+  const slug = normalizeBrandSlug(value);
+  const label = friendlyToolLabel(slug || value);
+  const hasLogo = KNOWN_BRAND_SLUGS.has(slug);
+
+  if (slug === "linear") {
+    return (
+      <span
+        aria-label={label}
+        title={label}
+        style={{
+          height: 18,
+          borderRadius: 5,
+          background: "color-mix(in srgb, var(--accent) 12%, var(--bg-card))",
+          color: ink,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "0 7px",
+          fontSize: 9.5,
+          fontWeight: 600,
+        }}
+      >
+        <BrandLogo icon={slug} className="size-[10px]" />
+        {label}
+      </span>
+    );
+  }
+
+  if (hasLogo) {
+    return (
+      <span
+        aria-label={label}
+        title={label}
+        style={{ width: 24, height: 18, borderRadius: 5, background: bgCard, display: "inline-flex", alignItems: "center", justifyContent: "center", color: inkSoft }}
+      >
+        <BrandLogo icon={slug} className="size-[12px]" />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title={label}
+      style={{ height: 18, borderRadius: 5, background: bgCard, color: inkSoft, display: "inline-flex", alignItems: "center", padding: "0 7px", fontSize: 9.5, fontWeight: 500, fontFamily: mono }}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -245,6 +308,17 @@ function friendlyTrigger(value?: string | null): string {
   if (raw === "composio") return "Event";
   return raw
     .split(/[-_]+/)
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(" ");
+}
+
+function friendlyToolLabel(value: string): string {
+  const raw = (value || "").trim();
+  if (!raw) return "Tool";
+  if (TOOL_LABELS[raw]) return TOOL_LABELS[raw];
+  return raw
+    .split(/[-_\s]+/)
     .filter(Boolean)
     .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
     .join(" ");

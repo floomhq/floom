@@ -117,8 +117,11 @@ export function useSecrets(initialData?: SecretItem[], enabled = true) {
 export function useContexts(initialData?: ContextSummary[]) {
   return useQuery({
     queryKey: qk.contexts,
-    queryFn: () => api.contexts.list(),
-    initialData,
+    queryFn: async () => {
+      const rows = await api.contexts.list();
+      return Array.isArray(rows) ? rows : [];
+    },
+    initialData: Array.isArray(initialData) ? initialData : undefined,
     placeholderData: keepPreviousData,
   });
 }

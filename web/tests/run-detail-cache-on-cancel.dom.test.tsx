@@ -69,4 +69,15 @@ describe("useRunDetail — cache survives a cancelled (post-unmount) fetch", () 
     const second = renderHook(() => useRunDetail("run-cancel-1", "completed"));
     await waitFor(() => expect(second.result.current).toEqual(detail));
   });
+
+  it("records detail fetch failures so tabs can exit skeleton loading", async () => {
+    get.mockRejectedValueOnce(new Error("detail failed"));
+    const { useRunDetailState } = await import("@/app/runs/RunsCollection");
+
+    const state = renderHook(() => useRunDetailState("run-detail-error-1", "failed"));
+
+    await waitFor(() => expect(state.result.current.loading).toBe(false));
+    expect(state.result.current.data).toBeUndefined();
+    expect(state.result.current.error?.message).toBe("detail failed");
+  });
 });

@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
         headers: {
           cookie: `wos_session=${backendSession}`,
           "content-type": "application/json",
+          "X-Floom-Source": "web",
         },
       });
     } catch {

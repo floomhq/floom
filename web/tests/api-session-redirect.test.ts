@@ -95,6 +95,52 @@ describe("api session expiry handling", () => {
     expect(headers.get("x-workeros-workspace")).toBe("local-default");
   });
 
+  it("prefers workspace_id from the current URL over stored workspace", async () => {
+    const assign = vi.fn();
+    const storedGet = vi.fn(() => "ws_stored");
+    vi.stubGlobal("window", {
+      location: { pathname: "/workers", search: "?sel=w1&workspace_id=ws_url", assign },
+      localStorage: {
+        getItem: storedGet,
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+      },
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const { api, getActiveWorkspaceId, getPersistedActiveWorkspaceId } = await import("@/lib/api");
+
+    expect(getActiveWorkspaceId()).toBe("ws_url");
+    expect(getPersistedActiveWorkspaceId()).toBe("ws_stored");
+    await api.workers.list();
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("x-workeros-workspace")).toBe("ws_url");
+  });
+
+  it("accepts ws as a workspace_id alias in legacy inbound links", async () => {
+    stubBrowserLocation("/workers", "?sel=w1&ws=ws_alias");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const { api, getActiveWorkspaceId } = await import("@/lib/api");
+
+    expect(getActiveWorkspaceId()).toBe("ws_alias");
+    await api.workers.list();
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("x-workeros-workspace")).toBe("ws_alias");
+  });
+
   it("marks the active workspace cookie Secure on HTTPS only", async () => {
     let written = stubWorkspaceCookieBrowser("https:");
     let mod = await import("@/lib/api");
@@ -111,5 +157,49 @@ describe("api session expiry handling", () => {
     expect(written.at(-1)).toBe(
       "workeros.activeWorkspaceId=ws%20local; Path=/; Max-Age=31536000; SameSite=Lax",
     );
+  });
+
+  it("clears persisted query data when the active workspace changes", async () => {
+    const removeItem = vi.fn();
+    const setItem = vi.fn();
+    vi.stubGlobal("window", {
+      location: { protocol: "https:", search: "" },
+      localStorage: {
+        getItem: vi.fn((key: string) => key === "workeros.activeWorkspaceId" ? "ws_old" : null),
+        setItem,
+        removeItem,
+      },
+      document: {
+        set cookie(_value: string) {},
+      },
+    });
+
+    const { setActiveWorkspaceId } = await import("@/lib/api");
+
+    setActiveWorkspaceId("ws_new");
+
+    expect(removeItem).toHaveBeenCalledWith("floom-query-cache");
+    expect(setItem).toHaveBeenCalledWith("workeros.activeWorkspaceId", "ws_new");
+  });
+
+  it("keeps persisted query data when the active workspace is unchanged", async () => {
+    const removeItem = vi.fn();
+    vi.stubGlobal("window", {
+      location: { protocol: "https:", search: "" },
+      localStorage: {
+        getItem: vi.fn((key: string) => key === "workeros.activeWorkspaceId" ? "ws_same" : null),
+        setItem: vi.fn(),
+        removeItem,
+      },
+      document: {
+        set cookie(_value: string) {},
+      },
+    });
+
+    const { setActiveWorkspaceId } = await import("@/lib/api");
+
+    setActiveWorkspaceId("ws_same");
+
+    expect(removeItem).not.toHaveBeenCalledWith("floom-query-cache");
   });
 });

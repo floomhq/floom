@@ -75,17 +75,17 @@ describe("CloudAppChrome — Emily fullscreen hides the page pane, keeps the sid
     );
 
     // Before: page pane visible, sidebar present.
-    expect(findPagePane(container).className).not.toContain("hidden");
+    expect(findPagePane(container).classList.contains("hidden")).toBe(false);
     expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
 
     // Enter fullscreen → page pane hidden (display:none, still mounted).
     await user.click(screen.getByRole("button", { name: /enter emily fullscreen/i }));
-    expect(findPagePane(container).className).toContain("hidden");
+    expect(findPagePane(container).classList.contains("hidden")).toBe(true);
     // Sidebar STAYS (Federico spec: keep nav).
     expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
 
     // Exit fullscreen → page pane restored.
     await user.click(screen.getByRole("button", { name: /exit emily fullscreen/i }));
-    expect(findPagePane(container).className).not.toContain("hidden");
+    expect(findPagePane(container).classList.contains("hidden")).toBe(false);
   });
 });

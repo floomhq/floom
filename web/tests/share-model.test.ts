@@ -35,7 +35,8 @@ describe("shareSummary", () => {
 describe("publicLinkScope", () => {
   it("describes what an anonymous public link exposes, per asset type", () => {
     expect(publicLinkScope("run")).toMatch(/inputs, steps, tool calls/i);
-    expect(publicLinkScope("worker")).toMatch(/inspect its files, and duplicate/i);
+    expect(publicLinkScope("worker")).toMatch(/inspect its non-secret files, and duplicate/i);
+    expect(publicLinkScope("worker")).toMatch(/Secrets, connection credentials, API keys, tokens/i);
     expect(publicLinkScope("brain_pack")).toMatch(/brain pack/i);
     expect(publicLinkScope("brain_file")).toMatch(/this file/i);
     expect(publicLinkScope("approval")).toMatch(/approve, or reject/i);

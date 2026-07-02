@@ -23,6 +23,10 @@ function activeWorkspaceCookieAttrs(): string {
 }
 
 export function getActiveWorkspaceId(): string | null {
+  return getPersistedActiveWorkspaceId();
+}
+
+export function getPersistedActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
   const value = safeStorageGet("local", ACTIVE_WORKSPACE_STORAGE_KEY);
   if (value && !(IS_CLOUD_DEPLOY && value === "local-default")) return value;

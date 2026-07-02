@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, getPersistedActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
 import { useWorkers, useStreamedInitialData, qk, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
 import type {
@@ -56,11 +57,18 @@ import {
 import { LoadingState } from "@/components/collection/CollectionStates";
 import {
   ArrowRight,
+  Archive,
   Brain,
   ChevronDown,
+  CopyPlus,
+  Edit3,
   Lock,
   Mail,
+  PauseCircle,
+  PlayCircle,
   Plus,
+  RotateCcw,
+  Share2,
   Trash2,
   Webhook,
   X,
@@ -105,7 +113,7 @@ import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 import { ADVANCED_DETAIL_TABS, BASE_DETAIL_TABS } from "@/lib/workers/pinned-tabs";
 import { ADVANCED_MODE_STORAGE_KEY } from "@/lib/workers/tabs";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
-import { createWorkerHref } from "@/lib/create-worker-nav";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 function rel(ts?: string | null): string {
   if (!ts) return "—";
@@ -210,6 +218,7 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
 function detailToSummary(d: WorkerDetail): WorkerSummary {
   return {
     id: d.id,
+    workspace_id: d.workspace_id,
     name: d.name,
     description: d.description,
     long_description: d.long_description,
@@ -242,6 +251,14 @@ function detailToSummary(d: WorkerDetail): WorkerSummary {
     permissions: d.permissions,
   } as WorkerSummary;
 }
+
+export const WORKSPACE_SCOPED_QUERY_ROOTS = new Set([
+  "workers",
+  "runs",
+  "contexts",
+  "connections",
+  "secrets",
+]);
 
 /** Build the worker.yml text from a detail (files take precedence). */
 function workerYml(d: WorkerDetail): string {
@@ -405,9 +422,8 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 // while /runs showed the full history for the same worker. Using the proven
 // worker-scoped list query here makes the two surfaces agree.
 //
-// Module-level cache keyed by worker id so the (synchronously-rendered) tab badge
-// and this tab body read the SAME data — that shared source is what stops the
-// "Runs N" badge flipping 0↔1 across tab clicks.
+// Module-level cache keyed by worker id so returning to a worker's Runs tab is
+// instant and never blanks.
 const workerRunsCache = new Map<string, RunSummary[]>();
 const WORKER_RUNS_LIMIT = 20;
 
@@ -439,6 +455,7 @@ function useWorkerRuns(workerId: string): RunSummary[] | undefined {
 // Runs: recent runs w/ durations, link to the full Runs surface.
 function RunsTab({ w }: { w: WorkerSummary }) {
   const fetched = useWorkerRuns(w.id);
+  const workspaceHref = useWorkspaceHref();
   // Until the worker-scoped fetch resolves, fall back to the summary's last_run
   // so the tab is never momentarily empty for a worker that has run.
   const runs = fetched ?? (w.last_run ? [w.last_run] : []);
@@ -462,7 +479,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
         label={(
           <span className="flex items-center gap-2">
             <span>Recent runs</span>
-            <Link href={`/runs?worker_id=${w.id}`} className="c-vpill normal-case" style={{ padding: "4px 8px", letterSpacing: 0 }}>
+            <Link href={workspaceHref(`/runs?worker_id=${w.id}`)} className="c-vpill normal-case" style={{ padding: "4px 8px", letterSpacing: 0 }}>
               All runs →
             </Link>
           </span>
@@ -472,7 +489,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
           {runs.map((r) => (
             <Link
               key={r.id}
-              href={`/runs?worker_id=${w.id}&sel=${r.id}`}
+              href={workspaceHref(`/runs/${encodeURIComponent(r.id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr auto auto", gap: 12, textDecoration: "none", color: "inherit" }}
             >
@@ -706,10 +723,6 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   return (
     <>
       <DetailGroup label="Source">
-        <p className="c-dctx">
-          {ordered.map((file) => file.path).slice(0, 4).join(" · ")}
-          {ordered.length > 4 ? ` · +${ordered.length - 4} more` : ""}
-        </p>
         {editable && (
           <div className="mb-3 flex justify-end">
             <button type="button" className="c-vpill" style={pillBtn} onClick={openEditor}>
@@ -727,19 +740,21 @@ function SourceTab({ w }: { w: WorkerSummary }) {
         />
       </DetailGroup>
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-h-[90vh] sm:max-w-6xl overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="grid h-[min(90vh,860px)] max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-6xl">
+          <DialogHeader className="px-6 pt-5 pb-3">
             <DialogTitle>Edit source</DialogTitle>
             <DialogDescription>Update this worker&apos;s source files.</DialogDescription>
           </DialogHeader>
-          <FilesEditor
-            mode="edit"
-            files={draftFiles}
-            selectedPath={draftPath}
-            onChange={setDraftFiles}
-            onSelectedPathChange={setDraftPath}
-          />
-          <DialogFooter>
+          <div className="min-h-0 overflow-y-auto px-6 pb-4">
+            <FilesEditor
+              mode="edit"
+              files={draftFiles}
+              selectedPath={draftPath}
+              onChange={setDraftFiles}
+              onSelectedPathChange={setDraftPath}
+            />
+          </div>
+          <DialogFooter className="sticky bottom-0 z-10 m-0 rounded-none">
             <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
@@ -1687,6 +1702,7 @@ function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
 function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => void }) {
   const [sub, setSub] = useState<SetupSubtab>("Inputs");
   const counts = useSetupSubCounts(w);
+  const workspaceHref = useWorkspaceHref();
   return (
     <div className="flex flex-col">
       {/* R9 FIX 2: the Setup second-row tabs sit DIRECTLY under the primary
@@ -1716,7 +1732,7 @@ function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => 
       <div className="c-ops-frame">
         <span>Visual worker editor</span>
         <Link
-          href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`}
+          href={workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`)}
           className="ml-auto normal-case"
           style={{ fontSize: 11, letterSpacing: 0 }}
           onClick={(e) => {
@@ -1780,13 +1796,8 @@ const WORKER_TAB_REASON: Record<WorkerDetailTab, CustomTabReason> = {
   Tools: "tool-list",
 };
 
-/**
- * Inline "Developer" disclosure button — sits directly after the operator tabs
- * and expands ALL ADVANCED_DETAIL_TABS at once (Source, Versions, Brain, Tools).
- * One click reveals all; clicking again collapses all. No dropdown, no pin, no
- * per-item checkmark. Replaces the pick-one dropdown (kills the #1680 bug class).
- */
-function DeveloperDisclosure({
+/** Developer disclosure: advanced tabs are either visible inline or hidden. */
+function DeveloperToggle({
   open,
   onToggle,
 }: {
@@ -1798,15 +1809,11 @@ function DeveloperDisclosure({
       type="button"
       className={`c-dtab-adv inline-flex items-center gap-1${open ? " open" : ""}`}
       aria-label={open ? "Hide developer tabs" : "Show developer tabs"}
-      aria-expanded={open}
+      aria-pressed={open}
       onClick={onToggle}
     >
       Developer
-      <ChevronDown
-        className="size-3.5"
-        aria-hidden="true"
-        style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms" }}
-      />
+      <ChevronDown className={`size-3.5 transition-transform${open ? " rotate-180" : ""}`} aria-hidden="true" />
     </button>
   );
 }
@@ -1821,6 +1828,7 @@ function WorkerDetailActions({
   canManage?: boolean;
 }) {
   const router = useRouter();
+  const workspaceHref = useWorkspaceHref();
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [editOpen, setEditOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -1871,7 +1879,7 @@ function WorkerDetailActions({
           // calm inline /run/{worker} page (schema-driven inputs + live
           // output-first run panel), the same standalone runnable surface — no
           // Dialog, no third page. See feedback/round-09/run-detail-real.md.
-          onClick={() => router.push(`/run/${encodeURIComponent(w.id)}`)}
+          onClick={() => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`))}
           title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
@@ -1881,12 +1889,13 @@ function WorkerDetailActions({
         <ActionMenu
           label="More worker actions"
           items={[
-            { label: "Edit", onSelect: () => setEditOpen(true) },
+            { label: "Edit", icon: <Edit3 className="size-4" />, onSelect: () => setEditOpen(true) },
             // Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
             // (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
             // the schedule, which a raw worker.yml `enabled:` PUT does not do.
             {
               label: w.enabled === false ? "Resume" : "Pause",
+              icon: w.enabled === false ? <PlayCircle className="size-4" /> : <PauseCircle className="size-4" />,
               onSelect: () => {
                 const pausing = w.enabled !== false;
                 const action = pausing ? api.workers.pause : api.workers.resume;
@@ -1901,14 +1910,15 @@ function WorkerDetailActions({
             },
             // Share — opens the real Share modal (company access + grants +
             // anonymous public link with revoke), not a bare copy-link.
-            { label: "Share", onSelect: () => setShareOpen(true) },
+            { label: "Share", icon: <Share2 className="size-4" />, onSelect: () => setShareOpen(true) },
             {
               label: "Duplicate",
+              icon: <CopyPlus className="size-4" />,
               onSelect: () => {
                 api.workers.duplicate(w.id)
                   .then((created) => {
                     onUpdated(detailToSummary(created));
-                    router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
+                    router.push(workspaceHref(`/workers?sel=${encodeURIComponent(created.id)}`));
                     toast.success("Worker duplicated");
                   })
                   .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
@@ -1916,6 +1926,7 @@ function WorkerDetailActions({
             },
             {
               label: workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live",
+              icon: <RotateCcw className="size-4" />,
               onSelect: () => {
                 const next = workerStageKey(w) === "live" ? "draft" : "live";
                 api.workers.setStage(w.id, next)
@@ -1928,6 +1939,9 @@ function WorkerDetailActions({
             },
             {
               label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+              icon: (w as WorkerSummary & { archived?: boolean }).archived
+                ? <RotateCcw className="size-4" />
+                : <Archive className="size-4" />,
               onSelect: () => {
                 const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
                 const action = isArchived ? api.workers.restore : api.workers.archive;
@@ -1941,6 +1955,7 @@ function WorkerDetailActions({
             },
             {
               label: "Delete",
+              icon: <Trash2 className="size-4" />,
               destructive: true,
               // Replaces window.confirm with the shared ConfirmDialog.
               confirm: {
@@ -2036,54 +2051,58 @@ function WorkerDetailActions({
   );
 }
 
-// ---- #1092: Workers empty-state inline prompt --------------------------------
+// ---- Workers empty-state quick start -----------------------------------------
 
-/**
- * A compact prompt input shown in the workers empty state so users can
- * describe what they want done and open the dedicated /workers/new page.
- */
-function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }) {
-  const [value, setValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+const WORKER_PROMPT_EXAMPLES = [
+  "Create a Floom worker that summarizes my latest 5 Gmail emails every hour and sends the summary to Slack.",
+  "Create a Floom worker that checks new Linear issues every morning and posts a priority digest to Slack.",
+  "Create a Floom worker that watches a Google Sheet for new rows and drafts follow-up emails.",
+];
 
-  function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    const trimmed = value.trim();
-    if (!trimmed) return;
-    onSubmit(trimmed);
-  }
-
+function WorkersEmptyQuickStart() {
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="mt-4 flex w-full items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
-      style={{ maxWidth: 440 }}
-    >
-      <input
-        ref={inputRef}
-        type="text"
-        // text-ellipsis so a long *placeholder* (or value) degrades to an
-        // ellipsis on a too-narrow input instead of hard-clipping mid-word
-        // ("…want dor"). The wider max-width above lets the intended
-        // placeholder render in full at the normal empty-state width.
-        className="min-w-0 flex-1 truncate bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-        placeholder="Describe the job you want done…"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        autoComplete="off"
-      />
-      <button
-        type="submit"
-        disabled={!value.trim()}
-        className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
-        aria-label="Create worker"
-      >
-        <ArrowRight className="size-3.5" />
-      </button>
-    </form>
+    <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-4 text-center">
+      <div>
+        <div className="text-sm font-medium text-ink">Quick start</div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Go to your coding agent, install the Floom MCP server, and ask it to create workers like these:
+        </p>
+      </div>
+
+      <div className="grid w-full gap-2 text-left">
+        {WORKER_PROMPT_EXAMPLES.map((example) => (
+          <div
+            key={example}
+            className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-[12px] leading-5 text-ink [border:var(--bd-card)]"
+          >
+            {example}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-1.5 font-mono text-[12px] leading-5 text-muted-foreground">
+        <div>npx -y @floomhq/floom mcp install</div>
+      </div>
+
+      <div className="flex flex-wrap justify-center gap-2">
+        <Link
+          className="c-addbtn"
+          href="/connections/mcp?from_install=workers-empty"
+        >
+          Install MCP
+        </Link>
+        <Link
+          className="c-vpill"
+          href="https://floom.dev/v3/docs/worker-yml"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Worker guide
+        </Link>
+      </div>
+    </div>
   );
 }
-
 
 /**
  * A downstream host can inject a top-level view (#1006) and compose
@@ -2115,7 +2134,16 @@ export default function WorkersCollection({
   extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
-  useStreamedInitialData(qk.workers(WORKERS_LIST_QUERY_OPTS), initialWorkersPromise);
+  const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
+  const urlWorkspaceId = searchParams.get("workspace_id") || searchParams.get("ws");
+  const persistedWorkspaceId = getPersistedActiveWorkspaceId();
+  const urlWorkspaceNeedsActivation = Boolean(urlWorkspaceId && urlWorkspaceId !== persistedWorkspaceId);
+  const workspaceHref = useWorkspaceHref();
+  useStreamedInitialData(
+    qk.workers(WORKERS_LIST_QUERY_OPTS),
+    urlWorkspaceNeedsActivation ? undefined : initialWorkersPromise,
+  );
   // Cache-first workers list (TanStack Query): returning to /workers renders
   // instantly from cache with no skeleton; a slow/failed refetch keeps showing
   // the cached list instead of flashing "Something went wrong". Local `workers`
@@ -2123,39 +2151,46 @@ export default function WorkersCollection({
   // update, archive) still work.
   const workersQuery = useWorkers(
     WORKERS_LIST_QUERY_OPTS,
-    initialWorkers.length > 0 ? initialWorkers : undefined,
+    !urlWorkspaceNeedsActivation && initialWorkers.length > 0 ? initialWorkers : undefined,
+    !urlWorkspaceNeedsActivation,
   );
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
-  // Developer disclosure — single boolean persisted to localStorage so the
-  // user's preference (expanded / collapsed) survives page reloads.
   const [developerOpen, setDeveloperOpen] = useState(false);
-  useEffect(() => {
-    setDeveloperOpen(safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY) === "true");
-  }, []);
-  const toggleDeveloper = useCallback(() => {
-    setDeveloperOpen((prev) => {
-      const next = !prev;
-      safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, next ? "true" : "false");
-      return next;
-    });
-  }, []);
   // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
   // `tab` URL param to drive the active tab. replace() avoids a history entry.
   const openAdvancedAndSelectWorkerTab = useCallback(
     (workerId: string, key: WorkerDetailTab) => {
       if (ADVANCED_DETAIL_TABS.includes(key)) {
         setDeveloperOpen(true);
-        safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "true");
+        safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "open");
       }
       router.replace(
-        `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
+        workspaceHref(`/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`),
       );
     },
-    [router],
+    [router, workspaceHref],
   );
+
+  useEffect(() => {
+    if (!urlWorkspaceId || urlWorkspaceId === persistedWorkspaceId) return;
+    setWorkers([]);
+    for (const root of WORKSPACE_SCOPED_QUERY_ROOTS) {
+      queryClient.removeQueries({ queryKey: [root] });
+    }
+    setActiveWorkspaceId(urlWorkspaceId);
+  }, [persistedWorkspaceId, queryClient, urlWorkspaceId]);
+
+  useEffect(() => {
+    const saved = safeStorageGet("local", ADVANCED_MODE_STORAGE_KEY);
+    if (saved === "open") setDeveloperOpen(true);
+    else if (saved && ADVANCED_DETAIL_TABS.includes(saved as WorkerDetailTab)) {
+      setDeveloperOpen(true);
+      safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, "open");
+    }
+  }, []);
 
   useEffect(() => {
     if (workersQuery.data) {
@@ -2290,16 +2325,17 @@ export default function WorkersCollection({
       ],
       status: workerStatusPill(w),
       menu: [
-        { label: "Open", onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) },
-        { label: "Run", onSelect: () => router.push(`/run/${encodeURIComponent(w.id)}`) },
+        { label: "Open", icon: <ArrowRight className="size-4" />, onSelect: () => router.push(workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}`)) },
+        { label: "Run", icon: <PlayCircle className="size-4" />, onSelect: () => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`)) },
         ...(canManageWorkers ? [
           {
             label: "Duplicate",
+            icon: <CopyPlus className="size-4" />,
             onSelect: () => {
               api.workers.duplicate(w.id)
                 .then((created) => {
                   setWorkers((prev) => [detailToSummary(created), ...prev]);
-                  router.push(`/workers?sel=${encodeURIComponent(created.id)}`);
+                  router.push(workspaceHref(`/workers?sel=${encodeURIComponent(created.id)}`));
                   toast.success("Worker duplicated");
                 })
                 .catch((err: Error) => toast.error(err.message || "Could not duplicate worker"));
@@ -2307,6 +2343,9 @@ export default function WorkersCollection({
           },
           {
             label: (w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive",
+            icon: (w as WorkerSummary & { archived?: boolean }).archived
+              ? <RotateCcw className="size-4" />
+              : <Archive className="size-4" />,
             onSelect: () => {
               const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
               const action = isArchived ? api.workers.restore : api.workers.archive;
@@ -2320,6 +2359,7 @@ export default function WorkersCollection({
           },
           {
             label: "Delete",
+            icon: <Trash2 className="size-4" />,
             destructive: true,
             confirm: {
               title: `Delete "${w.name}"?`,
@@ -2372,7 +2412,7 @@ export default function WorkersCollection({
         quickActions: [],
       };
     },
-    detail: (w) => {
+    detail: (w, activeTab) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const stage = workerStageKey(w);
       const actions = (
@@ -2416,14 +2456,14 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // Inline disclosure: BASE_DETAIL_TABS always visible; ADVANCED_DETAIL_TABS
-        // appear after them when developerOpen=true. CollectionView already handles
-        // the "active tab no longer in tab set" case by falling back to tabs[0],
-        // so collapsing while an advanced tab is active gracefully switches to Overview.
+        // Primary tabs stay stable. Developer is an explicit show/hide
+        // disclosure; when open, every advanced tab is visible inline.
         tabs: (() => {
+          const activeAdvanced = ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab);
+          const showDeveloperTabs = developerOpen || activeAdvanced;
           const visibleKeys: WorkerDetailTab[] = [
             ...BASE_DETAIL_TABS,
-            ...(developerOpen ? ADVANCED_DETAIL_TABS : []),
+            ...(showDeveloperTabs ? ADVANCED_DETAIL_TABS : []),
           ];
           return visibleKeys.map((key) => {
             const Tab = WORKER_TAB_COMPONENT[key];
@@ -2434,15 +2474,7 @@ export default function WorkersCollection({
               // editor, file/version/brain editors, run list, tool allowlist) that
               // loads its own data and owns its own state — not a synchronous
               // key/value pane — so each names an accurate custom reason.
-              // #1251 / #1679: badge matches the count listed in the Runs tab.
-              // Both read the SAME worker-scoped runs cache (api.runs.list) so the
-              // badge can no longer disagree with the tab body or flip 0↔1: until
-              // that fetch resolves the badge stays on the summary's last_run
-              // fallback, then settles to the real worker-scoped count.
-              count: key === "Runs"
-                ? (workerRunsCache.get(w.id)?.length
-                    ?? (w.last_run ? 1 : undefined))
-                : undefined,
+              count: undefined,
               custom: WORKER_TAB_REASON[key],
               render: () => key === "Setup"
                 ? <SetupTab w={w} onOpenSource={() => openAdvancedAndSelectWorkerTab(w.id, "Source")} />
@@ -2450,26 +2482,31 @@ export default function WorkersCollection({
             };
           });
         })(),
-        // Developer disclosure sits inline directly after the operator tabs —
-        // no far-right spacer. One click reveals ALL advanced tabs; clicking
-        // again collapses them. Replaces the pick-one dropdown (#1680 bug class).
+        // Developer toggle controls whether advanced tabs are shown inline.
         tabsTrailing: (
-          <DeveloperDisclosure open={developerOpen} onToggle={toggleDeveloper} />
+          <DeveloperToggle
+            open={developerOpen || ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab)}
+            onToggle={() => {
+              const next = !(developerOpen || ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab));
+              setDeveloperOpen(next);
+              safeStorageSet("local", ADVANCED_MODE_STORAGE_KEY, next ? "open" : "closed");
+              if (!next && ADVANCED_DETAIL_TABS.includes(activeTab as WorkerDetailTab)) {
+                openAdvancedAndSelectWorkerTab(w.id, "Overview");
+              }
+            }}
+          />
         ),
       };
     },
-    // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "New worker", onSelect: () => router.push(createWorkerHref()) },
     states: {
-      // #1364 — improved help text + action CTA driving the in-Emily create flow
       empty: {
-        title: "No workers yet",
-        help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
-        action: (
-          <WorkersEmptyPrompt
-            onSubmit={(prompt) => router.push(createWorkerHref(prompt))}
-          />
-        ),
+        title: "Create your first worker",
+        help: "Workers are YAML-defined automations with code, tools, secrets, memory, and run history.",
+        action: <WorkersEmptyQuickStart />,
+      },
+      filteredEmpty: {
+        title: "No workers found",
+        help: "Clear the search or filters to see your workers.",
       },
       errorRetry: () => {
         void workersQuery.refetch();

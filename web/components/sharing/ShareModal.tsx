@@ -321,6 +321,11 @@ export function ShareModal({ open, onOpenChange, asset, companyAccess, publicLin
               <Globe size={12} /> {publicLink.label ?? "Public link"}
             </p>
             <p className="text-xs text-[var(--ink-mute)]">{PUBLIC_LINK_UNLISTED_NOTE}</p>
+            {!publicLink.staticUrl && (
+              <p className="text-xs text-[var(--ink-mute)]">
+                Creating a new link disables any previous public link for this item.
+              </p>
+            )}
 
             {/* Static, always-valid link (e.g. approval review HMAC) — no revoke. */}
             {publicLink.staticUrl ? (
@@ -381,9 +386,6 @@ export function ShareModal({ open, onOpenChange, asset, companyAccess, publicLin
             ) : (
               <div className="space-y-2">
                 <p className="text-sm text-[var(--ink-soft)]">{publicLinkScope(asset.type)}</p>
-                <p className="text-xs text-[var(--ink-mute)]">
-                  Creating a new link disables any previous public link for this item.
-                </p>
                 <button
                   type="button"
                   className="c-addbtn"

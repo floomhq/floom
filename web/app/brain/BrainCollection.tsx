@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
-import { useContexts } from "@/lib/query/hooks";
+import { qk, useContexts, useStreamedInitialData } from "@/lib/query/hooks";
 import { reportError } from "@/lib/notify";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -19,9 +19,53 @@ import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineDragItem } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
 import { formatBytes, writeKey } from "@/lib/brain/format";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 const detailCache = new Map<string, ContextDetail>();
 const FOLDER_PLACEHOLDER_FILE = ".workeros-folder";
+
+type DisplayContextSummary = ContextSummary & {
+  memory_group?: boolean;
+  memory_children?: ContextSummary[];
+};
+
+function RelativeUpdated({ value }: { value?: string | null }) {
+  return <span suppressHydrationWarning>{formatRelative(value ?? "")}</span>;
+}
+
+export function isWorkerMemoryContext(name: string): boolean {
+  return /^memory-[a-z0-9][a-z0-9._-]*$/i.test(name);
+}
+
+export function isWorkerMemoryPack(ctx: Pick<ContextSummary, "name" | "category" | "worker_count">): boolean {
+  if (isWorkerMemoryContext(ctx.name)) return true;
+  return ctx.name !== "memory" && ctx.category === "memory" && (ctx.worker_count ?? 0) > 0;
+}
+
+export function buildMemoryParentFolder(memoryPacks: ContextSummary[]): DisplayContextSummary | null {
+  if (memoryPacks.length === 0) return null;
+  const sorted = [...memoryPacks].sort((a, b) => a.name.localeCompare(b.name));
+  const updated = sorted
+    .map((pack) => pack.updated_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+
+  return {
+    name: "memory",
+    description: `${sorted.length} worker memory folder${sorted.length === 1 ? "" : "s"}`,
+    file_count: sorted.reduce((total, pack) => total + (pack.file_count ?? 0), 0),
+    total_size_bytes: sorted.reduce((total, pack) => total + (pack.total_size_bytes ?? 0), 0),
+    updated_at: updated ?? null,
+    writeable: false,
+    read_only: true,
+    worker_count: sorted.reduce((total, pack) => total + (pack.worker_count ?? 0), 0),
+    visibility: "private",
+    category: "memory",
+    memory_group: true,
+    memory_children: sorted,
+  };
+}
 
 function useContextDetail(name: string): [ContextDetail | undefined, () => Promise<void>] {
   const [d, setD] = useState<ContextDetail | undefined>(detailCache.get(name));
@@ -317,6 +361,7 @@ function RenameFolderModal({
 
 function UsedByTab({ folder }: { folder: ContextSummary }) {
   const [d] = useContextDetail(folder.name);
+  const workspaceHref = useWorkspaceHref();
   if (!d) return <LoadingState rows={3} />;
   const used = d.used_by ?? [];
   // Framed in the register (DetailGroup + a c-ltable list of links, DetailEmpty
@@ -328,7 +373,7 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
           {used.map((ref) => (
             <Link
               key={ref.worker_id}
-              href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`}
+              href={workspaceHref(`/workers?sel=${encodeURIComponent(ref.worker_id)}`)}
               className="c-lrow"
               style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
             >
@@ -343,6 +388,40 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
       ) : (
         <DetailEmpty>No workers use this folder yet.</DetailEmpty>
       )}
+    </DetailGroup>
+  );
+}
+
+function MemoryChildrenTab({ packs }: { packs: ContextSummary[] }) {
+  const workspaceHref = useWorkspaceHref();
+  if (packs.length === 0) return <DetailEmpty>No memory folders yet.</DetailEmpty>;
+  return (
+    <DetailGroup label="Memory folders">
+      <p className="c-dctx">
+        {packs.length} folder{packs.length === 1 ? "" : "s"} grouped under memory.
+      </p>
+      <div className="c-ltable">
+        {packs.map((pack) => (
+          <Link
+            key={pack.name}
+            href={workspaceHref(`/library?sel=${encodeURIComponent(pack.name)}`)}
+            className="c-lrow"
+            style={{ gridTemplateColumns: "1.8fr 1fr 1fr", textDecoration: "none" }}
+          >
+            <div className="c-lprimary">
+              <span className="c-logo">
+                <Folder size={16} />
+              </span>
+              <div className="c-lp-tx">
+                <div className="nm">{pack.name}</div>
+                {pack.description ? <div className="sub">{pack.description}</div> : null}
+              </div>
+            </div>
+            <div className="c-cell">{pack.file_count ?? 0} files</div>
+            <div className="c-cell"><RelativeUpdated value={pack.updated_at} /></div>
+          </Link>
+        ))}
+      </div>
     </DetailGroup>
   );
 }
@@ -382,13 +461,25 @@ function EmptyStateActions({ onBrowse }: { onBrowse: () => void }) {
   );
 }
 
-export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
-  const foldersQuery = useContexts(initialFolders.length > 0 ? initialFolders : undefined);
-  const folders = foldersQuery.data ?? initialFolders;
+export default function BrainCollection({
+  initialFolders = [],
+  initialFoldersPromise,
+}: {
+  initialFolders?: ContextSummary[];
+  initialFoldersPromise?: Promise<ContextSummary[]>;
+}) {
+  useStreamedInitialData(qk.contexts, initialFoldersPromise);
+  const safeInitialFolders = Array.isArray(initialFolders) ? initialFolders : [];
+  const foldersQuery = useContexts(safeInitialFolders.length > 0 ? safeInitialFolders : undefined);
+  const folders = Array.isArray(foldersQuery.data) ? foldersQuery.data : safeInitialFolders;
   // Show a loading skeleton until the first fetch completes so we never flash
   // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
   // Cached revisits bypass this because the query already has data.
   const loading = foldersQuery.isLoading && !foldersQuery.data;
+  const listError =
+    foldersQuery.isError && !foldersQuery.data
+      ? "Could not load your Library. Check your connection and try again."
+      : null;
   const [listDragOver, setListDragOver] = useState(false);
   // Guards the auto-create folder paths against double-fires.
   const [creating, setCreating] = useState(false);
@@ -451,10 +542,17 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
 
   const openBrowse = () => browseInputRef.current?.click();
 
-  const folderTitle = (c: ContextSummary) => (
+  const memoryPacks = useMemo(() => folders.filter((folder) => !folder.system && isWorkerMemoryPack(folder)), [folders]);
+  const displayFolders = useMemo(() => {
+    const memoryParent = buildMemoryParentFolder(memoryPacks);
+    const regularFolders = folders.filter((folder) => !isWorkerMemoryPack(folder));
+    return memoryParent ? [...regularFolders, memoryParent] : regularFolders;
+  }, [folders, memoryPacks]);
+
+  const folderTitle = (c: DisplayContextSummary) => (
     <span className="inline-flex min-w-0 items-baseline gap-1.5">
       <span className="truncate">{c.name}</span>
-      {c.visibility === "workspace" ? (
+      {c.memory_group ? null : c.visibility === "workspace" ? (
         <Users className="size-3 text-[var(--muted-foreground)] translate-y-px" aria-label="Shared" />
       ) : (
         <Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" aria-label="Private" />
@@ -476,17 +574,19 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     [folders],
   );
 
-  const config: CollectionConfig<ContextSummary> = {
+  const config: CollectionConfig<DisplayContextSummary> = {
     title: "Library",
     subtitle: "Reusable folders of files your workers can read before they act.",
-    items: folders,
+    items: displayFolders,
     loading,
+    error: listError,
     // No banner and no prominent toolbar addButton: dropping files is the
     // primary affordance (outer wrapper handles file drops; the empty state
     // leads with a drop CTA). Folder-creation is the quiet secondary path in
     // config.toolbarActions and under the empty-state CTA.
     idOf: (c) => c.name,
-    searchOf: (c) => `${c.name} ${c.description ?? ""} ${c.category ?? ""}`,
+    searchOf: (c) =>
+      `${c.name} ${c.description ?? ""} ${c.category ?? ""} ${(c.memory_children ?? []).map((pack) => pack.name).join(" ")}`,
     tagsOf: (c) =>
       ({
         visibility: [c.visibility === "workspace" ? "shared" : "private"],
@@ -505,7 +605,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       ...(categoryTags.length > 0 ? { content: categoryTags } : {}),
     },
     counts: [
-      { value: folders.length, label: "folders" },
+      { value: displayFolders.length, label: "folders" },
       { value: folders.reduce((n, c) => n + (c.file_count ?? 0), 0), label: "files" },
     ],
     view: { default: "list", grid: true },
@@ -522,8 +622,8 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       ),
       primary: folderTitle(c),
       secondary: c.description ?? undefined,
-      cols: [`${c.file_count ?? 0} files`, formatRelative(c.updated_at ?? "")],
-      menu: c.read_only
+      cols: [`${c.file_count ?? 0} files`, <RelativeUpdated key="updated" value={c.updated_at} />],
+      menu: c.read_only || c.memory_group
         ? undefined
         : [
             { label: "Rename", onSelect: () => setRenameTarget(c) },
@@ -539,7 +639,11 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       // #1257: wrap in a span with title so the full name is accessible on hover
       // even when it is ellipsis-truncated by c-gnm.
       name: <span title={c.name}>{c.name}</span>,
-      description: `${c.file_count ?? 0} files · ${formatRelative(c.updated_at ?? "")}`,
+      description: (
+        <>
+          {c.file_count ?? 0} files · <RelativeUpdated value={c.updated_at} />
+        </>
+      ),
       status: c.read_only ? { tone: "idle", label: "Read only" } : null,
     }),
     detail: (c) => ({
@@ -552,17 +656,27 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         title: c.name,
         sub: (
           <>
-            <span className="c-vpill">{visibilityLabel(c.visibility)}</span>
+            {c.memory_group ? null : <span className="c-vpill">{visibilityLabel(c.visibility)}</span>}
             {c.read_only && <span className="c-vpill">Read only</span>}
             <span className="c-vpill">{c.file_count ?? 0} files</span>
             <span className="c-vpill">{formatBytes(c.total_size_bytes)}</span>
           </>
         ),
       },
-      tabs: [
-        { key: "Files", label: "Files", count: c.file_count, custom: "file-viewer", render: () => <FilesTab folder={c} /> },
-        { key: "Used by", label: "Used by", count: c.worker_count, custom: "used-by", render: () => <UsedByTab folder={c} /> },
-      ],
+      tabs: c.memory_group
+        ? [
+            {
+              key: "Folders",
+              label: "Folders",
+              count: c.memory_children?.length ?? 0,
+              custom: "file-viewer",
+              render: () => <MemoryChildrenTab packs={c.memory_children ?? []} />,
+            },
+          ]
+        : [
+            { key: "Files", label: "Files", count: c.file_count, custom: "file-viewer", render: () => <FilesTab folder={c} /> },
+            { key: "Used by", label: "Used by", count: c.worker_count, custom: "used-by", render: () => <UsedByTab folder={c} /> },
+          ],
     }),
     // No prominent toolbar "+ New folder" addButton (the operator 2026-06-15):
     // dropping files is the primary affordance, so folder-creation is a quiet
@@ -585,6 +699,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         title: "Your Library is empty",
         help: "Drag any docs onto this page and a folder is created for them automatically. Your workers read these before they act.",
         action: <EmptyStateActions onBrowse={openBrowse} />,
+      },
+      errorRetry: () => {
+        void foldersQuery.refetch();
       },
     },
   };
