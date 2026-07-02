@@ -298,7 +298,7 @@ def _run_email_html(
 <p style="font-size:13px;line-height:1.55;margin:16px 0 0;color:#62697A;">You are receiving this because email alerts are enabled for this {safe_brand} workspace.</p>
 </td></tr>
 <tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#62697A;">
-<a href="{safe_frontend_url}" style="color:#16171A;font-weight:650;text-decoration:none;">{safe_brand}</a>{footer_contact}{footer_unsubscribe}
+<a href="https://floom.dev" style="color:#16171A;font-weight:650;text-decoration:none;">floom.dev</a>{footer_contact}{footer_unsubscribe}
 </td></tr>
 </table>
 </td></tr></table>
