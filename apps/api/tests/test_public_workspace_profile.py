@@ -98,8 +98,32 @@ def test_public_workspace_profile_lists_only_public_workers_without_sensitive_fi
         assert body["workers"][0]["connections"] == ["gmail"]
         assert "private-worker" not in resp.text
         assert "local-user" not in resp.text
+        assert "email" not in body.get("shared_by", {})
         assert "owner_id" not in resp.text
         assert "GMAIL_REFRESH_TOKEN" not in resp.text
+
+
+def test_public_workspace_profile_404s_workspace_with_no_public_assets():
+    with tempfile.TemporaryDirectory(prefix="floom-workspace-profile-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        from auth.local_workspaces import ensure_default_workspace, update_local_workspace
+
+        ensure_default_workspace("local-user")
+        update_local_workspace("local-user", "local-default", name="Private Secretary")
+        repos = main.get_repositories()
+        repos.workers.create(
+            user_id="local-user",
+            worker_id="private-worker",
+            workspace_id="local-default",
+            name="Private Worker",
+            manifest_json=_manifest("private-worker", "Private Worker"),
+        )
+
+        resp = client.get("/workspaces/public/private-secretary")
+
+        assert resp.status_code == 404
+        assert "Private Secretary" not in resp.text
+        assert "private-worker" not in resp.text
 
 
 def test_public_workspace_profile_404s_unknown_handle():

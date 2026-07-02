@@ -18,11 +18,11 @@ function formatCount(value: number, noun: string) {
 function AssetCard({ asset }: { asset: PublicWorkspaceAsset }) {
   const worker = asset.worker;
   return (
-    <article className="w-full min-w-0 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-sm">
+    <article className="w-full min-w-0 rounded-lg bg-[var(--bg-card)] p-5 shadow-[inset_0_0_0_1px_var(--border),0_1px_2px_rgba(15,23,42,0.08)]">
       <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="rounded-md border border-[var(--border)] bg-[var(--bg-subtle)] px-2 py-1 text-xs font-medium uppercase tracking-[0.08em] text-[var(--ink-soft)]">
+            <span className="rounded-md bg-[var(--bg-subtle)] px-2 py-1 text-xs font-medium uppercase tracking-[0.08em] text-[var(--ink-soft)] shadow-[inset_0_0_0_1px_var(--border)]">
               Worker
             </span>
             <span className="text-xs text-[var(--ink-soft)]">{worker.trigger_type}</span>
@@ -74,7 +74,7 @@ export default async function PublicWorkspacePage({
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[var(--bg)] text-[var(--ink)]">
-      <header className="border-b border-[var(--border)] bg-[var(--bg-card)]">
+      <header className="bg-[var(--bg-card)] shadow-[inset_0_-1px_0_var(--border)]">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <FloomMark />
           <Link href="/login" className="text-sm font-medium text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
@@ -95,10 +95,10 @@ export default async function PublicWorkspacePage({
         </div>
 
         <div className="mt-8 flex flex-wrap gap-3 text-sm text-[var(--ink-soft)]">
-          <span className="rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
+          <span className="rounded-md bg-[var(--bg-card)] px-3 py-2 shadow-[inset_0_0_0_1px_var(--border)]">
             {formatCount(profile.counts.workers, "worker")}
           </span>
-          <span className="rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2">
+          <span className="rounded-md bg-[var(--bg-card)] px-3 py-2 shadow-[inset_0_0_0_1px_var(--border)]">
             @{profile.workspace.handle}
           </span>
         </div>
@@ -110,7 +110,7 @@ export default async function PublicWorkspacePage({
             ))}
           </div>
         ) : (
-          <div className="mt-10 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-6 text-[var(--ink-soft)]">
+          <div className="mt-10 rounded-lg bg-[var(--bg-card)] p-6 text-[var(--ink-soft)] shadow-[inset_0_0_0_1px_var(--border)]">
             No public assets are listed in this workspace.
           </div>
         )}

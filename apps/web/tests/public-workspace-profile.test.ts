@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { isPublicWorkspaceProfilePath } from "@/lib/public-workspace-routes";
 
 function read(rel: string): string {
   return readFileSync(join(process.cwd(), rel), "utf-8");
@@ -25,6 +26,14 @@ describe("public workspace profile", () => {
 
   it("renders handle profile pages outside the app shell", () => {
     const source = read("components/layout/AppShell.tsx");
-    expect(source).toContain('pathname.startsWith("/@")');
+    expect(source).toContain("isPublicWorkspaceProfilePath(pathname)");
+  });
+
+  it("matches only single-segment public workspace profile paths", () => {
+    expect(isPublicWorkspaceProfilePath("/@fede-secretary")).toBe(true);
+    expect(isPublicWorkspaceProfilePath("/@fede-secretary/")).toBe(true);
+    expect(isPublicWorkspaceProfilePath("/@fede-secretary/settings")).toBe(false);
+    expect(isPublicWorkspaceProfilePath("/@")).toBe(false);
+    expect(isPublicWorkspaceProfilePath("/app/@fede-secretary")).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/
 import { BootSplash } from "@/components/layout/BootSplash";
 import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 import { TermsAcceptanceGate } from "@/components/TermsAcceptanceGate";
+import { isPublicWorkspaceProfilePath } from "@/lib/public-workspace-routes";
 
 // Render exactly one Emily surface so only one chat instance mounts: the
 // desktop dock (≥1024px) or the mobile/tablet bottom-sheet (<1024px).
@@ -63,7 +64,7 @@ function pathMatchesPrefixes(pathname: string, prefixes: string[]) {
 export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   const pathname = usePathname();
   const isDesktop = useIsDesktop();
-  const standalone = pathname.startsWith("/@")
+  const standalone = isPublicWorkspaceProfilePath(pathname)
     || pathMatchesPrefixes(pathname, standalonePrefixes)
     || pathMatchesPrefixes(pathname, noSidebarPaths);
   const noDock = pathMatchesPrefixes(pathname, noDockPrefixes);

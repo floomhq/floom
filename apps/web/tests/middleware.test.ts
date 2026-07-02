@@ -150,6 +150,15 @@ describe("middleware auth gate", () => {
     }
   });
 
+  it("does NOT make nested /@ routes public by prefix", async () => {
+    const { proxy: middleware } = await import("@/proxy");
+    for (const p of ["/@fede-secretary/settings", "/@fede-secretary/private/run"]) {
+      const res = await middleware(req(p));
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toContain("/login");
+    }
+  });
+
   it("keeps the exact legal pages /privacy and /terms public (OW-02)", async () => {
     const { proxy: middleware } = await import("@/proxy");
     for (const p of ["/privacy", "/terms"]) {

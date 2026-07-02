@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export const metadata = {
   title: "Privacy | Floom",
   description: "How Floom handles data.",
@@ -75,9 +77,9 @@ export default function PrivacyPage() {
 
         <p className="text-muted-foreground pt-2">
           See also the{" "}
-          <a className="underline" href="/terms">
+          <Link className="underline" href="/terms">
             Terms
-          </a>
+          </Link>
           .
         </p>
       </div>

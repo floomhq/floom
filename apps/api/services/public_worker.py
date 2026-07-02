@@ -239,16 +239,14 @@ def _public_workspace_actor(workspace: Dict[str, Any], repos: "Repositories" | N
         except Exception:
             actor = None
     display_name = str((actor or {}).get("display_name") or "").strip()
-    email = str((actor or {}).get("email") or "").strip()
     username = str((actor or {}).get("username") or "").strip()
-    label = display_name or email or username or str(workspace.get("name") or "").strip()
+    username_label = "" if "@" in username else username
+    label = display_name or username_label or str(workspace.get("name") or "").strip()
     if not label:
         return None
     out = {"label": label}
     if display_name:
         out["display_name"] = display_name
-    if email or "@" in username:
-        out["email"] = email or username
     return out
 
 
@@ -294,6 +292,8 @@ def _public_workspace_profile(handle: str, repos: "Repositories", *, limit: int 
     workspace = _resolve_public_workspace_handle(handle)
     workspace_id = str(workspace.get("id") or "local-default")
     workers = repos.workers.list_public_for_workspace(workspace_id=workspace_id, limit=limit)
+    if not workers:
+        raise HTTPException(status_code=404, detail="Workspace profile not found")
     assets: list[Dict[str, Any]] = []
     for worker in workers:
         try:

@@ -546,9 +546,9 @@ export default function AssistantPage() {
 
       <p className="text-xs text-muted-foreground">
         To use this assistant from Slack, go to{" "}
-        <a href="/settings#slack" className="font-medium text-foreground underline-offset-2 hover:underline">
+        <Link href="/settings#slack" className="font-medium text-foreground underline-offset-2 hover:underline">
           Settings &rarr; Slack
-        </a>
+        </Link>
         .
       </p>
     </div>

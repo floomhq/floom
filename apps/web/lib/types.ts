@@ -491,7 +491,6 @@ export interface PublicWorker {
 export interface PublicWorkspaceActor {
   label: string;
   display_name?: string;
-  email?: string;
 }
 
 export interface PublicWorkspaceSummary {
