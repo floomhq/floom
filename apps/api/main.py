@@ -6083,6 +6083,8 @@ def _emit_mcp_tool_called_event(
         from services import analytics_posthog
         from services.product_events import emit_mcp_tool_called
 
+        if _telemetry_is_test_probe(tool_name):
+            return
         props = _mcp_tool_tracking_properties(tool_name, arguments, result)
         # This is the cloud MCP dispatcher (serves /mcp/{workspace} and
         # /mcp-tools/serve); those requests carry no X-Floom-Source header, so
@@ -6104,6 +6106,7 @@ def _emit_mcp_tool_called_event(
                 status_code=props.get("status_code"),
                 error_category=error_category,
                 is_custom_tool=bool(props.get("is_custom_tool")),
+                workspace_id=_telemetry_workspace_id(auth),
             )
         finally:
             analytics_posthog.reset_request_context(tokens)
@@ -8305,20 +8308,151 @@ class TelemetryIdentify(BaseModel):
     anonymous_distinct_id: str = Field(min_length=1, max_length=200)
 
 
-def _telemetry_workspace_id(owner_id: str) -> str:
+def _telemetry_is_test_probe(value: str | None) -> bool:
+    text = str(value or "")
+    return text == "does.not.exist" or text.startswith("codex.telemetry_probe")
+
+
+def _telemetry_candidate_workspace_id(value: Any) -> str:
+    text = str(value or "").strip()
+    return text
+
+
+def _telemetry_workspace_id_from_row(value: Any) -> str:
+    rows = value if isinstance(value, list) else [value]
+    role_rank = {"owner": 0, "admin": 1, "member": 2}
+    candidates: list[tuple[int, str]] = []
+    for row in rows:
+        workspace_id: Any = None
+        status = "active"
+        role = "member"
+        if isinstance(row, str):
+            workspace_id = row
+        elif isinstance(row, dict):
+            workspace_id = row.get("workspace_id") or row.get("workspaceId")
+            workspace = row.get("workspace")
+            if not workspace_id and isinstance(workspace, dict):
+                workspace_id = workspace.get("workspace_id") or workspace.get("id")
+            if not workspace_id and "user_id" not in row:
+                workspace_id = row.get("id")
+            status = str(row.get("status") or "active")
+            role = str(row.get("role") or "member")
+        else:
+            workspace_id = getattr(row, "workspace_id", None) or getattr(row, "workspaceId", None)
+            workspace = getattr(row, "workspace", None)
+            if not workspace_id and workspace is not None:
+                workspace_id = getattr(workspace, "workspace_id", None) or getattr(workspace, "id", None)
+            if not workspace_id and not hasattr(row, "user_id"):
+                workspace_id = getattr(row, "id", None)
+            status = str(getattr(row, "status", "active") or "active")
+            role = str(getattr(row, "role", "member") or "member")
+        workspace_id = _telemetry_candidate_workspace_id(workspace_id)
+        if workspace_id and status != "removed":
+            candidates.append((role_rank.get(role, 9), workspace_id))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
+def _telemetry_workspace_id_from_membership(owner_id: str) -> str:
+    try:
+        repos = get_repositories()
+    except Exception:
+        return ""
+    members = getattr(repos, "members", None)
+    if members is None:
+        return ""
+    for method_name in (
+        "active_workspace_for_user",
+        "get_active_workspace_for_user",
+        "workspace_for_user",
+        "get_workspace_for_user",
+        "get_by_user_id",
+        "get_for_user",
+        "find_for_user",
+        "list_for_user",
+        "list_by_user",
+        "list_for_user_id",
+    ):
+        method = getattr(members, method_name, None)
+        if not callable(method):
+            continue
+        result: Any = None
+        called = False
+        for kwargs in ({"user_id": owner_id}, {"owner_id": owner_id}):
+            try:
+                result = method(**kwargs)
+                called = True
+                break
+            except TypeError:
+                continue
+            except Exception:
+                result = None
+                called = True
+                break
+        if not called:
+            try:
+                result = method(owner_id)
+            except Exception:
+                result = None
+        workspace_id = _telemetry_workspace_id_from_row(result)
+        if workspace_id:
+            return workspace_id
+    return ""
+
+
+def _telemetry_workspace_id(auth: AuthContext, request: Request | None = None) -> str:
+    actor_prefix = "workspace:"
+    owner_id = str(getattr(auth, "user_id", "") or "")
+    if owner_id.startswith(actor_prefix):
+        workspace_id = _telemetry_candidate_workspace_id(owner_id[len(actor_prefix):])
+        if workspace_id:
+            return workspace_id
+
+    for attr_name in ("workspace_id", "active_workspace_id", "workspace"):
+        workspace_id = _telemetry_candidate_workspace_id(getattr(auth, attr_name, None))
+        if workspace_id:
+            return workspace_id
+
+    payload = getattr(auth, "run_token_payload", None)
+    if isinstance(payload, dict):
+        workspace_id = _telemetry_candidate_workspace_id(payload.get("workspace_id"))
+        if workspace_id:
+            return workspace_id
+
+    if request is not None:
+        state = getattr(request, "state", None)
+        for attr_name in ("workspace_id", "active_workspace_id", "workeros_workspace_id"):
+            workspace_id = _telemetry_candidate_workspace_id(getattr(state, attr_name, None))
+            if workspace_id:
+                return workspace_id
+
+    workspace_id = _telemetry_workspace_id_from_membership(owner_id)
+    if workspace_id:
+        return workspace_id
+
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "cloud":
+        return ""
     try:
         return str(derive_workspace_id(owner_id))
     except Exception:
         return ""
 
 
-def _identify_telemetry_install(owner_id: str, anonymous_distinct_id: Optional[str]) -> None:
+def _identify_telemetry_install(
+    owner_id: str,
+    anonymous_distinct_id: Optional[str],
+    workspace_id: Optional[str] = None,
+) -> None:
     if not anonymous_distinct_id:
         return
     try:
         from services import analytics_posthog
 
-        workspace_id = _telemetry_workspace_id(owner_id)
+        if workspace_id is None:
+            workspace_id = _telemetry_workspace_id(AuthContext(user_id=owner_id))
         analytics_posthog.identify_user(
             distinct_id=owner_id or "",
             anonymous_distinct_id=anonymous_distinct_id,
@@ -8331,9 +8465,14 @@ def _identify_telemetry_install(owner_id: str, anonymous_distinct_id: Optional[s
 @app.post("/telemetry/identify", status_code=204)
 async def post_telemetry_identify(
     payload: TelemetryIdentify,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> Response:
-    _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id)
+    _identify_telemetry_install(
+        auth.user_id,
+        payload.anonymous_distinct_id,
+        _telemetry_workspace_id(auth, request),
+    )
     return Response(status_code=204)
 
 
@@ -8347,7 +8486,10 @@ async def post_cli_telemetry(
         from services import analytics_posthog
         from services.product_events import emit_cli_command_invoked
 
-        _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id)
+        if _telemetry_is_test_probe(payload.command):
+            return Response(status_code=204)
+        workspace_id = _telemetry_workspace_id(auth, request)
+        _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id, workspace_id)
         tokens = analytics_posthog.set_request_context(
             source="cli",
             do_not_track=(
@@ -8365,6 +8507,7 @@ async def post_cli_telemetry(
                 api_base_kind=payload.api_base_kind,
                 worker_id=payload.worker_id,
                 run_id=payload.run_id,
+                workspace_id=workspace_id,
             )
         finally:
             analytics_posthog.reset_request_context(tokens)
@@ -8383,7 +8526,10 @@ async def post_mcp_tool_telemetry(
         from services import analytics_posthog
         from services.product_events import emit_mcp_tool_called
 
-        _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id)
+        if _telemetry_is_test_probe(payload.tool_name):
+            return Response(status_code=204)
+        workspace_id = _telemetry_workspace_id(auth, request)
+        _identify_telemetry_install(auth.user_id, payload.anonymous_distinct_id, workspace_id)
         tokens = analytics_posthog.set_request_context(
             source="mcp",
             do_not_track=(
@@ -8403,6 +8549,7 @@ async def post_mcp_tool_telemetry(
                 status_code=payload.status_code,
                 error_category=payload.error_category,
                 is_custom_tool=payload.is_custom_tool,
+                workspace_id=workspace_id,
             )
         finally:
             analytics_posthog.reset_request_context(tokens)
