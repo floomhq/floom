@@ -480,8 +480,7 @@ class TestConnectionCallbackAndComposio503:
 
         assert resp.status_code == 200, resp.text
         redirect_url = resp.json()["redirect_url"]
-        conn_id = resp.json()["id"]
-        assert redirect_url == f"https://floom.dev/app/api/proxy/connections/{conn_id}/authorize"
+        assert redirect_url.startswith("https://floom.dev/app/api/proxy/connections/authorize/")
         assert "composio.dev" not in redirect_url
 
         api_path = urlparse(redirect_url).path.removeprefix("/app/api/proxy")
