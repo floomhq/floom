@@ -182,6 +182,35 @@ describe("api session expiry handling", () => {
     expect(setItem).toHaveBeenCalledWith("workeros.activeWorkspaceId", "ws_new");
   });
 
+  it("uses the newly selected workspace header on following API calls", async () => {
+    const store = new Map<string, string>([["workeros.activeWorkspaceId", "ws_old"]]);
+    vi.stubGlobal("window", {
+      location: { protocol: "https:", search: "" },
+      localStorage: {
+        getItem: vi.fn((key: string) => store.get(key) ?? null),
+        setItem: vi.fn((key: string, value: string) => store.set(key, value)),
+        removeItem: vi.fn((key: string) => store.delete(key)),
+      },
+      document: {
+        set cookie(_value: string) {},
+      },
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const { api, setActiveWorkspaceId } = await import("@/lib/api");
+
+    setActiveWorkspaceId("ws_new");
+    await api.workers.list();
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("x-workeros-workspace")).toBe("ws_new");
+  });
+
   it("keeps persisted query data when the active workspace is unchanged", async () => {
     const removeItem = vi.fn();
     vi.stubGlobal("window", {

@@ -13,9 +13,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
-import { reportError, logError } from "@/lib/notify";
+import { logError } from "@/lib/notify";
 import { ShareModal } from "@/components/sharing/ShareModal";
-import { useRuns, useStreamedInitialData, qk, RUNS_FIRST_PAGE_QUERY_PARAMS } from "@/lib/query/hooks";
+import { useRuns, useStreamedInitialData, useWorkers, qk, RUNS_FIRST_PAGE_QUERY_PARAMS } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
@@ -501,6 +501,7 @@ export default function RunsCollection({
     RUNS_FIRST_PAGE_QUERY_PARAMS,
     initialRuns.length > 0 ? initialRuns : undefined,
   );
+  const workersQuery = useWorkers();
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -562,14 +563,10 @@ export default function RunsCollection({
   };
 
   useEffect(() => {
-    // Runs first page comes from the cache-first query (runsQuery / useRuns)
-    // above; here we only need the workers list for content-tag filtering
-    // (SPEC §11). Content tags are inherited from the parent worker.
-    api.workers
-      .list()
-      .then(setWorkers)
-      .catch((err) => reportError("Could not load workers for run filters.", err));
-  }, []);
+    if (workersQuery.data) {
+      setWorkers(workersQuery.data);
+    }
+  }, [workersQuery.data]);
 
   // worker_id → its content tags, for tag filtering + the shared vocabulary.
   const workerTags = useMemo(() => {
