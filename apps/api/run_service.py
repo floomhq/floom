@@ -1856,7 +1856,7 @@ def _resolved_worker_timeout_seconds(config: Optional["WorkerConfig"]) -> int:
     """Resolve the effective run timeout for a worker dispatch.
 
     Policy (#1127/#1314):
-    - Default: ``config.runtime.limits.timeout_seconds`` (per-worker, default 300 s).
+    - Default: ``config.runtime.limits.timeout_seconds`` (per-worker, default 900 s).
     - Workspace ``default_timeout_seconds`` overrides the per-worker value when
       set, enabling opt-in runs up to MAX_RUN_TIMEOUT_SECONDS (3600 s = 1 hour).
     - Absolute ceiling: MAX_RUN_TIMEOUT_SECONDS (never exceeds 3600 s).

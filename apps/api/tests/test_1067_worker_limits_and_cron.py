@@ -57,7 +57,8 @@ def test_normal_limits_pass_through():
 
 def test_defaults_unchanged():
     lim = WorkerLimits()
-    assert lim.timeout_seconds == 300
+    assert lim.timeout_seconds == 900
+    assert lim.max_tool_iterations == 80
     assert lim.max_output_tokens == 1_000_000
     assert lim.max_total_tokens == 1_000_000
     assert lim.max_monthly_cost_usd is None  # unlimited stays unlimited

@@ -2145,7 +2145,10 @@ async def stream_chat(
     Pushes dicts matching the AI SDK part format. Final part is
     {"type": "finish", "conversation_id": ..., "message_id": ...}.
     """
+    from agents_runtime import disable_openai_agents_tracing
     from agents import Agent, ModelSettings, RunConfig, Runner
+
+    disable_openai_agents_tracing()
 
     # Resolve or create conversation. Caller-supplied thread ids (Slack, MCP,
     # Langdock, custom clients) are mapped to deterministic owner-scoped internal
@@ -2342,6 +2345,7 @@ async def stream_chat(
         workflow_name="workeros:workspace-agent",
         trace_id=f"trace_chat_{uuid.uuid4().hex[:16]}",
         trace_metadata={"conversation_id": conversation_id, "user_id": user_id},
+        tracing_disabled=True,
         model_provider=loop_local_provider.provider,
     )
 

@@ -22,7 +22,7 @@ echo "==> backend: installing requirements (this takes a few minutes)"
 # 2. Scaffold apps/api/.env from the example (never clobber an existing one).
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "==> backend: created apps/api/.env — add OPENAI_API_KEY + E2B_API_KEY (or Bedrock keys)"
+  echo "==> backend: created apps/api/.env — add E2B_API_KEY plus Bedrock or explicit OpenAI provider keys"
 else
   echo "==> backend: apps/api/.env already exists — left untouched"
 fi
@@ -39,4 +39,4 @@ echo "==> frontend: npm install"
 npm install
 
 echo
-echo "Setup complete. Edit apps/api/.env with your keys, then run:  ./scripts/dev.sh"
+echo "Setup complete. Edit apps/api/.env with your provider keys, then run:  ./scripts/dev.sh"

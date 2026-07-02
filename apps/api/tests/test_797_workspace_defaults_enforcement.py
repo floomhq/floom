@@ -131,36 +131,45 @@ class TestDefaultModel:
 
 
 class TestTimeoutCeiling:
+    def test_worker_limits_default_timeout_is_900(self):
+        """#928: default run timeout is 900 s while the max remains 3600."""
+        from models import WorkerLimits
+        from runtime_limits import DEFAULT_RUN_TIMEOUT_SECONDS, MAX_RUN_TIMEOUT_SECONDS
+
+        assert DEFAULT_RUN_TIMEOUT_SECONDS == 900
+        assert MAX_RUN_TIMEOUT_SECONDS == 3600
+        assert WorkerLimits().timeout_seconds == 900
+
     def test_resolve_timeout_seconds_uses_workspace_when_set(self):
         """#1127/#1314: workspace default_timeout_seconds overrides per-worker limit upward."""
         import runner_sandbox.agent_driver as ad
         import types
 
-        # Simulate limits with per-worker default of 300 s
-        limits = types.SimpleNamespace(timeout_seconds=300)
+        # Simulate limits with the current per-worker default.
+        limits = types.SimpleNamespace(timeout_seconds=900)
 
-        # Workspace sets 3600 s → _resolve_timeout_seconds should return 3600
+        # Workspace sets 3600 s, so _resolve_timeout_seconds returns 3600.
         ad._ws_setting = lambda key: "3600" if key == "default_timeout_seconds" else None
-        assert ad._resolve_timeout_seconds(300, limits) == 3600
+        assert ad._resolve_timeout_seconds(900, limits) == 3600
 
     def test_resolve_timeout_seconds_uses_per_worker_when_ws_unset(self):
         """#1127/#1314: without a workspace setting, per-worker limit applies."""
         import runner_sandbox.agent_driver as ad
         import types
 
-        limits = types.SimpleNamespace(timeout_seconds=300)
+        limits = types.SimpleNamespace(timeout_seconds=900)
         ad._ws_setting = lambda key: None
-        assert ad._resolve_timeout_seconds(300, limits) == 300
+        assert ad._resolve_timeout_seconds(900, limits) == 900
 
     def test_resolve_timeout_seconds_never_exceeds_3600(self):
         """#1127/#1314: absolute ceiling is MAX_RUN_TIMEOUT_SECONDS (3600)."""
         import runner_sandbox.agent_driver as ad
         import types
 
-        limits = types.SimpleNamespace(timeout_seconds=300)
+        limits = types.SimpleNamespace(timeout_seconds=900)
         # Even if somehow a larger value slipped in, cap at 3600
         ad._ws_setting = lambda key: "9999" if key == "default_timeout_seconds" else None
-        assert ad._resolve_timeout_seconds(300, limits) == 3600
+        assert ad._resolve_timeout_seconds(900, limits) == 3600
 
     def test_workspace_setting_rejects_3601(self):
         """#1127/#1314: validate_default_timeout_seconds rejects values > 3600."""

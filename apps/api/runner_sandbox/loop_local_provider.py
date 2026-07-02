@@ -52,6 +52,16 @@ def _resolve_openai_api_key() -> Optional[str]:
         return None
 
 
+def _uses_openai_provider(model_name: str | None) -> bool:
+    """True when the Agents SDK must resolve this model through OpenAI."""
+    if model_name is None:
+        return True
+    if "/" not in model_name:
+        return True
+    prefix = model_name.split("/", 1)[0]
+    return prefix == "openai"
+
+
 class LoopLocalModelProvider:
     """A ModelProvider bound to a per-run AsyncOpenAI + httpx client.
 
@@ -71,25 +81,36 @@ class LoopLocalModelProvider:
         self._openai_client: Any = None
         self._http_client: Any = None
 
-    def _ensure_provider(self) -> Any:
+    def _ensure_provider(self, *, needs_openai_client: bool) -> Any:
         if self._provider is not None:
-            return self._provider
-        import httpx
-        from openai import AsyncOpenAI
+            if not needs_openai_client or self._openai_client is not None:
+                return self._provider
+            # Rebuild with a loop-local OpenAI client for an OpenAI model after
+            # this instance was first used for a non-OpenAI model.
+            self._provider = None
         from agents.models.multi_provider import MultiProvider
 
-        api_key = _resolve_openai_api_key()
-        base_url = os.environ.get("OPENAI_BASE_URL")
-        # Fresh httpx client bound to THIS loop. Not the SDK process global.
-        self._http_client = httpx.AsyncClient()
-        self._openai_client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            http_client=self._http_client,
-        )
-        # MultiProvider preserves the SDK's prefix routing (openai/, litellm/,
-        # any-llm/) while pinning the OpenAI provider to our per-run client.
-        self._provider = MultiProvider(openai_client=self._openai_client)
+        if needs_openai_client:
+            import httpx
+            from openai import AsyncOpenAI
+
+            api_key = _resolve_openai_api_key()
+            base_url = os.environ.get("OPENAI_BASE_URL")
+            # Fresh httpx client bound to THIS loop. Not the SDK process global.
+            self._http_client = httpx.AsyncClient()
+            self._openai_client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                http_client=self._http_client,
+            )
+            # OpenAI runs keep the loop-local client isolation that prevents
+            # cross-loop httpx reuse.
+            self._provider = MultiProvider(openai_client=self._openai_client)
+        else:
+            # Non-OpenAI runs use the SDK's built-in litellm provider. Do not
+            # construct AsyncOpenAI here; OpenAI keys are not required for these
+            # models and tracing is disabled in the agent driver.
+            self._provider = MultiProvider()
         return self._provider
 
     @property
@@ -99,13 +120,19 @@ class LoopLocalModelProvider:
 
     # --- ModelProvider protocol -------------------------------------------------
     def get_model(self, model_name: str | None) -> Any:
-        return self._ensure_provider().get_model(model_name)
+        return self._ensure_provider(
+            needs_openai_client=_uses_openai_provider(model_name)
+        ).get_model(model_name)
 
     @property
     def openai_provider(self) -> Any:
-        # Test/diagnostic hook mirroring MultiProvider.openai_provider. Forces
-        # lazy construction so callers can inspect the per-run OpenAI client.
-        return self._ensure_provider().openai_provider
+        # Test/diagnostic hook mirroring MultiProvider.openai_provider when the
+        # OpenAI provider already exists. The Agents SDK also probes this
+        # attribute for optional OpenAI harness metadata before model resolution;
+        # do not construct AsyncOpenAI from that probe on non-OpenAI runs.
+        if self._provider is None or self._openai_client is None:
+            return None
+        return self._provider.openai_provider
 
     async def aclose(self) -> None:
         """Close the per-run OpenAI + httpx client. Idempotent, never raises."""

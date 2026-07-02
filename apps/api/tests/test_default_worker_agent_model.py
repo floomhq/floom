@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -107,6 +108,8 @@ def test_agent_driver_fallback_uses_default_agent_model(monkeypatch, tmp_path):
 
     async def _fake_run_streamed(*, agent, run_input, max_turns, run_config):
         captured["model"] = agent.model
+        captured["max_turns"] = max_turns
+        captured["tracing_disabled"] = run_config.tracing_disabled
         return object()
 
     async def _fake_consume(*_args, **_kwargs):
@@ -140,14 +143,16 @@ def test_agent_driver_fallback_uses_default_agent_model(monkeypatch, tmp_path):
     assert result.status == "success"
     assert captured["model"] == llm.agent_model(DEFAULT_WORKER_AGENT_MODEL)
     assert captured["model"] != "gpt-5-mini"
+    assert captured["max_turns"] == 80
+    assert captured["tracing_disabled"] is True
 
 
 # ---------------------------------------------------------------------------
 # Cloud regression: WORKEROS_WORKER_AGENT_MODEL arrives AFTER `from models import`
 # (load_dotenv in main.py runs after the import block). A frozen module-level
-# constant would stay "gpt-5.5" (→ OpenAI, dead key, "exceeded your current
-# quota") while Emily, which reads WORKEROS_CHAT_MODEL lazily, works. These tests
-# pin the lazy resolution so workers route to Bedrock like Emily.
+# constant would stay on the import-time fallback while Emily, which reads
+# WORKEROS_CHAT_MODEL lazily, works. These tests pin lazy resolution so workers
+# route to the configured provider like Emily.
 # ---------------------------------------------------------------------------
 
 _BEDROCK = "bedrock/us.anthropic.claude-sonnet-4-6"
@@ -161,11 +166,11 @@ def test_default_worker_agent_model_resolves_bedrock_when_env_set(monkeypatch):
     assert default_worker_agent_model() == _BEDROCK
 
 
-def test_default_worker_agent_model_falls_back_to_openai_when_unset(monkeypatch):
+def test_default_worker_agent_model_falls_back_to_bedrock_when_unset(monkeypatch):
     from models import default_worker_agent_model
 
     monkeypatch.delenv("WORKEROS_WORKER_AGENT_MODEL", raising=False)
-    assert default_worker_agent_model() == "gpt-5.5"
+    assert default_worker_agent_model() == _BEDROCK
 
 
 def test_worker_contract_picks_up_bedrock_env_after_import(monkeypatch):
@@ -194,3 +199,54 @@ def test_explicit_worker_model_choice_is_preserved(monkeypatch):
 
     config = worker_contract_to_worker_config(contract, "default-model-worker")
     assert config.runtime.model == "gpt-5.5"
+
+
+def test_litellm_agent_model_does_not_build_openai_client(monkeypatch):
+    """#927: non-OpenAI agent runs do not require or construct AsyncOpenAI."""
+    from runner_sandbox.loop_local_provider import LoopLocalModelProvider
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("PLATFORM_OPENAI_API_KEY", raising=False)
+
+    def _fail_async_openai(*_args, **_kwargs):
+        raise AssertionError("AsyncOpenAI must not be built for litellm models")
+
+    monkeypatch.setattr("openai.AsyncOpenAI", _fail_async_openai)
+
+    provider = LoopLocalModelProvider()
+    model = provider.get_model(f"litellm/{_BEDROCK}")
+
+    assert model.__class__.__name__ == "LitellmModel"
+    assert provider._openai_client is None
+    assert provider._http_client is None
+
+
+def test_openai_agent_model_still_builds_openai_client(monkeypatch):
+    """Explicit OpenAI models keep the loop-local OpenAI provider path."""
+    from runner_sandbox.loop_local_provider import LoopLocalModelProvider
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    provider = LoopLocalModelProvider()
+    model = provider.get_model("gpt-5.5")
+
+    assert model.__class__.__name__.startswith("OpenAI")
+    assert provider._openai_client is not None
+    assert provider._http_client is not None
+
+
+def test_agents_runtime_disables_openai_agents_tracing(monkeypatch):
+    """#927: runtime turns off Agents SDK tracing before agent runs."""
+    import agents_runtime
+
+    calls: list[bool] = []
+
+    monkeypatch.delenv("OPENAI_AGENTS_DISABLE_TRACING", raising=False)
+    monkeypatch.setattr(agents_runtime, "_TRACING_DISABLED", False)
+    monkeypatch.setattr("agents.set_tracing_disabled", lambda disabled: calls.append(disabled))
+
+    agents_runtime.disable_openai_agents_tracing()
+
+    assert calls == [True]
+    assert agents_runtime._TRACING_DISABLED is True
+    assert os.environ["OPENAI_AGENTS_DISABLE_TRACING"] == "1"

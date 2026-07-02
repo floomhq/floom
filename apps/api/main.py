@@ -74,6 +74,10 @@ if os.environ.get("WORKEROS_DEV") == "1":
 elif (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local":
     load_dotenv()
 
+from agents_runtime import disable_openai_agents_tracing
+
+disable_openai_agents_tracing()
+
 from auth import AuthContext, get_auth_context, get_auth_provider
 from auth.context import current_auth_context, current_auth_user_id, set_current_auth_context
 from auth.guards import _require_admin, _require_workspace_write
