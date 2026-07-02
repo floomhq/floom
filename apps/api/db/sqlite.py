@@ -3565,6 +3565,77 @@ class SqliteConnectionRepository:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
+    def create_authorize_link(
+        self,
+        *,
+        link_id: str,
+        user_id: str,
+        redirect_url: str,
+        nonce: str,
+        exp: int,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO connection_authorize_links
+                    (id, user_id, redirect_url, nonce, exp, created_at, consumed_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (link_id, user_id, redirect_url, nonce, int(exp), created_at),
+            )
+            row = conn.execute(
+                """
+                SELECT id, user_id, redirect_url, nonce, exp, created_at, consumed_at
+                FROM connection_authorize_links
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (link_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError(f"failed to create authorize link {link_id}")
+        return _row_dict(row)
+
+    def consume_authorize_link(self, *, link_id: str, now: int, consumed_at: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT id, user_id, redirect_url, nonce, exp, created_at, consumed_at
+                FROM connection_authorize_links
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (link_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            record = _row_dict(row)
+            if record.get("consumed_at") or int(record.get("exp") or 0) < int(now):
+                return None
+            cursor = conn.execute(
+                """
+                UPDATE connection_authorize_links
+                SET consumed_at = ?
+                WHERE id = ? AND consumed_at IS NULL AND exp >= ?
+                """,
+                (consumed_at, link_id, int(now)),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return record
+
+    def prune_authorize_links(self, *, now: int) -> int:
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM connection_authorize_links
+                WHERE exp < ? OR consumed_at IS NOT NULL
+                """,
+                (int(now),),
+            )
+        return cursor.rowcount
+
 
 class SqliteSecretRepository:
     def list(self, *, user_id: str) -> list[dict[str, Any]]:

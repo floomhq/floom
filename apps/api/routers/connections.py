@@ -264,41 +264,51 @@ def _validate_oauth_state(state: str) -> str:
     return user_id
 
 
-def _issue_authorize_token(*, redirect_url: str, user_id: str, ttl_seconds: int = 900) -> str:
-    payload = {
-        "redirect_url": redirect_url,
-        "user_id": user_id,
-        "nonce": pysecrets.token_urlsafe(18),
-        "exp": int(time.time()) + ttl_seconds,
-    }
-    encoded = _b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    signature = hmac.new(
-        _oauth_state_secret().encode("utf-8"),
-        encoded.encode("ascii"),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"{encoded}.{signature}"
-
-
-def _validate_authorize_token(token: str) -> str:
+def _issue_authorize_token(
+    *,
+    redirect_url: str,
+    user_id: str,
+    repos: Repositories,
+    ttl_seconds: int = _AUTHORIZE_LINK_TTL_SECONDS,
+) -> str:
+    if not _is_allowed_composio_redirect_url(redirect_url):
+        raise HTTPException(status_code=400, detail="Invalid authorization target")
+    now = int(time.time())
     try:
-        encoded, signature = token.split(".", 1)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid authorization link") from exc
-    expected = hmac.new(
-        _oauth_state_secret().encode("utf-8"),
-        encoded.encode("ascii"),
-        hashlib.sha256,
-    ).hexdigest()
-    if not hmac.compare_digest(expected, signature):
-        raise HTTPException(status_code=400, detail="Invalid authorization link")
-    try:
-        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+        repos.connections.prune_authorize_links(now=now)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid authorization link") from exc
-    if int(payload.get("exp") or 0) < int(time.time()):
+        logger.debug("Could not prune expired authorization links: %s", exc)
+    for _ in range(3):
+        link_id = pysecrets.token_urlsafe(16)
+        try:
+            repos.connections.create_authorize_link(
+                link_id=link_id,
+                user_id=user_id,
+                redirect_url=redirect_url,
+                nonce=pysecrets.token_urlsafe(18),
+                exp=now + ttl_seconds,
+                created_at=now_iso(),
+            )
+            return link_id
+        except Exception as exc:
+            if "UNIQUE" not in str(exc).upper():
+                raise
+    raise HTTPException(status_code=503, detail="Could not create authorization link")
+
+
+def _validate_authorize_token(token: str, repos: Repositories) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", token or ""):
+        raise HTTPException(status_code=400, detail="Invalid authorization link")
+    row = repos.connections.consume_authorize_link(
+        link_id=token,
+        now=int(time.time()),
+        consumed_at=now_iso(),
+    )
+    if not row:
         raise HTTPException(status_code=400, detail="Authorization link expired")
-    redirect_url = str(payload.get("redirect_url") or "")
+    if not row.get("nonce") or not row.get("user_id"):
+        raise HTTPException(status_code=400, detail="Invalid authorization link")
+    redirect_url = str(row.get("redirect_url") or "")
     if not _is_allowed_composio_redirect_url(redirect_url):
         raise HTTPException(status_code=400, detail="Invalid authorization target")
     return redirect_url
@@ -313,8 +323,9 @@ def _is_allowed_composio_redirect_url(redirect_url: str) -> bool:
     )
 
 
-def _branded_authorize_url(connection_id: str) -> str:
-    return f"{_get_frontend_url()}/api/proxy/connections/{connection_id}/authorize"
+def _branded_authorize_url(*, redirect_url: str, user_id: str, repos: Repositories) -> str:
+    token = _issue_authorize_token(redirect_url=redirect_url, user_id=user_id, repos=repos)
+    return f"{_get_frontend_url()}/api/proxy/connections/authorize/{token}"
 
 
 def _authorize_redirect_url_for_connection(connection_id: str, repos: Repositories) -> str:
@@ -1475,7 +1486,6 @@ def initiate_connection(
     # active connection exists for the app — see the suppression there. We do NOT
     # reuse/replace rows here, which would break genuine multi-account support.)
     conn_id = str(_uuid_mod.uuid4())
-    redirect_url = _branded_authorize_url(conn_id)
     now = now_iso()
     repos.connections.upsert(
         user_id=auth.user_id,
@@ -1486,6 +1496,11 @@ def initiate_connection(
         status="initiated",
         created_at=now,
         updated_at=now,
+    )
+    redirect_url = _branded_authorize_url(
+        redirect_url=result["redirect_url"],
+        user_id=auth.user_id,
+        repos=repos,
     )
     try:
         background_tasks.add_task(
@@ -1516,10 +1531,13 @@ def authorize_connection_by_id(
 
 
 @connections_router.get("/connections/authorize/{token}")
-def authorize_connection(token: str):
+def authorize_connection(
+    token: str,
+    repos: Repositories = Depends(get_repos),
+):
     from fastapi.responses import RedirectResponse
 
-    return RedirectResponse(url=_validate_authorize_token(token))
+    return RedirectResponse(url=_validate_authorize_token(token, repos))
 
 
 @connections_router.post("/connections/mcp", response_model=ConnectionItem)
@@ -1617,7 +1635,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
     """OAuth callback landing — Composio redirects here after user authorizes.
 
     Composio sends: ?connection_id=<composio_conn_id>&status=<status>&state=<signed-state>
-    We update the local DB and redirect the user to /connections.
+    We update the local DB and redirect the user to the selected connection.
     """
     from fastapi.responses import RedirectResponse
 
@@ -1766,6 +1784,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
         redirect_qs += f"&app={urllib.parse.quote(landing_app)}"
     if landing_id:
         redirect_qs += f"&connection_id={urllib.parse.quote(landing_id)}"
+        redirect_qs += f"&sel={urllib.parse.quote(landing_id)}"
     return RedirectResponse(url=f"{frontend_url}/connections?{redirect_qs}")
 
 
