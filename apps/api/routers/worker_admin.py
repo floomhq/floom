@@ -81,6 +81,7 @@ def create_worker_share_link(
         entity_type="worker",
         entity_id=str(worker["id"]),
         owner_id=str(worker.get("owner_id") or auth.user_id),
+        repos=repos,
     )
 
 
@@ -102,6 +103,7 @@ def revoke_worker_share_link(
         entity_type="worker",
         entity_id=str(worker["id"]),
         owner_id=str(worker.get("owner_id") or auth.user_id),
+        repos=repos,
     )
 
 

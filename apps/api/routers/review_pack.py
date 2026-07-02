@@ -87,6 +87,7 @@ def create_review_pack_share_link(
         context_name=safe_name,
         pack_id=pack_id,
         owner_id=auth.user_id,
+        repos=repos,
     )
 
 
@@ -121,6 +122,7 @@ def revoke_review_pack_share_link(
         entity_id=safe_name,
         file_path=rel,
         owner_id=auth.user_id,
+        repos=repos,
     )
 
 
