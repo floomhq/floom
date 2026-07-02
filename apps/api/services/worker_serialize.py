@@ -389,6 +389,26 @@ def _worker_files_from_manifest(worker: Dict[str, Any]) -> List[WorkerFile]:
 
     files: List[WorkerFile] = []
     manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    embedded_files = manifest.get("_files") if isinstance(manifest, dict) else None
+    if isinstance(embedded_files, dict):
+        order = {"worker.yml": 0, "SKILL.md": 1, "run.py": 2}
+        for rel, content in sorted(
+            embedded_files.items(), key=lambda item: (order.get(str(item[0]), 100), str(item[0]))
+        ):
+            if not isinstance(rel, str) or not isinstance(content, str):
+                continue
+            files.append(
+                WorkerFile(
+                    path=rel,
+                    language=_language_for_path(rel),
+                    content=content,
+                    binary=False,
+                    size=len(content.encode("utf-8")),
+                )
+            )
+        if files:
+            return files
+
     if manifest:
         try:
             manifest_yaml = pyyaml.safe_dump(manifest, sort_keys=False)

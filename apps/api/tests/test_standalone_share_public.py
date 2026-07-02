@@ -103,6 +103,15 @@ def test_worker_standalone_share_wraps_public_worker_projection():
                 "outputs": [],
                 "secrets": ["OPENAI_API_KEY"],
             },
+            "manifest": {
+                "id": "share-worker",
+                "name": "Share Worker",
+                "runtime": {"type": "skill", "entrypoint": "SKILL.md"},
+                "_files": {
+                    "worker.yml": "id: share-worker\nname: Share Worker\n",
+                    "SKILL.md": "# Share Worker\n",
+                },
+            },
         }
 
         class WorkersRepo:
@@ -153,6 +162,8 @@ def test_worker_standalone_share_wraps_public_worker_projection():
         assert body["entity_type"] == "worker"
         assert body["worker"]["name"] == "Share Worker"
         assert body["worker"]["connections"] == ["gmail"]
+        assert [f["path"] for f in body["files"]] == ["worker.yml", "SKILL.md"]
+        assert body["files"][0]["content"] == "id: share-worker\nname: Share Worker\n"
         assert body["shared_by"] == {
             "label": "Floom Builder",
             "display_name": "Floom Builder",
