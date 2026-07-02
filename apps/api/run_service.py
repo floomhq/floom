@@ -1422,6 +1422,51 @@ def _run_duration_ms(run_row: Optional[Dict[str, Any]]) -> Optional[int]:
         return None
 
 
+def _run_lifecycle_workspace_id(
+    *,
+    run_row: Optional[Dict[str, Any]],
+    worker_id: str | None,
+    owner_id: str | None,
+    repos: Repositories | None,
+) -> str:
+    """Best-effort workspace for run lifecycle telemetry.
+
+    Prefer the run row when it is hydrated, then the owning worker row, then the
+    owner-id convention used by local/default workspaces. This is intentionally
+    fail-open so telemetry cannot affect run completion.
+    """
+    if run_row:
+        workspace_id = str(run_row.get("workspace_id") or "").strip()
+        if workspace_id:
+            return workspace_id
+
+    worker_scope = str(worker_id or "").strip()
+    owner_scope = str(owner_id or "").strip()
+    if worker_scope and repos is not None:
+        worker_row: dict[str, Any] | None = None
+        if owner_scope:
+            try:
+                worker_row = repos.workers.get(user_id=owner_scope, worker_id=worker_scope)
+            except Exception:
+                worker_row = None
+        if worker_row is None:
+            try:
+                worker_row = repos.workers.get_any(worker_id=worker_scope)
+            except Exception:
+                worker_row = None
+        if worker_row:
+            workspace_id = str(worker_row.get("workspace_id") or "").strip()
+            if workspace_id:
+                return workspace_id
+
+    try:
+        from db import derive_workspace_id
+
+        return str(derive_workspace_id(owner_scope or None) or "").strip()
+    except Exception:
+        return ""
+
+
 def _emit_run_lifecycle_event(
     *,
     run_id: str,
@@ -1431,7 +1476,7 @@ def _emit_run_lifecycle_event(
     error: Optional[str],
     error_code: Optional[str],
     run_row: Optional[Dict[str, Any]],
-    repos: Repositories,
+    repos: Repositories | None,
 ) -> None:
     """Emit the run_started/completed/failed/cancelled PostHog event for a
     terminal (or running) transition. Pure side effect; swallows all errors so
@@ -1449,15 +1494,12 @@ def _emit_run_lifecycle_event(
         return
 
     try:
-        # workspace group: prefer an explicit workspace_id from the row (cloud
-        # backend); else derive from the owner id (engine convention).
-        from db import derive_workspace_id
-
-        workspace_id = ""
-        if run_row:
-            workspace_id = str(run_row.get("workspace_id") or "").strip()
-        if not workspace_id:
-            workspace_id = derive_workspace_id(owner_id)
+        workspace_id = _run_lifecycle_workspace_id(
+            run_row=run_row,
+            worker_id=worker_id,
+            owner_id=owner_id,
+            repos=repos,
+        )
 
         trigger_source = str((run_row or {}).get("trigger_source") or "").strip() or None
         runner = str((run_row or {}).get("runner") or "").strip() or None

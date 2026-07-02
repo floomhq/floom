@@ -39,6 +39,30 @@ class _Recorder:
         )
 
 
+class _WorkerRepo:
+    def __init__(self, row):
+        self.row = row
+
+    def get(self, *, user_id, worker_id):
+        if (
+            self.row
+            and self.row.get("owner_id") == user_id
+            and self.row.get("id") == worker_id
+        ):
+            return self.row
+        return None
+
+    def get_any(self, *, worker_id):
+        if self.row and self.row.get("id") == worker_id:
+            return self.row
+        return None
+
+
+class _Repos:
+    def __init__(self, worker_row):
+        self.workers = _WorkerRepo(worker_row)
+
+
 @pytest.fixture
 def emit(monkeypatch):
     """Patch analytics to enabled + a recorder, and stub cost lookups."""
@@ -101,6 +125,25 @@ class TestRunLifecycleEmit:
         assert props["total_tokens"] == 4242
         assert props["total_cost_usd"] == 0.05
         assert "error_category" not in props
+
+    def test_run_completed_resolves_workspace_from_worker_when_run_row_lacks_it(self, emit):
+        repos = _Repos(
+            {
+                "id": "wkr-1",
+                "owner_id": "owner-1",
+                "workspace_id": "ws_abcdef12345678",
+            }
+        )
+        _emit(
+            "completed",
+            run_row={"trigger_source": "manual", "runner": "e2b", "input_json": {}},
+            repos=repos,
+        )
+        assert len(emit.calls) == 1
+        call = emit.calls[0]
+        assert call["event"] == "run_completed"
+        assert call["groups"] == {"workspace": "ws_abcdef12345678"}
+        assert call["properties"]["workspace_id"] == "ws_abcdef12345678"
 
     def test_run_failed_error_category_matches_classifier(self, emit):
         _emit("failed", error="Agent run exceeded timeout of 300s", error_code="timeout")
