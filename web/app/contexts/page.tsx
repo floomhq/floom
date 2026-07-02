@@ -7,6 +7,7 @@ import { MarkdownRenderer } from "@/components/contexts/markdown-renderer";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -55,18 +56,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { CodeBlock } from "@/components/file-viewer/code-block";
 import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 const TEXT_PREVIEW_LIMIT = 512 * 1024;
 const TABLE_PREVIEW_ROWS = 100;
 const TABLE_PREVIEW_COLS = 12;
 const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const BRAIN_ROUTE = `${APP_BASE_PATH}/brain`;
+
+type PendingDelete =
+  | { kind: "folder"; context: ContextSummary }
+  | { kind: "file"; contextName: string; path: string };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -90,6 +97,19 @@ function displayTypeIcon(displayType: string) {
   if (displayType === "PDF") return <FileText className="size-4 shrink-0 text-muted-foreground" />;
   if (displayType === "Video") return <Film className="size-4 shrink-0 text-muted-foreground" />;
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
+}
+
+export function isWorkerMemoryContext(name: string): boolean {
+  return /^memory-[a-z0-9][a-z0-9._-]*$/i.test(name);
+}
+
+export function isWorkerMemoryPack(ctx: Pick<ContextSummary, "name" | "category" | "worker_count">): boolean {
+  if (isWorkerMemoryContext(ctx.name)) return true;
+  return ctx.name !== "memory" && ctx.category === "memory" && (ctx.worker_count ?? 0) > 0;
+}
+
+export function memoryGroupOpenForView(open: boolean, selectedIsMemoryPack: boolean, search: string): boolean {
+  return open || selectedIsMemoryPack || Boolean(search.trim());
 }
 
 function packNameFromFiles(files: FileList | File[], existing: ContextSummary[]): string {
@@ -400,6 +420,8 @@ function ContextsPage() {
   const [newContextName, setNewContextName] = useState("");
   const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // ---- Resizable panes (desktop only) -------------------------------------
   const isDesktop = useIsDesktop();
@@ -541,7 +563,16 @@ function ContextsPage() {
   }, [contexts, search]);
 
   const operatorPacks = useMemo(() => filteredContexts.filter((c) => !c.system), [filteredContexts]);
+  const regularOperatorPacks = useMemo(() => operatorPacks.filter((c) => !isWorkerMemoryPack(c)), [operatorPacks]);
+  const memoryPacks = useMemo(() => operatorPacks.filter((c) => isWorkerMemoryPack(c)), [operatorPacks]);
   const systemPacks = useMemo(() => filteredContexts.filter((c) => c.system), [filteredContexts]);
+  const selectedIsMemoryPack = memoryPacks.some((pack) => pack.name === selectedName);
+  const [memoryGroupOpen, setMemoryGroupOpen] = useState(selectedIsMemoryPack);
+  const memoryGroupVisibleOpen = memoryGroupOpenForView(memoryGroupOpen, selectedIsMemoryPack, search);
+
+  useEffect(() => {
+    if (selectedIsMemoryPack) setMemoryGroupOpen(true);
+  }, [selectedIsMemoryPack]);
 
   // Miller columns: one entry list per folder level, [root, level1, ...].
   const folderColumns = useMemo(() => {
@@ -610,31 +641,50 @@ function ContextsPage() {
     }
   }
 
-  async function deleteContext(context: ContextSummary) {
+  function deleteContext(context: ContextSummary) {
     if (context.read_only) return;
-    if (!confirm(`Delete folder "${context.name}"? This cannot be undone.`)) return;
+    setPendingDelete({ kind: "folder", context });
+  }
+
+  async function confirmDeleteContext(context: ContextSummary) {
+    if (context.read_only || deleting) return;
+    setDeleting(true);
     try {
       await api.contexts.delete(context.name, true);
       const remaining = contexts.filter((item) => item.name !== context.name);
       setFolderPath([]);
       setSelectedFile(null);
       await loadContexts(remaining[0]?.name || "");
+      setPendingDelete(null);
       toast.success("Folder deleted");
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to delete folder");
+    } finally {
+      setDeleting(false);
     }
   }
 
-  async function deleteFile(path: string) {
-    if (!selectedName || !confirm(`Delete "${path}"?`)) return;
+  function deleteFile(path: string) {
+    if (!selectedName) return;
+    setPendingDelete({ kind: "file", contextName: selectedName, path });
+  }
+
+  async function confirmDeleteFile(contextName: string, path: string) {
+    if (!contextName || deleting) return;
+    setDeleting(true);
     try {
-      const next = await api.contexts.deleteFile(selectedName, path);
-      setDetail(next);
+      const next = await api.contexts.deleteFile(contextName, path);
+      if (selectedName === contextName) {
+        setDetail(next);
+      }
       if (selectedFile === path) setSelectedFile(null);
-      await loadContexts(selectedName);
+      await loadContexts(contextName);
+      setPendingDelete(null);
       toast.success("File deleted");
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to delete file");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -847,7 +897,7 @@ function ContextsPage() {
 
             {operatorPacks.length > 0 ? (
               <div className="[&>*+*]:[border-top:var(--bd-div)]">
-                {operatorPacks.map((ctx) => (
+                {regularOperatorPacks.map((ctx) => (
                   <PackRow
                     key={ctx.name}
                     ctx={ctx}
@@ -857,6 +907,17 @@ function ContextsPage() {
                     onDelete={() => void deleteContext(ctx)}
                   />
                 ))}
+                {memoryPacks.length > 0 && (
+                  <MemoryPackGroup
+                    packs={memoryPacks}
+                    compact={fileOpen}
+                    open={memoryGroupVisibleOpen}
+                    selectedName={selectedName}
+                    onToggle={() => setMemoryGroupOpen((value) => !value)}
+                    onSelect={(name) => void selectContext(name)}
+                    onDelete={(ctx) => void deleteContext(ctx)}
+                  />
+                )}
               </div>
             ) : (
               !search.trim() && (
@@ -1031,6 +1092,31 @@ function ContextsPage() {
           }}
         />
       </div>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setPendingDelete(null);
+        }}
+        title={
+          pendingDelete?.kind === "folder"
+            ? `Delete folder "${pendingDelete.context.name}"?`
+            : pendingDelete?.kind === "file"
+              ? `Delete "${pendingDelete.path}"?`
+              : "Delete?"
+        }
+        body={
+          pendingDelete?.kind === "folder"
+            ? "This removes the folder and its files. This cannot be undone."
+            : "This removes the file from the current folder."
+        }
+        confirmLabel={deleting ? "Deleting..." : "Delete"}
+        destructive
+        loading={deleting}
+        onConfirm={() => {
+          if (pendingDelete?.kind === "folder") void confirmDeleteContext(pendingDelete.context);
+          if (pendingDelete?.kind === "file") void confirmDeleteFile(pendingDelete.contextName, pendingDelete.path);
+        }}
+      />
     </div>
   );
 }
@@ -1172,6 +1258,69 @@ function SecretWarningBanner({
 // ===========================================================================
 // Pack row in the left rail.
 // ===========================================================================
+
+export function MemoryPackGroup({
+  packs,
+  selectedName,
+  compact,
+  open,
+  onToggle,
+  onSelect,
+  onDelete,
+}: {
+  packs: ContextSummary[];
+  selectedName: string;
+  compact: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (name: string) => void;
+  onDelete: (ctx: ContextSummary) => void;
+}) {
+  const totalFiles = packs.reduce((sum, pack) => sum + (pack.file_count ?? 0), 0);
+  const selected = packs.some((pack) => pack.name === selectedName);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`group flex w-full items-start gap-2.5 px-3 py-3 text-left transition-colors ${
+          selected ? "bg-[var(--active-nav-bg)]" : "hover:bg-muted/40"
+        }`}
+        aria-expanded={open}
+      >
+        <span className="mt-0.5 text-muted-foreground">
+          {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate text-sm font-medium">memory</span>
+          </span>
+          {!compact && (
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {packs.length} worker {packs.length === 1 ? "folder" : "folders"} · {totalFiles} {totalFiles === 1 ? "file" : "files"}
+            </span>
+          )}
+        </span>
+      </button>
+      {open && (
+        <div className="[&>*+*]:[border-top:var(--bd-div)] [border-top:var(--bd-div)] bg-[var(--bg-2)] pl-4">
+          {packs.map((ctx) => (
+            <PackRow
+              key={ctx.name}
+              ctx={ctx}
+              compact={compact}
+              selected={ctx.name === selectedName}
+              onSelect={() => onSelect(ctx.name)}
+              onDelete={() => onDelete(ctx)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PackRow({
   ctx,
@@ -1383,6 +1532,7 @@ export function PackDetailPane({
     onDrop: React.DragEventHandler<HTMLElement>;
   }>;
 }) {
+  const workspaceHref = useWorkspaceHref();
   const sensitive = detail.sensitive ?? true;
 
   return (
@@ -1507,7 +1657,7 @@ export function PackDetailPane({
               <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
                 {(detail.used_by ?? []).map((ref, i, arr) => (
                   <span key={ref.worker_id} className="inline-flex items-center min-w-0">
-                    <Link href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`} className="text-xs font-medium hover:underline truncate">
+                    <Link href={workspaceHref(`/workers?sel=${encodeURIComponent(ref.worker_id)}`)} className="text-xs font-medium hover:underline truncate">
                       {ref.worker_name}
                     </Link>
                     {i < arr.length - 1 && <span className="text-xs text-muted-foreground ml-1.5">·</span>}

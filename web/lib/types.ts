@@ -218,6 +218,7 @@ export type RunPart =
 
 export interface OutputField {
   name: string;
+  kind?: string | null;
   type: string;  // "markdown" | "json" | "csv" | "text" | "file"
   label: string;
   value: string | number | boolean | Record<string, unknown> | unknown[] | null;
@@ -283,6 +284,7 @@ export interface TimeseriesDay {
 
 export interface WorkerSummary {
   id: string;
+  workspace_id?: string | null;
   name: string;
   created_at?: string | null;
   updated_at?: string | null;
@@ -350,6 +352,7 @@ export interface WorkerFile {
 
 export interface WorkerDetail {
   id: string;
+  workspace_id?: string | null;
   name: string;
   description?: string;
   long_description?: string;
@@ -494,9 +497,11 @@ export interface StandaloneShareLink {
 export interface PublicShareFile {
   path: string;
   size: number;
-  mime_type: string;
+  mime_type?: string;
   display_type?: string | null;
-  is_binary: boolean;
+  is_binary?: boolean;
+  binary?: boolean;
+  content?: string | null;
   updated_at?: string | null;
   description?: string | null;
   tags?: string[];

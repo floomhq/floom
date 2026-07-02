@@ -101,8 +101,9 @@ describe("Emily composer - E10 flat box, no outline", () => {
     streamState.isStreaming = false;
     render(<EmilyChatPage />);
     const composer = screen.getByPlaceholderText(/Message/i);
-    // The composer container is the textarea's parent flex row.
-    const box = composer.parentElement as HTMLElement;
+    // The composer shell is the rounded bg-2 container; PromptInput may wrap the
+    // textarea with an internal relative layer for inline token mirroring.
+    const box = composer.closest(".rounded-xl") as HTMLElement;
     expect(box).toBeTruthy();
     const cls = box.className;
     // Default composer is discoverable with a bg-2 fill, not an outline.
@@ -114,7 +115,7 @@ describe("Emily composer - E10 flat box, no outline", () => {
     streamState.isStreaming = false;
     render(<EmilyChatPage />);
     const composer = screen.getByRole("textbox", { name: /message emily/i });
-    const box = composer.parentElement as HTMLElement;
+    const box = composer.closest(".rounded-xl") as HTMLElement;
     expect(composer).toBeInTheDocument();
     expect(box.className).toContain("focus-within:ring-2");
     expect(box.className).toContain("focus-within:ring-[var(--ring)]");

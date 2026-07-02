@@ -61,6 +61,7 @@ describe("middleware auth gate", () => {
       "/api/proxy/approvals/public/abc-123/approve?token=xyz",
       "/api/proxy/approvals/public/abc-123/reject?token=xyz",
       "/api/proxy/approvals/public/abc-123/artifacts/a1/download?token=xyz",
+      "/api/proxy/approvals/public-batch/fls_abc123/items/apr_1/decision",
     ];
     for (const p of paths) {
       const res = await middleware(req(p));
@@ -100,10 +101,10 @@ describe("middleware auth gate", () => {
     expect(proxy.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("keeps signed connection authorize proxy links reachable without login", async () => {
+  it("keeps short connection authorize proxy links reachable without login", async () => {
     const { proxy: middleware } = await import("@/proxy");
 
-    const proxy = await middleware(req("/api/proxy/connections/authorize/signed-token"));
+    const proxy = await middleware(req("/api/proxy/connections/11111111-1111-4111-8111-111111111111/authorize"));
 
     expect(proxy.status).toBe(200);
     expect(proxy.headers.get("x-middleware-next")).toBe("1");

@@ -115,23 +115,29 @@ describe("CollectionView — list & grid (§8e)", () => {
     expect(container.querySelector('[style*="max-width: 900px"]')).toBeInTheDocument();
   });
 
-  it("keeps filters below the search/action row in the control strip", () => {
+  it("keeps filters below the search/action row without merging both into one grey strip", () => {
     const { container } = render(<Harness config={makeConfig()} />);
-    const strip = container.querySelector(".c-controlstrip-inner");
+    const strip = container.querySelector(".c-controlstrip");
+    const stripInner = container.querySelector(".c-controlstrip-inner");
     const topRow = container.querySelector(".c-controlstrip-toprow");
     const search = container.querySelector(".c-srch");
     const filterBar = container.querySelector(".c-filterbar");
+    const filterStrip = container.querySelector(".c-filterstrip");
     const actions = container.querySelector(".c-toolbar-actions");
 
     expect(strip).toBeInTheDocument();
+    expect(stripInner).toBeInTheDocument();
     expect(topRow).toBeInTheDocument();
     expect(search).toBeInTheDocument();
     expect(filterBar).toBeInTheDocument();
+    expect(filterStrip).toBeInTheDocument();
     expect(actions).toBeInTheDocument();
     expect(topRow).toContainElement(search);
     expect(topRow).toContainElement(actions);
     expect(topRow).not.toContainElement(filterBar);
-    expect(strip?.children[1]).toBe(filterBar);
+    expect(strip).not.toContainElement(filterBar);
+    expect(filterStrip).toContainElement(filterBar);
+    expect(strip?.nextElementSibling).toBe(filterStrip);
   });
 });
 
@@ -455,11 +461,25 @@ describe("CollectionView — states (§7)", () => {
   it("keeps the toolbar when a filter narrows a non-empty list to zero", () => {
     const { container } = render(
       <Harness
-        config={makeConfig()}
+        config={makeConfig({
+          states: {
+            empty: {
+              title: "Create your first worker",
+              action: <div>First-worker onboarding</div>,
+            },
+            filteredEmpty: {
+              title: "No workers found",
+              help: "Clear the search or filters to see your workers.",
+            },
+          },
+        })}
         initial={{ ...emptyState("list"), q: "zzz-no-match" }}
       />,
     );
-    expect(screen.getByText("No workers yet")).toBeInTheDocument();
+    expect(screen.getByText("No workers found")).toBeInTheDocument();
+    expect(screen.getByText("Clear the search or filters to see your workers.")).toBeInTheDocument();
+    expect(screen.queryByText("Create your first worker")).not.toBeInTheDocument();
+    expect(screen.queryByText("First-worker onboarding")).not.toBeInTheDocument();
     expect(container.querySelector(".c-controlstrip")).toBeInTheDocument();
     expect(container.querySelector(".c-srch")).toBeInTheDocument();
   });

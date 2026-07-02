@@ -30,6 +30,7 @@ function RowMenu({ items }: { items: RowMenuItem[] }) {
         label="Row actions"
         items={items.map((it) => ({
           label: it.label,
+          icon: it.icon,
           destructive: it.danger,
           confirm: it.confirm,
           onSelect: it.onSelect,

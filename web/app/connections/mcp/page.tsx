@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Check,
@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { IntegrationsShell } from "@/components/connections/IntegrationsShell";
 import { ListLoading, ListEmpty, ListError } from "@/components/collection/CollectionStates";
+import { McpInstallPanel } from "@/components/mcp/McpInstallPanel";
 import { api } from "@/lib/api";
 import type { ConnectionItem, SecretItem } from "@/lib/types";
 
@@ -47,15 +48,6 @@ type McpConfigPayload = {
   auth_secret?: string | null;
   allowed_tools?: string[];
 };
-
-const MCP_INSTALL_TARGETS = [
-  { label: "Codex / Generic", target: "generic", command: "floom mcp install --target generic" },
-  { label: "Claude", target: "claude", command: "floom mcp install --target claude" },
-  { label: "Cursor", target: "cursor", command: "floom mcp install --target cursor" },
-  { label: "VS Code", target: "vscode", command: "floom mcp install --target vscode" },
-  { label: "Windsurf", target: "windsurf", command: "floom mcp install --target windsurf" },
-  { label: "Continue", target: "continue", command: "floom mcp install --target continue" },
-] as const;
 
 const IMPORT_CONFIG_COMMAND = "floom connections import-mcp-config ~/.claude/settings.json";
 const DEFAULT_MCP_JSON = `{
@@ -257,6 +249,8 @@ function truncateUrl(url: string, max = 48): string {
 // ---------- component ----------
 
 export default function McpConnectionsPage() {
+  const searchParams = useSearchParams();
+  const fromInstall = searchParams.get("from_install");
   const [connections, setConnections] = useState<McpConnection[]>([]);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -269,9 +263,7 @@ export default function McpConnectionsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Concept A: install Floom Workers into an AI client (secondary, collapsed)
-  const [installOpen, setInstallOpen] = useState(false);
-  const [installTarget, setInstallTarget] = useState<(typeof MCP_INSTALL_TARGETS)[number]["target"]>("generic");
-  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
+  const [installOpen, setInstallOpen] = useState(() => Boolean(fromInstall));
 
   // Concept B: add an MCP server for workers, JSON first.
   const [formOpen, setFormOpen] = useState(false);
@@ -429,13 +421,6 @@ export default function McpConnectionsPage() {
     }
   }
 
-  function copyCommand(value: string) {
-    navigator.clipboard.writeText(value).then(() => {
-      setCopiedCommand(value);
-      setTimeout(() => setCopiedCommand(null), 1500);
-    });
-  }
-
   function handleParseImport() {
     setImportError("");
     if (!importRaw.trim()) return;
@@ -496,9 +481,6 @@ export default function McpConnectionsPage() {
     setImporting(false);
   }
 
-  const currentInstallCommand =
-    MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command;
-
   return (
     <IntegrationsShell
       title="MCP"
@@ -529,33 +511,8 @@ export default function McpConnectionsPage() {
         </button>
 
         {installOpen && (
-          <div className="space-y-3 [border-top:var(--bd-div)] px-4 py-4">
-            <div className="flex flex-wrap gap-1.5">
-              {MCP_INSTALL_TARGETS.map((target) => (
-                <button
-                  key={target.target}
-                  type="button"
-                  onClick={() => setInstallTarget(target.target)}
-                  className={`rounded-[var(--radius-button)] [border:var(--bd-pill)] px-2.5 py-1 text-xs font-medium transition-colors ${
-                    installTarget === target.target
-                      ? "bg-[var(--ink)] text-[var(--bg-app)]"
-                      : "bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {target.label}
-                </button>
-              ))}
-            </div>
-            <CommandBlock
-              title="Run in your terminal"
-              command={currentInstallCommand}
-              copied={copiedCommand === currentInstallCommand}
-              onCopy={() => copyCommand(currentInstallCommand)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Installs Floom&apos; tools into your AI client. To connect a third-party MCP
-              server <em>into</em> Floom instead, use the section below.
-            </p>
+          <div className="[border-top:var(--bd-div)] px-4 py-4">
+            <McpInstallPanel />
           </div>
         )}
       </section>
@@ -947,37 +904,6 @@ export default function McpConnectionsPage() {
         <code className="rounded bg-muted px-1 py-0.5 font-mono">{IMPORT_CONFIG_COMMAND}</code>.
       </p>
     </IntegrationsShell>
-  );
-}
-
-function CommandBlock({
-  title,
-  command,
-  copied,
-  onCopy,
-}: {
-  title: string;
-  command: string;
-  copied: boolean;
-  onCopy: () => void;
-}) {
-  return (
-    <div className="rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)] p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</span>
-        <button
-          type="button"
-          onClick={onCopy}
-          className="inline-flex size-7 items-center justify-center rounded-md [border:var(--bd-card)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
-          title="Copy command"
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </button>
-      </div>
-      <pre className="overflow-x-auto rounded-md bg-[var(--ink)] px-3 py-2 text-xs text-[var(--bg-app)]">
-        <code>{command}</code>
-      </pre>
-    </div>
   );
 }
 

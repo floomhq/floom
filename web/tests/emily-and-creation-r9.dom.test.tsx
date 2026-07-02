@@ -77,7 +77,7 @@ describe("Emily creation flow — consistent Emily empty state", () => {
     expect(screen.queryByRole("heading", { name: "Hire a new worker" })).not.toBeInTheDocument();
   });
 
-  it("Enter submits the create prompt wrapped as a worker-draft directive (behavior preserved)", async () => {
+  it("Enter submits the create prompt as plain chat", async () => {
     const user = userEvent.setup();
     sendMessage.mockClear();
     render(<EmilyChatCore fullPage createMode />);
@@ -86,11 +86,7 @@ describe("Emily creation flow — consistent Emily empty state", () => {
     await user.keyboard("Send a daily digest{Enter}");
     // Enter fires exactly one submit (no click required).
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    // Round-09 #2: the FIRST create-mode message is wrapped in an explicit
-    // worker-authoring directive so the backend drafts a worker instead of
-    // answering as a chat query. The raw prompt is preserved verbatim inside it.
-    expect(sendMessage.mock.calls[0][0]).toContain("Send a daily digest");
-    expect(sendMessage.mock.calls[0][0]).not.toBe("Send a daily digest");
+    expect(sendMessage.mock.calls[0][0]).toBe("Send a daily digest");
   });
 });
 

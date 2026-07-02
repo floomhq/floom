@@ -52,7 +52,6 @@ import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/Cl
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
-import { Avatar } from "@/components/ui/Avatar";
 import {
   useAssistantName,
   setCachedAssistantName,
@@ -73,18 +72,15 @@ import {
   ExternalLink,
   History,
   Info,
-  KeyRound,
   Mail,
   MessageSquare,
   Palette,
-  QrCode,
   RotateCcw,
   Save,
   Settings,
   ShieldAlert,
   Trash2,
   UserPlus,
-  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -111,17 +107,6 @@ function ScopeChip({ scope, name }: { scope: SettingsScope; name?: string | null
       {isWs ? "Workspace" : "Account"}
       {name ? <span className="opacity-70">· {name}</span> : null}
     </span>
-  );
-}
-
-// Pane-level scope banner: a chip + one-line "what this scope means" detail,
-// restated at the top of the content (mockup .pane-scope).
-function ScopeBanner({ scope, name, detail }: { scope: SettingsScope; name?: string | null; detail: string }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <ScopeChip scope={scope} name={name} />
-      <span className="text-xs text-muted-foreground">{detail}</span>
-    </div>
   );
 }
 
@@ -382,7 +367,7 @@ export function WorkspaceTokensPanel() {
       ) : tokens === null ? null : (
         <>
           <p className="text-sm text-muted-foreground">
-            One shared token (prefix <code className="font-mono text-xs">fl_wt_</code>) that
+            One shared token (prefix <code className="font-mono text-xs">wst_</code>) that
             authenticates this workspace&apos;s CLI runs and CI. It is not tied to you
             personally and gives API access to workspace-shared workers only, not
             private workers. Admins only. Token values are shown once; store them
@@ -480,18 +465,15 @@ function isValidSection(value: string | null): value is SectionKey {
 function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
     // Legacy aliases kept for back-compat with old deep-links.
-    value === "api" ? "connect" :
+    value === "api" ? "developer" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
-    value === "git" ? "connect" :
-    // The "developer" section was split into two token panes + a connect pane.
-    // Old ?sel=developer links land on the API/MCP/CLI/Git reference.
-    value === "developer" ? "connect" :
-    // workspace_tokens was a standalone nav item, then briefly a Developer
-    // sub-tab; it is now its own workspace-scoped pane again.
-    value === "workspace_tokens" ? "workspace_token" :
-    // Personal tokens used to live under Developer > Tokens.
-    value === "tokens" ? "personal_tokens" :
+    value === "git" ? "developer" :
+    value === "connect" ? "developer" :
+    value === "workspace_token" ? "developer" :
+    value === "workspace_tokens" ? "developer" :
+    value === "personal_tokens" ? "developer" :
+    value === "tokens" ? "developer" :
     value;
   return isValidSection(candidate) ? candidate : null;
 }
@@ -809,7 +791,7 @@ function SettingsContent() {
             {item.description}
           </>
         ),
-        status: { tone: "idle", label: item.scope === "workspace" ? "Workspace" : "Account" },
+        status: null,
       }),
       detail: (item) => ({
         header: {
@@ -906,16 +888,10 @@ function SettingsContent() {
             onClearRuns={handleClearRuns}
           />
         );
-      case "workspace_token":
-        return <WorkspaceTokenSection workspaceName={workspaceName} />;
-      case "personal_tokens":
-        return <PersonalTokensSection accountName={accountName} workspaceName={workspaceName} />;
-      case "connect":
-        return <ConnectSection />;
+      case "developer":
+        return <DeveloperSection workspaceName={workspaceName} />;
       case "appearance":
         return <AppearanceSection />;
-      case "profile":
-        return <ProfileSection currentUser={currentUser} onUpdated={(u) => setCurrentUser(u)} />;
     }
   }
 
@@ -1011,16 +987,10 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return History;
     case "danger":
       return ShieldAlert;
-    case "workspace_token":
-      return KeyRound;
-    case "personal_tokens":
-      return KeyRound;
-    case "connect":
+    case "developer":
       return Code2;
     case "appearance":
       return Palette;
-    case "profile":
-      return UserRound;
   }
 }
 
@@ -1231,65 +1201,53 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
   );
 }
 
-// WorkspaceTokenSection (workspace scope) — re-homes WorkspaceTokensPanel under
-// WORKSPACE with its own scope banner + a cross-link to Account · Personal
-// access tokens. The token CRUD itself is unchanged (same api.workspace.tokens
-// calls); this only re-homes + re-labels it (mockup .pane[data-pane="ws-token"]).
-function WorkspaceTokenSection({ workspaceName }: { workspaceName: string }) {
-  return (
-    <div className="space-y-5">
-      <ScopeBanner
-        scope="workspace"
-        name={workspaceName}
-        detail={`Scoped to ${workspaceName} · used by this workspace's CLI & CI`}
-      />
-      <WorkspaceTokensPanel />
-      <ScopeCrossLink
-        title="This is not your personal token."
-        body={`It is shared by everyone in ${workspaceName} and authenticates this workspace's CLI & CI. Rotating it breaks any CI using the old value. For a token tied to just you, see`}
-        linkLabel="Account → Personal access tokens"
-        targetSel="personal_tokens"
-      />
-    </div>
-  );
+type DeveloperSubTabKey = "personal-tokens" | "workspace-token" | "api" | "mcp" | "cli" | "git";
+
+function developerDefaultTabFromLocation(): DeveloperSubTabKey {
+  if (typeof window === "undefined") return "personal-tokens";
+  const params = new URLSearchParams(window.location.search);
+  const sel = params.get("sel");
+  const tab = params.get("tab");
+  if (sel === "workspace_token" || sel === "workspace_tokens") return "workspace-token";
+  if (sel === "personal_tokens" || sel === "tokens") return "personal-tokens";
+  if (tab === "workspace-token" || tab === "personal-tokens" || tab === "api" || tab === "mcp" || tab === "cli" || tab === "git") {
+    return tab;
+  }
+  return "personal-tokens";
 }
 
-// PersonalTokensSection (account scope) — re-homes PersonalAccessTokensPanel
-// under ACCOUNT with its own scope banner + a cross-link to Workspace · token.
-// CRUD unchanged (api.tokens.*) (mockup .pane[data-pane="acct-tokens"]).
-function PersonalTokensSection({ accountName, workspaceName }: { accountName?: string; workspaceName: string }) {
-  return (
-    <div className="space-y-5">
-      <ScopeBanner
-        scope="account"
-        name={accountName}
-        detail="Yours · works across all your workspaces"
-      />
-      <PersonalAccessTokensPanel />
-      <ScopeCrossLink
-        title="These are yours, not the workspace's."
-        body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
-        linkLabel={`Workspace · ${workspaceName} → Access key`}
-        targetSel="workspace_token"
-      />
-    </div>
-  );
-}
+// DeveloperSection: one account-scoped home for programmatic access (tokens, API, MCP, CLI, Git).
+function DeveloperSection({ workspaceName }: { workspaceName: string }) {
+  const [defaultTab] = useState<DeveloperSubTabKey>(() => developerDefaultTabFromLocation());
 
-// ConnectSection (account scope) — the developer reference snippets that used to
-// share the Developer page with token CRUD: REST API, MCP install, CLI, and Git
-// sync. No token management here anymore (it moved to the two token panes); this
-// is read-only reference plus the Git workspace panel. (#616 GitWorkspacePanel
-// preserved.)
-function ConnectSection() {
   return (
-    <Tabs defaultValue="api">
+    <Tabs defaultValue={defaultTab}>
       <TabsList>
+        <TabsTrigger value="personal-tokens">Personal tokens</TabsTrigger>
+        <TabsTrigger value="workspace-token">Workspace token</TabsTrigger>
         <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
+      <TabsContent value="personal-tokens" className="space-y-5">
+        <PersonalAccessTokensPanel />
+        <ScopeCrossLink
+          title="These are yours, not the workspace's."
+          body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
+          linkLabel={`Workspace · ${workspaceName} token`}
+          targetSel="developer"
+        />
+      </TabsContent>
+      <TabsContent value="workspace-token" className="space-y-5">
+        <WorkspaceTokensPanel />
+        <ScopeCrossLink
+          title="This is not your personal token."
+          body={`It is shared by everyone in ${workspaceName} and authenticates this workspace's CLI & CI. Rotating it breaks any CI using the old value. For a token tied to just you, see`}
+          linkLabel="Personal tokens"
+          targetSel="developer"
+        />
+      </TabsContent>
       <TabsContent value="api" className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-sm font-medium">REST API</h2>
@@ -1332,7 +1290,7 @@ function ConnectSection() {
             type="button"
             className="font-medium text-[var(--accent)] hover:underline"
             onClick={() => {
-              navigateSettingsSelection("personal_tokens");
+              navigateSettingsSelection("developer");
             }}
           >
             Account · Personal access tokens
@@ -1377,78 +1335,6 @@ function AppearanceSection() {
   );
 }
 
-function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser | null; onUpdated: (u: CurrentUser) => void }) {
-  const [displayName, setDisplayName] = useState(currentUser?.display_name ?? "");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setDisplayName(currentUser?.display_name ?? "");
-  }, [currentUser?.display_name]);
-
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    const name = displayName.trim();
-    if (!name) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_BASE}/me`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ display_name: name }),
-      });
-      if (res.ok) {
-        const updated = (await res.json()) as CurrentUser;
-        onUpdated(updated);
-      } else {
-        // Optimistic update if backend doesn't support PATCH /me yet
-        if (currentUser) onUpdated({ ...currentUser, display_name: name });
-      }
-      toast.success("Name updated");
-    } catch {
-      if (currentUser) onUpdated({ ...currentUser, display_name: name });
-      toast.success("Name updated");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const email = currentUser?.email ?? "";
-  // User photo (Google/GitHub) when the host /me supplies it; else generated.
-  const photoUrl = currentUser?.picture ?? currentUser?.avatar_url ?? null;
-
-  return (
-    <div className="space-y-6">
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
-        <div className="flex items-center gap-4">
-          <Avatar role="user" name={displayName || email || "User"} src={photoUrl} size={56} />
-          <div className="min-w-0">
-            <p className="font-medium">{displayName || email}</p>
-            <p className="text-sm text-muted-foreground">{email}</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Display name</h2>
-        <form onSubmit={(e) => void handleSave(e)} className="flex gap-2">
-          <Input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Your name"
-            className="max-w-xs"
-          />
-          <Button type="submit" size="sm" disabled={saving || !displayName.trim()}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </form>
-        <p className="text-xs text-muted-foreground">
-          Your display name is shown in the sidebar and in activity logs.
-        </p>
-      </section>
-    </div>
-  );
-}
 
 function DangerSection({
   canEdit,
@@ -2527,7 +2413,7 @@ function MembersSettingsPanel() {
 // "Backups & history": download a workspace copy, browse the unified git
 // timeline (workers, library, notes), undo recent workspace-note/persona edits,
 // and surface GitHub sync status when connected. Git SHA/branch vocabulary stays
-// out of the UI; connect/setup lives under Account · Connect & automate.
+// out of the UI; connect/setup lives under Account · Developer.
 type UndoScope = "instructions" | "base";
 
 function changelogScopeLabel(assetType: string, assetName: string): string {
@@ -2641,7 +2527,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
           Every save to workers, library folders, and workspace notes appears here.
           {gitStatus?.connected
             ? " Connected repos receive these commits when Floom pushes to GitHub."
-            : " To back up to GitHub, connect a repo under Account · Connect & automate."}
+            : " To back up to GitHub, connect a repo under Account · Developer."}
         </p>
         {gitStatus?.connected && gitStatus.repo_url ? (
           <p className="text-xs text-muted-foreground">
@@ -2665,7 +2551,7 @@ function VersionHistorySettingsPanel({ canManageWorkspace }: { canManageWorkspac
             <button
               type="button"
               className="font-medium text-[var(--accent)] hover:underline"
-              onClick={() => navigateSettingsSelection("connect")}
+              onClick={() => navigateSettingsSelection("developer")}
             >
               Connect GitHub
             </button>
@@ -2803,81 +2689,7 @@ function VersionList({
 }
 
 // SPEC §12: Channels — how you reach Emily/workers (inbound), set once.
-// Slack (live), WhatsApp (coming), and "install in your agent" over MCP/CLI.
-// ---------------------------------------------------------------------------
-// WhatsApp QR — static inline SVG generated from the fixed wa.me deep-link.
-// No external service, no npm dep. The QR data was generated offline with
-// qrcode (Python) for https://wa.me/16503999709 at error-correction M.
-// To regenerate: python3 -c "import qrcode; ..." (see git history for script).
-//
-// #1385: WA_BOT_NUMBER is read from NEXT_PUBLIC_WA_BOT_NUMBER env at build time.
-// Deployments set it via env. When unset,
-// the WhatsApp card renders a "not configured" state instead of QR/number.
-// The pre-computed QR SVG below encodes one default number; it is only rendered
-// when the env number matches. Custom numbers get the wa.me link only.
-// ---------------------------------------------------------------------------
-
-// The default number the pre-computed QR encodes. Do not change without
-// regenerating WA_QR_PATH.
-const WA_QR_DEFAULT_NUMBER = "16503999709";
-
-// Read from env; when absent the WhatsApp channel card renders unconfigured.
-const WA_BOT_NUMBER = (process.env.NEXT_PUBLIC_WA_BOT_NUMBER || "").trim() || null;
-const WA_LINK = WA_BOT_NUMBER ? `https://wa.me/${WA_BOT_NUMBER}` : null;
-
-// Pre-computed QR path for WA_LINK (29×29 modules, 2-module border).
-const WA_QR_PATH =
-  "M2,2h1v1h-1z M3,2h1v1h-1z M4,2h1v1h-1z M5,2h1v1h-1z M6,2h1v1h-1z M7,2h1v1h-1z M8,2h1v1h-1z M15,2h1v1h-1z M18,2h1v1h-1z M20,2h1v1h-1z M21,2h1v1h-1z M22,2h1v1h-1z M23,2h1v1h-1z M24,2h1v1h-1z M25,2h1v1h-1z M26,2h1v1h-1z M2,3h1v1h-1z M8,3h1v1h-1z M10,3h1v1h-1z M11,3h1v1h-1z M12,3h1v1h-1z M13,3h1v1h-1z M18,3h1v1h-1z M20,3h1v1h-1z M26,3h1v1h-1z M2,4h1v1h-1z M4,4h1v1h-1z M5,4h1v1h-1z M6,4h1v1h-1z M8,4h1v1h-1z M10,4h1v1h-1z M12,4h1v1h-1z M13,4h1v1h-1z M17,4h1v1h-1z M18,4h1v1h-1z M20,4h1v1h-1z M22,4h1v1h-1z M23,4h1v1h-1z M24,4h1v1h-1z M26,4h1v1h-1z M2,5h1v1h-1z M4,5h1v1h-1z M5,5h1v1h-1z M6,5h1v1h-1z M8,5h1v1h-1z M10,5h1v1h-1z M12,5h1v1h-1z M15,5h1v1h-1z M16,5h1v1h-1z M20,5h1v1h-1z M22,5h1v1h-1z M23,5h1v1h-1z M24,5h1v1h-1z M26,5h1v1h-1z M2,6h1v1h-1z M4,6h1v1h-1z M5,6h1v1h-1z M6,6h1v1h-1z M8,6h1v1h-1z M11,6h1v1h-1z M12,6h1v1h-1z M16,6h1v1h-1z M20,6h1v1h-1z M22,6h1v1h-1z M23,6h1v1h-1z M24,6h1v1h-1z M26,6h1v1h-1z M2,7h1v1h-1z M8,7h1v1h-1z M11,7h1v1h-1z M12,7h1v1h-1z M15,7h1v1h-1z M20,7h1v1h-1z M26,7h1v1h-1z M2,8h1v1h-1z M3,8h1v1h-1z M4,8h1v1h-1z M5,8h1v1h-1z M6,8h1v1h-1z M7,8h1v1h-1z M8,8h1v1h-1z M10,8h1v1h-1z M12,8h1v1h-1z M14,8h1v1h-1z M16,8h1v1h-1z M18,8h1v1h-1z M20,8h1v1h-1z M21,8h1v1h-1z M22,8h1v1h-1z M23,8h1v1h-1z M24,8h1v1h-1z M25,8h1v1h-1z M26,8h1v1h-1z M10,9h1v1h-1z M12,9h1v1h-1z M13,9h1v1h-1z M14,9h1v1h-1z M16,9h1v1h-1z M17,9h1v1h-1z M18,9h1v1h-1z M2,10h1v1h-1z M8,10h1v1h-1z M10,10h1v1h-1z M11,10h1v1h-1z M14,10h1v1h-1z M15,10h1v1h-1z M17,10h1v1h-1z M18,10h1v1h-1z M19,10h1v1h-1z M20,10h1v1h-1z M23,10h1v1h-1z M24,10h1v1h-1z M25,10h1v1h-1z M2,11h1v1h-1z M4,11h1v1h-1z M6,11h1v1h-1z M7,11h1v1h-1z M10,11h1v1h-1z M13,11h1v1h-1z M14,11h1v1h-1z M15,11h1v1h-1z M17,11h1v1h-1z M18,11h1v1h-1z M21,11h1v1h-1z M22,11h1v1h-1z M23,11h1v1h-1z M24,11h1v1h-1z M25,11h1v1h-1z M2,12h1v1h-1z M4,12h1v1h-1z M5,12h1v1h-1z M7,12h1v1h-1z M8,12h1v1h-1z M9,12h1v1h-1z M10,12h1v1h-1z M12,12h1v1h-1z M13,12h1v1h-1z M14,12h1v1h-1z M17,12h1v1h-1z M18,12h1v1h-1z M20,12h1v1h-1z M21,12h1v1h-1z M22,12h1v1h-1z M23,12h1v1h-1z M25,12h1v1h-1z M26,12h1v1h-1z M2,13h1v1h-1z M5,13h1v1h-1z M6,13h1v1h-1z M10,13h1v1h-1z M13,13h1v1h-1z M16,13h1v1h-1z M19,13h1v1h-1z M20,13h1v1h-1z M21,13h1v1h-1z M23,13h1v1h-1z M26,13h1v1h-1z M6,14h1v1h-1z M7,14h1v1h-1z M8,14h1v1h-1z M9,14h1v1h-1z M12,14h1v1h-1z M14,14h1v1h-1z M16,14h1v1h-1z M17,14h1v1h-1z M19,14h1v1h-1z M20,14h1v1h-1z M26,14h1v1h-1z M2,15h1v1h-1z M6,15h1v1h-1z M7,15h1v1h-1z M9,15h1v1h-1z M11,15h1v1h-1z M15,15h1v1h-1z M16,15h1v1h-1z M17,15h1v1h-1z M21,15h1v1h-1z M25,15h1v1h-1z M2,16h1v1h-1z M4,16h1v1h-1z M8,16h1v1h-1z M9,16h1v1h-1z M13,16h1v1h-1z M14,16h1v1h-1z M17,16h1v1h-1z M18,16h1v1h-1z M19,16h1v1h-1z M21,16h1v1h-1z M22,16h1v1h-1z M23,16h1v1h-1z M25,16h1v1h-1z M26,16h1v1h-1z M2,17h1v1h-1z M4,17h1v1h-1z M6,17h1v1h-1z M9,17h1v1h-1z M12,17h1v1h-1z M13,17h1v1h-1z M17,17h1v1h-1z M21,17h1v1h-1z M23,17h1v1h-1z M24,17h1v1h-1z M26,17h1v1h-1z M2,18h1v1h-1z M5,18h1v1h-1z M8,18h1v1h-1z M11,18h1v1h-1z M12,18h1v1h-1z M13,18h1v1h-1z M14,18h1v1h-1z M15,18h1v1h-1z M18,18h1v1h-1z M19,18h1v1h-1z M20,18h1v1h-1z M21,18h1v1h-1z M22,18h1v1h-1z M24,18h1v1h-1z M10,19h1v1h-1z M12,19h1v1h-1z M14,19h1v1h-1z M15,19h1v1h-1z M16,19h1v1h-1z M18,19h1v1h-1z M22,19h1v1h-1z M2,20h1v1h-1z M3,20h1v1h-1z M4,20h1v1h-1z M5,20h1v1h-1z M6,20h1v1h-1z M7,20h1v1h-1z M8,20h1v1h-1z M11,20h1v1h-1z M13,20h1v1h-1z M15,20h1v1h-1z M16,20h1v1h-1z M18,20h1v1h-1z M20,20h1v1h-1z M22,20h1v1h-1z M26,20h1v1h-1z M2,21h1v1h-1z M8,21h1v1h-1z M14,21h1v1h-1z M16,21h1v1h-1z M18,21h1v1h-1z M22,21h1v1h-1z M25,21h1v1h-1z M26,21h1v1h-1z M2,22h1v1h-1z M4,22h1v1h-1z M5,22h1v1h-1z M6,22h1v1h-1z M8,22h1v1h-1z M11,22h1v1h-1z M12,22h1v1h-1z M13,22h1v1h-1z M15,22h1v1h-1z M17,22h1v1h-1z M18,22h1v1h-1z M19,22h1v1h-1z M20,22h1v1h-1z M21,22h1v1h-1z M22,22h1v1h-1z M24,22h1v1h-1z M2,23h1v1h-1z M4,23h1v1h-1z M5,23h1v1h-1z M6,23h1v1h-1z M8,23h1v1h-1z M13,23h1v1h-1z M14,23h1v1h-1z M17,23h1v1h-1z M18,23h1v1h-1z M19,23h1v1h-1z M20,23h1v1h-1z M25,23h1v1h-1z M26,23h1v1h-1z M2,24h1v1h-1z M4,24h1v1h-1z M5,24h1v1h-1z M6,24h1v1h-1z M8,24h1v1h-1z M14,24h1v1h-1z M15,24h1v1h-1z M16,24h1v1h-1z M23,24h1v1h-1z M24,24h1v1h-1z M26,24h1v1h-1z M2,25h1v1h-1z M8,25h1v1h-1z M11,25h1v1h-1z M12,25h1v1h-1z M14,25h1v1h-1z M16,25h1v1h-1z M18,25h1v1h-1z M19,25h1v1h-1z M21,25h1v1h-1z M22,25h1v1h-1z M26,25h1v1h-1z M2,26h1v1h-1z M3,26h1v1h-1z M4,26h1v1h-1z M5,26h1v1h-1z M6,26h1v1h-1z M7,26h1v1h-1z M8,26h1v1h-1z M10,26h1v1h-1z M11,26h1v1h-1z M13,26h1v1h-1z M16,26h1v1h-1z M18,26h1v1h-1z M20,26h1v1h-1z M23,26h1v1h-1z M26,26h1v1h-1z";
-
-function WhatsAppQR() {
-  if (!WA_BOT_NUMBER || !WA_LINK) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        WhatsApp not configured. Set <code className="font-mono">WA_BOT_NUMBER</code>.
-      </p>
-    );
-  }
-
-  // Format number for display: digits only → +N NNN-NNN-NNNN style for US numbers,
-  // or fall back to raw if non-US.
-  const digitsOnly = WA_BOT_NUMBER.replace(/\D/g, "");
-  const displayNumber =
-    digitsOnly.length === 11 && digitsOnly.startsWith("1")
-      ? `+1 ${digitsOnly.slice(1, 4)}-${digitsOnly.slice(4, 7)}-${digitsOnly.slice(7)}`
-      : `+${digitsOnly}`;
-
-  // The pre-computed QR SVG only matches the default number.
-  const showQR = digitsOnly === WA_QR_DEFAULT_NUMBER;
-
-  return (
-    <div className="flex flex-col items-center gap-2">
-      {showQR && (
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 29 29"
-          width={120}
-          height={120}
-          shapeRendering="crispEdges"
-          aria-label="WhatsApp QR code"
-          role="img"
-          className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
-        >
-          <rect width="29" height="29" fill="white" />
-          <path fill="black" d={WA_QR_PATH} />
-        </svg>
-      )}
-      <a
-        href={WA_LINK}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
-      >
-        {displayNumber}
-      </a>
-    </div>
-  );
-}
-
+// Slack, email, and "install in your agent" over MCP/CLI.
 // ---------------------------------------------------------------------------
 // SlackBindingStatus — per-user DM identity status + unlink
 // ---------------------------------------------------------------------------
@@ -2946,74 +2758,8 @@ function SlackBindingStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// WhatsAppBindingStatus — per-user binding status + unlink
 // ---------------------------------------------------------------------------
-function WhatsAppBindingStatus() {
-  const [binding, setBinding] = useState<import("@/lib/types").WhatsAppBindingMe | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [unlinking, setUnlinking] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      setBinding(await api.whatsapp.bindingMe());
-    } catch {
-      // endpoint may not exist on older engines — fail silently
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-
-  async function handleUnlink() {
-    if (!confirm("Unlink your WhatsApp number from this account?")) return;
-    setUnlinking(true);
-    try {
-      await api.whatsapp.unlink();
-      toast.success("WhatsApp number unlinked");
-      void load();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to unlink WhatsApp");
-    } finally {
-      setUnlinking(false);
-    }
-  }
-
-  if (loading) return <Skeleton className="h-8 w-48" />;
-  if (!binding) return null;
-  if (!binding.linked) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Scan the QR or text the number above, then tap the link Emily sends you.
-      </p>
-    );
-  }
-
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-foreground truncate">
-          {binding.profile_name
-            ? `${binding.profile_name} (${binding.wa_id_masked})`
-            : binding.wa_id_masked}
-        </p>
-        <p className="text-[11px] text-muted-foreground">Linked to this account</p>
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="shrink-0 text-muted-foreground hover:text-destructive"
-        onClick={() => void handleUnlink()}
-        disabled={unlinking}
-      >
-        {unlinking ? "Unlinking..." : "Unlink"}
-      </Button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ChannelsTab — Slack + WhatsApp + Agent install
+// ChannelsTab - Slack + email + MCP setup
 // ---------------------------------------------------------------------------
 function EmailChannelStatus() {
   const [status, setStatus] = useState<{ connected: boolean; email?: string | null } | null>(null);
@@ -3057,15 +2803,13 @@ function EmailChannelStatus() {
 }
 
 function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
-  const [qrOpen, setQrOpen] = useState(false);
   return (
     <div>
       <Tabs defaultValue="slack">
         <TabsList className="mb-4">
           <TabsTrigger value="slack">Slack</TabsTrigger>
-          <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
-          <TabsTrigger value="agent-install">Agent install</TabsTrigger>
+          <TabsTrigger value="agent-install">MCP setup</TabsTrigger>
         </TabsList>
         <TabsContent value="slack" className="space-y-4">
           <div className="c-ltable">
@@ -3086,32 +2830,6 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
             <SlackBindingStatus />
           </div>
         </TabsContent>
-        <TabsContent value="whatsapp" className="space-y-4">
-          {WA_BOT_NUMBER ? (
-            <>
-              <div className="c-ltable">
-                <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-                  <div className="c-lp-tx">
-                    <div className="nm">WhatsApp</div>
-                    <div className="sub">Scan the QR code to start a chat and bind your number.</div>
-                  </div>
-                  <Button type="button" variant="outline" onClick={() => setQrOpen(true)}>
-                    <QrCode className="size-3.5" />
-                    Show QR
-                  </Button>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Your link status</p>
-                <WhatsAppBindingStatus />
-              </div>
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              WhatsApp not configured. Set <code className="font-mono">WA_BOT_NUMBER</code>.
-            </p>
-          )}
-        </TabsContent>
         <TabsContent value="email" className="space-y-4">
           <EmailChannelStatus />
         </TabsContent>
@@ -3124,16 +2842,6 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           />
         </TabsContent>
       </Tabs>
-      <Dialog open={qrOpen} onOpenChange={setQrOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Link WhatsApp</DialogTitle>
-            <DialogDescription>Scan this QR code, send Emily a message, then open the claim link she replies with.</DialogDescription>
-          </DialogHeader>
-          <WhatsAppQR />
-        </DialogContent>
-      </Dialog>
-
       <ChannelCapabilityMatrix />
     </div>
   );
@@ -3151,14 +2859,13 @@ interface ChannelCapRow {
   web: CapCell;
   emily: CapCell;
   slack: CapCell;
-  whatsapp: CapCell;
 }
 
 const CHANNEL_CAPS: ChannelCapRow[] = [
-  { capability: "Run worker",    web: "yes",     emily: "yes",     slack: "yes",     whatsapp: "yes"     },
-  { capability: "Approve run",   web: "yes",     emily: "partial", slack: "partial", whatsapp: "partial" },
-  { capability: "Create worker", web: "yes",     emily: "no",      slack: "no",      whatsapp: "no"      },
-  { capability: "Notify on run", web: "partial", emily: "yes",     slack: "yes",     whatsapp: "yes"     },
+  { capability: "Run worker",    web: "yes",     emily: "yes",     slack: "yes" },
+  { capability: "Approve run",   web: "yes",     emily: "partial", slack: "partial" },
+  { capability: "Create worker", web: "yes",     emily: "no",      slack: "no" },
+  { capability: "Notify on run", web: "partial", emily: "yes",     slack: "yes" },
 ];
 
 // "partial" = limited support (e.g. approve via link, notify via browser only)
@@ -3169,7 +2876,7 @@ const CAP_LABELS: Record<CapCell, { label: string; className: string }> = {
 };
 
 function ChannelCapabilityMatrix() {
-  const cols = ["Web", "Emily", "Slack", "WhatsApp"] as const;
+  const cols = ["Web", "Emily", "Slack"] as const;
   return (
     <div className="mt-6 space-y-2">
       <p className="text-xs font-medium text-muted-foreground">Channel capabilities</p>
@@ -3187,7 +2894,7 @@ function ChannelCapabilityMatrix() {
             {CHANNEL_CAPS.map((row) => (
               <tr key={row.capability} className="[border-top:var(--bd-div)]">
                 <td className="py-1.5 pr-4 text-muted-foreground">{row.capability}</td>
-                {(["web", "emily", "slack", "whatsapp"] as const).map((ch) => {
+                {(["web", "emily", "slack"] as const).map((ch) => {
                   const cell = row[ch];
                   const { label, className } = CAP_LABELS[cell];
                   return (

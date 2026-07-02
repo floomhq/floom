@@ -73,6 +73,7 @@ export interface ListRowSpec {
 
 export interface RowMenuItem {
   label: string;
+  icon?: ReactNode;
   onSelect: () => void;
   danger?: boolean;
   confirm?: Pick<
@@ -213,6 +214,12 @@ export interface CollectionStates {
     /** Render the empty state as a bounded dashed drop-zone box (drop-led
      *  surfaces such as the Library). */
     dropzone?: boolean;
+  };
+  filteredEmpty?: {
+    title: string;
+    help?: string;
+    icon?: import("react").ComponentType<{ size?: number }>;
+    action?: ReactNode;
   };
   errorRetry?: () => void;
 }

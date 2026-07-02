@@ -1,45 +1,20 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildMcpServerConfig, buildMcpJson } from "@/lib/mcp-config";
 
-describe("MCP server config (Settings → API tab)", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("uses the configured API base for the url and embeds the token", () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE", "http://localhost:8000");
-    const cfg = buildMcpServerConfig("wos_member_tok");
-    expect(cfg.mcpServers.floom.url).toBe("http://localhost:8000/mcp-tools/serve");
-    expect(cfg.mcpServers.floom.headers["x-floom-secret"]).toBe("wos_member_tok");
-  });
-
-  it("omits x-workeros-workspace for the default workspace", () => {
-    const cfg = buildMcpServerConfig("tok", null);
-    expect(cfg.mcpServers.floom.headers).not.toHaveProperty("x-workeros-workspace");
-    const cfg2 = buildMcpServerConfig("tok"); // undefined
-    expect(cfg2.mcpServers.floom.headers).not.toHaveProperty("x-workeros-workspace");
-  });
-
-  it("pins x-workeros-workspace when a non-default workspace is active", () => {
-    const cfg = buildMcpServerConfig("tok", "ws_abc123");
-    expect(cfg.mcpServers.floom.headers["x-workeros-workspace"]).toBe("ws_abc123");
+describe("MCP server config", () => {
+  it("is a token-free npx command snippet using the stdio server binary", () => {
+    const cfg = buildMcpServerConfig();
+    expect(cfg.mcpServers.floom.command).toBe("npx");
+    expect(cfg.mcpServers.floom.args).toEqual(["-y", "-p", "@floomhq/floom", "floom-mcp"]);
+    // nothing to leak/rotate: no url, headers, secret, or workspace embedded.
+    expect(cfg.mcpServers.floom).not.toHaveProperty("url");
+    expect(cfg.mcpServers.floom).not.toHaveProperty("headers");
   });
 
   it("buildMcpJson is valid pretty JSON matching the config object", () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://api.acme.internal");
-    const json = buildMcpJson("tok", "ws_x");
+    const json = buildMcpJson();
     const parsed = JSON.parse(json);
-    expect(parsed).toEqual(buildMcpServerConfig("tok", "ws_x"));
-    expect(parsed.mcpServers.floom.url).toBe("https://api.acme.internal/mcp-tools/serve");
-    expect(parsed.mcpServers.floom.headers["x-workeros-workspace"]).toBe("ws_x");
-  });
-
-  it("uses the cloud API host in MCP config when NEXT_PUBLIC_WORKEROS_DEPLOY=cloud", () => {
-    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
-    vi.stubEnv("NEXT_PUBLIC_API_BASE", "");
-    const cfg = buildMcpServerConfig("wos_cloud_pat");
-    expect(cfg.mcpServers.floom.url).toBe("https://workeros-api.floom.dev/mcp/<YOUR_WORKSPACE_ID>");
-    expect(cfg.mcpServers.floom.headers.Authorization).toBe("Bearer wos_cloud_pat");
-    expect(cfg.mcpServers.floom.headers).not.toHaveProperty("x-floom-secret");
+    expect(parsed).toEqual(buildMcpServerConfig());
+    expect(parsed.mcpServers.floom.command).toBe("npx");
   });
 });

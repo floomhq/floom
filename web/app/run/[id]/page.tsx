@@ -19,6 +19,7 @@
 //
 // This page works TODAY for any authenticated user who has access to the worker.
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -37,6 +38,7 @@ import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/W
 import { RunPanel } from "@/components/run-page/RunPanel";
 import { FloomMark } from "@/components/share/ShareCardShell";
 import { api } from "@/lib/api";
+import { withWorkspaceParam } from "@/lib/workspaceHref";
 import type { ConnectionItem, WorkerDetail, WorkerInput } from "@/lib/types";
 
 // Normalize connection slugs to the BrandLogo's expected format
@@ -91,6 +93,7 @@ function WorkerConnectionRow({
   slug: string;
   connection: ConnectionItem | undefined;
 }) {
+  const searchParams = useSearchParams();
   const app = getSupportedApp(slug);
   const accountLabel = connection
     ? maskAccountLabel(getConnectionAccountLabel(connection as ConnectionRecord))
@@ -106,7 +109,7 @@ function WorkerConnectionRow({
           <span className="block truncate text-xs text-muted-foreground">{accountLabel}</span>
         ) : (
           <Link
-            href="/connections"
+            href={withWorkspaceParam("/connections", searchParams)}
             className="block text-xs text-[var(--accent)] no-underline hover:underline"
           >
             Not connected · Connect
@@ -185,6 +188,7 @@ function WorkerIdentityPanel({
 
 export default function RunWorkerPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
   // Support an optional share ?token= param for future public-run path.
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
@@ -301,6 +305,9 @@ export default function RunWorkerPage() {
     try {
       const result = await api.workers.run(worker.id, inputs);
       if (!result.run_id) throw new Error("Run ID missing from API response");
+      queryClient.removeQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["workers"] });
+      queryClient.invalidateQueries({ queryKey: ["system", "overview"] });
       setActiveRunId(result.run_id);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start run");
@@ -314,7 +321,7 @@ export default function RunWorkerPage() {
   // Where "Back" returns to: the worker's detail pane if we know the id, else
   // the Workers list. The /run page is a standalone takeover (no app sidebar),
   // so this is the only way back into the app.
-  const backHref = id ? `/workers?sel=${encodeURIComponent(id)}` : "/workers";
+  const backHref = withWorkspaceParam(id ? `/workers?sel=${encodeURIComponent(id)}` : "/workers", searchParams);
 
   // Loading
   if (loading) {
@@ -352,6 +359,7 @@ export default function RunWorkerPage() {
       loadError?.toLowerCase().includes("unauthorized") ||
       loadError?.toLowerCase().includes("not authorized") ||
       loadError?.includes("401");
+    const loginNext = withWorkspaceParam(`/run/${id}${token ? `?token=${token}` : ""}`, searchParams);
 
     return (
       <RunPageShell backHref={backHref}>
@@ -361,7 +369,7 @@ export default function RunWorkerPage() {
               <p className="text-sm text-[var(--ink)]">
                 Sign in to run this worker.
               </p>
-              <Link href={`/login?next=${encodeURIComponent(`/run/${id}${token ? `?token=${token}` : ""}`)}`}>
+              <Link href={`/login?next=${encodeURIComponent(loginNext)}`}>
                 <Button>Sign in</Button>
               </Link>
             </>

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { QueryClientContext } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -68,6 +70,15 @@ function cacheWorkspaceSwitcherState(next: WorkspaceSwitcherCache) {
   return next;
 }
 
+export function replaceUrlWorkspaceParam(workspaceId: string) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("workspace_id") && !url.searchParams.has("ws")) return;
+  url.searchParams.set("workspace_id", workspaceId);
+  url.searchParams.delete("ws");
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 function loadWorkspaceSwitcherState() {
   if (!workspaceSwitcherLoadPromise) {
     workspaceSwitcherLoadPromise = Promise.all([
@@ -106,6 +117,8 @@ function WorkspaceAvatar({
 }
 
 export function WorkspaceSwitcher() {
+  const router = useRouter();
+  const queryClient = useContext(QueryClientContext);
   const [state, setState] = useState<WorkspaceState | null>(() => workspaceSwitcherCache?.state ?? null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -153,13 +166,32 @@ export function WorkspaceSwitcher() {
     };
   }, []);
 
+  function commitWorkspaceSelection(workspaceId: string, nextWorkspaces?: LocalWorkspace[]) {
+    setActiveWorkspaceId(workspaceId);
+    replaceUrlWorkspaceParam(workspaceId);
+    queryClient?.clear();
+
+    const workspaces = nextWorkspaces ?? state?.workspaces ?? [];
+    const nextState = state ? { ...state, workspaces, activeId: workspaceId } : null;
+    if (nextState) {
+      setState(nextState);
+      cacheWorkspaceSwitcherState({
+        state: nextState,
+        canExportWorkspace,
+      });
+    }
+    const activeWorkspace = workspaces.find((w) => w.id === workspaceId);
+    groupPostHogWorkspace(workspaceId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
+    setSwitchingTo(null);
+    router.refresh();
+  }
+
   async function handleSwitch(workspaceId: string) {
     if (state && state.activeId === workspaceId) return;
     setSwitchingTo(workspaceId);
     try {
       await api.workspace.select(workspaceId);
-      setActiveWorkspaceId(workspaceId);
-      window.location.reload();
+      commitWorkspaceSelection(workspaceId);
     } catch (err) {
       setError((err as Error).message || "Failed to switch workspace");
       setSwitchingTo(null);
@@ -169,14 +201,21 @@ export function WorkspaceSwitcher() {
   async function handleCreate() {
     const name = createName.trim();
     if (!name) return;
+    setError(null);
     setCreating(true);
     try {
       const created = await api.workspace.create(name);
       await api.workspace.select(created.id);
-      setActiveWorkspaceId(created.id);
-      window.location.reload();
+      const nextWorkspaces = state
+        ? [...state.workspaces.filter((w) => w.id !== created.id), created]
+        : [created];
+      setCreateOpen(false);
+      setCreating(false);
+      commitWorkspaceSelection(created.id, nextWorkspaces);
     } catch (err) {
-      setError((err as Error).message || "Failed to create workspace");
+      const message = (err as Error).message || "Failed to create workspace";
+      setError(message);
+      toast.error(message);
       setCreating(false);
     }
   }
@@ -257,9 +296,10 @@ export function WorkspaceSwitcher() {
     try {
       const created = await api.workspace.duplicate(state.activeId);
       await api.workspace.select(created.id);
-      setActiveWorkspaceId(created.id);
+      const nextWorkspaces = [...state.workspaces.filter((w) => w.id !== created.id), created];
+      commitWorkspaceSelection(created.id, nextWorkspaces);
       toast.success(`Duplicated to “${created.name}”`);
-      window.location.reload();
+      setDuplicating(false);
     } catch (err) {
       toast.error((err as Error).message || "Failed to duplicate workspace");
       setDuplicating(false);
@@ -375,6 +415,7 @@ export function WorkspaceSwitcher() {
                 setCreateName("");
                 setCreateCompany("");
                 setNameTouched(false);
+                setError(null);
                 setCreateOpen(true);
               }}
               className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
@@ -539,6 +580,7 @@ export function WorkspaceSwitcher() {
                   onChange={(event) => {
                     const v = event.target.value;
                     setCreateCompany(v);
+                    setError(null);
                     if (!nameTouched) setCreateName(prefillWorkspaceName(v));
                   }}
                   placeholder="e.g. Acme or acme.com"
@@ -554,6 +596,7 @@ export function WorkspaceSwitcher() {
                 value={createName}
                 onChange={(event) => {
                   setNameTouched(true);
+                  setError(null);
                   setCreateName(event.target.value);
                 }}
                 placeholder="e.g. Acme"
@@ -567,6 +610,11 @@ export function WorkspaceSwitcher() {
               />
             </div>
           </div>
+          {error && (
+            <p role="alert" className="text-sm text-[var(--negative)]">
+              {error}
+            </p>
+          )}
           <DialogFooter>
             <Button
               variant="ghost"

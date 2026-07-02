@@ -39,6 +39,7 @@ import {
 } from "@/lib/run-format";
 import { stripCitationTokens } from "@/lib/strip-citations";
 import { getToolCardTitle } from "@/lib/useChatStream";
+import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 import type { LogEntry, RunDetail, RunFeedback, RunPart, TranscriptRow, ToolCallEntry, ApprovalEntry } from "@/lib/types";
 
 type Props = {
@@ -208,12 +209,14 @@ export function RunDetailSplitPane({
   onReplay,
   onCancel,
 }: Props) {
+  const workspaceHref = useWorkspaceHref();
   const [replayConfirmOpen, setReplayConfirmOpen] = useState(false);
   const transcriptParts = parts.length > 0 ? parts : partsFromRun(run);
   const timeline = buildTimeline(run, transcriptParts);
   const isActive = run.status === "running" || run.status === "queued";
   const latest = latestStatus(run, transcriptParts);
   const displayStatus = streamUnavailable && isActive ? "unknown" : latest;
+  const showTimelineRail = isActive || streamConnected || Boolean(streamError) || timeline.length > 1;
 
   return (
     <div className={cn("space-y-6", inline && "min-h-[280px]")}>
@@ -223,7 +226,7 @@ export function RunDetailSplitPane({
           with the same flex/gap/padding rhythm as /workers/<id>. */}
       {!inline && (
         <Link
-          href="/runs"
+          href={workspaceHref("/runs")}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <span aria-hidden="true">←</span>
@@ -234,7 +237,7 @@ export function RunDetailSplitPane({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/workers?sel=${encodeURIComponent(run.worker_id)}`}
+              href={workspaceHref(`/workers?sel=${encodeURIComponent(run.worker_id)}`)}
               className={cn("min-w-0 break-words font-semibold tracking-tight sm:truncate hover:underline", inline ? "text-base" : "text-xl")}
             >
               {run.worker_name || run.worker_id}
@@ -288,7 +291,7 @@ export function RunDetailSplitPane({
           {/* N27: was "Edit" — misleading in run-detail context (users expected to
               edit the run, not the worker source). Relabelled "Edit worker" and
               link lands on the worker Source tab (same destination as before). */}
-          <Link href={`/workers?sel=${encodeURIComponent(run.worker_id)}&tab=Source`}>
+          <Link href={workspaceHref(`/workers?sel=${encodeURIComponent(run.worker_id)}&tab=Source`)}>
             <Button variant="outline" size="sm">
               <Pencil className="size-3.5 mr-1.5" />
               Edit worker
@@ -356,22 +359,24 @@ export function RunDetailSplitPane({
       {/* R4: the split pane was unbounded — long transcripts/logs grew the
           whole page so it scrolled "into infinity". Cap the pane at a
           viewport-relative height and let each pane scroll WITHIN itself. */}
-      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] flex-col gap-0 overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] md:flex-row">
+      <div className="flex min-h-[320px] max-h-[calc(100vh-12rem)] flex-col gap-0 overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] md:flex-row">
         {/* R5 (2026-05-30): the timeline pane previously had `md:resize-x` (a
             CSS textarea-style drag handle showed in its corner) and
             `md:max-h-none`, which stretched a short timeline into a huge empty
             box reserving dead vertical height. Drop the resize affordance and
             let the pane size to its content (self-scroll only when long). */}
-        <aside className="max-h-44 w-full shrink-0 self-start overflow-y-auto [border-bottom:var(--bd-div)] bg-muted/25 md:max-h-[calc(100vh-13rem)] md:w-[320px] md:min-w-[240px] md:max-w-[460px] md:[border-right:var(--bd-div)] md:[border-bottom:0]">
-          {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
-              The timeline IS the panel; the label was dead weight (ChatGPT
-              audit P-1). */}
-          <div className="p-2">
-            {timeline.map((item, index) => (
-              <TimelineRow key={`${item.label}-${index}`} item={item} />
-            ))}
-          </div>
-        </aside>
+        {showTimelineRail && (
+          <aside className="max-h-44 w-full shrink-0 overflow-y-auto [border-bottom:var(--bd-div)] bg-muted/25 md:max-h-[calc(100vh-12rem)] md:w-[240px] md:min-w-[200px] md:max-w-[280px] md:[border-right:var(--bd-div)] md:[border-bottom:0]">
+            {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
+                The timeline IS the panel; the label was dead weight (ChatGPT
+                audit P-1). */}
+            <div className="p-2">
+              {timeline.map((item, index) => (
+                <TimelineRow key={`${item.label}-${index}`} item={item} />
+              ))}
+            </div>
+          </aside>
+        )}
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* v6: lead with the rendered OUTPUT (the generic viewer). The
@@ -458,7 +463,7 @@ function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
   const durationValue =
     run.duration_ms != null ? formatDuration(run.duration_ms) : status === "unknown" ? "Unknown" : "Running";
   return (
-    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-7">
+    <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
       <RunMetric label="Status" value={statusLabel(status)} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
       <RunMetric label="Duration" value={durationValue} />
@@ -472,7 +477,7 @@ function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
 
 function RunMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 bg-card px-3 py-2">
+    <div className="min-w-0 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card px-3 py-2">
       <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 truncate font-medium text-foreground">{value}</dd>
     </div>
@@ -654,7 +659,7 @@ function OutputSummary({ run }: { run: RunDetail }) {
   const exportEntries = allScalar.filter(([key]) => isExportSuccessKey(key));
   const metricEntries = allScalar.filter(([key]) => !isExportSuccessKey(key)).slice(0, 8);
   const schemaFields = (run.output_schema || []).filter((field) => field.value != null && field.value !== "");
-  const fileFields = schemaFields.filter((field) => typeof field.value === "string" && field.value.includes("/"));
+  const fileFields = schemaFields.filter((field) => isFilePathOutputField(field));
 
   if (metricEntries.length === 0 && exportEntries.length === 0 && schemaFields.length === 0) {
     return (
@@ -717,8 +722,71 @@ function OutputSummary({ run }: { run: RunDetail }) {
   );
 }
 
+function isWorkerAuthorRun(run: RunDetail): boolean {
+  return run.worker_id === "worker-author" || run.worker_name === "worker-author";
+}
+
+function normalizeRunPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.?\//, "");
+}
+
+function isFilePathOutputField(field: RunDetail["output_schema"][number]): boolean {
+  if (typeof field.value !== "string") return false;
+  return field.kind === "file" || field.type === "file" || normalizeRunPath(field.value).includes("/");
+}
+
+function isArtifactBackedOutputField(run: RunDetail, field: RunDetail["output_schema"][number]): boolean {
+  if (!isFilePathOutputField(field) || typeof field.value !== "string") return false;
+  const value = normalizeRunPath(field.value);
+  return run.artifacts.some((artifact) => {
+    const name = normalizeRunPath(artifact.name || "");
+    const path = normalizeRunPath(artifact.relative_path || artifact.path || "");
+    return value === path || path.endsWith(`/${value}`) || value.endsWith(`/${name}`) || name === value.split("/").at(-1);
+  });
+}
+
+function visibleOutputSchemaFields(run: RunDetail): RunDetail["output_schema"] {
+  return (run.output_schema || []).filter((field) => !isArtifactBackedOutputField(run, field));
+}
+
+function WorkerAuthorOutputFallback({ run, fileFields }: { run: RunDetail; fileFields: RunDetail["output_schema"] }) {
+  const bundleField = fileFields.find((field) => String(field.value || "").includes("bundle")) || fileFields[0];
+  const suggestedId = typeof run.output?.created_worker_id === "string"
+    ? run.output.created_worker_id
+    : typeof run.output?.suggested_id === "string"
+      ? run.output.suggested_id
+      : null;
+  return (
+    <div className="space-y-5">
+      <section className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/20 p-4">
+        <p className="text-xs font-medium uppercase text-muted-foreground">Worker draft</p>
+        <h2 className="mt-1 text-base font-semibold">Worker bundle generated</h2>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          The worker-author run produced a draft bundle for review. Open the created worker from the creation card, or download the bundle below to inspect the generated files.
+        </p>
+        {suggestedId && (
+          <p className="mt-3 text-sm">
+            Worker id: <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{suggestedId}</code>
+          </p>
+        )}
+      </section>
+      {bundleField && (
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">Generated files</h3>
+          <OutputFileLink run={run} label={bundleField.label || bundleField.name || "Worker bundle"} path={String(bundleField.value)} />
+        </section>
+      )}
+    </div>
+  );
+}
+
 function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; path: string }) {
-  const artifact = run.artifacts.find((candidate) => candidate.name === path);
+  const normalizedPath = normalizeRunPath(path);
+  const artifact = run.artifacts.find((candidate) => {
+    const name = normalizeRunPath(candidate.name || "");
+    const artifactPath = normalizeRunPath(candidate.relative_path || candidate.path || "");
+    return normalizedPath === artifactPath || artifactPath.endsWith(`/${normalizedPath}`) || normalizedPath.endsWith(`/${name}`);
+  });
   const href = artifact ? api.runs.artifactUrl(run.id, artifact.id) : api.runs.bundleUrl(run.id, path);
   return (
     <a
@@ -818,11 +886,38 @@ function OutputView({ run }: { run: RunDetail }) {
     return <StackTrace error={run.error} />;
   }
   if (hasSchema) {
+    const visibleFields = visibleOutputSchemaFields(run);
+    const fileFields = run.output_schema.filter((field) => isArtifactBackedOutputField(run, field));
+    if (visibleFields.length === 0) {
+      if (isWorkerAuthorRun(run) && fileFields.length > 0) {
+        return <WorkerAuthorOutputFallback run={run} fileFields={fileFields} />;
+      }
+      return (
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Output is available in the generated files below.</p>
+          <div className="grid gap-2 lg:grid-cols-2">
+            {fileFields.map((field) => (
+              <OutputFileLink key={field.name} run={run} label={field.label || field.name} path={String(field.value)} />
+            ))}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="space-y-6">
-        {run.output_schema.map((field) => (
+        {visibleFields.map((field) => (
           <OutputRenderer key={field.name} field={field} runId={run.id} />
         ))}
+        {fileFields.length > 0 && (
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">Generated files</h3>
+            <div className="grid gap-2 lg:grid-cols-2">
+              {fileFields.map((field) => (
+                <OutputFileLink key={field.name} run={run} label={field.label || field.name} path={String(field.value)} />
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     );
   }
@@ -1025,6 +1120,7 @@ function ToolCallsView({ calls }: { calls: ToolCallEntry[] }) {
 }
 
 function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
+  const workspaceHref = useWorkspaceHref();
   if (!approval) {
     return <p className="text-sm text-muted-foreground">No approval required for this run.</p>;
   }
@@ -1066,7 +1162,7 @@ function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
         {approval.follow_up_run_id && (
           <p className="text-xs">
             <span className="text-muted-foreground">Follow-up run: </span>
-            <Link href={`/runs/${approval.follow_up_run_id}`} className="text-primary hover:underline font-mono">
+            <Link href={workspaceHref(`/runs/${approval.follow_up_run_id}`)} className="text-primary hover:underline font-mono">
               {approval.follow_up_run_id}
             </Link>
           </p>

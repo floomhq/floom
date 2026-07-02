@@ -43,7 +43,19 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
 vi.mock("@/lib/query/hooks", () => ({
   useOverview: () => ({
     data: {
-      stats: { work_shipped_7d: 7 },
+      stats: {
+        active_workers_count: 3,
+        paused_workers_count: 1,
+        connections_healthy: 2,
+        connections_total: 3,
+        work_shipped_7d: 7,
+        running_now: 1,
+        queued_now: 1,
+        runs_7d_sparkline: [
+          { label: "Mon", started_at: "2026-06-29T00:00:00Z", total: 4, failed: 0 },
+          { label: "Tue", started_at: "2026-06-30T00:00:00Z", total: 5, failed: 1 },
+        ],
+      },
       outcomes: [],
       recent_runs: [],
       scheduled_today: [],
@@ -107,7 +119,16 @@ describe("HOME = existing Emily, fullscreen, stuff in empty state", () => {
     // Pulse: "{done} done this week" (degrades gracefully but here overview loaded).
     expect(await screen.findByText(/done this week/i)).toBeInTheDocument();
     // Needs-attention affordance from the single attention item.
-    expect(screen.getByText(/need attention/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/need attention/i).length).toBeGreaterThan(0);
+    expect(screen.getByText("Total workers")).toBeInTheDocument();
+    expect(screen.getByText("Active workers")).toBeInTheDocument();
+    expect(screen.getByText("Runs this week")).toBeInTheDocument();
+    expect(screen.getByText("Connections")).toBeInTheDocument();
+    expect(screen.getByText("Needs attention")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.getAllByText("7").length).toBeGreaterThan(0);
+    expect(screen.getByText("2/3")).toBeInTheDocument();
+    expect(screen.getByText("1 running, 1 queued")).toBeInTheDocument();
 
     // Greeting is the primary heading — H1-scale, visually above the pulse line.
     const greeting = screen.getByText(/Good (morning|afternoon|evening)/i);

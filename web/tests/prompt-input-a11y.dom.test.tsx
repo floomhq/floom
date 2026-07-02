@@ -36,7 +36,7 @@ describe("PromptInput a11y (#1711)", () => {
   it("composer wrapper renders a visible focus ring (focus-within:ring)", () => {
     renderComposer();
     const textarea = screen.getByRole("textbox", { name: /describe the job/i });
-    const wrapper = textarea.parentElement as HTMLElement;
+    const wrapper = textarea.closest(".rounded-xl") as HTMLElement;
     expect(wrapper.className).toMatch(/focus-within:ring-2/);
     expect(wrapper.className).toMatch(/focus-within:ring-\[var\(--ring\)\]/);
   });
