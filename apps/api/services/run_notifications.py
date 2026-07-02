@@ -24,6 +24,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from html import escape
+from email.utils import parseaddr
 from typing import Any, Dict, Optional
 
 from models import (
@@ -36,6 +37,9 @@ from models import (
 )
 
 logger = logging.getLogger("floom.run_service")
+
+FLOOM_EMAIL_LOGO_URL = "https://workers.floom.dev/brand/floom-email-logo@2x.png"
+FLOOM_NOTIFICATIONS_FROM = "Floom <notifications@floom.dev>"
 
 
 def _resend_timeout_seconds() -> float:
@@ -233,27 +237,39 @@ def _run_email_html(
     """Branded run-notification email. Branding is env-configurable for self-hosters:
     WORKEROS_BRAND_NAME (default "Floom"), WORKERS_FRONTEND_URL (header/footer link),
     WORKEROS_EMAIL_LOGO_URL (optional absolute https logo; falls back to the brand name
-    as text), and WORKEROS_SUPPORT_EMAIL (optional footer contact)."""
+    as text), WORKEROS_SUPPORT_EMAIL (optional footer contact), and
+    WORKEROS_EMAIL_UNSUBSCRIBE_URL (optional alert-management or unsubscribe URL)."""
     brand = (os.environ.get("WORKEROS_BRAND_NAME") or "Floom").strip() or "Floom"
-    frontend_url = (os.environ.get("WORKERS_FRONTEND_URL") or "http://localhost:3000").rstrip("/")
+    frontend_url = (os.environ.get("WORKERS_FRONTEND_URL") or "https://floom.dev/app").rstrip("/")
     # Gmail requires an absolute https <img> src in email (data URIs are stripped),
     # so the logo must be a public URL; when unset we render the brand name as text.
-    logo_url = (os.environ.get("WORKEROS_EMAIL_LOGO_URL") or "").strip()
+    logo_url = (os.environ.get("WORKEROS_EMAIL_LOGO_URL") or FLOOM_EMAIL_LOGO_URL).strip()
     support_email = (os.environ.get("WORKEROS_SUPPORT_EMAIL") or "").strip()
+    unsubscribe_header_url = (os.environ.get("WORKEROS_EMAIL_UNSUBSCRIBE_URL") or "").strip()
+    safe_brand = escape(brand)
+    safe_frontend_url = escape(frontend_url, quote=True)
+    safe_logo_url = escape(logo_url, quote=True)
+    run_url = f"{frontend_url}/runs/{run_id}"
+    manage_alerts_url = unsubscribe_header_url or f"{frontend_url}/workers/{worker_id}"
+    safe_run_url = escape(run_url, quote=True)
     brand_mark = (
-        f'<img src="{logo_url}" width="120" height="42" alt="{brand}" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;">'
+        f'<img src="{safe_logo_url}" width="120" height="42" alt="{safe_brand}" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;">'
         if logo_url
-        else f'<span style="font-size:20px;font-weight:700;color:#16171A;">{brand}</span>'
+        else f'<span style="font-size:20px;font-weight:700;color:#16171A;">{safe_brand}</span>'
     )
     footer_contact = (
-        f' &middot; <a href="mailto:{support_email}" style="color:#3E6FE0;text-decoration:underline;">{support_email}</a>'
+        f' &middot; <a href="mailto:{escape(support_email, quote=True)}" style="color:#3563CC;text-decoration:underline;">{escape(support_email)}</a>'
         if support_email
         else ""
     )
+    footer_unsubscribe = (
+        f' &middot; <a href="{escape(manage_alerts_url, quote=True)}" style="color:#3563CC;text-decoration:underline;">Manage alerts</a>'
+    )
     is_failed = status_label.lower() == "failed"
     status_color = "#E5533D" if is_failed else "#2F8F5B"
+    headline = "needs attention" if is_failed else "finished successfully"
     rows = [
-        ("Worker", f"{worker_name} <span style=\"color:#6B7280;\">({worker_id})</span>"),
+        ("Worker", f"{worker_name} <span style=\"color:#62697A;\">({worker_id})</span>"),
         ("Run ID", f"<span style=\"font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;\">{run_id}</span>"),
         ("Status", f"<span style=\"color:{status_color};font-weight:650;\">{status_label}</span>"),
         ("Time", timestamp),
@@ -261,7 +277,7 @@ def _run_email_html(
     if error:
         rows.append(("Error", f"<span style=\"font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#E5533D;\">{error}</span>"))
     row_html = "".join(
-        f"<tr><td style=\"padding:6px 0;font-size:13px;color:#6B7280;width:96px;vertical-align:top;\">{label}</td>"
+        f"<tr><td style=\"padding:6px 0;font-size:13px;color:#62697A;width:96px;vertical-align:top;\">{label}</td>"
         f"<td style=\"padding:6px 0;font-size:14px;color:#16171A;\">{value}</td></tr>"
         for label, value in rows
     )
@@ -270,21 +286,34 @@ def _run_email_html(
 <body style="margin:0;padding:0;background:#FBFBFC;font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#16171A;-webkit-font-smoothing:antialiased;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FBFBFC;"><tr><td align="center" style="padding:40px 16px;">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
-<tr><td style="background:#F2F3F5;border:1px solid rgba(20,23,26,0.08);border-bottom:none;border-radius:16px 16px 0 0;padding:26px 36px;">
-<a href="{frontend_url}" style="text-decoration:none;display:inline-block;">{brand_mark}</a>
+<tr><td style="background:#F3F4F6;border:1px solid rgba(20,23,26,0.08);border-bottom:none;border-radius:16px 16px 0 0;padding:26px 36px;">
+<a href="{safe_frontend_url}" style="text-decoration:none;display:inline-block;">{brand_mark}</a>
 </td></tr>
 <tr><td style="background:#FFFFFF;border:1px solid rgba(20,23,26,0.08);border-top:none;border-radius:0 0 16px 16px;padding:36px 40px 40px;">
-<p style="margin:0 0 10px;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#6B7280;">Worker run</p>
-<h1 style="margin:0 0 22px;font-size:22px;line-height:1.25;font-weight:650;color:#16171A;">{worker_name} {status_label}</h1>
+<p style="margin:0 0 10px;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#62697A;">Worker run</p>
+<h1 style="margin:0 0 18px;font-size:24px;line-height:1.25;font-weight:650;color:#16171A;">{worker_name} {headline}</h1>
+<p style="font-size:15px;line-height:1.6;margin:0 0 22px;color:#16171A;">Floom finished a worker run in your workspace. The details are below, and the full run log is ready in the dashboard.</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{row_html}</table>
-<p style="font-size:13px;line-height:1.55;margin:24px 0 0;color:#6B7280;">You're receiving this because a worker run finished in your {brand} workspace.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px;"><tr><td style="border-radius:10px;background:#16171A;"><a href="{safe_run_url}" style="display:inline-block;background:#16171A;color:#FFFFFF;text-decoration:none;padding:14px 28px;border-radius:10px;font-size:15px;font-weight:650;line-height:1;">View run</a></td></tr></table>
+<p style="font-size:13px;line-height:1.55;margin:16px 0 0;color:#62697A;">You are receiving this because email alerts are enabled for this {safe_brand} workspace.</p>
 </td></tr>
-<tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#6B7280;">
-<a href="{frontend_url}" style="color:#16171A;font-weight:650;text-decoration:none;">{brand}</a>{footer_contact}
+<tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#62697A;">
+<a href="https://floom.dev" style="color:#16171A;font-weight:650;text-decoration:none;">floom.dev</a>{footer_contact}{footer_unsubscribe}
 </td></tr>
 </table>
 </td></tr></table>
 </body></html>"""
+
+
+def _normalize_floom_sender(raw: str, *, fallback: str = FLOOM_NOTIFICATIONS_FROM) -> str:
+    _, parsed = parseaddr(raw.strip())
+    if not parsed:
+        parsed = parseaddr(fallback)[1]
+    local, _, domain = parsed.partition("@")
+    fallback_addr = parseaddr(fallback)[1]
+    if domain.lower() == "floom.dev" and local.lower() in {"noreply", "no-reply"}:
+        parsed = fallback_addr
+    return f"Floom <{parsed}>"
 
 
 def _send_email_notification(
@@ -305,13 +334,7 @@ def _send_email_notification(
     if not to_addrs:
         return
 
-    from_addr = os.environ.get("NOTIFY_FROM_EMAIL", "notifications@example.com").strip()
-    # The user-facing brand is "Floom". Force the From display name to "Floom"
-    # regardless of how NOTIFY_FROM_EMAIL is configured (it must never read
-    # "Floom" to recipients). Preserve the address, override the name.
-    _email_only = from_addr.split("<")[-1].strip(" <>") if "<" in from_addr else from_addr
-    if _email_only:
-        from_addr = f"Floom <{_email_only}>"
+    from_addr = _normalize_floom_sender(os.environ.get("NOTIFY_FROM_EMAIL", FLOOM_NOTIFICATIONS_FROM))
     status_label = "failed" if status == "failed" else "completed"
     subject = (subject_template or "Worker {worker_name} {status}").format(
         worker_name=worker_name, status=status_label, run_id=run_id
@@ -344,13 +367,20 @@ def _send_email_notification(
     try:
         import resend
         resend.api_key = api_key
-        _resend_send_with_timeout(resend, {
+        payload = {
             "from": from_addr,
             "to": to_addrs,
             "subject": subject,
             "html": html,
             "text": "\n".join(text_lines),
-        })
+        }
+        unsubscribe_url = (os.environ.get("WORKEROS_EMAIL_UNSUBSCRIBE_URL") or "").strip()
+        if unsubscribe_url:
+            payload["headers"] = {
+                "List-Unsubscribe": f"<{unsubscribe_url}>",
+                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            }
+        _resend_send_with_timeout(resend, payload)
         logger.debug("Email notification sent via Resend to %s for run %s (%s)", to_addrs, run_id, status)
     except Exception as exc:
         logger.warning("Resend email notification failed for run %s: %s", run_id, exc)
@@ -579,4 +609,3 @@ def _dispatch_terminal_run_alerts(
         daemon=True,
         name=f"alert-{run_id}",
     ).start()
-

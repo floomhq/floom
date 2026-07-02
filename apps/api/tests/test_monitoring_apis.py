@@ -908,10 +908,35 @@ class TestEmailNotifications:
         assert payload["from"] == "Floom <notifications@example.com>"
         assert payload["to"] == ["ops@example.com"]
         assert payload["subject"] == "Worker Weekly <Digest> failed"
+        assert "https://workers.floom.dev/brand/floom-email-logo@2x.png" in payload["html"]
+        assert "View run" in payload["html"]
+        assert "#F3F4F6" in payload["html"]
         assert "Weekly &lt;Digest&gt;" in payload["html"]
         assert "run_&lt;123&gt;" in payload["html"]
         assert "Boom &lt;script&gt;" in payload["html"]
         assert "Weekly <Digest>" in payload["text"]
+
+    def test_send_email_rewrites_legacy_noreply_and_adds_unsubscribe_headers(self, monkeypatch):
+        monkeypatch.setenv("RESEND_API_KEY", "re_test")
+        monkeypatch.setenv("NOTIFY_FROM_EMAIL", "Workeros <noreply@floom.dev>")
+        monkeypatch.setenv("WORKEROS_EMAIL_UNSUBSCRIBE_URL", "https://floom.dev/app/settings")
+        fake_resend = MagicMock()
+        monkeypatch.setitem(sys.modules, "resend", fake_resend)
+        run_svc = self._import_send_email()
+
+        run_svc._send_email_notification(
+            to_addrs=["ops@example.com"],
+            worker_name="Worker",
+            run_id="run_123",
+            worker_id="worker_123",
+            status="completed",
+            error=None,
+        )
+
+        payload = fake_resend.Emails.send.call_args.args[0]
+        assert payload["from"] == "Floom <notifications@floom.dev>"
+        assert payload["headers"]["List-Unsubscribe"] == "<https://floom.dev/app/settings>"
+        assert "Manage alerts" in payload["html"]
 
     def test_send_email_timeout_returns_without_waiting_for_resend(self, monkeypatch):
         """A hung Resend SDK call is bounded and does not block run completion."""
