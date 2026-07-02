@@ -142,6 +142,25 @@ function workerCardMeta(w: WorkerSummary): string | null {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+function isScheduleTriggerType(value?: string | null): boolean {
+  const normalized = (value || "").trim().toLowerCase();
+  return normalized === "schedule" || normalized === "cron" || normalized === "scheduled";
+}
+
+function workerHasSchedule(w: WorkerSummary, d?: WorkerDetail | null): boolean {
+  if (isScheduleTriggerType(d?.config?.trigger?.type ?? w.trigger_type)) return true;
+  const specs = d?.triggers_spec && d.triggers_spec.length > 0 ? d.triggers_spec : w.triggers_spec;
+  return (specs ?? []).some((trigger) => isScheduleTriggerType(trigger.type));
+}
+
+function scheduleStateLabel(w: WorkerSummary, d?: WorkerDetail | null): string | null {
+  if (!workerHasSchedule(w, d)) return null;
+  const enabled = d?.enabled ?? w.enabled;
+  if (enabled === false) return "Paused - disabled";
+  const stage = workerStageKey({ ...w, stage: d?.stage ?? w.stage });
+  return stage === "draft" ? "Active - draft" : "Active";
+}
+
 function displayBrandCopy(value?: string | null): string {
   const legacyAllCapsSuffix = new RegExp(`\\bWorker${"OS"}\\b`, "g");
   const legacyTitle = new RegExp(`\\bWorker${"os"}\\b`, "g");
@@ -330,29 +349,38 @@ function friendlyToken(value?: string | null): string {
 
 function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
-  const stats = d?.recent_stats ?? w.recent_stats;
-  const lastRun = d?.last_run ?? w.last_run;
+  const stats = d === undefined ? undefined : d?.recent_stats ?? w.recent_stats;
+  const lastRun = d === undefined ? undefined : d?.last_run ?? w.last_run;
+  const scheduleState = scheduleStateLabel(w, d);
+  const summaryItems = [
+    {
+      key: "last-run",
+      label: "Last run",
+      value: d === undefined ? "Loading" : rel(stats?.last_run_at ?? lastRun?.created_at),
+    },
+    {
+      key: "runs",
+      label: "Runs",
+      value: d === undefined ? "Loading" : stats?.runs_7d ?? (lastRun ? 1 : 0),
+    },
+    {
+      key: "success",
+      label: "Success",
+      value: d === undefined
+        ? "Loading"
+        : typeof stats?.success_rate_7d === "number"
+          ? `${Math.round(stats.success_rate_7d * 100)}%`
+          : "Not set",
+    },
+    ...(scheduleState ? [{ key: "schedule", label: "Schedule", value: scheduleState }] : []),
+  ];
   return (
     <div>
       {/* #1290: "Latest output" removed — its purpose was unclear to operators
           (Federico: "why is latest output shown?") and it only showed run status +
           ID with no actual output text. The History tab shows the run list. */}
-      <DetailSummary
-        items={[
-          { key: "last-run", label: "Last run", value: rel(stats?.last_run_at ?? lastRun?.created_at) },
-          { key: "runs", label: "Runs", value: stats?.runs_7d ?? (lastRun ? 1 : 0) },
-          {
-            key: "success",
-            label: "Success",
-            value: typeof stats?.success_rate_7d === "number"
-              ? `${Math.round(stats.success_rate_7d * 100)}%`
-              : "Not set",
-          },
-        ]}
-      />
-      {/* #1279: useWorkerDetail can now return null (load failed); the overview
-          treats that the same as "not loaded yet" — AboutBody renders its empty state. */}
-      <AboutBody w={w} d={d ?? undefined} />
+      <DetailSummary items={summaryItems} />
+      <AboutBody w={w} d={d} />
     </div>
   );
 }
@@ -381,23 +409,32 @@ function BrainContextChip({ name }: { name: string }) {
   );
 }
 
-function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
+function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail | null }) {
   const description = displayBrandCopy(w.long_description || w.description) || "No description yet.";
   const contexts = d?.config?.contexts ?? [];
+  const flowConnections = (d?.config?.connections ?? [])
+    .map(connectionSpecApp)
+    .filter((app): app is string => Boolean(app));
   return (
     <div>
       <DetailGroup label="What it does">
         <p style={{ margin: 0, color: "var(--ink-soft)", fontSize: 13 }}>{description}</p>
       </DetailGroup>
       <DetailGroup label="Flow">
-        <WorkerFlow
-          workerName={w.name}
-          worker={{ id: w.id, name: w.name, connections: w.connections, tags: w.tags }}
-          connections={w.connections}
-          triggerType={w.trigger_type}
-          inputs={(d?.config?.inputs ?? []).map((i) => ({ name: i.name, label: i.label, type: i.type }))}
-          outputs={(d?.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
-        />
+        {d === undefined ? (
+          <Loading />
+        ) : d === null ? (
+          <DetailError />
+        ) : (
+          <WorkerFlow
+            workerName={d.name}
+            worker={{ id: d.id, name: d.name, connections: flowConnections, tags: d.tags }}
+            connections={flowConnections}
+            triggerType={d.config?.trigger?.type ?? d.trigger_type}
+            inputs={(d.config?.inputs ?? []).map((i) => ({ name: i.name, label: i.label, type: i.type }))}
+            outputs={(d.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
+          />
+        )}
       </DetailGroup>
       {contexts.length > 0 && (
         <DetailGroup
@@ -1014,12 +1051,14 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
 
   // Read-only view: list the configured trigger(s) without editing chrome.
   if (!editable) {
+    const scheduleState = scheduleStateLabel(w, d);
     return (
       <DetailGroup label="Trigger">
         <DetailRow label="Type" value={friendlyToken(d.config?.trigger?.type ?? w.trigger_type)} />
         {d.config?.trigger?.cron && <DetailRow label="Cron" value={d.config.trigger.cron} mono />}
         {d.config?.trigger?.timezone && <DetailRow label="Timezone" value={d.config.trigger.timezone} />}
         {d.webhook_url && <DetailRow label="Webhook" value={d.webhook_url} mono />}
+        {scheduleState && <DetailRow label="Schedule" value={scheduleState} />}
         {scheduleStatusRows(d).map(([label, value]) => (
           <DetailRow key={label} label={label} value={value} />
         ))}
@@ -1028,6 +1067,7 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
   }
 
   const statusRows = scheduleStatusRows(d);
+  const scheduleState = scheduleStateLabel(w, d);
 
   const save = async () => {
     if (saving || !dirty) return;
@@ -1049,9 +1089,15 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
     <div className="flex flex-col gap-4">
       {statusRows.length > 0 && (
         <DetailGroup label="Schedule status">
+          {scheduleState && <DetailRow label="Schedule" value={scheduleState} />}
           {statusRows.map(([label, value]) => (
             <DetailRow key={label} label={label} value={value} />
           ))}
+        </DetailGroup>
+      )}
+      {statusRows.length === 0 && scheduleState && (
+        <DetailGroup label="Schedule status">
+          <DetailRow label="Schedule" value={scheduleState} />
         </DetailGroup>
       )}
       <TriggersEditor

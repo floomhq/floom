@@ -23,9 +23,9 @@ import { type WorkerIconInput } from "@/lib/worker-icon";
 // the worker detail "Flow" group. Replaces the monospace WorkerAsciiDiagram.
 //
 // Built DETERMINISTICALLY from worker config (NO LLM): declared inputs become
-// source nodes, the worker becomes the central processing node (showing a
-// `score(...)`-style signature + its connected tools), declared outputs become
-// destination nodes. Curved SVG connectors are drawn between MEASURED port
+// source nodes, the worker becomes the central processing node (showing its
+// connected tools), declared outputs become destination nodes. Curved SVG
+// connectors are drawn between MEASURED port
 // centers (useLayoutEffect + ResizeObserver) so they stay aligned for any
 // number of inputs/outputs (1, 2, 3+) and survive label truncation.
 //
@@ -97,13 +97,10 @@ export function WorkerFlow({
   inputs,
   outputs,
   connections,
-  triggerType,
   className,
 }: WorkerFlowProps) {
-  // Fallbacks keep 0-input / 0-output workers rendering a clean graph.
-  const inNodes: FlowNode[] =
-    inputs && inputs.length > 0 ? inputs : [{ label: friendlyTrigger(triggerType), type: "trigger" }];
-  const outNodes: FlowNode[] = outputs && outputs.length > 0 ? outputs : [{ label: "Result", type: "text" }];
+  const inNodes: FlowNode[] = inputs ?? [];
+  const outNodes: FlowNode[] = outputs ?? [];
   const tools = (connections ?? []).map((c) => c.trim()).filter(Boolean);
 
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -155,7 +152,12 @@ export function WorkerFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(inNodes), JSON.stringify(outNodes), tools.join(",")]);
 
-  const workerLabel = `score(${inNodes[0]?.name || "candidate"}, rubric)`;
+  const workerArgs = inNodes
+    .map((node) => node.name || node.label)
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .slice(0, 3)
+    .join(", ");
+  const workerLabel = `run(${workerArgs})`;
 
   return (
     <div
@@ -197,8 +199,8 @@ export function WorkerFlow({
           </span>
         </div>
         <div style={{ padding: "11px 13px 9px", fontFamily: mono, fontSize: 12.5, color: ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          <span style={{ fontWeight: 600 }}>score</span>
-          <span style={{ color: inkSoft }}>{workerLabel.replace("score", "")}</span>
+          <span style={{ fontWeight: 600 }}>run</span>
+          <span style={{ color: inkSoft }}>{workerLabel.replace("run", "")}</span>
         </div>
         {tools.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 12px 11px", flexWrap: "wrap" }}>
@@ -299,18 +301,6 @@ function FlowNodeCard({ node, nodeRef }: { node: FlowNode; nodeRef: (el: HTMLDiv
 function curve(from: Pt, to: Pt): string {
   const midX = (from.x + to.x) / 2;
   return `M${from.x} ${from.y} C ${midX} ${from.y} ${midX} ${to.y} ${to.x} ${to.y}`;
-}
-
-function friendlyTrigger(value?: string | null): string {
-  const raw = (value || "").trim();
-  if (!raw) return "Trigger";
-  if (raw === "cron") return "Schedule";
-  if (raw === "composio") return "Event";
-  return raw
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-    .join(" ");
 }
 
 function friendlyToolLabel(value: string): string {
