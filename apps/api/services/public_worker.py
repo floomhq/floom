@@ -37,7 +37,11 @@ from services.share_links import (
     _load_short_link_public_worker,
     _load_standalone_share_row,
 )
-from services.worker_serialize import _read_worker_files, _worker_public_token
+from services.worker_serialize import (
+    _read_worker_files,
+    _worker_files_from_manifest,
+    _worker_public_token,
+)
 
 if TYPE_CHECKING:
     from db import Repositories
@@ -180,6 +184,8 @@ def _public_worker_share_from_worker(worker: Dict[str, Any], repos: "Repositorie
     from worker_registry import WORKERS_DIR as _SHARE_WORKERS_DIR
     worker_dir = _SHARE_WORKERS_DIR / str(worker.get("id") or "")
     raw_files = _read_worker_files(worker_dir)
+    if not raw_files:
+        raw_files = _worker_files_from_manifest(worker)
     share_files = [
         {"path": f.path, "content": f.content or "", "binary": f.binary}
         for f in raw_files
