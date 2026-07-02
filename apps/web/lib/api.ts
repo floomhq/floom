@@ -303,7 +303,8 @@ export const api = {
       if (opts?.include_archived) qs.set("include_archived", "true");
       return fetchJson<import("./types").WorkerSummary[]>(`/workers?${qs.toString()}`);
     },
-    get: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}`),
+    get: (id: string) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, { cache: "no-store" }),
     // Lightweight worker detail for the standalone /run/{id} run-form page.
     // shape=run skips the heavy detail-only assembly (recent runs, latest-run
     // output, stats batch, recipe, secret/connection availability, on-disk

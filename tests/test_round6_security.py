@@ -92,7 +92,7 @@ def test_delete_connection_requires_ownership(monkeypatch, tmp_path):
     with patch("composio_client.initiate_connection") as mocked:
         mocked.return_value = {
             "composio_connection_id": f"ca_{uuid.uuid4().hex}",
-            "redirect_url": "https://auth.example.test",
+            "redirect_url": "https://connect.composio.dev/link/test",
         }
         created = client.post("/connections", json={"app_name": "gmail"}, headers=_headers("user-a"))
     assert created.status_code == 200, created.text

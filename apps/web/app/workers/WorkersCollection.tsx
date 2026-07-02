@@ -217,7 +217,7 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
  * instead of falsely toasting "Item not found … old ID format".
  */
 function detailToSummary(d: WorkerDetail): WorkerSummary {
-  return {
+  const summary = {
     id: d.id,
     workspace_id: d.workspace_id,
     name: d.name,
@@ -251,6 +251,34 @@ function detailToSummary(d: WorkerDetail): WorkerSummary {
     visibility: d.visibility,
     permissions: d.permissions,
   } as WorkerSummary;
+  if (d.last_run !== undefined) summary.last_run = d.last_run;
+  if (d.recent_stats !== undefined) summary.recent_stats = d.recent_stats;
+  if (d.timeseries !== undefined) summary.timeseries = d.timeseries;
+  return summary;
+}
+
+function SelectedWorkerSummaryRefresh({
+  workerId,
+  onLoaded,
+}: {
+  workerId: string;
+  onLoaded: (detail: WorkerDetail) => void;
+}) {
+  useEffect(() => {
+    let alive = true;
+    api.workers
+      .get(workerId)
+      .then((detail) => {
+        if (!alive) return;
+        detailCache.set(detail.id, detail);
+        onLoaded(detail);
+      })
+      .catch((err) => logError("Could not refresh worker stats.", err));
+    return () => {
+      alive = false;
+    };
+  }, [workerId, onLoaded]);
+  return null;
 }
 
 /** Build the worker.yml text from a detail (files take precedence). */
@@ -302,7 +330,8 @@ function friendlyToken(value?: string | null): string {
 
 function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
-  const stats = w.recent_stats;
+  const stats = d?.recent_stats ?? w.recent_stats;
+  const lastRun = d?.last_run ?? w.last_run;
   return (
     <div>
       {/* #1290: "Latest output" removed — its purpose was unclear to operators
@@ -310,8 +339,8 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
           ID with no actual output text. The History tab shows the run list. */}
       <DetailSummary
         items={[
-          { key: "last-run", label: "Last run", value: rel(stats?.last_run_at ?? w.last_run?.created_at) },
-          { key: "runs", label: "Runs", value: stats?.runs_7d ?? (w.last_run ? 1 : 0) },
+          { key: "last-run", label: "Last run", value: rel(stats?.last_run_at ?? lastRun?.created_at) },
+          { key: "runs", label: "Runs", value: stats?.runs_7d ?? (lastRun ? 1 : 0) },
           {
             key: "success",
             label: "Success",
@@ -449,15 +478,17 @@ function useWorkerRuns(workerId: string): RunSummary[] | undefined {
 function RunsTab({ w }: { w: WorkerSummary }) {
   const fetched = useWorkerRuns(w.id);
   const workspaceHref = useWorkspaceHref();
+  const [d] = useWorkerDetail(w.id);
   // Until the worker-scoped fetch resolves, fall back to the summary's last_run
   // so the tab is never momentarily empty for a worker that has run.
-  const runs = fetched ?? (w.last_run ? [w.last_run] : []);
-  const stats = w.recent_stats;
+  const lastRun = d?.last_run ?? w.last_run;
+  const runs = fetched ?? (lastRun ? [lastRun] : []);
+  const stats = d?.recent_stats ?? w.recent_stats;
   return (
     <div>
       <DetailSummary
         items={[
-          { key: "last-run", label: "Last run", value: rel(stats?.last_run_at ?? w.last_run?.created_at) },
+          { key: "last-run", label: "Last run", value: rel(stats?.last_run_at ?? lastRun?.created_at) },
           { key: "runs-7d", label: "Runs", value: stats?.runs_7d ?? runs.length },
           {
             key: "success",
@@ -2152,6 +2183,19 @@ export default function WorkersCollection({
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
   const [developerOpen, setDeveloperOpen] = useState(false);
+  const refreshWorkerSummary = useCallback(
+    (detail: WorkerDetail) => {
+      const summary = detailToSummary(detail);
+      setWorkers((prev) => prev.map((item) => (item.id === summary.id ? { ...item, ...summary } : item)));
+      queryClient.setQueryData<WorkerSummary[]>(
+        qk.workers(WORKERS_LIST_QUERY_OPTS),
+        (prev) => Array.isArray(prev)
+          ? prev.map((item) => (item.id === summary.id ? { ...item, ...summary } : item))
+          : prev,
+      );
+    },
+    [queryClient],
+  );
   // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
   // `tab` URL param to drive the active tab. replace() avoids a history entry.
   const openAdvancedAndSelectWorkerTab = useCallback(
@@ -2410,6 +2454,7 @@ export default function WorkersCollection({
       const stage = workerStageKey(w);
       const actions = (
         <>
+          <SelectedWorkerSummaryRefresh workerId={w.id} onLoaded={refreshWorkerSummary} />
           <span className={stage === "live" ? "c-pill run" : "c-pill idle"}>
             <span className="dot" aria-hidden="true" />
             {stage === "live" ? "Live" : "Draft"}

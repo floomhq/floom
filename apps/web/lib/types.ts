@@ -374,6 +374,9 @@ export interface WorkerDetail {
   runner: string;
   config: WorkerConfig;
   recent_runs: RunSummary[];
+  last_run?: RunSummary;
+  recent_stats?: RecentStats | null;
+  timeseries?: TimeseriesDay[] | null;
   manifest_yaml?: string;
   run_py?: string;
   skill_md_content?: string;
