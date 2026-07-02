@@ -41,8 +41,8 @@ from typing import Any, Dict
 # Product events get schema_version+emitter+source from
 # analytics_posthog._base_properties. AI events route through the SAME funnel, so
 # they carry those too, plus their own ai_schema_version.
-SERVER_ENVELOPE_PROPS = {"schema_version", "emitter", "source"}
-AI_ENVELOPE_PROPS = {"schema_version", "emitter", "source", "ai_schema_version"}
+SERVER_ENVELOPE_PROPS = {"schema_version", "emitter", "source", "$geoip_disable", "$ip"}
+AI_ENVELOPE_PROPS = {"schema_version", "emitter", "source", "$geoip_disable", "$ip", "ai_schema_version"}
 
 # Canonical id keys that the test recognizes as identity props.
 CANONICAL_IDS = {"run_id", "worker_id", "workspace_id", "approval_id"}

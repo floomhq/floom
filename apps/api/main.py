@@ -34,6 +34,7 @@ except ImportError:
     _LOCK_EX = 1
     _LOCK_UN = 8
 import re
+import random
 import sys
 import time
 import collections
@@ -1449,11 +1450,64 @@ _API_TELEMETRY_DYNAMIC_SEGMENT_RE = re.compile(
     r")$"
 )
 
+_API_TELEMETRY_STATIC_ASSET_EXTENSIONS = {
+    ".avif",
+    ".css",
+    ".gif",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".map",
+    ".png",
+    ".svg",
+    ".webp",
+    ".woff",
+    ".woff2",
+}
+
+
+def _api_request_telemetry_sample_rate() -> float:
+    raw = (os.environ.get("WORKEROS_API_TELEMETRY_SAMPLE") or "").strip()
+    if not raw:
+        return 0.1
+    try:
+        rate = float(raw)
+    except (TypeError, ValueError):
+        return 0.1
+    if rate <= 0:
+        return 0.0
+    if rate >= 1:
+        return 1.0
+    return rate
+
+
+def _api_request_telemetry_sampled_in() -> bool:
+    rate = _api_request_telemetry_sample_rate()
+    if rate >= 1:
+        return True
+    if rate <= 0:
+        return False
+    return random.random() < rate
+
+
+def _api_request_telemetry_static_asset_path(path: str) -> bool:
+    normalized = (path or "").split("?", 1)[0].lower()
+    if normalized in {"/favicon.ico", "/robots.txt", "/sitemap.xml"}:
+        return True
+    asset_prefixes = ("/_next/", "/assets/", "/static/")
+    if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in asset_prefixes):
+        return True
+    suffix = Path(normalized).suffix
+    return suffix in _API_TELEMETRY_STATIC_ASSET_EXTENSIONS
+
 
 def _api_request_telemetry_excluded(path: str, method: str) -> bool:
     if method.upper() == "OPTIONS":
         return True
     if path in {"/health", "/healthz", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}:
+        return True
+    if _api_request_telemetry_static_asset_path(path):
         return True
     excluded_prefixes = (
         "/telemetry/",
@@ -1515,7 +1569,7 @@ async def api_request_telemetry_middleware(request: Request, call_next):
         if _api_request_telemetry_excluded(path, method):
             continue_telemetry = False
         else:
-            continue_telemetry = True
+            continue_telemetry = _api_request_telemetry_sampled_in()
         if continue_telemetry:
             auth = getattr(request.state, "auth_context", None)
             if auth is not None:
