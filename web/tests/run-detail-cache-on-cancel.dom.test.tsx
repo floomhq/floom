@@ -32,6 +32,7 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/lib/query/hooks", () => ({
   useRuns: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
+  useWorkers: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
 }));
 
 vi.mock("@/lib/useRunLogStream", () => ({
