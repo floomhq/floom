@@ -51,14 +51,50 @@ def _load_app(monkeypatch, tmp_path):
     return db, main
 
 
-def _seed_active(repos, owner, *, conn_id, ca_id, account_label, created_at="2026-06-01T00:00:00Z"):
+def _seed_active(
+    repos,
+    owner,
+    *,
+    conn_id,
+    ca_id,
+    account_label,
+    app_name="gmail",
+    created_at="2026-06-01T00:00:00Z",
+):
     repos.connections.upsert(
         user_id=owner,
         id=conn_id,
-        app_name="gmail",
+        app_name=app_name,
         composio_connection_id=ca_id,
         status="active",
         account_label=account_label,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
+def _seed_connection(
+    repos,
+    owner,
+    *,
+    conn_id,
+    app_name,
+    status,
+    ca_id=None,
+    scopes_json=None,
+    account_label=None,
+    display_name=None,
+    created_at="2026-06-01T00:00:00Z",
+):
+    repos.connections.upsert(
+        user_id=owner,
+        id=conn_id,
+        app_name=app_name,
+        composio_connection_id=ca_id or f"ca_{conn_id}",
+        status=status,
+        scopes_json=scopes_json,
+        account_label=account_label,
+        display_name=display_name,
         created_at=created_at,
         updated_at=created_at,
     )
@@ -248,3 +284,137 @@ def test_by_app_reports_existing_connection(monkeypatch, tmp_path):
     )
     assert resp2.status_code == 200
     assert resp2.json() == {"connected": False}
+
+
+def test_post_connections_cleans_google_calendar_orphans_only(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    repos = db.get_repositories()
+    owner = main._bootstrap_user_id()
+
+    _seed_active(
+        repos,
+        owner,
+        conn_id="active-calendar",
+        ca_id="ca_active_calendar",
+        app_name="googlecalendar",
+        account_label="owner@example.com",
+    )
+    _seed_connection(
+        repos,
+        owner,
+        conn_id="orphan-failed",
+        app_name="googlecalendar",
+        ca_id="ca_orphan_failed",
+        status="failed",
+        scopes_json="[]",
+    )
+    _seed_connection(
+        repos,
+        owner,
+        conn_id="orphan-expired",
+        app_name="googlecalendar",
+        ca_id="ca_orphan_expired",
+        status="expired",
+        scopes_json="",
+    )
+    _seed_connection(
+        repos,
+        owner,
+        conn_id="scoped-failed",
+        app_name="googlecalendar",
+        ca_id="ca_scoped_failed",
+        status="failed",
+        scopes_json='["calendar.readonly"]',
+    )
+    _seed_connection(
+        repos,
+        owner,
+        conn_id="labeled-failed",
+        app_name="googlecalendar",
+        ca_id="ca_labeled_failed",
+        status="failed",
+        scopes_json="[]",
+        account_label="owner@example.com",
+    )
+    _seed_connection(
+        repos,
+        owner,
+        conn_id="other-app-orphan",
+        app_name="gmail",
+        ca_id="ca_other_app_orphan",
+        status="failed",
+        scopes_json="[]",
+    )
+
+    import composio_client
+    import routers.connections as _conn
+
+    monkeypatch.setattr(
+        composio_client,
+        "initiate_connection",
+        lambda app_name, redirect_url, *, user_id: {
+            "composio_connection_id": "ca_new_calendar",
+            "redirect_url": "https://connect.example.test/googlecalendar",
+        },
+    )
+    monkeypatch.setattr(_conn, "_start_pending_connection_reconciler", lambda **_kwargs: None)
+
+    client = TestClient(main.app)
+    resp = client.post(
+        "/connections",
+        json={"app_name": "googlecalendar"},
+        cookies=_session_cookie(repos, owner),
+    )
+
+    assert resp.status_code == 200
+    new_id = resp.json()["id"]
+    ids = {row["id"] for row in repos.connections.list(user_id=owner)}
+    assert new_id in ids
+    assert "orphan-failed" not in ids
+    assert "orphan-expired" not in ids
+    assert {
+        "active-calendar",
+        "scoped-failed",
+        "labeled-failed",
+        "other-app-orphan",
+    }.issubset(ids)
+
+
+def test_failed_google_calendar_callback_deletes_zero_scope_orphan(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    repos = db.get_repositories()
+    owner = main._bootstrap_user_id()
+
+    _seed_connection(
+        repos,
+        owner,
+        conn_id="callback-orphan",
+        app_name="googlecalendar",
+        ca_id="ca_callback_orphan",
+        status="initiated",
+        scopes_json="[]",
+    )
+
+    import composio_client
+    import routers.connections as _conn
+
+    monkeypatch.setattr(composio_client, "check_status", lambda _connection_id: "failed")
+
+    client = TestClient(main.app)
+    resp = client.get(
+        "/connections/callback",
+        params={
+            "connection_id": "ca_callback_orphan",
+            "status": "failed",
+            "state": _conn._issue_oauth_state(user_id=owner),
+        },
+        cookies=_session_cookie(repos, owner),
+        follow_redirects=False,
+    )
+
+    assert resp.status_code in (302, 307)
+    assert repos.connections.get(user_id=owner, composio_id="callback-orphan") is None
+    location = resp.headers["location"]
+    assert "connected=0" in location
+    assert "error=oauth_failed" in location
+    assert "app=googlecalendar" in location

@@ -49,6 +49,7 @@ class _FakeConnections:
     def __init__(self, row):
         self._row = row
         self.updates = []
+        self.deletes = []
 
     def get_by_composio_connection_id(self, *, composio_connection_id):
         return dict(self._row)
@@ -56,6 +57,10 @@ class _FakeConnections:
     def update(self, **fields):
         self.updates.append(fields)
         return None
+
+    def delete(self, **fields):
+        self.deletes.append(fields)
+        return True
 
 
 class _FakeRepos:
