@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { QueryProvider } from "@/components/providers/QueryProvider";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { WorkerSummary } from "@/lib/types";
 
 const router = vi.hoisted(() => ({
   push: vi.fn(),
@@ -15,6 +16,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 const TEST_TIMEOUT = 15_000;
+const WORKERS_LIST_QUERY_OPTS = { include_archived: true } as const;
+const WORKERS_LIST_QUERY_KEY = ["workers", WORKERS_LIST_QUERY_OPTS] as const;
 
 const WORKER_ID = "invoice-reconciler";
 const worker = {
@@ -39,6 +42,14 @@ const worker = {
 
 const workerDetail = {
   ...worker,
+  last_run: {
+    id: "fresh-run",
+    worker_id: WORKER_ID,
+    status: "completed",
+    trigger_source: "schedule",
+    created_at: "2026-06-22T12:00:00Z",
+  },
+  recent_stats: { last_run_at: "2026-06-22T12:00:00Z", runs_7d: 7, success_rate_7d: 1 },
   config: {
     id: WORKER_ID,
     name: "Invoice Reconciler",
@@ -87,20 +98,25 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-async function openDetail(tab?: string) {
+function makeQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+async function openDetail(tab?: string, client = makeQueryClient()) {
   router.searchParams = tab
     ? `sel=${encodeURIComponent(WORKER_ID)}&tab=${encodeURIComponent(tab)}`
     : "";
   const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
   render(
-    <QueryProvider>
+    <QueryClientProvider client={client}>
       <WorkersCollection initialWorkers={[worker as never]} />
-    </QueryProvider>,
+    </QueryClientProvider>,
   );
   if (!tab) {
     fireEvent.click(await screen.findByRole("button", { name: /Invoice Reconciler/i }));
   }
   await waitFor(() => expect(document.querySelector(".c-dhead")).toBeTruthy());
+  return client;
 }
 
 function classIncludes(el: Element, value: string): boolean {
@@ -177,6 +193,23 @@ describe("Workers detail redesign register", () => {
       await waitFor(() => expect(screen.getByRole("tab", { name: tabName(name) })).toHaveAttribute("aria-selected", "true"));
       expectNoGreyCardWrappers(name);
     }
+  }, TEST_TIMEOUT);
+
+  it("refreshes selected worker stats from the detail fetch instead of keeping stale list stats", async () => {
+    const client = await openDetail();
+
+    await waitFor(() => {
+      const summary = document.querySelector(".c-dsum");
+      expect(summary?.textContent).toMatch(/7\s*Runs/);
+      expect(summary?.textContent).toMatch(/100%\s*Success/);
+    });
+
+    await waitFor(() => {
+      const cached = client.getQueryData<WorkerSummary[]>(WORKERS_LIST_QUERY_KEY);
+      expect(cached?.[0]?.recent_stats?.runs_7d).toBe(7);
+      expect(cached?.[0]?.recent_stats?.success_rate_7d).toBe(1);
+      expect(cached?.[0]?.last_run?.id).toBe("fresh-run");
+    });
   }, TEST_TIMEOUT);
 
   it("opens Advanced before the View as YAML action navigates", async () => {
