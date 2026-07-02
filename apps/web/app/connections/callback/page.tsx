@@ -26,7 +26,16 @@ function CallbackInner() {
       if (window.opener) {
         window.close();
       } else {
-        router.replace("/connections");
+        const qs = new URLSearchParams();
+        const cid = params.get("connection_id");
+        const sel = params.get("sel") || cid;
+        if (connected) qs.set("connected", connected);
+        const app = params.get("app");
+        if (app) qs.set("app", app);
+        if (cid) qs.set("connection_id", cid);
+        if (sel) qs.set("sel", sel);
+        const qStr = qs.toString();
+        router.replace(qStr ? `/connections?${qStr}` : "/connections");
       }
     } else {
       // M57 FIX: trigger the backend DB-update via fetch, then navigate
@@ -79,6 +88,8 @@ function CallbackInner() {
               if (app) feedbackQs.set("app", app);
               const cid = parsed.searchParams.get("connection_id");
               if (cid) feedbackQs.set("connection_id", cid);
+              const sel = parsed.searchParams.get("sel") || cid;
+              if (sel) feedbackQs.set("sel", sel);
               const qStr = feedbackQs.toString();
               dest = qStr ? `/connections?${qStr}` : "/connections";
             }

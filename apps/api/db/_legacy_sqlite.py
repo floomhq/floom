@@ -685,6 +685,26 @@ def _ensure_connection_oauth_redirect_url_column(conn: sqlite3.Connection) -> No
         conn.execute("ALTER TABLE composio_connections ADD COLUMN oauth_redirect_url TEXT")
 
 
+def _ensure_connection_authorize_links_table(conn: sqlite3.Connection) -> None:
+    _execute_sql_script(conn,
+        """
+        CREATE TABLE IF NOT EXISTS connection_authorize_links (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            redirect_url TEXT NOT NULL,
+            nonce TEXT NOT NULL,
+            exp INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            consumed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_connection_authorize_links_exp
+            ON connection_authorize_links(exp);
+        CREATE INDEX IF NOT EXISTS idx_connection_authorize_links_user_id
+            ON connection_authorize_links(user_id);
+        """
+    )
+
+
 def _ensure_runs_artifacts_archived_column(conn: sqlite3.Connection) -> None:
     columns = _table_columns(conn, "runs")
     if "artifacts_archived" not in columns:
@@ -2207,6 +2227,8 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_mcp_tools_workspace_user
         ON mcp_tools(workspace_id, user_id);
     """,
+    # -- migration 92: opaque short OAuth authorize links ---------------------
+    _ensure_connection_authorize_links_table,
 ]
 
 
