@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("floom.api")
+
+
+def _is_test_probe_name(value: str | None) -> bool:
+    text = str(value or "")
+    return text == "does.not.exist" or text.startswith("codex.telemetry_probe")
 
 
 def emit_product_event(
@@ -23,11 +29,14 @@ def emit_product_event(
     if not analytics_posthog.is_enabled():
         return
     try:
+        if workspace_id is None:
+            deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+            workspace_id = derive_workspace_id(owner_id) if deploy != "cloud" else ""
         analytics_posthog.capture_event(
             distinct_id=owner_id or "",
             event=event,
             properties=properties,
-            groups={"workspace": workspace_id or derive_workspace_id(owner_id)},
+            groups={"workspace": workspace_id},
         )
     except Exception:  # pragma: no cover
         logger.debug("PostHog %s emit failed", event, exc_info=True)
@@ -109,10 +118,14 @@ def emit_mcp_tool_called(
     status_code: Optional[int] = None,
     error_category: Optional[str] = None,
     is_custom_tool: bool = False,
+    workspace_id: Optional[str] = None,
 ) -> None:
+    if _is_test_probe_name(tool_name):
+        return
     emit_product_event(
         owner_id=owner_id,
         event="mcp_tool_called",
+        workspace_id=workspace_id,
         properties={
             "tool_name": tool_name,
             "success": bool(success),
@@ -137,10 +150,14 @@ def emit_cli_command_invoked(
     api_base_kind: str,
     worker_id: Optional[str] = None,
     run_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
 ) -> None:
+    if _is_test_probe_name(command):
+        return
     emit_product_event(
         owner_id=owner_id,
         event="cli_command_invoked",
+        workspace_id=workspace_id,
         properties={
             "command": command,
             "success": bool(success),
