@@ -1238,6 +1238,7 @@ def create_run_share_link(
         entity_type="run",
         entity_id=run_id,
         owner_id=auth.user_id,
+        repos=repos,
     )
 
 
@@ -1252,7 +1253,7 @@ def revoke_run_share_link(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return _revoke_standalone_share_link(
-        entity_type="run", entity_id=run_id, owner_id=auth.user_id,
+        entity_type="run", entity_id=run_id, owner_id=auth.user_id, repos=repos,
     )
 
 
@@ -1268,7 +1269,7 @@ def get_public_run(
     then rendered under the share owner's identity (same builder as the authed
     GET /runs/{id}). 404 for any token/run mismatch — never leaks another run.
     """
-    row = _load_standalone_share_row(token)
+    row = _load_standalone_share_row(token, repos)
     if not row or str(row.get("entity_type")) != "run" or str(row.get("entity_id")) != run_id:
         raise HTTPException(status_code=404, detail="Run not found")
     owner_auth = AuthContext(user_id=str(row.get("owner_id") or ""), email=None, scopes=("run_share",))
@@ -1280,7 +1281,7 @@ def _get_run_for_worker_share_stream(
     token: str,
     repos: Repositories,
 ) -> tuple[Any, str]:
-    row = _load_standalone_share_row(token)
+    row = _load_standalone_share_row(token, repos)
     if not row or str(row.get("entity_type") or "") != "worker":
         raise HTTPException(status_code=404, detail="Run not found")
     owner_id = str(row.get("owner_id") or "")
@@ -1329,7 +1330,7 @@ async def stream_run_parts(
     if token is not None:
         # Try RUN share token first (base / #1329), then WORKER share token
         # (main / #1338). Both validate ownership; both stream under owner id.
-        share_row = _load_standalone_share_row(token)
+        share_row = _load_standalone_share_row(token, repos)
         if (
             share_row
             and str(share_row.get("entity_type")) == "run"

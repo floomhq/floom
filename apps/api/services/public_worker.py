@@ -455,7 +455,7 @@ def _standalone_share_payload(
     *,
     request: Request | None = None,
 ) -> Dict[str, Any]:
-    row = _load_standalone_share_row(token)
+    row = _load_standalone_share_row(token, repos)
     if row:
         entity_type = str(row.get("entity_type") or "")
         if entity_type == "worker":

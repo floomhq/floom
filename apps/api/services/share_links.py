@@ -11,6 +11,7 @@ fixtures); the public URL is built from ``core.urls._frontend_base_url``.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import secrets as pysecrets
 import sqlite3
@@ -22,6 +23,8 @@ from fastapi import HTTPException
 from core.urls import _frontend_base_url, _short_link_base_url
 
 _API_PUBLIC_HOSTS = {"workeros-api.floom.dev", "workers-api.floom.dev"}
+logger = logging.getLogger("floom.api.share_links")
+StandaloneShareEntity = Literal["worker", "brain_file", "brain_pack", "run", "review_pack", "approvals_batch"]
 
 
 def _public_share_frontend_base_url() -> str:
@@ -154,17 +157,50 @@ def _ensure_standalone_share_links_table() -> None:
             _rebuild_standalone_share_links_without_entity_unique(conn)
 
 
+def _standalone_share_repo(repos: Any | None, *methods: str) -> Any | None:
+    share_repo = getattr(repos, "share_links", None) if repos is not None else None
+    if share_repo is None:
+        return None
+    if all(callable(getattr(share_repo, method, None)) for method in methods):
+        return share_repo
+    return None
+
+
 def _create_or_get_standalone_share_link(
     *,
-    entity_type: Literal["worker", "brain_file", "brain_pack", "run", "review_pack", "approvals_batch"],
+    entity_type: StandaloneShareEntity,
     entity_id: str,
     owner_id: str,
     file_path: str = "",
+    repos: Any | None = None,
 ) -> Dict[str, str]:
     from db import get_db, now_iso
     safe_file_path = file_path or ""
     if not entity_id or not owner_id:
         raise HTTPException(status_code=409, detail="Item cannot be shared")
+    share_repo = _standalone_share_repo(repos, "create_standalone_share")
+    if share_repo is not None:
+        ts = now_iso()
+        for _ in range(8):
+            candidate = _mint_standalone_share_token()
+            try:
+                share_repo.create_standalone_share(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    file_path=safe_file_path,
+                    owner_id=owner_id,
+                    token_hash=_hash_share_token(candidate),
+                    created_at=ts,
+                )
+                return {
+                    "token": candidate,
+                    "url": _standalone_share_url(candidate),
+                    "entity_type": entity_type,
+                }
+            except Exception:
+                logger.warning("standalone share-link repository create failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not create share link")
+
     _ensure_standalone_share_links_table()
     # #2144: only SHA-256(token) is stored, so the raw value of an existing row
     # cannot be returned. Re-sharing mints an additional active token instead of
@@ -198,10 +234,18 @@ def _create_or_get_standalone_share_link(
     }
 
 
-def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
-    from db import get_db
+def _load_standalone_share_row(token: str, repos: Any | None = None) -> Optional[Dict[str, Any]]:
+    from db import get_db, now_iso
     if not re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token or ""):
         raise HTTPException(status_code=404, detail="Share link not found")
+    share_repo = _standalone_share_repo(repos, "resolve_standalone_share")
+    if share_repo is not None:
+        row = share_repo.resolve_standalone_share(
+            token_hash=_hash_share_token(token),
+            now_iso_str=now_iso(),
+        )
+        return dict(row) if row else None
+
     _ensure_standalone_share_links_table()
     with get_db() as conn:
         # #934: lookup is by SHA-256 of the presented token — the raw value is
@@ -224,10 +268,25 @@ def _revoke_standalone_share_link(
     entity_id: str,
     owner_id: str,
     file_path: str = "",
+    repos: Any | None = None,
 ) -> Dict[str, bool]:
     # #766: delete the token row so the public link stops resolving. A later
     # POST /share-link mints a fresh token (the frontend toggle off->on flow).
-    from db import get_db
+    from db import get_db, now_iso
+    share_repo = _standalone_share_repo(repos, "revoke_standalone_share")
+    if share_repo is not None:
+        return {
+            "revoked": bool(
+                share_repo.revoke_standalone_share(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    file_path=file_path or "",
+                    owner_id=owner_id,
+                    revoked_at=now_iso(),
+                )
+            )
+        }
+
     _ensure_standalone_share_links_table()
     with get_db() as conn:
         cursor = conn.execute(

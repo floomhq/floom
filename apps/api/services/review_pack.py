@@ -453,6 +453,7 @@ def mint_review_pack_share_link(
     context_name: str,
     pack_id: str,
     owner_id: str,
+    repos: Any | None = None,
 ) -> Dict[str, Any]:
     from services.context_access import _safe_context_file_or_400, _write_context_file
     from services.share_links import _create_or_get_standalone_share_link
@@ -478,6 +479,7 @@ def mint_review_pack_share_link(
         entity_id=context_name,
         file_path=rel,
         owner_id=owner_id,
+        repos=repos,
     )
     link["url"] = review_pack_share_url(link["token"])
     link["reviewer_links"] = [

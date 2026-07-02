@@ -81,7 +81,7 @@ def _load_standalone_worker_share(
     token: str,
     repos: Repositories,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
-    row = _load_standalone_share_row(token)
+    row = _load_standalone_share_row(token, repos)
     if (
         not row
         or str(row.get("entity_type") or "") != "worker"
@@ -261,6 +261,7 @@ def create_brain_pack_share_link(
         entity_type="brain_pack",
         entity_id=safe_name,
         owner_id=auth.user_id,
+        repos=repos,
     )
 
 
@@ -283,6 +284,7 @@ def create_brain_file_share_link(
         entity_id=safe_name,
         file_path=rel,
         owner_id=auth.user_id,
+        repos=repos,
     )
 
 
@@ -298,6 +300,7 @@ def revoke_brain_pack_share_link(
         entity_type="brain_pack",
         entity_id=safe_name,
         owner_id=auth.user_id,
+        repos=repos,
     )
 
 
@@ -316,6 +319,7 @@ def revoke_brain_file_share_link(
         entity_id=safe_name,
         file_path=rel,
         owner_id=auth.user_id,
+        repos=repos,
     )
 
 
@@ -326,7 +330,7 @@ def download_standalone_share_file(
 ) -> Response:
     from contexts import context_scope_for_user, guess_mime_type, use_context_scope
 
-    row = _load_standalone_share_row(token)
+    row = _load_standalone_share_row(token, repos)
     if not row or row.get("entity_type") != "brain_file":
         raise HTTPException(status_code=404, detail="Download not found")
     owner_id = str(row.get("owner_id") or "")
