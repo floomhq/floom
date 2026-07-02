@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { api, getPersistedActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
 import { useWorkers, useStreamedInitialData, qk, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
+import { WORKSPACE_SCOPED_QUERY_ROOTS } from "@/lib/query/workspace";
 import type {
   WorkerSummary,
   WorkerDetail,
@@ -251,14 +252,6 @@ function detailToSummary(d: WorkerDetail): WorkerSummary {
     permissions: d.permissions,
   } as WorkerSummary;
 }
-
-export const WORKSPACE_SCOPED_QUERY_ROOTS = new Set([
-  "workers",
-  "runs",
-  "contexts",
-  "connections",
-  "secrets",
-]);
 
 /** Build the worker.yml text from a detail (files take precedence). */
 function workerYml(d: WorkerDetail): string {

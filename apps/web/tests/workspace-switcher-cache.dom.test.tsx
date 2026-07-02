@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -153,6 +154,50 @@ describe("WorkspaceSwitcher cache", () => {
     expect(mocks.setActiveWorkspaceId).toHaveBeenCalledWith("ws_1");
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Switch workspace" })).toHaveTextContent("Old workspace");
+  });
+
+  it("invalidates and refetches workspace-scoped queries after switching workspace", async () => {
+    mocks.list.mockResolvedValueOnce({
+      active_id: "ws_2",
+      workspaces: [
+        { id: "ws_1", name: "Old workspace", owner_user_id: "u1", created_at: "2026-06-01T00:00:00Z" },
+        { id: "ws_2", name: "New workspace", owner_user_id: "u1", created_at: "2026-06-02T00:00:00Z" },
+      ],
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const removeSpy = vi.spyOn(queryClient, "removeQueries");
+    const setDataSpy = vi.spyOn(queryClient, "setQueriesData");
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const refetchSpy = vi.spyOn(queryClient, "refetchQueries");
+    const { WorkspaceSwitcher } = await import("@/components/layout/WorkspaceSwitcher");
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSwitcher />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("New workspace")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Switch workspace" }));
+    await user.click(await screen.findByText("Old workspace"));
+
+    await waitFor(() => expect(mocks.setActiveWorkspaceId).toHaveBeenCalledWith("ws_1"));
+    for (const root of ["system", "workers", "runs", "contexts", "connections", "secrets", "approvals", "workspace"]) {
+      expect(removeSpy).toHaveBeenCalledWith({ queryKey: [root], type: "inactive" });
+      expect(setDataSpy).toHaveBeenCalledWith({ queryKey: [root], type: "active" }, expect.any(Function));
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: [root], refetchType: "none" });
+      expect(refetchSpy).toHaveBeenCalledWith({ queryKey: [root], type: "active" });
+    }
+  });
+
+  it("clears active list and object query payloads to non-stale empty values", async () => {
+    const { clearedWorkspaceQueryData } = await import("@/lib/query/workspace");
+
+    expect(clearedWorkspaceQueryData([{ id: "old-worker" }])).toEqual([]);
+    expect(clearedWorkspaceQueryData({ pending: 3 })).toBeNull();
   });
 
   it("replaces stale URL workspace params before reload after a workspace switch", async () => {
