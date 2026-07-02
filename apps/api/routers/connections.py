@@ -404,6 +404,7 @@ _COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success
 _COMPOSIO_LIST_REFRESH_STATUSES = {"", "initiated", "pending", "unknown", "created"}
 _COMPOSIO_LIST_REFRESH_MIN_AGE_SECONDS = 60.0
 _COMPOSIO_RECONCILE_TERMINAL_STATUSES = {"active", "expired", "failed", "disabled", "revoked"}
+_COMPOSIO_ORPHANED_OAUTH_STATUSES = {"failed", "expired", "error"}
 _PENDING_CONNECTION_RECONCILE_DEFAULT_MAX_SECONDS = 600.0
 _PENDING_CONNECTION_RECONCILE_BACKOFF_SECONDS = (5.0, 10.0, 20.0, 30.0, 60.0)
 _pending_connection_reconciler_lock = threading.Lock()
@@ -415,6 +416,59 @@ def _normalize_composio_connection_status(status: Optional[str]) -> str:
     if normalized in _COMPOSIO_ACTIVE_STATUSES:
         return "active"
     return normalized
+
+
+def _connection_scopes_are_empty(row: Dict[str, Any]) -> bool:
+    scopes = row.get("scopes_json")
+    if scopes is None:
+        return True
+    if isinstance(scopes, list):
+        return len(scopes) == 0
+    text = str(scopes).strip()
+    if text in {"", "[]"}:
+        return True
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return False
+    return isinstance(parsed, list) and len(parsed) == 0
+
+
+def _connection_account_identity_is_blank(row: Dict[str, Any]) -> bool:
+    return not str(row.get("account_label") or "").strip() and not str(row.get("display_name") or "").strip()
+
+
+def _is_orphaned_failed_oauth_row(row: Dict[str, Any], app_name: str | None = None) -> bool:
+    if (row.get("kind") or "composio") != "composio":
+        return False
+    if app_name is not None and str(row.get("app_name") or "").strip().lower() != app_name.strip().lower():
+        return False
+    status = _normalize_composio_connection_status(row.get("status"))
+    if status in _COMPOSIO_ACTIVE_STATUSES:
+        return False
+    if status not in _COMPOSIO_ORPHANED_OAUTH_STATUSES:
+        return False
+    if not _connection_scopes_are_empty(row):
+        return False
+    return _connection_account_identity_is_blank(row)
+
+
+def _cleanup_orphaned_failed_oauth_rows(
+    *,
+    repos: Repositories,
+    user_id: str,
+    app_name: str,
+) -> int:
+    deleted = 0
+    for row in repos.connections.list(user_id=user_id):
+        row_data = row_to_dict(row)
+        if not _is_orphaned_failed_oauth_row(row_data, app_name=app_name):
+            continue
+        if repos.connections.delete(user_id=user_id, composio_id=str(row_data.get("id") or "")):
+            deleted += 1
+    if deleted:
+        _invalidate_connections_cache(user_id)
+    return deleted
 
 
 def _connection_list_item_needs_status_refresh(item: Any) -> bool:
@@ -502,6 +556,12 @@ def _reconcile_pending_connection_once(
     }
     if remote_status and remote_status != "not_found":
         updates["status"] = remote_status
+    if remote_status in _COMPOSIO_ORPHANED_OAUTH_STATUSES and _is_orphaned_failed_oauth_row(
+        {**row, **updates}
+    ):
+        repos_obj.connections.delete(user_id=user_id, composio_id=connection_id)
+        _invalidate_connections_cache(user_id)
+        return remote_status
     repos_obj.connections.update(
         user_id=user_id,
         composio_id=connection_id,
@@ -1404,6 +1464,11 @@ def initiate_connection(
         _raise_composio_unavailable(exc)
 
     composio_conn_id = result["composio_connection_id"]
+    _cleanup_orphaned_failed_oauth_rows(
+        repos=repos,
+        user_id=auth.user_id,
+        app_name=app_name,
+    )
     # Always insert a new row — multiple accounts per app are allowed.
     # Each Composio connected_account is a distinct row identified by its own UUID.
     # (Stale expired siblings are hidden from the UI by list_connections once an
@@ -1627,6 +1692,23 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
 
         final_status = _callback_persisted_status(str(existing.get("status") or ""), remote_status)
         now = now_iso()
+        failed_orphan = _is_orphaned_failed_oauth_row({**existing, "status": final_status})
+        if remote_status in _COMPOSIO_ORPHANED_OAUTH_STATUSES and failed_orphan:
+            repos.connections.delete(user_id=existing["user_id"], composio_id=existing["id"])
+            _connection_list_cache_clear(str(existing["user_id"]))
+            _invalidate_connections_cache(str(existing["user_id"]))
+            _emit_connection_resolved(
+                event="connection_failed",
+                connection_id=str(existing["id"]),
+                owner_id=str(existing["user_id"]),
+                provider=existing.get("app_name"),
+                failure_status=final_status,
+            )
+            landing_app = existing.get("app_name") or ""
+            redirect_qs = "connected=0&error=oauth_failed"
+            if landing_app:
+                redirect_qs += f"&app={urllib.parse.quote(landing_app)}"
+            return RedirectResponse(url=f"{frontend_url}/connections?{redirect_qs}")
         repos.connections.update(
             user_id=existing["user_id"],
             composio_id=existing["id"],

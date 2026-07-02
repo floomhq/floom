@@ -87,6 +87,13 @@ def test_post_connections_schedules_pending_connection_reconciler(monkeypatch):
     captured_upsert: dict[str, object] = {}
 
     class ConnectionsRepo:
+        def list(self, *, user_id):
+            assert user_id == "user-a"
+            return []
+
+        def delete(self, **_kwargs):
+            raise AssertionError("no orphan rows should be deleted in this fixture")
+
         def upsert(self, **kwargs):
             captured_upsert.update(kwargs)
             return kwargs
@@ -161,3 +168,113 @@ def test_pending_connection_reconciler_marks_remote_active(monkeypatch):
     assert updates["last_checked_at"] == "2026-07-01T00:00:00+00:00"
     assert updates["last_check_status"] == "active"
     assert updates["last_check_error"] is None
+
+
+def test_pending_connection_reconciler_deletes_failed_zero_scope_orphan(monkeypatch):
+    from routers import connections
+
+    row = {
+        "id": "conn-1",
+        "kind": "composio",
+        "app_name": "googlecalendar",
+        "status": "initiated",
+        "composio_connection_id": "ca_123",
+        "scopes_json": "[]",
+        "account_label": None,
+        "display_name": "",
+    }
+    deleted: list[tuple[str, str]] = []
+
+    class ConnectionsRepo:
+        def get(self, *, user_id, composio_id):
+            assert user_id == "user-a"
+            assert composio_id == "conn-1"
+            return row
+
+        def update(self, **_kwargs):
+            raise AssertionError("orphan failure should be deleted, not persisted")
+
+        def delete(self, *, user_id, composio_id):
+            deleted.append((user_id, composio_id))
+            return True
+
+    monkeypatch.setattr("composio_client.check_status", lambda _connection_id: "failed")
+    monkeypatch.setattr(connections, "_invalidate_connections_cache", lambda _user_id: None)
+
+    status = connections._reconcile_pending_connection_once(
+        user_id="user-a",
+        connection_id="conn-1",
+        composio_connection_id="ca_123",
+        repos=SimpleNamespace(connections=ConnectionsRepo()),
+        checked_at="2026-07-01T00:00:00+00:00",
+    )
+
+    assert status == "failed"
+    assert deleted == [("user-a", "conn-1")]
+
+
+@pytest.mark.parametrize(
+    "preserved_fields",
+    [
+        {"scopes_json": '["https://www.googleapis.com/auth/calendar.readonly"]'},
+        {"account_label": "owner@example.com"},
+        {"display_name": "Owner Calendar"},
+        {"kind": "mcp"},
+        {"status": "active"},
+    ],
+)
+def test_pending_connection_reconciler_preserves_non_orphan_failures(monkeypatch, preserved_fields):
+    from routers import connections
+
+    row = {
+        "id": "conn-1",
+        "kind": "composio",
+        "app_name": "googlecalendar",
+        "status": "initiated",
+        "composio_connection_id": "ca_123",
+        "scopes_json": "[]",
+        "account_label": None,
+        "display_name": "",
+        **preserved_fields,
+    }
+    updates: dict[str, object] = {}
+    deleted: list[str] = []
+
+    class ConnectionsRepo:
+        def get(self, *, user_id, composio_id):
+            assert user_id == "user-a"
+            assert composio_id == "conn-1"
+            return {**row, **updates}
+
+        def update(self, *, user_id, composio_id, **kwargs):
+            assert user_id == "user-a"
+            assert composio_id == "conn-1"
+            updates.update(kwargs)
+            return {**row, **updates}
+
+        def delete(self, *, user_id, composio_id):
+            deleted.append(composio_id)
+            return True
+
+    monkeypatch.setattr("composio_client.check_status", lambda _connection_id: "failed")
+    monkeypatch.setattr(connections, "_invalidate_connections_cache", lambda _user_id: None)
+
+    status = connections._reconcile_pending_connection_once(
+        user_id="user-a",
+        connection_id="conn-1",
+        composio_connection_id="ca_123",
+        repos=SimpleNamespace(connections=ConnectionsRepo()),
+        checked_at="2026-07-01T00:00:00+00:00",
+    )
+
+    if preserved_fields.get("kind") == "mcp":
+        assert status == "skipped"
+        assert updates == {}
+    elif preserved_fields.get("status") == "active":
+        assert status == "active"
+        assert updates == {}
+    else:
+        assert status == "failed"
+        assert updates["status"] == "failed"
+        assert updates["last_check_status"] == "failed"
+    assert deleted == []
