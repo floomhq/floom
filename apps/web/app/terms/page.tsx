@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export const metadata = {
   title: "Terms | Floom",
   description: "Terms for using this Floom instance.",
@@ -45,9 +47,9 @@ export default function TermsPage() {
 
         <p className="text-muted-foreground pt-2">
           See also{" "}
-          <a className="underline" href="/privacy">
+          <Link className="underline" href="/privacy">
             Privacy
-          </a>
+          </Link>
           .
         </p>
       </div>

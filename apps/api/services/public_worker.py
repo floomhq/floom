@@ -16,6 +16,7 @@ share-row lookups from services.share_links. Never imports main.
 from __future__ import annotations
 
 import hmac
+import re
 import urllib.parse
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
@@ -191,6 +192,148 @@ def _public_worker_share_from_worker(worker: Dict[str, Any], repos: "Repositorie
         "shared_by": _public_share_actor(worker, repos),
         "worker": public,
         "files": share_files,
+    }
+
+
+_HANDLE_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+
+
+def _slugify_handle(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return slug[:64].strip("-")
+
+
+def _workspace_profile_path(handle: str) -> str:
+    return f"/@{handle}"
+
+
+def _worker_share_path(worker: Dict[str, Any]) -> str | None:
+    worker_id = str(worker.get("id") or "").strip()
+    if not worker_id:
+        return None
+    try:
+        token = _worker_public_token(worker)
+    except Exception:
+        return None
+    return f"/w/{urllib.parse.quote(worker_id, safe='')}?token={urllib.parse.quote(token, safe='')}"
+
+
+def _public_workspace_actor(workspace: Dict[str, Any], repos: "Repositories" | None) -> Dict[str, str] | None:
+    if repos is None:
+        return None
+    owner_id = str(workspace.get("owner_user_id") or "").strip()
+    workspace_id = str(workspace.get("id") or "local-default").strip() or "local-default"
+    if not owner_id:
+        return None
+    actor = None
+    try:
+        members = getattr(repos, "members", None)
+        actor = members.get(workspace_id=workspace_id, user_id=owner_id) if members is not None else None
+    except Exception:
+        actor = None
+    if not actor:
+        try:
+            users = getattr(repos, "users", None)
+            actor = users.get(user_id=owner_id) if users is not None else None
+        except Exception:
+            actor = None
+    display_name = str((actor or {}).get("display_name") or "").strip()
+    username = str((actor or {}).get("username") or "").strip()
+    username_label = "" if "@" in username else username
+    label = display_name or username_label or str(workspace.get("name") or "").strip()
+    if not label:
+        return None
+    out = {"label": label}
+    if display_name:
+        out["display_name"] = display_name
+    return out
+
+
+def _list_local_workspace_rows() -> list[Dict[str, Any]]:
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, owner_user_id, name, created_at, region, timezone
+                FROM local_workspaces
+                ORDER BY created_at, id
+                """
+            ).fetchall()
+    except Exception:
+        return []
+    return [dict(row) for row in rows]
+
+
+def _resolve_public_workspace_handle(handle: str) -> Dict[str, Any]:
+    raw = str(handle or "").strip().lstrip("@").strip("/")
+    slug = _slugify_handle(raw)
+    if not slug or not _HANDLE_RE.fullmatch(slug):
+        raise HTTPException(status_code=404, detail="Workspace profile not found")
+
+    workspaces = _list_local_workspace_rows()
+    exact_id = [row for row in workspaces if str(row.get("id") or "").lower() == raw.lower()]
+    if exact_id:
+        row = exact_id[0]
+        return {**row, "handle": _slugify_handle(row.get("name") or row.get("id")) or str(row.get("id") or "")}
+
+    for row in workspaces:
+        row_handle = _slugify_handle(row.get("name") or row.get("id"))
+        if row_handle == slug:
+            return {**row, "handle": row_handle}
+    raise HTTPException(status_code=404, detail="Workspace profile not found")
+
+
+def _public_workspace_profile(handle: str, repos: "Repositories", *, limit: int = 50) -> Dict[str, Any]:
+    from models import WorkerConfig
+
+    workspace = _resolve_public_workspace_handle(handle)
+    workspace_id = str(workspace.get("id") or "local-default")
+    workers = repos.workers.list_public_for_workspace(workspace_id=workspace_id, limit=limit)
+    if not workers:
+        raise HTTPException(status_code=404, detail="Workspace profile not found")
+    assets: list[Dict[str, Any]] = []
+    for worker in workers:
+        try:
+            config = WorkerConfig(**(worker.get("config") or {}))
+        except Exception:
+            config = WorkerConfig(
+                id=str(worker.get("id") or ""),
+                name=str(worker.get("name") or ""),
+                trigger={"type": "manual"},
+                runtime={"type": "python", "entrypoint": "run.py"},
+            )
+        public = _public_worker_response(worker, config).model_dump()
+        assets.append(
+            {
+                "type": "worker",
+                "id": public.get("id"),
+                "title": public.get("name"),
+                "description": public.get("description") or public.get("long_description"),
+                "share_path": _worker_share_path(worker),
+                "worker": public,
+            }
+        )
+    profile_handle = str(workspace.get("handle") or _slugify_handle(workspace.get("name") or workspace_id))
+    return {
+        "entity_type": "workspace_profile",
+        "workspace": {
+            "id": workspace_id,
+            "name": str(workspace.get("name") or workspace_id),
+            "handle": profile_handle,
+            "profile_path": _workspace_profile_path(profile_handle),
+        },
+        "title": str(workspace.get("name") or workspace_id),
+        "description": "Public Floom workspace profile",
+        "shared_by": _public_workspace_actor(workspace, repos),
+        "counts": {
+            "workers": len(assets),
+            "assets": len(assets),
+        },
+        "assets": assets,
+        "workers": [asset["worker"] for asset in assets],
     }
 
 

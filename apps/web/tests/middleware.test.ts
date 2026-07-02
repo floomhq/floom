@@ -144,9 +144,18 @@ describe("middleware auth gate", () => {
 
   it("keeps public pages reachable without login", async () => {
     const { proxy: middleware } = await import("@/proxy");
-    for (const p of ["/login", "/connections/callback?status=success", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {
+    for (const p of ["/login", "/connections/callback?status=success", "/approvals/review?id=x&token=y", "/w/abc?token=y", "/@fede-secretary"]) {
       const res = await middleware(req(p));
       expect(res.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
+
+  it("does NOT make nested /@ routes public by prefix", async () => {
+    const { proxy: middleware } = await import("@/proxy");
+    for (const p of ["/@fede-secretary/settings", "/@fede-secretary/private/run"]) {
+      const res = await middleware(req(p));
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toContain("/login");
     }
   });
 

@@ -488,6 +488,41 @@ export interface PublicWorker {
   outputs: PublicWorkerOutput[];
 }
 
+export interface PublicWorkspaceActor {
+  label: string;
+  display_name?: string;
+}
+
+export interface PublicWorkspaceSummary {
+  id: string;
+  name: string;
+  handle: string;
+  profile_path: string;
+}
+
+export interface PublicWorkspaceAsset {
+  type: "worker";
+  id: string;
+  title: string;
+  description?: string | null;
+  share_path?: string | null;
+  worker: PublicWorker;
+}
+
+export interface PublicWorkspaceProfile {
+  entity_type: "workspace_profile";
+  workspace: PublicWorkspaceSummary;
+  title: string;
+  description?: string | null;
+  shared_by?: PublicWorkspaceActor | null;
+  counts: {
+    workers: number;
+    assets: number;
+  };
+  assets: PublicWorkspaceAsset[];
+  workers: PublicWorker[];
+}
+
 export interface StandaloneShareLink {
   token: string;
   url: string;
