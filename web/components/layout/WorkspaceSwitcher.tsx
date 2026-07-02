@@ -15,6 +15,7 @@ import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { Avatar } from "@/components/ui/Avatar";
 import { getWorkspaceActionAvailability, getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
 import { computeIsAdmin } from "@/lib/use-is-admin";
+import { refetchWorkspaceScopedQueries } from "@/lib/query/workspace";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -169,7 +170,11 @@ export function WorkspaceSwitcher() {
   function commitWorkspaceSelection(workspaceId: string, nextWorkspaces?: LocalWorkspace[]) {
     setActiveWorkspaceId(workspaceId);
     replaceUrlWorkspaceParam(workspaceId);
-    queryClient?.clear();
+    if (queryClient) {
+      void refetchWorkspaceScopedQueries(queryClient).catch((err) => {
+        console.error("Failed to refresh workspace-scoped queries after workspace switch", err);
+      });
+    }
 
     const workspaces = nextWorkspaces ?? state?.workspaces ?? [];
     const nextState = state ? { ...state, workspaces, activeId: workspaceId } : null;
