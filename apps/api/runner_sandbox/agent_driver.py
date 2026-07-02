@@ -35,6 +35,7 @@ from models import (
     WorkerResult,
 )
 import llm as _llm
+from agents_runtime import disable_openai_agents_tracing
 from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
@@ -87,16 +88,16 @@ def _resolve_timeout_seconds(requested: int, limits: "Any") -> int:
     """Resolve the effective run timeout for an agent-mode worker.
 
     Policy (#1127/#1314):
-    - Start from ``limits.timeout_seconds`` (per-worker ceiling, default 300 s).
+    - Start from ``limits.timeout_seconds`` (per-worker ceiling, default 900 s).
     - If the workspace has set ``default_timeout_seconds``, use THAT value as
       the timeout (it may be higher than the per-worker default, enabling up to
       1-hour runs without touching individual manifests).
     - Never exceed MAX_RUN_TIMEOUT_SECONDS (3600 s).
 
     Examples:
-      worker limits=300, ws unset   → 300   (existing workers unchanged)
-      worker limits=300, ws=3600    → 3600  (workspace opt-in to 1 h)
-      worker limits=600, ws=300     → 300   (workspace is tighter → still wins)
+      worker limits=900, ws unset   -> 900   (default worker limit)
+      worker limits=900, ws=3600    -> 3600  (workspace opt-in to 1 h)
+      worker limits=600, ws=300     -> 300   (workspace is tighter, so it wins)
     """
     from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
 
@@ -367,6 +368,7 @@ class AgentDriver(SandboxDriver):
         connection_ids: Dict[str, str],
         user_id: str | None,
     ) -> WorkerResult:
+        disable_openai_agents_tracing()
         from agents import Agent, ModelSettings, RunConfig
 
         limits = config.runtime.limits
@@ -485,6 +487,7 @@ class AgentDriver(SandboxDriver):
             workflow_name=f"workeros:{worker_id}",
             trace_id=trace_id,
             trace_metadata={"worker_id": worker_id, "run_id": run_id},
+            tracing_disabled=True,
             model_settings=model_settings,
             model_provider=loop_local_provider.provider,
         )

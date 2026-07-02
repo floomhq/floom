@@ -1,9 +1,10 @@
 """Provider-agnostic LLM access for the Floom backend.
 
-A single seam so every model call can target OpenAI (the zero-config default) or
-any litellm-supported provider (e.g. AWS Bedrock / Anthropic Claude) chosen purely
-by the configured *model id*. No provider is hardcoded: switch by changing the
-model env vars and supplying that provider's credentials.
+A single seam so every model call can target the configured provider by model id.
+Worker agents default to AWS Bedrock; OpenAI remains available by setting an
+OpenAI model id and key. Other litellm-supported providers (e.g. Anthropic
+Claude) are selected by changing the model env vars and supplying that
+provider's credentials.
 
 Model id conventions
 --------------------

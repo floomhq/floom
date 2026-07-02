@@ -19,8 +19,8 @@ npx -y @floomhq/floom mcp install --target claude
 ```
 
 Hosted Cloud does not require cloning this repo, editing `.env`, or supplying
-your own `OPENAI_API_KEY` / `E2B_API_KEY`; those are local/self-hosted runtime
-requirements. The local setup runs the same core pieces used by hosted
+your own model-provider key or `E2B_API_KEY`; those are local/self-hosted
+runtime requirements. The local setup runs the same core pieces used by hosted
 deployments:
 
 - FastAPI backend with SQLite persistence.
@@ -45,7 +45,8 @@ Prerequisites:
 - Python 3.11 or newer.
 - Node.js 20 or newer.
 - Git.
-- `OPENAI_API_KEY` for Emily, agent workers, and worker generation.
+- Model-provider credentials: AWS credentials for the Bedrock worker-agent
+  default, or an explicit OpenAI/other-provider key when configured.
 - `E2B_API_KEY` for sandboxed script-worker execution.
 
 Linux / macOS:
@@ -110,12 +111,13 @@ artifact directories from reload watching.
 
 ### Model providers
 
-OpenAI is the zero-config default. To use another provider, set the role-specific
-model variables to a litellm model id and provide that provider's credentials.
+Worker agents default to Bedrock on hosted deployments. To use another provider,
+set the role-specific model variables to a litellm model id and provide that
+provider's credentials.
 
 | Env var | Role | Default |
 | --- | --- | --- |
-| `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `gpt-5.5` |
+| `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `bedrock/us.anthropic.claude-sonnet-4-6` |
 | `WORKEROS_CHAT_MODEL` | Emily chat assistant | `gpt-5.4-mini` |
 | `WORKEROS_CODEGEN_MODEL` | worker codegen, draft, and repair | `gpt-5.5` |
 | `WORKEROS_SUGGEST_MODEL` | worker-edit conflict check | codegen model |
@@ -129,6 +131,15 @@ WORKEROS_CODEGEN_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 AWS_REGION_NAME=us-west-2
+```
+
+Optional OpenAI configuration:
+
+```bash
+WORKEROS_WORKER_AGENT_MODEL=gpt-5.5
+WORKEROS_CHAT_MODEL=gpt-5.4-mini
+WORKEROS_CODEGEN_MODEL=gpt-5.5
+OPENAI_API_KEY=...
 ```
 
 Other litellm providers work the same way:

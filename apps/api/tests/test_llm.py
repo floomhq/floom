@@ -66,6 +66,9 @@ def test_provider_credentials_present(monkeypatch):
     assert llm.provider_credentials_present("bedrock/us.anthropic.claude-sonnet-4-6") is False
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
     assert llm.provider_credentials_present("bedrock/us.anthropic.claude-sonnet-4-6") is True
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.setenv("AWS_PROFILE", "bedrock-profile")
+    assert llm.provider_credentials_present("bedrock/us.anthropic.claude-sonnet-4-6") is True
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)

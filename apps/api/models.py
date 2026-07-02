@@ -9,18 +9,18 @@ from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Tuple,
 from urllib.parse import unquote, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
-from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
+from runtime_limits import DEFAULT_RUN_TIMEOUT_SECONDS, MAX_RUN_TIMEOUT_SECONDS
 
 
 # The tool-calling worker default. MUST be resolved lazily (at call time), not
 # frozen at import. On the cloud the model env vars arrive via
 # `load_dotenv(~/.config/workeros/api.env, override=False)` in main.py — which
 # runs AFTER `from models import ...`. A module-level constant read here would
-# freeze to the bare "gpt-5.5" fallback (→ OpenAI) before dotenv injects
+# freeze to the fallback before dotenv injects
 # WORKEROS_WORKER_AGENT_MODEL=bedrock/..., so worker runs hit the (dead/quota'd)
 # OpenAI key while Emily — which reads WORKEROS_CHAT_MODEL lazily — works.
 # Resolve at call time so the live env (whatever delivery mechanism set it) wins.
-_WORKER_AGENT_MODEL_FALLBACK = "gpt-5.5"
+_WORKER_AGENT_MODEL_FALLBACK = "bedrock/us.anthropic.claude-sonnet-4-6"
 
 
 def default_worker_agent_model() -> str:
@@ -1378,10 +1378,10 @@ def _ceiling_from_env(env_key: str, default: int) -> int:
 
 
 class WorkerLimits(BaseModel):
-    max_tool_iterations: int = Field(default=30, ge=1)
+    max_tool_iterations: int = Field(default=80, ge=1)
     max_output_tokens: int = Field(default=1000000, ge=1)
     max_total_tokens: int = Field(default=1000000, ge=1)
-    timeout_seconds: int = Field(default=300, ge=1, le=MAX_RUN_TIMEOUT_SECONDS)
+    timeout_seconds: int = Field(default=DEFAULT_RUN_TIMEOUT_SECONDS, ge=1, le=MAX_RUN_TIMEOUT_SECONDS)
     # #793: per-worker monthly spend cap in USD. None = unlimited. Enforced at
     # dispatch: a run is refused (failed, error_code=spend_cap_exceeded) when
     # the worker's month-to-date cost has already reached the cap.
