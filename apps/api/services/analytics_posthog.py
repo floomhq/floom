@@ -200,6 +200,8 @@ def _base_properties(extra: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         # only when the caller wants them; here we simply keep all provided keys
         # except those the caller set to the sentinel below.
         props.update(extra)
+    props["$geoip_disable"] = True
+    props["$ip"] = None
     return props
 
 

@@ -114,6 +114,22 @@ class TestEnabled:
         assert props["schema_version"] == analytics_posthog.SCHEMA_VERSION
         assert props["emitter"] == "server"
         assert props["source"] == "api"
+        assert props["$geoip_disable"] is True
+        assert props["$ip"] is None
+
+    def test_capture_strips_client_ip_even_if_caller_sets_one(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+
+        analytics_posthog.capture_event(
+            distinct_id="owner-9",
+            event="run_completed",
+            properties={"$ip": "203.0.113.9", "$geoip_disable": False},
+            groups={"workspace": "ws-7"},
+        )
+
+        props = stub.captured[0][1]["properties"]
+        assert props["$geoip_disable"] is True
+        assert props["$ip"] is None
 
     def test_request_source_context_is_injected(self, monkeypatch):
         stub = _enable_with_stub(monkeypatch)
