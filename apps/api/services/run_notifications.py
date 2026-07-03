@@ -262,9 +262,7 @@ def _run_email_html(
         if support_email
         else ""
     )
-    footer_unsubscribe = (
-        f' &middot; <a href="{escape(manage_alerts_url, quote=True)}" style="color:#3563CC;text-decoration:underline;">Manage alerts</a>'
-    )
+    footer_unsubscribe = f' &middot; <a href="{escape(manage_alerts_url, quote=True)}" style="color:#3563CC;text-decoration:underline;">Manage alerts</a>'
     is_failed = status_label.lower() == "failed"
     status_color = "#E5533D" if is_failed else "#2F8F5B"
     headline = "needs attention" if is_failed else "finished successfully"
@@ -286,15 +284,13 @@ def _run_email_html(
 <body style="margin:0;padding:0;background:#FBFBFC;font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#16171A;-webkit-font-smoothing:antialiased;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FBFBFC;"><tr><td align="center" style="padding:40px 16px;">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
-<tr><td style="background:#F3F4F6;border:1px solid rgba(20,23,26,0.08);border-bottom:none;border-radius:16px 16px 0 0;padding:26px 36px;">
-<a href="{safe_frontend_url}" style="text-decoration:none;display:inline-block;">{brand_mark}</a>
-</td></tr>
-<tr><td style="background:#FFFFFF;border:1px solid rgba(20,23,26,0.08);border-top:none;border-radius:0 0 16px 16px;padding:36px 40px 40px;">
+<tr><td style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:8px;padding:38px 40px 40px;">
+<a href="{safe_frontend_url}" style="text-decoration:none;display:inline-block;margin:0 0 26px;">{brand_mark}</a>
 <p style="margin:0 0 10px;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#62697A;">Worker run</p>
 <h1 style="margin:0 0 18px;font-size:24px;line-height:1.25;font-weight:650;color:#16171A;">{worker_name} {headline}</h1>
 <p style="font-size:15px;line-height:1.6;margin:0 0 22px;color:#16171A;">Floom finished a worker run in your workspace. The details are below, and the full run log is ready in the dashboard.</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{row_html}</table>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px;"><tr><td style="border-radius:10px;background:#16171A;"><a href="{safe_run_url}" style="display:inline-block;background:#16171A;color:#FFFFFF;text-decoration:none;padding:14px 28px;border-radius:10px;font-size:15px;font-weight:650;line-height:1;">View run</a></td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px;"><tr><td style="border-radius:8px;background:#111317;"><a href="{safe_run_url}" style="display:inline-block;background:#111317;color:#FFFFFF;text-decoration:none;padding:13px 18px;border-radius:8px;font-size:14px;font-weight:700;line-height:1;">View run</a></td></tr></table>
 <p style="font-size:13px;line-height:1.55;margin:16px 0 0;color:#62697A;">You are receiving this because email alerts are enabled for this {safe_brand} workspace.</p>
 </td></tr>
 <tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#62697A;">
