@@ -53,7 +53,7 @@ _OPENAI_MAX_OUTPUT_CAP = 16_384
 _BEDROCK_MAX_OUTPUT_CAP = 64_000
 _AUTH_ERROR_RE = re.compile(
     r"authentication|unauthorized|forbidden|invalid[_ -]?api[_ -]?key|incorrect api key"
-    r"|access denied|expired token|signaturedoesnotmatch|unrecognizedclient|401|403",
+    r"|access denied|expired token|signaturedoesnotmatch|unrecognizedclient",
     re.IGNORECASE,
 )
 _QUOTA_ERROR_RE = re.compile(
@@ -70,8 +70,8 @@ _MODEL_NOT_CONFIGURED_RE = re.compile(
     re.IGNORECASE,
 )
 _PROVIDER_ERROR_RE = re.compile(
-    r"openai|anthropic|bedrock|litellm|gemini|vertex|provider|model|completion"
-    r"|api.?connection|upstream|llm",
+    r"openai|anthropic|bedrock|litellm|gemini|vertex|provider|api.?connection|upstream|llm"
+    r"|chat\.?completions?|completion(?:s)? api|modelprovider|model provider",
     re.IGNORECASE,
 )
 _SECRET_TOKEN_RE = re.compile(
@@ -224,13 +224,27 @@ def _redact_provider_message(message: str, secrets: Dict[str, str]) -> str:
 def _classify_llm_provider_error(exc: BaseException | str) -> str | None:
     text = str(exc)
     module = getattr(exc.__class__, "__module__", "") if isinstance(exc, BaseException) else ""
-    haystack = f"{module} {exc.__class__.__name__ if isinstance(exc, BaseException) else ''} {text}"
-    if _QUOTA_ERROR_RE.search(haystack):
-        return "llm_quota_exceeded"
+    class_name = exc.__class__.__name__ if isinstance(exc, BaseException) else ""
+    status_code = None
+    if isinstance(exc, BaseException):
+        for attr in ("status_code", "status", "http_status", "http_status_code"):
+            value = getattr(exc, attr, None)
+            if value is None:
+                continue
+            try:
+                status_code = int(value)
+                break
+            except (TypeError, ValueError):
+                continue
+    haystack = f"{module} {class_name} {text}"
     if _AUTH_ERROR_RE.search(haystack):
         return "llm_auth_error"
     if _MODEL_NOT_CONFIGURED_RE.search(haystack):
         return "llm_model_not_configured"
+    if _QUOTA_ERROR_RE.search(haystack) or "ratelimit" in class_name.lower():
+        return "llm_quota_exceeded"
+    if status_code in {401, 403} or re.search(r"\b(?:401|403)\b", haystack):
+        return "llm_auth_error"
     if _PROVIDER_ERROR_RE.search(haystack):
         return "llm_provider_error"
     return None

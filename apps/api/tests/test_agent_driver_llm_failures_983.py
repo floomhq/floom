@@ -11,6 +11,7 @@ if str(API_DIR) not in sys.path:
 from models import WorkerConfig, WorkerLimits, WorkerRuntime, WorkerTrigger  # noqa: E402
 from runner_sandbox.agent_driver import (  # noqa: E402
     AgentDriver,
+    _classify_llm_provider_error,
     _resolve_agent_timeout_seconds,
     _resolve_max_tool_iterations,
     _resolve_max_total_tokens,
@@ -92,6 +93,17 @@ def test_provider_quota_and_generic_provider_errors_have_distinct_codes(monkeypa
         assert result.retryable is expected_retryable
 
 
+def test_llm_classifier_prefers_explicit_auth_over_quota_hint():
+    assert (
+        _classify_llm_provider_error(
+            "openai.AuthenticationError: 401 incorrect API key; check quota dashboard if this persists"
+        )
+        == "llm_auth_error"
+    )
+    assert _classify_llm_provider_error("bedrock returned 403 quota exceeded") == "llm_quota_exceeded"
+    assert _classify_llm_provider_error("pydantic model validation failed") is None
+
+
 def test_agent_model_preflight_fails_missing_bedrock_env(monkeypatch):
     for key in (
         "AWS_ACCESS_KEY_ID",
@@ -148,3 +160,12 @@ def test_scheduled_agent_caps_get_sane_floors_with_hard_ceilings(monkeypatch):
     assert _resolve_max_tool_iterations(manual.runtime.limits, manual) == 10
     assert _resolve_max_total_tokens(manual.runtime.limits, manual) == 50_000
     assert _resolve_agent_timeout_seconds(120, manual.runtime.limits, manual) == 120
+
+
+def test_manual_agent_tool_iteration_cap_does_not_drop_existing_manifest_budget(monkeypatch):
+    manual = _config(
+        trigger_type="manual",
+        limits=WorkerLimits(max_tool_iterations=500, max_total_tokens=50_000, timeout_seconds=120),
+    )
+
+    assert _resolve_max_tool_iterations(manual.runtime.limits, manual) == 500
