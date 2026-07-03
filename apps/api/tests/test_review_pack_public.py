@@ -130,15 +130,20 @@ def test_review_pack_public_vote_roundtrip_is_bound_to_reviewer_token(monkeypatc
         _write_pack(client, context_name, pack_id, _pack(pack_id))
         token, reviewer_token = _mint(client, context_name, pack_id)
 
-        bad = client.get(f"/review/public/{token}?password=wrong")
+        bad = client.post(
+            f"/review/public/{token}/unlock",
+            headers={"x-review-pack-reviewer-token": reviewer_token},
+            json={"password": "wrong"},
+        )
         assert bad.status_code == 401
 
-        ok = client.get(
-            f"/review/public/{token}",
-            headers={
-                "x-review-pack-password": "secret123",
-                "x-review-pack-reviewer-token": reviewer_token,
-            },
+        old_query_unlock = client.get(f"/review/public/{token}?password=secret123")
+        assert old_query_unlock.status_code == 401
+
+        ok = client.post(
+            f"/review/public/{token}/unlock",
+            headers={"x-review-pack-reviewer-token": reviewer_token},
+            json={"password": "secret123"},
         )
         assert ok.status_code == 200, ok.text
         body = ok.json()
@@ -179,6 +184,14 @@ def test_review_pack_public_vote_roundtrip_is_bound_to_reviewer_token(monkeypatc
             },
         )
         assert missing_reviewer.status_code == 422
+
+        prior = client.post(
+            f"/review/public/{token}/feedback/read",
+            headers={"x-review-pack-reviewer-token": reviewer_token},
+            json={"password": "secret123"},
+        )
+        assert prior.status_code == 200, prior.text
+        assert prior.json()["my_votes"][0]["candidate_id"] == "c_lisa-01"
 
     feedback_files = list((contexts_dir / context_name / "feedback" / "review" / pack_id).glob("*.json"))
     assert len(feedback_files) == 1
@@ -225,12 +238,10 @@ def test_review_pack_can_materialize_directly_from_run_output_utf8(monkeypatch, 
         assert materialized.status_code == 200, materialized.text
 
         token, reviewer_token = _mint(client, context_name, pack_id)
-        public = client.get(
-            f"/review/public/{token}",
-            headers={
-                "x-review-pack-password": "secret123",
-                "x-review-pack-reviewer-token": reviewer_token,
-            },
+        public = client.post(
+            f"/review/public/{token}/unlock",
+            headers={"x-review-pack-reviewer-token": reviewer_token},
+            json={"password": "secret123"},
         )
         assert public.status_code == 200, public.text
         assert public.json()["pack"]["jobs"][0]["candidates"][0]["why"] == "Führungserfahrung für München"

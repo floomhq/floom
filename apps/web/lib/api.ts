@@ -854,18 +854,32 @@ export const api = {
   review: {
     publicGet: (token: string, password?: string, reviewerToken?: string) => {
       const headers = new Headers();
-      if (password) headers.set("x-review-pack-password", password);
       if (reviewerToken) headers.set("x-review-pack-reviewer-token", reviewerToken);
+      const path = `/review/public/${encodeURIComponent(token)}`;
+      if (password) {
+        return fetchJson<import("./types").ReviewPackPublicResponse>(`${path}/unlock`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ password }),
+        });
+      }
       return fetchJson<import("./types").ReviewPackPublicResponse>(
-        `/review/public/${encodeURIComponent(token)}`,
+        path,
         { headers },
       );
     },
     publicMyVotes: (token: string, reviewerToken: string, password?: string) => {
       const headers = new Headers({ "x-review-pack-reviewer-token": reviewerToken });
-      if (password) headers.set("x-review-pack-password", password);
+      const path = `/review/public/${encodeURIComponent(token)}/feedback`;
+      if (password) {
+        return fetchJson<import("./types").ReviewPackFeedbackResponse>(`${path}/read`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ password }),
+        });
+      }
       return fetchJson<import("./types").ReviewPackFeedbackResponse>(
-        `/review/public/${encodeURIComponent(token)}/feedback`,
+        path,
         { headers },
       );
     },

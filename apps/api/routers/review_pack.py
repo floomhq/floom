@@ -40,6 +40,10 @@ class ReviewPackMaterializeInput(BaseModel):
     run_id: str = Field(min_length=1, max_length=200)
 
 
+class ReviewPackPasswordInput(BaseModel):
+    password: Optional[str] = None
+
+
 @review_pack_router.get("/review/public/{token}")
 def get_public_review_pack(
     token: str,
@@ -49,6 +53,15 @@ def get_public_review_pack(
     return load_public_review_pack(token, password, reviewer_token)
 
 
+@review_pack_router.post("/review/public/{token}/unlock")
+def unlock_public_review_pack(
+    token: str,
+    body: ReviewPackPasswordInput,
+    reviewer_token: Optional[str] = Header(default=None, alias="x-review-pack-reviewer-token"),
+) -> Dict[str, Any]:
+    return load_public_review_pack(token, body.password, reviewer_token)
+
+
 @review_pack_router.get("/review/public/{token}/feedback")
 def get_public_review_pack_feedback(
     token: str,
@@ -56,6 +69,15 @@ def get_public_review_pack_feedback(
     reviewer_token: str = Header(..., alias="x-review-pack-reviewer-token"),
 ) -> Dict[str, Any]:
     return load_public_feedback(token, reviewer_token, password)
+
+
+@review_pack_router.post("/review/public/{token}/feedback/read")
+def read_public_review_pack_feedback(
+    token: str,
+    body: ReviewPackPasswordInput,
+    reviewer_token: str = Header(..., alias="x-review-pack-reviewer-token"),
+) -> Dict[str, Any]:
+    return load_public_feedback(token, reviewer_token, body.password)
 
 
 @review_pack_router.post("/review/public/{token}/feedback")
