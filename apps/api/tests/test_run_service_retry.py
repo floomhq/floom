@@ -276,6 +276,20 @@ def test_llm_setup_errors_do_not_retry_and_provider_error_retries(monkeypatch):
         assert did_schedule is False
 
     did_schedule = run_service._schedule_retry_for_failed_run(
+        run_id="run-llm-rate-limited",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        result_retryable=False,
+        result_error_code="llm_rate_limited",
+        repos=_Repos(),
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+    assert did_schedule is True
+    assert scheduled[-1]["attempt"] == 1
+
+    did_schedule = run_service._schedule_retry_for_failed_run(
         run_id="run-llm-provider",
         worker_id="worker-a",
         inputs={},

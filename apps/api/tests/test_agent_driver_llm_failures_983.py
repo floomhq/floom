@@ -64,10 +64,11 @@ def test_provider_errors_are_classified_and_redacted(monkeypatch):
     assert "LLM provider error (llm_auth_error)" in logs[0][0]
 
 
-def test_provider_quota_and_generic_provider_errors_have_distinct_codes(monkeypatch):
+def test_provider_rate_limit_quota_and_generic_provider_errors_have_distinct_codes(monkeypatch):
     driver = AgentDriver()
     cases = [
-        ("litellm.RateLimitError: 429 insufficient_quota", "llm_quota_exceeded", False),
+        ("litellm.RateLimitError: 429", "llm_rate_limited", True),
+        ("openai.RateLimitError: exceeded your current quota", "llm_quota_exceeded", False),
         ("litellm.APIConnectionError: bedrock upstream connection failed", "llm_provider_error", True),
     ]
 
@@ -101,6 +102,8 @@ def test_llm_classifier_prefers_explicit_auth_over_quota_hint():
         == "llm_auth_error"
     )
     assert _classify_llm_provider_error("bedrock returned 403 quota exceeded") == "llm_quota_exceeded"
+    assert _classify_llm_provider_error("openai returned 429") == "llm_rate_limited"
+    assert _classify_llm_provider_error("retry-after header present") == "llm_rate_limited"
     assert _classify_llm_provider_error("pydantic model validation failed") is None
 
 

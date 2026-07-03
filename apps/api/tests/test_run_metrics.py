@@ -123,6 +123,7 @@ class TestClassifyFailure:
     def test_resource_oom(self):
         assert classify_failure(error_code="sandbox_oom") == "resource"
         assert classify_failure(error_code="llm_quota_exceeded") == "resource"
+        assert classify_failure(error_code="llm_rate_limited") == "resource"
 
     def test_network_mcp(self):
         assert classify_failure(error_code="mcp_connect_failed") == "network"

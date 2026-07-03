@@ -466,6 +466,7 @@ _TRANSIENT_RETRY_ERROR_CODES = {
     "e2b_quota_exhausted",
     "e2b_sandbox_error",
     "llm_provider_error",
+    "llm_rate_limited",
     "interrupted_by_restart",
     "mcp_connect_failed",
     "run_abandoned_server_restart",

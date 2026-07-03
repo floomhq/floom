@@ -56,9 +56,12 @@ _AUTH_ERROR_RE = re.compile(
     r"|access denied|expired token|signaturedoesnotmatch|unrecognizedclient",
     re.IGNORECASE,
 )
+_RATE_LIMIT_ERROR_RE = re.compile(
+    r"\b429\b|rate.?limit|too many requests|retry[_ -]?after|retry-after|throttl",
+    re.IGNORECASE,
+)
 _QUOTA_ERROR_RE = re.compile(
-    r"insufficient[_ -]?quota|quota|rate.?limit|too many requests|resource_exhausted"
-    r"|throttl|billing|credit|429",
+    r"insufficient[_ -]?quota|quota exceeded|exceeded your current quota|billing|credit",
     re.IGNORECASE,
 )
 _MODEL_NOT_CONFIGURED_RE = re.compile(
@@ -241,7 +244,10 @@ def _classify_llm_provider_error(exc: BaseException | str) -> str | None:
         return "llm_auth_error"
     if _MODEL_NOT_CONFIGURED_RE.search(haystack):
         return "llm_model_not_configured"
-    if _QUOTA_ERROR_RE.search(haystack) or "ratelimit" in class_name.lower():
+    hard_quota_match = _QUOTA_ERROR_RE.search(haystack)
+    if (_RATE_LIMIT_ERROR_RE.search(haystack) or "ratelimit" in class_name.lower()) and not hard_quota_match:
+        return "llm_rate_limited"
+    if hard_quota_match:
         return "llm_quota_exceeded"
     if status_code in {401, 403} or re.search(r"\b(?:401|403)\b", haystack):
         return "llm_auth_error"
@@ -255,6 +261,8 @@ def _llm_error_message(error_code: str, model: str | None = None) -> str:
         return "The configured AI provider credentials were rejected. Update the platform model credentials and retry."
     if error_code == "llm_quota_exceeded":
         return "The configured AI provider quota or billing limit was reached. Restore provider capacity and retry."
+    if error_code == "llm_rate_limited":
+        return "The configured AI provider is rate-limiting requests. The run can be retried."
     if error_code == "llm_model_not_configured":
         model_suffix = f" for {model}" if model else ""
         return f"The platform AI model{model_suffix} is not fully configured. Set the required provider credentials and retry."
@@ -417,7 +425,7 @@ class AgentDriver(SandboxDriver):
                     status="error",
                     error=_llm_error_message(llm_error_code),
                     error_code=llm_error_code,
-                    retryable=llm_error_code == "llm_provider_error",
+                    retryable=llm_error_code in {"llm_provider_error", "llm_rate_limited"},
                 )
             logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
             log_fn(f"Agent runtime error: {exc}", "error")

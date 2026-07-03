@@ -100,6 +100,7 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "output_token_limit": "resource",
     "token_cap_exceeded": "resource",
     "llm_quota_exceeded": "resource",
+    "llm_rate_limited": "resource",
     "spend_cap_exceeded": "resource",
     # output / schema validation
     "invalid_outputs_shape": "validation",
