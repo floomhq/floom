@@ -342,12 +342,14 @@ def test_system_metrics_returns_expected_shape(monkeypatch, tmp_path):
         "drafts_last_hour",
         "cancel_flag_db_read_errors",
         "uptime_seconds",
+        "telemetry",
     }
     assert set(body.keys()) == expected_keys
-    # All counters are non-negative ints.
-    for key in expected_keys:
+    # All counters are non-negative ints ("telemetry" is a nested stats dict).
+    for key in expected_keys - {"telemetry"}:
         assert isinstance(body[key], int)
         assert body[key] >= 0
+    assert isinstance(body["telemetry"], dict)
 
 
 def test_system_metrics_requires_x_floom_secret(monkeypatch, tmp_path):

@@ -32,6 +32,7 @@ import logging
 import os
 import threading
 from contextvars import ContextVar, Token
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("floom.analytics")
@@ -47,7 +48,11 @@ _DEFAULT_HOST = "https://us.i.posthog.com"
 
 _client: Optional[Any] = None
 _init_lock = threading.Lock()
+_stats_lock = threading.Lock()
 _init_attempted = False
+_captured_total = 0
+_failed_total = 0
+_last_failure_ts: Optional[str] = None
 _request_source: ContextVar[str] = ContextVar("floom_analytics_source", default="api")
 _request_do_not_track: ContextVar[bool] = ContextVar("floom_analytics_do_not_track", default=False)
 _ALLOWED_SOURCES = {"web", "api", "cli", "mcp", "schedule"}
@@ -84,6 +89,31 @@ def _truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _record_captured(count: int = 1) -> None:
+    global _captured_total
+    n = max(1, int(count or 1))
+    with _stats_lock:
+        _captured_total += n
+
+
+def _record_failure(count: int = 1) -> None:
+    global _failed_total, _last_failure_ts
+    n = max(1, int(count or 1))
+    with _stats_lock:
+        _failed_total += n
+        _last_failure_ts = datetime.now(timezone.utc).isoformat()
+
+
+def capture_stats() -> Dict[str, Any]:
+    """In-process PostHog capture counters for health/metrics surfaces."""
+    with _stats_lock:
+        return {
+            "captured_total": int(_captured_total),
+            "failed_total": int(_failed_total),
+            "last_failure_ts": _last_failure_ts,
+        }
+
+
 def _workspace_analytics_opted_out(workspace_id: str) -> bool:
     if not workspace_id:
         return False
@@ -118,13 +148,13 @@ def _on_delivery_error(error: Any, items: Any = None) -> None:
     becomes a visible metric. Lazy import avoids an init-time circular import.
     Never raises."""
     try:
+        n = max(1, len(items)) if items is not None else 1
+    except Exception:
+        n = 1
+    _record_failure(n)
+    try:
         from services.ai_observability import record_delivery_event
 
-        n = 1
-        try:
-            n = max(1, len(items)) if items is not None else 1
-        except Exception:
-            n = 1
         record_delivery_event("emit_failed", n)
     except Exception:  # pragma: no cover - defensive
         logger.debug("PostHog on_error hook failed", exc_info=True)
@@ -236,7 +266,9 @@ def capture_event(
             properties=_base_properties(properties),
             groups={k: str(v) for k, v in (groups or {}).items() if v},
         )
+        _record_captured()
     except Exception:  # pragma: no cover - belt-and-suspenders; capture is @no_throw
+        _record_failure()
         logger.debug("PostHog capture failed for %s", event, exc_info=True)
 
 
@@ -265,7 +297,9 @@ def identify_user(
             properties=_base_properties(identify_props),
             groups={k: str(v) for k, v in (groups or {}).items() if v},
         )
+        _record_captured()
     except Exception:  # pragma: no cover
+        _record_failure()
         logger.debug("PostHog identify failed", exc_info=True)
 
 
@@ -293,7 +327,11 @@ def shutdown() -> None:
 
 def _reset_for_tests() -> None:
     """Test-only: clear the cached client so env changes re-init."""
-    global _client, _init_attempted
+    global _client, _init_attempted, _captured_total, _failed_total, _last_failure_ts
     with _init_lock:
         _client = None
         _init_attempted = False
+    with _stats_lock:
+        _captured_total = 0
+        _failed_total = 0
+        _last_failure_ts = None
