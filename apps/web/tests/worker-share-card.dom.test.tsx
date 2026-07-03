@@ -47,6 +47,15 @@ const worker: PublicWorker = {
 };
 
 describe("WorkerShareCard public panes", () => {
+  it("preserves the public share path through login for logged-out imports", () => {
+    render(<WorkerShareCard worker={worker} authed={false} token="spendready-lead-ops" />);
+
+    expect(screen.getByRole("link", { name: "Add to workspace" })).toHaveAttribute(
+      "href",
+      "/login?next=%2Fs%2Fspendready-lead-ops",
+    );
+  });
+
   it("shows overview details plus copyable setup instead of a raw worker.yml tab", () => {
     const { container } = render(<WorkerShareCard worker={worker} authed={false} token="share_token" />);
 
