@@ -212,6 +212,11 @@ def _resolve_agent_model(config: WorkerConfig) -> str:
     )
 
 
+def _uses_default_agent_stream_runner(driver: object) -> bool:
+    stream_runner = getattr(driver, "_run_streamed", None)
+    return getattr(stream_runner, "__func__", stream_runner) is AgentDriver._run_streamed
+
+
 def _redact_provider_message(message: str, secrets: Dict[str, str]) -> str:
     scrubbed = _scrub(message, secrets)
     for key, value in os.environ.items():
@@ -528,7 +533,7 @@ class AgentDriver(SandboxDriver):
 
         limits = config.runtime.limits
         resolved_model = _resolve_agent_model(config)
-        if not _llm.provider_credentials_present(resolved_model):
+        if _uses_default_agent_stream_runner(self) and not _llm.provider_credentials_present(resolved_model):
             message = _llm_error_message("llm_model_not_configured", resolved_model)
             log_fn(message, "error")
             return WorkerResult(
