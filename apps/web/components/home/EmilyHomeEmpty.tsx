@@ -23,12 +23,14 @@ import { useOverview, useWorkers } from "@/lib/query/hooks";
 import type {
   SystemOverview,
   SystemOverviewAttentionItem,
+  OverviewSparklineBucket,
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { InlineToolToken } from "@/components/InlineToolToken";
 import { tokenisePrompt } from "@/lib/prompt-detect";
 import { isMachineLabel } from "@/lib/workspace/display-name";
+import { Sparkline } from "@/components/Sparkline";
 import { resolveWorkersGate } from "./emily-home-empty";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
@@ -110,78 +112,135 @@ function formatCount(value: number | null | undefined) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value ?? 0);
 }
 
-function pluralize(count: number, singular: string, plural = `${singular}s`) {
-  return count === 1 ? singular : plural;
+function formatTimeOfDay(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
 }
 
-type HomeStat = {
+// Convert the 24h number[] into OverviewSparklineBucket[] so the shared
+// Sparkline (area variant) receives a consistent type with hover labels.
+function hourlyBuckets(values: number[] | undefined): OverviewSparklineBucket[] {
+  return (values ?? []).map((total, i) => ({
+    label: `${String(i).padStart(2, "0")}:00`,
+    started_at: String(i),
+    total,
+    failed: 0,
+  }));
+}
+
+// ── HomeStatsRow ──────────────────────────────────────────────────────────────
+//
+// Four real-data stat cards matching the dashboard overview:
+//   1. Runs completed / last 7 days  — area sparkline from runs_7d_sparkline
+//   2. Runs today                    — area sparkline from runs_24h_sparkline
+//   3. Workers active                — text-only (no per-hour timeseries in API)
+//   4. Coming up today               — text-only (no per-hour timeseries in API)
+//
+// Sparklines are rendered only when the API returns ≥2 data points; cards
+// without real series degrade gracefully to text-only. This ensures the
+// sparklines always reflect real workspace data, never placeholder values.
+
+function HomeStatCard({
+  label,
+  value,
+  detail,
+  sparkline,
+}: {
   label: string;
   value: string;
   detail: string;
-  attention?: boolean;
-};
+  sparkline?: OverviewSparklineBucket[];
+}) {
+  const hasSparkline = sparkline && sparkline.length >= 2;
+  return (
+    <div className="flex min-h-[98px] min-w-0 flex-col rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3.5 pt-3 pb-0 text-left">
+      <div className="text-[10.5px] font-medium leading-tight text-[var(--ink-mute)]">{label}</div>
+      <div className="mt-2 text-[22px] font-semibold leading-none tracking-normal text-ink">{value}</div>
+      <div className="mt-1.5 text-[11.5px] leading-tight text-[var(--text-muted)]">{detail}</div>
+      {hasSparkline ? (
+        // Stretch the sparkline edge-to-edge to the card's padding boundary.
+        // The negative -mx-3.5 pulls it flush; height is fixed at 28px so the
+        // card stays compact. preserveAspectRatio="none" (via variant="area")
+        // scales the polyline to fill the full width regardless of bucket count.
+        <div className="mt-auto -mx-3.5 h-7 overflow-hidden">
+          <Sparkline
+            data={sparkline}
+            height={28}
+            variant="area"
+            className="h-full w-full"
+          />
+        </div>
+      ) : (
+        // Reserve the same 28px bottom space when there is no sparkline so
+        // all four cards stay the same height.
+        <div className="mt-auto h-7" aria-hidden="true" />
+      )}
+    </div>
+  );
+}
 
 function HomeStatsRow({
   stats,
-  needsAttentionCount,
 }: {
   stats: SystemOverview["stats"];
-  needsAttentionCount: number;
 }) {
-  const totalWorkers = (stats.active_workers_count ?? 0) + (stats.paused_workers_count ?? 0);
-  const runningOrQueued = (stats.running_now ?? 0) + (stats.queued_now ?? 0);
-  const healthyConnections = stats.connections_healthy ?? 0;
-  const totalConnections = stats.connections_total ?? 0;
   const completedThisWeek = stats.work_shipped_7d ?? 0;
-  const items: HomeStat[] = [
-    {
-      label: "Total workers",
-      value: formatCount(totalWorkers),
-      detail: `${formatCount(stats.paused_workers_count)} paused`,
-    },
-    {
-      label: "Active workers",
-      value: formatCount(stats.active_workers_count),
-      detail:
-        stats.queued_now && stats.queued_now > 0
-          ? `${formatCount(stats.running_now)} running, ${formatCount(stats.queued_now)} queued`
-          : `${formatCount(runningOrQueued)} ${pluralize(runningOrQueued, "run")} live`,
-    },
-    {
-      label: "Runs this week",
-      value: formatCount(completedThisWeek),
-      detail: "completed",
-    },
-    {
-      label: "Connections",
-      value: totalConnections > 0 ? `${formatCount(healthyConnections)}/${formatCount(totalConnections)}` : "0",
-      detail: totalConnections > 0 ? "healthy" : "none connected",
-    },
-    {
-      label: "Needs attention",
-      value: formatCount(needsAttentionCount),
-      detail: needsAttentionCount > 0 ? "ready to triage" : "clear",
-      attention: needsAttentionCount > 0,
-    },
-  ];
+  const runsToday = stats.runs_today ?? stats.runs_24h ?? 0;
+  const completedToday = stats.completed_today ?? 0;
+  const failedToday = stats.failed_today ?? 0;
+  const activeWorkers = stats.active_workers_count ?? 0;
+  const pausedWorkers = stats.paused_workers_count ?? 0;
+  const scheduledToday = stats.scheduled_24h_count ?? 0;
+  const nextAt = stats.next_scheduled_at;
+
+  // Sparkline series — undefined when the API doesn't return enough points.
+  const runs7dSeries: OverviewSparklineBucket[] | undefined =
+    stats.runs_7d_sparkline && stats.runs_7d_sparkline.length >= 2
+      ? stats.runs_7d_sparkline
+      : undefined;
+
+  const runs24hSeries: OverviewSparklineBucket[] | undefined =
+    stats.runs_24h_sparkline && stats.runs_24h_sparkline.length >= 2
+      ? hourlyBuckets(stats.runs_24h_sparkline)
+      : undefined;
+
+  const todayDetail =
+    completedToday > 0 || failedToday > 0
+      ? `${formatCount(completedToday)} ok · ${formatCount(failedToday)} failed`
+      : `${formatCount(runsToday)} in last 24h`;
+
+  const nextScheduledDetail = nextAt
+    ? `Next at ${formatTimeOfDay(nextAt)}`
+    : "No runs scheduled";
 
   return (
-    <div className="my-5 grid w-full max-w-[760px] grid-cols-2 gap-2.5 md:grid-cols-5">
-      {items.map((item) => (
-        <div
-          key={item.label}
-          className={
-            "min-h-[98px] min-w-0 rounded-[var(--radius-card)] px-3.5 py-3 text-left " +
-            (item.attention
-              ? "bg-[color-mix(in_srgb,var(--warning)_10%,var(--bg-card))]"
-              : "bg-[var(--bg-2)]")
-          }
-        >
-          <div className="text-[10.5px] font-medium leading-tight text-[var(--ink-mute)]">{item.label}</div>
-          <div className="mt-2 text-[22px] font-semibold leading-none tracking-normal text-ink">{item.value}</div>
-          <div className="mt-2 text-[11.5px] leading-tight text-[var(--text-muted)]">{item.detail}</div>
-        </div>
-      ))}
+    <div className="my-5 grid w-full max-w-[760px] grid-cols-2 gap-2.5 md:grid-cols-4">
+      <HomeStatCard
+        label="Runs completed"
+        value={formatCount(completedThisWeek)}
+        detail="last 7 days"
+        sparkline={runs7dSeries}
+      />
+      <HomeStatCard
+        label="Runs today"
+        value={formatCount(runsToday)}
+        detail={todayDetail}
+        sparkline={runs24hSeries}
+      />
+      <HomeStatCard
+        label="Workers active"
+        value={formatCount(activeWorkers)}
+        detail={`${formatCount(pausedWorkers)} paused`}
+      />
+      <HomeStatCard
+        label="Coming up today"
+        value={formatCount(scheduledToday)}
+        detail={nextScheduledDetail}
+      />
     </div>
   );
 }
@@ -371,7 +430,6 @@ export function EmilyHomeEmpty({
           {overviewStats && (
             <HomeStatsRow
               stats={overviewStats}
-              needsAttentionCount={needsAttentionCount}
             />
           )}
         </>

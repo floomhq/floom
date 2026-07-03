@@ -51,9 +51,20 @@ vi.mock("@/lib/query/hooks", () => ({
         work_shipped_7d: 7,
         running_now: 1,
         queued_now: 1,
+        runs_today: 12,
+        completed_today: 10,
+        failed_today: 2,
+        runs_24h: 12,
+        runs_24h_sparkline: [2, 3, 1, 4, 2, 0, 1, 3, 5, 4, 3, 2, 1, 0, 2, 3, 4, 5, 3, 2, 1, 0, 2, 3],
+        scheduled_24h_count: 0,
         runs_7d_sparkline: [
-          { label: "Mon", started_at: "2026-06-29T00:00:00Z", total: 4, failed: 0 },
-          { label: "Tue", started_at: "2026-06-30T00:00:00Z", total: 5, failed: 1 },
+          { label: "Mon", started_at: "2026-06-27T00:00:00Z", total: 4, failed: 0 },
+          { label: "Tue", started_at: "2026-06-28T00:00:00Z", total: 5, failed: 1 },
+          { label: "Wed", started_at: "2026-06-29T00:00:00Z", total: 3, failed: 0 },
+          { label: "Thu", started_at: "2026-06-30T00:00:00Z", total: 6, failed: 0 },
+          { label: "Fri", started_at: "2026-07-01T00:00:00Z", total: 2, failed: 1 },
+          { label: "Sat", started_at: "2026-07-02T00:00:00Z", total: 4, failed: 0 },
+          { label: "Sun", started_at: "2026-07-03T00:00:00Z", total: 7, failed: 0 },
         ],
       },
       outcomes: [],
@@ -120,20 +131,26 @@ describe("HOME = existing Emily, fullscreen, stuff in empty state", () => {
     expect(await screen.findByText(/done this week/i)).toBeInTheDocument();
     // Needs-attention affordance from the single attention item.
     expect(screen.getAllByText(/need attention/i).length).toBeGreaterThan(0);
-    expect(screen.getByText("Total workers")).toBeInTheDocument();
-    expect(screen.getByText("Active workers")).toBeInTheDocument();
-    expect(screen.getByText("Runs this week")).toBeInTheDocument();
-    expect(screen.getByText("Connections")).toBeInTheDocument();
-    expect(screen.getByText("Needs attention")).toBeInTheDocument();
-    expect(screen.getByText("4")).toBeInTheDocument();
-    expect(screen.getAllByText("7").length).toBeGreaterThan(0);
-    expect(screen.getByText("2/3")).toBeInTheDocument();
-    expect(screen.getByText("1 running, 1 queued")).toBeInTheDocument();
+    // Stat card labels (new 4-card layout with real sparkline data).
+    expect(screen.getByText("Runs completed")).toBeInTheDocument();
+    expect(screen.getByText("last 7 days")).toBeInTheDocument();
+    expect(screen.getByText("Runs today")).toBeInTheDocument();
+    expect(screen.getByText("Workers active")).toBeInTheDocument();
+    expect(screen.getByText("Coming up today")).toBeInTheDocument();
+    // Values from the mocked overview stats.
+    expect(screen.getAllByText("7").length).toBeGreaterThan(0); // completedThisWeek
+    expect(screen.getByText("3")).toBeInTheDocument();          // active_workers_count
+    expect(screen.getByText("1 paused")).toBeInTheDocument();   // paused_workers_count
 
     // Greeting is the primary heading — H1-scale, visually above the pulse line.
     const greeting = screen.getByText(/Good (morning|afternoon|evening)/i);
     expect(greeting.className).toContain("text-[21px]");
     expect(greeting.className).toContain("font-semibold");
+
+    // SVG sparklines rendered for the two run-series cards (7d + 24h each have ≥2 points).
+    // The Sparkline area variant renders an SVG with fill and a stroke path.
+    const sparklineSvgs = document.querySelectorAll("svg");
+    expect(sparklineSvgs.length).toBeGreaterThanOrEqual(2);
 
     // Exactly ONE Emily composer (the real EmilyChatCore one) — no clone.
     const composers = screen.getAllByPlaceholderText(/Message Emily/i);
