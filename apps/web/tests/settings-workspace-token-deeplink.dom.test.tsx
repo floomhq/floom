@@ -135,4 +135,15 @@ describe("Settings workspace token deeplink", () => {
     expect(screen.getByText("shared-runner")).toBeInTheDocument();
     expect(screen.queryByText(/personal access tokens are scoped to your account/i)).not.toBeInTheDocument();
   }, 15_000);
+
+  it("opens the MCP pane from legacy ?tab=mcp without selecting Personal tokens", async () => {
+    window.history.replaceState(null, "", "/settings?tab=mcp");
+    const { default: SettingsPage } = await import("@/app/settings/page");
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByText("MCP setup")).toBeInTheDocument();
+    expect(screen.getByText(/MCP setup uses your saved CLI login/i)).toBeInTheDocument();
+    expect(screen.queryByText(/personal access tokens are scoped to your account/i)).not.toBeInTheDocument();
+  }, 15_000);
 });

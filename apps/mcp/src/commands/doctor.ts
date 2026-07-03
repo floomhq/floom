@@ -117,6 +117,23 @@ async function checkRecentRuns(client: FloomApiClient): Promise<Check> {
   }
 }
 
+function reconcileApiReachability(checks: Check[]): Check[] {
+  const api = checks.find((check) => check.name === "api_url");
+  const auth = checks.find((check) => check.name === "auth");
+  const runs = checks.find((check) => check.name === "recent_runs");
+  if (!api || api.ok || !auth?.ok || !runs?.ok) return checks;
+
+  return checks.map((check) =>
+    check.name === "api_url"
+      ? warn(
+          "api_url",
+          `Health probe failed (${check.detail || "unknown error"}), but auth and recent runs succeeded`,
+          "The API is reachable through authenticated endpoints; retry doctor if you need health endpoint status",
+        )
+      : check,
+  );
+}
+
 export async function doctorCommand(options: { json?: boolean } = {}): Promise<number> {
   const credentials = await readCredentials();
   const apiBase =
@@ -148,14 +165,16 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
     checks.push(fail("recent_runs", "Skipped — not authenticated", `Run: ${getCommandName()} login`));
   }
 
+  const reconciledChecks = reconcileApiReachability(checks);
+
   if (options.json) {
-    printJson({ ok: checks.every((c) => c.ok), checks });
-    return checks.every((c) => c.ok) ? 0 : 1;
+    printJson({ ok: reconciledChecks.every((c) => c.ok), checks: reconciledChecks });
+    return reconciledChecks.every((c) => c.ok) ? 0 : 1;
   }
 
   log.heading(`${getCommandName()} doctor`);
 
-  for (const check of checks) {
+  for (const check of reconciledChecks) {
     const detail = check.detail ? ` — ${check.detail}` : "";
     if (!check.ok) {
       log.err(`${check.name}${detail}`);
@@ -170,8 +189,8 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
   }
 
   log.blank();
-  const failed = checks.filter((c) => !c.ok).length;
-  const warnings = checks.filter((c) => c.ok && c.hint).length;
+  const failed = reconciledChecks.filter((c) => !c.ok).length;
+  const warnings = reconciledChecks.filter((c) => c.ok && c.hint).length;
   if (failed === 0) {
     if (warnings === 0) {
       log.ok("All checks passed.");
