@@ -112,3 +112,46 @@ describe("FilesEditor edit mode — code renders normally (not one char per line
     confirmSpy.mockRestore();
   });
 });
+
+describe("FilesEditor worker.yml preview", () => {
+  it("renders a readable worker summary with Preview and Raw modes", async () => {
+    const user = userEvent.setup();
+    render(
+      <FilesEditor
+        mode="view"
+        selectedPath="worker.yml"
+        files={[
+          {
+            path: "worker.yml",
+            content: [
+              "name: Revenue Reconciler",
+              "description: Reconciles monthly revenue against the ledger.",
+              "trigger:",
+              "  type: manual",
+              "runtime:",
+              "  type: python311",
+              "connections:",
+              "  - stripe",
+              "outputs:",
+              "  - name: report",
+              "    type: text",
+            ].join("\n"),
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("tab", { name: "Preview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Raw" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Revenue Reconciler" })).toBeInTheDocument();
+    expect(screen.getByText(/Reconciles monthly revenue against the ledger/)).toBeInTheDocument();
+    expect(screen.getByText("Trigger")).toBeInTheDocument();
+    expect(screen.getByText("Connects")).toBeInTheDocument();
+    expect(screen.getByText("Output")).toBeInTheDocument();
+    expect(screen.getByText("Runtime")).toBeInTheDocument();
+    expect(screen.queryByText(/^name: Revenue Reconciler$/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Raw" }));
+    expect(document.body.textContent).toContain("name: Revenue Reconciler");
+  });
+});

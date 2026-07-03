@@ -695,16 +695,16 @@ function WorkerYamlPreviewContent({ content }: { content: string }) {
   ].filter(([, value]) => value);
 
   return (
-    <div className="space-y-5 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-5 py-4">
+    <div className="space-y-5 bg-[var(--bg-2)] px-5 py-4">
       <div className="max-w-3xl space-y-2">
         <h3 className="text-lg font-semibold leading-7 text-foreground">{title}</h3>
         <p className="text-sm leading-6 text-muted-foreground">{summaryLine}</p>
       </div>
-      <dl className="grid max-w-3xl gap-2 text-sm sm:grid-cols-2">
+      <dl className="max-w-3xl divide-y [border-top:var(--bd-div)] [border-bottom:var(--bd-div)] text-sm">
         {essentials.map(([label, value]) => (
-          <div key={label} className="rounded-[var(--radius-card)] bg-card/80 px-3 py-2.5">
-            <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
-            <dd className="mt-1 text-foreground" title={String(value)}>{value}</dd>
+          <div key={label} className="grid gap-1 py-3 sm:grid-cols-[120px_1fr] sm:gap-4">
+            <dt className="text-[12px] font-medium text-muted-foreground">{label}</dt>
+            <dd className="min-w-0 text-foreground" title={String(value)}>{value}</dd>
           </div>
         ))}
       </dl>

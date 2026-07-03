@@ -93,6 +93,14 @@ function readCachedWorkspaceSwitcherState(): WorkspaceSwitcherCache | null {
   }
 }
 
+function fallbackWorkspaceState(): WorkspaceState {
+  const activeId = getActiveWorkspaceId() || "local-default";
+  return {
+    activeId,
+    workspaces: [{ id: activeId, name: "Workspace", owner_user_id: "", created_at: "" }],
+  };
+}
+
 export function replaceUrlWorkspaceParam(workspaceId: string) {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
@@ -142,7 +150,7 @@ function WorkspaceAvatar({
 export function WorkspaceSwitcher() {
   const router = useRouter();
   const queryClient = useContext(QueryClientContext);
-  const [state, setState] = useState<WorkspaceState | null>(() => readCachedWorkspaceSwitcherState()?.state ?? null);
+  const [state, setState] = useState<WorkspaceState>(() => readCachedWorkspaceSwitcherState()?.state ?? fallbackWorkspaceState());
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -197,15 +205,13 @@ export function WorkspaceSwitcher() {
       });
     }
 
-    const workspaces = nextWorkspaces ?? state?.workspaces ?? [];
-    const nextState = state ? { ...state, workspaces, activeId: workspaceId } : null;
-    if (nextState) {
-      setState(nextState);
-      cacheWorkspaceSwitcherState({
-        state: nextState,
-        canExportWorkspace,
-      });
-    }
+    const workspaces = nextWorkspaces ?? state.workspaces;
+    const nextState = { ...state, workspaces, activeId: workspaceId };
+    setState(nextState);
+    cacheWorkspaceSwitcherState({
+      state: nextState,
+      canExportWorkspace,
+    });
     const activeWorkspace = workspaces.find((w) => w.id === workspaceId);
     groupPostHogWorkspace(workspaceId, activeWorkspace?.name ? { name: activeWorkspace.name } : {});
     setSwitchingTo(null);
@@ -232,9 +238,7 @@ export function WorkspaceSwitcher() {
     try {
       const created = await api.workspace.create(name);
       await api.workspace.select(created.id);
-      const nextWorkspaces = state
-        ? [...state.workspaces.filter((w) => w.id !== created.id), created]
-        : [created];
+      const nextWorkspaces = [...state.workspaces.filter((w) => w.id !== created.id), created];
       setCreateOpen(false);
       setCreating(false);
       commitWorkspaceSelection(created.id, nextWorkspaces);
@@ -249,7 +253,7 @@ export function WorkspaceSwitcher() {
   // #791: rename the active workspace.
   async function handleRename() {
     const name = renameName.trim();
-    if (!name || !state) return;
+    if (!name) return;
     setRenaming(true);
     try {
       const updated = await api.workspace.rename(state.activeId, name);
@@ -260,12 +264,7 @@ export function WorkspaceSwitcher() {
         ),
       };
       setState(nextState);
-      if (workspaceSwitcherCache) {
-        workspaceSwitcherCache = {
-          ...workspaceSwitcherCache,
-          state: nextState,
-        };
-      }
+      cacheWorkspaceSwitcherState({ state: nextState, canExportWorkspace });
       setRenameOpen(false);
     } catch (err) {
       setError((err as Error).message || "Failed to rename workspace");
@@ -317,7 +316,7 @@ export function WorkspaceSwitcher() {
   }
 
   async function handleDuplicate() {
-    if (duplicating || !state) return;
+    if (duplicating) return;
     setDuplicating(true);
     try {
       const created = await api.workspace.duplicate(state.activeId);
@@ -353,20 +352,6 @@ export function WorkspaceSwitcher() {
     } finally {
       setSharingLink(false);
     }
-  }
-
-  if (!state) {
-    return (
-      <div className="w-full">
-        <div
-          className="flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
-          aria-label="Loading workspaces"
-        >
-          <div className="size-6 shrink-0 rounded-md bg-muted" />
-          <div className="h-3 w-20 rounded bg-muted" />
-        </div>
-      </div>
-    );
   }
 
   const active =

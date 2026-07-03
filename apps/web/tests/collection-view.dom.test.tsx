@@ -40,6 +40,12 @@ function makeConfig(over: Partial<CollectionConfig<Item>> = {}): CollectionConfi
     },
     view: { default: "list", grid: true },
     columns: { template: "1fr 120px 40px", headers: ["Worker", "Status", ""] },
+    sort: {
+      columns: {
+        0: { value: (i) => i.name },
+        1: { value: (i) => i.status },
+      },
+    },
     row: (i) => ({
       leading: <Avatar role="workspace" name={i.name} />,
       primary: i.name,
@@ -138,6 +144,23 @@ describe("CollectionView — list & grid (§8e)", () => {
     expect(strip).not.toContainElement(filterBar);
     expect(filterStrip).toContainElement(filterBar);
     expect(strip?.nextElementSibling).toBe(filterStrip);
+  });
+
+  it("sorts list rows by column headers with asc/desc indicators", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Harness config={makeConfig()} />);
+    const rowNames = () =>
+      Array.from(container.querySelectorAll(".c-lrow .nm")).map((el) => el.textContent);
+
+    expect(rowNames()).toEqual(["Weekly Update", "DACH Compliance", "Gmail Intake"]);
+
+    await user.click(screen.getByRole("button", { name: "Sort by Worker" }));
+    expect(screen.getByRole("button", { name: "Sort Worker descending" })).toHaveAttribute("aria-pressed", "true");
+    expect(rowNames()).toEqual(["DACH Compliance", "Gmail Intake", "Weekly Update"]);
+
+    await user.click(screen.getByRole("button", { name: "Sort Worker descending" }));
+    expect(screen.getByRole("button", { name: "Sort Worker ascending" })).toHaveAttribute("aria-pressed", "true");
+    expect(rowNames()).toEqual(["Weekly Update", "Gmail Intake", "DACH Compliance"]);
   });
 });
 
