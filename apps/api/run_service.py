@@ -1584,6 +1584,39 @@ def _emit_run_lifecycle_event(
         logger.debug("PostHog run-lifecycle emit failed for %s", run_id, exc_info=True)
 
 
+def emit_run_lifecycle_event_for_existing_status(
+    *,
+    run_id: str,
+    status: str,
+    user_id: str | None = None,
+    repos: Repositories | None = None,
+    error: str | None = None,
+    error_code: str | None = None,
+) -> None:
+    """Emit lifecycle analytics for a status transition already persisted elsewhere."""
+    if status not in _RUN_STATUS_EVENT:
+        return
+    repos_obj = _repos(repos)
+    owner_id = user_id
+    if owner_id is None:
+        scope = _run_scope(run_id, repos_obj)
+        if scope is None:
+            return
+        owner_id, _worker_id = scope
+    run_row = repos_obj.runs.get(user_id=owner_id, run_id=run_id)
+    worker_id = str((run_row or {}).get("worker_id") or "")
+    _emit_run_lifecycle_event(
+        run_id=run_id,
+        status=status,
+        worker_id=worker_id,
+        owner_id=owner_id,
+        error=error if error is not None else (run_row or {}).get("error"),
+        error_code=error_code if error_code is not None else (run_row or {}).get("error_code"),
+        run_row=run_row,
+        repos=repos_obj,
+    )
+
+
 def _emit_run_exception(
     *,
     exc: BaseException,

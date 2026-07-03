@@ -236,10 +236,16 @@ def test_rejecting_expired_is_refused(_stub_side_effect):
 # ---------------------------------------------------------------------------
 
 
-def test_non_expired_approval_still_approves(_stub_side_effect):
+def test_non_expired_approval_still_approves(_stub_side_effect, monkeypatch):
     spawned = _stub_side_effect
     _seed_pending("run_live", "apr_live", expires_at=_future())
     client = TestClient(main.app)
+    lifecycle_events: list[dict] = []
+    monkeypatch.setattr(
+        run_service,
+        "_emit_run_lifecycle_event",
+        lambda **kwargs: lifecycle_events.append(kwargs),
+    )
 
     resp = client.post("/runs/run_live/approve", json={}, headers=_AUTH)
     assert resp.status_code == 200, resp.text
@@ -249,6 +255,11 @@ def test_non_expired_approval_still_approves(_stub_side_effect):
     row = repos.approvals.get_by_run_id(run_id="run_live")
     assert row["status"] == "approved", row
     assert row.get("follow_up_run_id") == spawned[0]
+    assert [
+        (event["run_id"], event["status"])
+        for event in lifecycle_events
+        if event["run_id"] == "run_live"
+    ] == [("run_live", main.RunStatus.COMPLETED.value)]
 
 
 def test_non_expired_approval_lists_as_pending(_stub_side_effect):

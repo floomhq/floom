@@ -1394,7 +1394,7 @@ def approve_run(
       - approved_output: the (optionally edited) proposed output
     """
     from db import now_iso
-    from run_service import create_run, start_run
+    from run_service import create_run, emit_run_lifecycle_event_for_existing_status, start_run
     run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if run_row is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -1498,6 +1498,12 @@ def approve_run(
         user_id=auth.user_id,
         run_id=run_id,
         status=RunStatus.COMPLETED.value,
+    )
+    emit_run_lifecycle_event_for_existing_status(
+        run_id=run_id,
+        status=RunStatus.COMPLETED.value,
+        user_id=auth.user_id,
+        repos=repos,
     )
 
     # We won the claim — now (and only now) spawn the single follow-up run.
