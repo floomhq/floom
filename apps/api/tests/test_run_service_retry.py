@@ -257,6 +257,53 @@ def test_agent_runtime_error_gets_infra_retry_budget(monkeypatch):
     assert any("Scheduling retryable failure 2/2 in 60s" in msg for msg, _level in logs)
 
 
+def test_llm_setup_errors_do_not_retry_and_provider_error_retries(monkeypatch):
+    scheduled: list[dict] = []
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kwargs: scheduled.append(kwargs))
+
+    for code in ("llm_auth_error", "llm_quota_exceeded", "llm_model_not_configured"):
+        did_schedule = run_service._schedule_retry_for_failed_run(
+            run_id=f"run-{code}",
+            worker_id="worker-a",
+            inputs={},
+            owner_id="user-a",
+            config=None,
+            result_retryable=True,
+            result_error_code=code,
+            repos=_Repos(),
+            log_fn=lambda *_args, **_kwargs: None,
+        )
+        assert did_schedule is False
+
+    did_schedule = run_service._schedule_retry_for_failed_run(
+        run_id="run-llm-rate-limited",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        result_retryable=False,
+        result_error_code="llm_rate_limited",
+        repos=_Repos(),
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+    assert did_schedule is True
+    assert scheduled[-1]["attempt"] == 1
+
+    did_schedule = run_service._schedule_retry_for_failed_run(
+        run_id="run-llm-provider",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        result_retryable=False,
+        result_error_code="llm_provider_error",
+        repos=_Repos(),
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+    assert did_schedule is True
+    assert scheduled[-1]["attempt"] == 1
+
+
 def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
     created: list[str] = []
     started: list[str] = []

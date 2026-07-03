@@ -134,11 +134,17 @@ def provider_credentials_present(model: str) -> bool:
         if _is_direct_gemini_api_key_model(model):
             return bool(_gemini_primary_key() or _gemini_fallback_key())
         if "bedrock" in model.lower():
-            return bool(
+            has_credentials = bool(
                 os.environ.get("AWS_ACCESS_KEY_ID")
                 or os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
                 or os.environ.get("AWS_PROFILE")
             )
+            has_region = bool(
+                os.environ.get("AWS_REGION_NAME")
+                or os.environ.get("AWS_REGION")
+                or os.environ.get("AWS_DEFAULT_REGION")
+            )
+            return has_credentials and has_region
         return True
     return bool(
         os.environ.get("OPENAI_API_KEY") or os.environ.get("PLATFORM_OPENAI_API_KEY")
