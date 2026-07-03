@@ -89,13 +89,17 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     # auth / credentials
     "missing_secret": "auth",
     "missing_connection": "auth",
+    "llm_auth_error": "auth",
+    "llm_model_not_configured": "config",
     # network / external connectivity
     "mcp_connect_failed": "network",
+    "llm_provider_error": "network",
     # resource limits
     "sandbox_oom": "resource",
     "output_too_large": "resource",
     "output_token_limit": "resource",
     "token_cap_exceeded": "resource",
+    "llm_quota_exceeded": "resource",
     "spend_cap_exceeded": "resource",
     # output / schema validation
     "invalid_outputs_shape": "validation",

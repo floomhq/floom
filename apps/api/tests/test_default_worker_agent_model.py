@@ -87,6 +87,9 @@ def test_agent_driver_fallback_uses_default_agent_model(monkeypatch, tmp_path):
     (bundle_dir / "SKILL.md").write_text("You are a test worker.", encoding="utf-8")
     monkeypatch.setattr(agent_driver, "WORKERS_DIR", workers_dir)
     monkeypatch.setattr(agent_driver, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.setenv("AWS_REGION_NAME", "us-east-1")
 
     config = WorkerConfig(
         id="default-model-worker",

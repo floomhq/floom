@@ -114,15 +114,19 @@ class TestClassifyFailure:
 
     def test_auth_missing_secret(self):
         assert classify_failure(error_code="missing_secret") == "auth"
+        assert classify_failure(error_code="llm_auth_error") == "auth"
+        assert classify_failure(error_code="llm_model_not_configured") == "config"
 
     def test_config_invalid_worker(self):
         assert classify_failure(error_code="invalid_worker") == "config"
 
     def test_resource_oom(self):
         assert classify_failure(error_code="sandbox_oom") == "resource"
+        assert classify_failure(error_code="llm_quota_exceeded") == "resource"
 
     def test_network_mcp(self):
         assert classify_failure(error_code="mcp_connect_failed") == "network"
+        assert classify_failure(error_code="llm_provider_error") == "network"
 
     def test_cancelled(self):
         assert classify_failure(error_code="user_cancel") == "cancelled"

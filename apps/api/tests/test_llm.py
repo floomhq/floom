@@ -63,11 +63,17 @@ def test_provider_credentials_present(monkeypatch):
 
     for var in ("AWS_ACCESS_KEY_ID", "AWS_BEARER_TOKEN_BEDROCK", "AWS_PROFILE"):
         monkeypatch.delenv(var, raising=False)
+    for var in ("AWS_REGION_NAME", "AWS_REGION", "AWS_DEFAULT_REGION"):
+        monkeypatch.delenv(var, raising=False)
     assert llm.provider_credentials_present("bedrock/us.anthropic.claude-sonnet-4-6") is False
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+    assert llm.provider_credentials_present("bedrock/us.anthropic.claude-sonnet-4-6") is False
+    monkeypatch.setenv("AWS_REGION_NAME", "us-east-1")
     assert llm.provider_credentials_present("bedrock/us.anthropic.claude-sonnet-4-6") is True
     monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_REGION_NAME", raising=False)
     monkeypatch.setenv("AWS_PROFILE", "bedrock-profile")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     assert llm.provider_credentials_present("bedrock/us.anthropic.claude-sonnet-4-6") is True
 
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)

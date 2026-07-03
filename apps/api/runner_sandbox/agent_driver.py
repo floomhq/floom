@@ -51,6 +51,37 @@ logger = logging.getLogger("floom.runner_sandbox.agent")
 
 _OPENAI_MAX_OUTPUT_CAP = 16_384
 _BEDROCK_MAX_OUTPUT_CAP = 64_000
+_AUTH_ERROR_RE = re.compile(
+    r"authentication|unauthorized|forbidden|invalid[_ -]?api[_ -]?key|incorrect api key"
+    r"|access denied|expired token|signaturedoesnotmatch|unrecognizedclient|401|403",
+    re.IGNORECASE,
+)
+_QUOTA_ERROR_RE = re.compile(
+    r"insufficient[_ -]?quota|quota|rate.?limit|too many requests|resource_exhausted"
+    r"|throttl|billing|credit|429",
+    re.IGNORECASE,
+)
+_MODEL_NOT_CONFIGURED_RE = re.compile(
+    r"missing.*credential|no.*credential|unable to locate credentials"
+    r"|could not load credentials|api[_ -]?key.*not (?:set|configured|provided)"
+    r"|api_key client option must be set|model.*not (?:found|configured|supported)"
+    r"|unknown model|deployment.*not found|region.*not (?:set|configured|provided)"
+    r"|environment variable .*not (?:set|configured)",
+    re.IGNORECASE,
+)
+_PROVIDER_ERROR_RE = re.compile(
+    r"openai|anthropic|bedrock|litellm|gemini|vertex|provider|model|completion"
+    r"|api.?connection|upstream|llm",
+    re.IGNORECASE,
+)
+_SECRET_TOKEN_RE = re.compile(
+    r"(?i)\b(sk-[A-Za-z0-9_\-]{6,}|AKIA[0-9A-Z]{8,}|ASIA[0-9A-Z]{8,}"
+    r"|xox[baprs]-[A-Za-z0-9\-]+|ya29\.[A-Za-z0-9_\-]+)\b"
+)
+_ASSIGNMENT_SECRET_RE = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?key|secret|token|password|authorization)"
+    r"(\s*[:=]\s*)([^\s,'\")]+)"
+)
 
 
 def _ws_setting(key: str) -> "Optional[str]":
@@ -129,6 +160,91 @@ def _resolve_max_output_tokens(limits: "Any") -> int:
     if per_worker != 1_000_000:
         return per_worker
     return _ws_default_int("max_output_tokens") or per_worker
+
+
+def _is_scheduled_agent_worker(config: "Optional[WorkerConfig]") -> bool:
+    trigger = getattr(config, "trigger", None)
+    trigger_type = str(getattr(trigger, "type", "") or "").strip().lower()
+    if trigger_type in {"cron", "scheduled"}:
+        return True
+    return bool(getattr(trigger, "cron", None) or getattr(config, "cron_expr", None))
+
+
+def _resolve_agent_timeout_seconds(requested: int, limits: "Any", config: "Optional[WorkerConfig]") -> int:
+    from runtime_limits import effective_agent_timeout_seconds
+
+    per_worker = limits.timeout_seconds if limits else requested
+    _ws_timeout = _ws_default_int("default_timeout_seconds")
+    effective = _ws_timeout if _ws_timeout else per_worker
+    return effective_agent_timeout_seconds(
+        effective,
+        scheduled=_is_scheduled_agent_worker(config),
+    )
+
+
+def _resolve_max_tool_iterations(limits: "Any", config: "Optional[WorkerConfig]") -> int:
+    from runtime_limits import effective_agent_tool_iterations
+
+    return effective_agent_tool_iterations(
+        int(getattr(limits, "max_tool_iterations", 80) or 80),
+        scheduled=_is_scheduled_agent_worker(config),
+    )
+
+
+def _resolve_max_total_tokens(limits: "Any", config: "Optional[WorkerConfig]") -> int:
+    from runtime_limits import effective_agent_total_tokens
+
+    return effective_agent_total_tokens(
+        int(getattr(limits, "max_total_tokens", 1_000_000) or 1_000_000),
+        scheduled=_is_scheduled_agent_worker(config),
+    )
+
+
+def _resolve_agent_model(config: WorkerConfig) -> str:
+    return (
+        config.runtime.model
+        or _ws_default_model()
+        or _ws_fallback_model()
+        or default_worker_agent_model()
+    )
+
+
+def _redact_provider_message(message: str, secrets: Dict[str, str]) -> str:
+    scrubbed = _scrub(message, secrets)
+    for key, value in os.environ.items():
+        key_lower = key.lower()
+        if not any(marker in key_lower for marker in ("key", "token", "secret", "password")):
+            continue
+        if value and len(value) > 3:
+            scrubbed = scrubbed.replace(value, f"<REDACTED:{key}>")
+    scrubbed = _SECRET_TOKEN_RE.sub("<REDACTED:provider-secret>", scrubbed)
+    return _ASSIGNMENT_SECRET_RE.sub(r"\1\2<REDACTED>", scrubbed)
+
+
+def _classify_llm_provider_error(exc: BaseException | str) -> str | None:
+    text = str(exc)
+    module = getattr(exc.__class__, "__module__", "") if isinstance(exc, BaseException) else ""
+    haystack = f"{module} {exc.__class__.__name__ if isinstance(exc, BaseException) else ''} {text}"
+    if _QUOTA_ERROR_RE.search(haystack):
+        return "llm_quota_exceeded"
+    if _AUTH_ERROR_RE.search(haystack):
+        return "llm_auth_error"
+    if _MODEL_NOT_CONFIGURED_RE.search(haystack):
+        return "llm_model_not_configured"
+    if _PROVIDER_ERROR_RE.search(haystack):
+        return "llm_provider_error"
+    return None
+
+
+def _llm_error_message(error_code: str, model: str | None = None) -> str:
+    if error_code == "llm_auth_error":
+        return "The configured AI provider credentials were rejected. Update the platform model credentials and retry."
+    if error_code == "llm_quota_exceeded":
+        return "The configured AI provider quota or billing limit was reached. Restore provider capacity and retry."
+    if error_code == "llm_model_not_configured":
+        model_suffix = f" for {model}" if model else ""
+        return f"The platform AI model{model_suffix} is not fully configured. Set the required provider credentials and retry."
+    return "The AI provider failed while running this worker. Check the run logs for the redacted provider message and retry."
 
 
 
@@ -272,6 +388,23 @@ class AgentDriver(SandboxDriver):
                     error_code="output_token_limit",
                     retryable=False,
                 )
+            llm_error_code = _classify_llm_provider_error(exc)
+            if llm_error_code:
+                redacted = _redact_provider_message(exc_str, secrets)
+                logger.warning(
+                    "Agent LLM provider failure for worker %s run %s classified as %s: %s",
+                    worker_id,
+                    run_id,
+                    llm_error_code,
+                    redacted,
+                )
+                log_fn(f"LLM provider error ({llm_error_code}): {redacted}", "error")
+                return WorkerResult(
+                    status="error",
+                    error=_llm_error_message(llm_error_code),
+                    error_code=llm_error_code,
+                    retryable=llm_error_code == "llm_provider_error",
+                )
             logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
             log_fn(f"Agent runtime error: {exc}", "error")
             return WorkerResult(
@@ -309,7 +442,7 @@ class AgentDriver(SandboxDriver):
         # When the workspace sets a value > per-worker limits, the larger value
         # wins (allows 1-hour runs without touching individual worker manifests).
         # The absolute ceiling is MAX_RUN_TIMEOUT_SECONDS (3600).
-        timeout_seconds = _resolve_timeout_seconds(limits.timeout_seconds, limits)
+        timeout_seconds = _resolve_agent_timeout_seconds(limits.timeout_seconds, limits, config)
         try:
             return await asyncio.wait_for(
                 self._run_agent_inner(
@@ -372,6 +505,18 @@ class AgentDriver(SandboxDriver):
         from agents import Agent, ModelSettings, RunConfig
 
         limits = config.runtime.limits
+        resolved_model = _resolve_agent_model(config)
+        if not _llm.provider_credentials_present(resolved_model):
+            message = _llm_error_message("llm_model_not_configured", resolved_model)
+            log_fn(message, "error")
+            return WorkerResult(
+                status="error",
+                error=message,
+                error_code="llm_model_not_configured",
+                retryable=False,
+            )
+        max_tool_iterations = _resolve_max_tool_iterations(limits, config)
+        max_total_tokens = _resolve_max_total_tokens(limits, config)
         bundle_dir = _worker_dir_for_run(worker_id, config)
         if not bundle_dir.is_dir():
             try:
@@ -520,7 +665,7 @@ class AgentDriver(SandboxDriver):
                         error="Run cancelled by user",
                         error_code="cancelled",
                     )
-                if total_tokens >= limits.max_total_tokens:
+                if total_tokens >= max_total_tokens:
                     return WorkerResult(
                         status="error",
                         error="Agent token cap exceeded",
@@ -528,12 +673,7 @@ class AgentDriver(SandboxDriver):
                     )
 
                 force_finish = corrective_retry_used
-                _agent_model = _llm.agent_model(
-                    config.runtime.model
-                    or _ws_default_model()
-                    or _ws_fallback_model()
-                    or default_worker_agent_model()
-                )
+                _agent_model = _llm.agent_model(resolved_model)
                 # Clamp output tokens to the provider's hard limit (caps above):
                 # Bedrock -> 64k, OpenAI -> forward only when <=16k else None.
                 _agent_max_tokens = _agent_effective_max_tokens(
@@ -563,7 +703,7 @@ class AgentDriver(SandboxDriver):
                     result = await self._run_streamed(
                         agent=agent,
                         run_input=run_input,
-                        max_turns=limits.max_tool_iterations,
+                        max_turns=max_tool_iterations,
                         run_config=run_config,
                     )
                 except Exception as exc:
@@ -581,7 +721,7 @@ class AgentDriver(SandboxDriver):
                         run_id=run_id,
                         transcript=transcript,
                         total_tokens=total_tokens,
-                        max_total_tokens=limits.max_total_tokens,
+                        max_total_tokens=max_total_tokens,
                         ai_ctx=ai_ctx,
                     )
                 except Exception as exc:
