@@ -66,6 +66,7 @@ _CONTEXT_METADATA_SAVE_LOCK = threading.Lock()
 # Signature: hydrate_hook(scope: str | None, name: str, dest_dir: Path) -> None
 # The hook MUST be idempotent and MUST NOT raise (errors are logged internally).
 _hydration_hook: Optional[Callable[[Optional[str], str, "Path"], None]] = None
+_refresh_hook: Optional[Callable[[Optional[str], str, "Path", dict[str, Any]], None]] = None
 
 
 def set_context_hydration_hook(
@@ -84,6 +85,36 @@ def set_context_hydration_hook(
     """
     global _hydration_hook
     _hydration_hook = hook
+
+
+def set_context_refresh_hook(
+    hook: Optional[Callable[[Optional[str], str, "Path", dict[str, Any]], None]],
+) -> None:
+    """Register a callable that persists a refreshed context pack remotely.
+
+    Hosted deployments keep the durable copy in object storage and hydrate it
+    lazily onto local disk. The platform system-asset refresh path rewrites the
+    local pack from the deployed engine bundle, then calls this hook so the
+    cloud host can upload the same files to its canonical storage. OSS/local
+    mode leaves the hook unset and remains filesystem-only.
+
+    Signature: refresh_hook(scope, name, source_dir, summary) -> None.
+    Unlike hydration, failures are allowed to propagate because a refresh that
+    only updates ephemeral local disk is incomplete in hosted mode.
+    """
+    global _refresh_hook
+    _refresh_hook = hook
+
+
+def sync_refreshed_context_pack(
+    scope: str | None,
+    name: str,
+    source_dir: "Path",
+    summary: dict[str, Any],
+) -> None:
+    hook = _refresh_hook
+    if hook is not None:
+        hook(scope, name, source_dir, summary)
 
 
 def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) -> None:
