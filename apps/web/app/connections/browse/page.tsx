@@ -591,6 +591,12 @@ export default function ConnectionsBrowsePage() {
       statusColumn: false,
       menuColumn: false,
     },
+    sort: {
+      columns: {
+        0: { value: (i) => i.name },
+        1: { value: (i) => i.tools_count ?? 0, defaultDirection: "desc" },
+      },
+    },
     row: (i) => {
       const isConnected = connectedSlugs.has(i.slug.toLowerCase());
       const isConnecting = connecting === i.slug;
