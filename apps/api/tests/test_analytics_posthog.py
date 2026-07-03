@@ -20,7 +20,7 @@ API_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if API_DIR not in sys.path:
     sys.path.insert(0, API_DIR)
 
-from services import analytics_posthog  # noqa: E402
+from services import ai_observability, analytics_posthog  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +116,11 @@ class TestEnabled:
         assert props["source"] == "api"
         assert props["$geoip_disable"] is True
         assert props["$ip"] is None
+        assert analytics_posthog.capture_stats() == {
+            "captured_total": 1,
+            "failed_total": 0,
+            "last_failure_ts": None,
+        }
 
     def test_capture_strips_client_ip_even_if_caller_sets_one(self, monkeypatch):
         stub = _enable_with_stub(monkeypatch)
@@ -228,6 +233,48 @@ class TestEnabled:
         analytics_posthog.capture_event(
             distinct_id="u", event="run_failed", properties={}
         )
+        stats = analytics_posthog.capture_stats()
+        assert stats["captured_total"] == 0
+        assert stats["failed_total"] == 1
+        assert stats["last_failure_ts"] is not None
+
+    def test_identify_never_raises_on_client_error_and_counts_failure(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+
+        def _boom(*a, **k):
+            raise RuntimeError("network down")
+
+        stub.capture = _boom
+        analytics_posthog.identify_user(
+            distinct_id="owner-9",
+            anonymous_distinct_id="anon_install",
+            groups={"workspace": "ws-7"},
+        )
+        stats = analytics_posthog.capture_stats()
+        assert stats["captured_total"] == 0
+        assert stats["failed_total"] == 1
+        assert stats["last_failure_ts"] is not None
+
+    def test_delivery_error_hook_counts_failed_items(self):
+        analytics_posthog._on_delivery_error(RuntimeError("drop"), items=[1, 2, 3])
+
+        stats = analytics_posthog.capture_stats()
+        assert stats["captured_total"] == 0
+        assert stats["failed_total"] == 3
+        assert stats["last_failure_ts"] is not None
+
+    def test_ingestion_canary_reports_through_capture_counter(self, monkeypatch):
+        stub = _enable_with_stub(monkeypatch)
+        ai_observability._reset_delivery_counters_for_tests()
+
+        emitted = ai_observability.emit_ingestion_canary(source="test")
+
+        assert emitted is True
+        assert stub.captured[0][0] == "posthog_ingestion_canary"
+        stats = analytics_posthog.capture_stats()
+        assert stats["captured_total"] == 1
+        assert stats["failed_total"] == 0
+        assert stats["last_failure_ts"] is None
 
 
 # ---------------------------------------------------------------------------

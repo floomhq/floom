@@ -111,6 +111,15 @@ def system_metrics(
         cancel_flag_errors = cancel_flag_db_read_errors_total()
     except Exception:
         cancel_flag_errors = 0
+    try:
+        from services.analytics_posthog import capture_stats as posthog_capture_stats
+        telemetry = posthog_capture_stats()
+    except Exception:
+        telemetry = {
+            "captured_total": 0,
+            "failed_total": 0,
+            "last_failure_ts": None,
+        }
     return {
         "workers_count": len(workers),
         "runs_total": int(runs_total or 0),
@@ -121,6 +130,7 @@ def system_metrics(
         "active_triggers": int(active_triggers or 0),
         "drafts_last_hour": _drafts_last_hour_total(),
         "cancel_flag_db_read_errors": int(cancel_flag_errors or 0),
+        "telemetry": telemetry,
         "uptime_seconds": int(time.time() - _PROCESS_START_TIME),
     }
 
