@@ -5,10 +5,9 @@
 //   Gate (pack password) -> Identity (name/role) -> Review (job tabs, candidate
 //   cards, verdict buttons, auto-save) -> Done.
 // The token in the URL is the share secret; the pack password gates the body.
-// Reviewer identity + the unlocked password persist in localStorage so a reload
-// or a returning reviewer resumes without re-entering anything (contract:
-// "localStorage for reviewer_key session"). Votes are idempotent upserts keyed
-// by reviewer_key, so re-voting overwrites — safe to auto-save on every tap.
+// Reviewer identity comes from the reviewer token in the URL. Pack passwords
+// stay in memory only. Votes are idempotent upserts keyed by reviewer_key, so
+// re-voting overwrites — safe to auto-save on every tap.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -60,7 +59,6 @@ function VerdictIcon({ verdict, className = "h-3.5 w-3.5" }: { verdict: ReviewVe
 }
 
 export function ReviewFlow({ token }: { token: string }) {
-  const pwKey = `reviewpack.${token}.pw`;
   const reviewerToken = useMemo(() => {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("reviewer") || "";
@@ -137,27 +135,21 @@ export function ReviewFlow({ token }: { token: string }) {
     [token, reviewerToken, mergeConsensus],
   );
 
-  // Initial load: resume from localStorage. Try a (stored-password) GET; if the
-  // pack isn't gated the no-password GET still succeeds and we skip the gate.
+  // Initial load: if the pack is gated, the no-password GET fails and the user
+  // unlocks in-page.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let storedPw: string | null = null;
       try {
-        storedPw = window.localStorage.getItem(pwKey);
-      } catch {
-        /* localStorage unavailable — fall through to the gate */
-      }
-      try {
-        const res = await api.review.publicGet(token, storedPw ?? undefined, reviewerToken || undefined);
+        const res = await api.review.publicGet(token, undefined, reviewerToken || undefined);
         if (cancelled) return;
-        applyPack(res, storedPw ?? null);
+        applyPack(res, null);
         if (!res.reviewer?.name) {
           setGateError("Dieser Review-Link ist nicht personalisiert. Bitte nutzen Sie den Link aus Ihrer E-Mail.");
           setScreen("gate");
           return;
         }
-        await loadMyVotes(storedPw ?? null);
+        await loadMyVotes(null);
         if (!cancelled) setScreen("review");
       } catch {
         if (!cancelled) setScreen("gate");
@@ -166,7 +158,7 @@ export function ReviewFlow({ token }: { token: string }) {
     return () => {
       cancelled = true;
     };
-  }, [token, reviewerToken, pwKey, applyPack, loadMyVotes]);
+  }, [token, reviewerToken, applyPack, loadMyVotes]);
 
   const unlock = useCallback(
     async (pw: string) => {
@@ -180,11 +172,6 @@ export function ReviewFlow({ token }: { token: string }) {
           setScreen("gate");
           return;
         }
-        try {
-          window.localStorage.setItem(pwKey, pw);
-        } catch {
-          /* ignore persistence failure */
-        }
         await loadMyVotes(pw);
         setScreen("review");
       } catch {
@@ -193,7 +180,7 @@ export function ReviewFlow({ token }: { token: string }) {
         setUnlocking(false);
       }
     },
-    [token, reviewerToken, applyPack, loadMyVotes, pwKey],
+    [token, reviewerToken, applyPack, loadMyVotes],
   );
 
   const saveVote = useCallback(
@@ -590,90 +577,6 @@ function GateScreen({
         leiten Sie den Link nicht weiter. Zugriff ist passwortgeschützt.
         {expiry ? ` Gültig bis ${expiry}.` : " Der Link ist zeitlich befristet."}
       </div>
-    </CenteredShell>
-  );
-}
-
-function IdentityScreen({
-  pack,
-  name,
-  role,
-  onName,
-  onRole,
-  onPick,
-  onStart,
-}: {
-  pack: ReviewPack | null;
-  name: string;
-  role: string;
-  onName: (v: string) => void;
-  onRole: (v: string) => void;
-  onPick: (s: { name: string; role?: string }) => void;
-  onStart: () => void;
-}) {
-  const suggestions =
-    pack?.reviewers_suggested && pack.reviewers_suggested.length > 0
-      ? pack.reviewers_suggested
-      : [{ name: "Vera", role: "Recruiting" }, { name: "Hendrik", role: "Gründer" }];
-
-  return (
-    <CenteredShell>
-      <div className="mb-7 flex justify-center">
-        <FloomMark size={24} />
-      </div>
-      <h1 className="text-xl font-semibold text-[var(--ink)]">Wer überprüft?</h1>
-      <p className="mt-1.5 text-sm text-[var(--ink-soft)]">
-        Damit Ihr Team sieht, wer welches Profil markiert hat. Kein Konto nötig.
-      </p>
-
-      <div className="mt-5 flex flex-wrap gap-2">
-        {suggestions.map((s) => (
-          <button
-            key={s.name}
-            type="button"
-            onClick={() => onPick(s)}
-            className={`rounded-[var(--radius-pill)] px-3 py-1.5 text-sm transition-colors ${
-              name === s.name
-                ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-                : "bg-[var(--bg-2)] text-[var(--ink-soft)] hover:text-[var(--ink)]"
-            }`}
-          >
-            {s.name}
-          </button>
-        ))}
-      </div>
-
-      <form
-        className="mt-5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onStart();
-        }}
-      >
-        <label className="mb-1.5 block text-xs font-medium text-[var(--ink-soft)]">Ihr Name</label>
-        <input
-          value={name}
-          onChange={(e) => onName(e.target.value)}
-          placeholder="z. B. Vera"
-          className="w-full rounded-[var(--radius-input)] bg-[var(--bg-2)] px-4 py-3 text-base text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        />
-        <label className="mb-1.5 mt-3 block text-xs font-medium text-[var(--ink-soft)]">
-          Rolle (optional)
-        </label>
-        <input
-          value={role}
-          onChange={(e) => onRole(e.target.value)}
-          placeholder="z. B. Recruiting"
-          className="w-full rounded-[var(--radius-input)] bg-[var(--bg-2)] px-4 py-3 text-base text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        />
-        <button
-          type="submit"
-          disabled={!name.trim()}
-          className="mt-4 w-full rounded-[var(--radius-button)] bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-[var(--solid-fg)] transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          Review starten
-        </button>
-      </form>
     </CenteredShell>
   );
 }

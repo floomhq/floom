@@ -886,14 +886,14 @@ export interface ReviewConsensus {
   chips: ReviewVoteChip[];
 }
 
-/** Response of GET /review/public/{token}?password= */
+/** Response of GET /review/public/{token} or POST /review/public/{token}/unlock */
 export interface ReviewPackPublicResponse {
   pack: ReviewPack;
   consensus: ReviewConsensus[];
   reviewer?: { key: string; name: string; role?: string | null } | null;
 }
 
-/** Response of GET /review/public/{token}/feedback?reviewer_key= */
+/** Response of GET /review/public/{token}/feedback or POST /review/public/{token}/feedback/read */
 export interface ReviewPackFeedbackResponse {
   my_votes: ReviewPackFeedback[];
   consensus: ReviewConsensus[];
