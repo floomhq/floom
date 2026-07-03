@@ -5942,6 +5942,9 @@ from routers.system import (
 )
 app.include_router(system_router)
 
+from routers.system_assets import system_assets_router
+app.include_router(system_assets_router)
+
 from routers.overview import (
     overview_router,
     OverviewStats,
