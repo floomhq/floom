@@ -466,6 +466,8 @@ function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
     // Legacy aliases kept for back-compat with old deep-links.
     value === "api" ? "developer" :
+    value === "mcp" ? "developer" :
+    value === "cli" ? "developer" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
     value === "git" ? "developer" :
@@ -1022,7 +1024,9 @@ type SystemSubTabKey = (typeof SYSTEM_SUBTABS)[number]["key"];
 // Sub-tab keys per section (only sections that present sub-tabs appear here).
 // Used to validate/persist ?tab= deep-links so a stray ?tab does not leak.
 function subTabKeysForSection(section: SectionKey | null): string[] {
-  return section === "system" ? SYSTEM_SUBTABS.map((t) => t.key) : [];
+  if (section === "system") return SYSTEM_SUBTABS.map((t) => t.key);
+  if (section === "developer") return ["personal-tokens", "workspace-token", "api", "mcp", "cli", "git"];
+  return [];
 }
 
 function isValidSubTab(section: SectionKey | null, tab: string | null): boolean {

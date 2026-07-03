@@ -466,6 +466,69 @@ test("doctor accepts cloud PAT credentials and uses shared client headers", asyn
   });
 });
 
+test("doctor keeps api_url non-fatal when authenticated hosted checks pass", async () => {
+  await withTempHome(async () => {
+    const originalStdout = process.stdout.write.bind(process.stdout);
+    const originalFetch = globalThis.fetch;
+    const originalBase = process.env.WORKEROS_API_BASE;
+    const originalToken = process.env.WORKEROS_API_TOKEN;
+    const originalWorkspace = process.env.WORKEROS_WORKSPACE_ID;
+    let stdout = "";
+    const urls = [];
+    try {
+      process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
+      process.env.WORKEROS_API_TOKEN = "floom_pat_doctor";
+      process.env.WORKEROS_WORKSPACE_ID = "ws_doctor";
+      process.stdout.write = (chunk) => {
+        stdout += typeof chunk === "string" ? chunk : chunk.toString();
+        return true;
+      };
+      globalThis.fetch = async (url) => {
+        const value = String(url);
+        urls.push(value);
+        if (value === "https://workeros-api.floom.dev/api/health") {
+          const err = new Error("timed out");
+          err.name = "AbortError";
+          throw err;
+        }
+        if (value === "https://workeros-api.floom.dev/api/system/info") {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (value === "https://workeros-api.floom.dev/api/runs?limit=1") {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ detail: "unexpected" }), { status: 404 });
+      };
+
+      const code = await doctorCommand({ json: true });
+      assert.equal(code, 0);
+      const body = JSON.parse(stdout);
+      assert.equal(body.ok, true);
+      assert.ok(urls.includes("https://workeros-api.floom.dev/api/health"));
+      const apiUrl = body.checks.find((check) => check.name === "api_url");
+      assert.equal(apiUrl.ok, true);
+      assert.match(apiUrl.detail, /Health probe failed/);
+      assert.match(apiUrl.detail, /auth and recent runs succeeded/);
+      assert.match(apiUrl.hint, /authenticated endpoints/);
+    } finally {
+      process.stdout.write = originalStdout;
+      globalThis.fetch = originalFetch;
+      if (originalBase === undefined) delete process.env.WORKEROS_API_BASE;
+      else process.env.WORKEROS_API_BASE = originalBase;
+      if (originalToken === undefined) delete process.env.WORKEROS_API_TOKEN;
+      else process.env.WORKEROS_API_TOKEN = originalToken;
+      if (originalWorkspace === undefined) delete process.env.WORKEROS_WORKSPACE_ID;
+      else process.env.WORKEROS_WORKSPACE_ID = originalWorkspace;
+    }
+  });
+});
+
 test("doctor first run defaults to hosted Floom and points login at hosted flow", async () => {
   await withTempHome(async () => {
     const originalStdout = process.stdout.write.bind(process.stdout);

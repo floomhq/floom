@@ -113,6 +113,12 @@ function downloadText(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+function shareLoginHref(token?: string): string {
+  if (!token) return "/login";
+  const sharePath = `/s/${encodeURIComponent(token)}`;
+  return `/login?next=${encodeURIComponent(sharePath)}`;
+}
+
 export function WorkerShareCard({
   worker,
   authed = false,
@@ -166,7 +172,7 @@ export function WorkerShareCard({
   }
 
   // CTA element differs: authed users get an import button; guests go to login.
-  const ctaHref = authed ? undefined : "/login";
+  const ctaHref = authed ? undefined : shareLoginHref(token);
   const ctaLabel = importedId ? "View worker" : importing ? "Importing..." : "Add to workspace";
 
   const importButton = authed && token ? (
