@@ -10,7 +10,7 @@ export const PERSIST_STORAGE_KEY = "floom-query-cache";
 
 // Bump BUSTER on any deploy that alters a persisted query's data shape so the
 // old localStorage cache is discarded instead of hydrating a stale shape.
-export const PERSIST_BUSTER = "floom-cache-v1";
+export const PERSIST_BUSTER = "floom-cache-v2";
 
 // 24h: how long a persisted cache may live before the persister discards it.
 // The QueryClient gcTime must be >= this, or react-query evicts entries before

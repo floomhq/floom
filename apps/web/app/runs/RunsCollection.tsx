@@ -755,6 +755,21 @@ export default function RunsCollection({
       // be cancelled directly from the list. Terminal runs render no menu.
       menuColumn: true,
     },
+    sort: {
+      columns: {
+        0: { value: (r) => r.worker_name ?? r.worker_id },
+        1: { value: (r) => formatTrigger(r.trigger_source) },
+        2: { value: (r) => r.duration_ms ?? null },
+        3: { value: (r) => runStatusPill(r.status).label },
+        4: {
+          value: (r) => {
+            const raw = r.created_at ?? r.started_at;
+            return raw ? Date.parse(raw) : null;
+          },
+          defaultDirection: "desc",
+        },
+      },
+    },
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
       primary: r.worker_name ?? r.worker_id,

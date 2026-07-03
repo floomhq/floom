@@ -95,6 +95,14 @@ async function openDetail() {
 }
 
 describe("R9 worker-detail FIX 1 — Developer tabs are a show/hide disclosure", () => {
+  it("does not move browser focus to the non-interactive detail header", async () => {
+    await openDetail();
+    const header = document.querySelector(".c-dhead");
+    expect(header).toBeTruthy();
+    expect(header).not.toHaveAttribute("tabindex");
+    expect(document.activeElement).not.toBe(header);
+  });
+
   it("renders a 'Developer' disclosure inside the primary .c-dtabs row", async () => {
     await openDetail();
     const tabRow = document.querySelector(".c-dtabs");

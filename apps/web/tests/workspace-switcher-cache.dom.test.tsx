@@ -55,6 +55,7 @@ vi.mock("sonner", () => ({
 describe("WorkspaceSwitcher cache", () => {
   beforeEach(() => {
     vi.resetModules();
+    window.localStorage.clear();
     mocks.list.mockReset();
     mocks.me.mockReset();
     mocks.create.mockReset();
@@ -94,7 +95,29 @@ describe("WorkspaceSwitcher cache", () => {
 
     expect(screen.queryByLabelText("Loading workspaces")).not.toBeInTheDocument();
     expect(screen.getByText("Acme")).toBeInTheDocument();
-    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+  });
+
+  it("renders the persisted workspace identity immediately on a fresh module load", async () => {
+    window.localStorage.setItem(
+      "floom.workspaceSwitcher.identity.v1",
+      JSON.stringify({
+        state: {
+          activeId: "ws_cached",
+          workspaces: [
+            { id: "ws_cached", name: "Cached Workspace", owner_user_id: "u1", created_at: "2026-06-01T00:00:00Z" },
+          ],
+        },
+        canExportWorkspace: false,
+      }),
+    );
+    mocks.list.mockImplementation(() => new Promise(() => {}));
+
+    const { WorkspaceSwitcher } = await import("@/components/layout/WorkspaceSwitcher");
+    render(<WorkspaceSwitcher />);
+
+    expect(screen.queryByLabelText("Loading workspaces")).not.toBeInTheDocument();
+    expect(screen.getByText("Cached Workspace")).toBeInTheDocument();
   });
 
   it("surfaces workspace create failures in the dialog", async () => {

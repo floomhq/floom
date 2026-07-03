@@ -37,18 +37,23 @@ export function DetailPane({
   onClose,
   onCollapse,
 }: DetailPaneProps) {
-  const headerRef = useRef<HTMLDivElement>(null);
+  const collapseButtonRef = useRef<HTMLButtonElement>(null);
   const current = tabs.find((t) => t.key === activeTab) ?? tabs[0];
 
-  // Move focus to the detail header when it opens (SPEC §8c focus rule).
   useEffect(() => {
-    headerRef.current?.focus();
+    collapseButtonRef.current?.focus();
   }, []);
 
   return (
     <>
-      <div className="c-dhead" ref={headerRef} tabIndex={-1}>
-        <button type="button" className="lcbtn" aria-label="Collapse list" onClick={onCollapse}>
+      <div className="c-dhead">
+        <button
+          type="button"
+          className="lcbtn"
+          aria-label="Collapse list"
+          onClick={onCollapse}
+          ref={collapseButtonRef}
+        >
           <ChevronsLeft size={18} />
         </button>
         {header.leading}
