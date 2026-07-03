@@ -167,36 +167,90 @@ function displayBrandCopy(value?: string | null): string {
   return (value ?? "").replace(legacyAllCapsSuffix, "Floom").replace(legacyTitle, "Floom");
 }
 
-// ---- detail (lazy WorkerDetail, cached so tab switches don't refetch) ----
-const detailCache = new Map<string, WorkerDetail>();
+// ---- detail (lazy WorkerDetail, scoped by workspace so identities never bleed) ----
+const DETAIL_CACHE_FRESH_MS = 250;
+type DetailCacheEntry = {
+  detail?: WorkerDetail;
+  fetchedAt: number;
+  promise?: Promise<WorkerDetail>;
+};
+const detailCache = new Map<string, DetailCacheEntry>();
+
+function activeWorkspaceScope(fallback?: string | null): string {
+  if (fallback) return fallback;
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search || "");
+    const urlWorkspace = params.get("workspace_id") || params.get("ws");
+    if (urlWorkspace) return urlWorkspace;
+  }
+  return getPersistedActiveWorkspaceId() || "local-default";
+}
+
+function detailCacheKey(workspaceId: string | null | undefined, workerId: string): string {
+  return `${activeWorkspaceScope(workspaceId)}:${workerId}`;
+}
+
+function cacheWorkerDetail(detail: WorkerDetail, workspaceId?: string | null) {
+  detailCache.set(detailCacheKey(workspaceId ?? detail.workspace_id, detail.id), {
+    detail,
+    fetchedAt: Date.now(),
+  });
+}
+
+function readFreshWorkerDetail(workspaceId: string | null | undefined, workerId: string): WorkerDetail | undefined {
+  const entry = detailCache.get(detailCacheKey(workspaceId, workerId));
+  if (!entry?.detail) return undefined;
+  return Date.now() - entry.fetchedAt <= DETAIL_CACHE_FRESH_MS ? entry.detail : undefined;
+}
 
 // Returns [detail, apply] where detail is:
 //   undefined → still loading
 //   null      → load failed (show an error/empty state)
 //   WorkerDetail → loaded
-function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: WorkerDetail) => void] {
-  const [detail, setDetail] = useState<WorkerDetail | undefined | null>(detailCache.get(id));
+function useWorkerDetail(
+  id: string,
+  workspaceId?: string | null,
+): [WorkerDetail | undefined | null, (d: WorkerDetail) => void] {
+  const cacheKey = detailCacheKey(workspaceId, id);
+  const [detail, setDetail] = useState<WorkerDetail | undefined | null>(() =>
+    readFreshWorkerDetail(workspaceId, id)
+  );
   useEffect(() => {
-    if (detailCache.has(id)) {
-      setDetail(detailCache.get(id));
-      return;
-    }
     let alive = true;
     // settled = true once the load resolves or fails, so the safety timeout
     // below does not overwrite a successfully-loaded detail (stale-closure fix).
     let settled = false;
+    const fresh = readFreshWorkerDetail(workspaceId, id);
+    if (fresh) {
+      setDetail(fresh);
+      settled = true;
+      return () => {
+        alive = false;
+      };
+    }
+    setDetail(undefined);
     // Retry once before surfacing an error — a transiently slow backend should
     // not strand the detail tabs on "Could not load" (#1279 + round-03 source-load).
     const load = (attempt: number) => {
-      api.workers
-        .get(id)
+      const existing = detailCache.get(cacheKey);
+      const request = existing?.promise ?? api.workers.get(id);
+      detailCache.set(cacheKey, {
+        detail: existing?.detail,
+        fetchedAt: existing?.fetchedAt ?? 0,
+        promise: request,
+      });
+      request
         .then((d) => {
           settled = true;
-          detailCache.set(id, d);
+          cacheWorkerDetail(d, workspaceId);
           if (alive) setDetail(d);
         })
         .catch((err) => {
           if (!alive) return;
+          const entry = detailCache.get(cacheKey);
+          if (entry?.promise === request) {
+            detailCache.delete(cacheKey);
+          }
           if (attempt < 1) setTimeout(() => load(attempt + 1), 1500);
           else {
             settled = true;
@@ -217,13 +271,13 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
       alive = false;
       clearTimeout(timeout);
     };
-  }, [id]);
+  }, [cacheKey, id, workspaceId]);
   const apply = useCallback(
     (d: WorkerDetail) => {
-      detailCache.set(id, d);
+      cacheWorkerDetail(d, workspaceId);
       setDetail(d);
     },
-    [id],
+    [workspaceId],
   );
   return [detail, apply];
 }
@@ -289,7 +343,7 @@ function SelectedWorkerSummaryRefresh({
       .get(workerId)
       .then((detail) => {
         if (!alive) return;
-        detailCache.set(detail.id, detail);
+        cacheWorkerDetail(detail, detail.workspace_id);
         onLoaded(detail);
       })
       .catch((err) => logError("Could not refresh worker stats.", err));
@@ -348,7 +402,7 @@ function friendlyToken(value?: string | null): string {
 }
 
 function OverviewTab({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id, w.workspace_id);
   const stats = d === undefined ? undefined : d?.recent_stats ?? w.recent_stats;
   const lastRun = d === undefined ? undefined : d?.last_run ?? w.last_run;
   const scheduleState = scheduleStateLabel(w, d);
@@ -515,7 +569,7 @@ function useWorkerRuns(workerId: string): RunSummary[] | undefined {
 function RunsTab({ w }: { w: WorkerSummary }) {
   const fetched = useWorkerRuns(w.id);
   const workspaceHref = useWorkspaceHref();
-  const [d] = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id, w.workspace_id);
   // Until the worker-scoped fetch resolves, fall back to the summary's last_run
   // so the tab is never momentarily empty for a worker that has run.
   const lastRun = d?.last_run ?? w.last_run;
@@ -574,7 +628,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
 // SPEC §4 Versions: git log in the GLOBAL list style — message + `sha · author ·
 // age`, current marker, Diff (modal) + Restore (confirm). Endpoints BUILT.
 function VersionsTab({ w }: { w: WorkerSummary }) {
-  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id, w.workspace_id);
   const [versions, setVersions] = useState<VersionSummary[] | null>(null);
   // #1249: store both version files AND current files so the modal can show a
   // proper line-level diff (VersionDiffPanel) instead of a raw file view.
@@ -725,7 +779,7 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
 // On Save: calls api.workers.updateFiles (PUT /workers/{id}/files).
 // Protected workers that clone on edit return a new WorkerDetail — applyDetail handles it.
 function SourceTab({ w }: { w: WorkerSummary }) {
-  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id, w.workspace_id);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [draftFiles, setDraftFiles] = useState<{ path: string; content: string; binary?: boolean; language?: string; size?: number }[]>([]);
@@ -830,7 +884,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
 }
 
 function BrainTab({ w }: { w: WorkerSummary }) {
-  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id, w.workspace_id);
   const [packs, setPacks] = useState<{ name: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const refreshPacks = useCallback(() => {
@@ -905,7 +959,7 @@ function BrainTab({ w }: { w: WorkerSummary }) {
 }
 
 function ToolsTab({ w }: { w: WorkerSummary }) {
-  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id, w.workspace_id);
   const [busy, setBusy] = useState(false);
   // B4: the Add-tool combobox is sourced from the workspace's connected apps
   // (Federico: "we already have the list of connections") plus the integrations
@@ -1034,7 +1088,7 @@ function scheduleStatusRows(d: WorkerDetail): Array<[string, React.ReactNode]> {
 // TriggersEditor used in the create flow. Persists through the worker.yml PUT
 // (replaceTriggerBlock → updateFiles), the path Tools/Brain already use.
 function TriggersTab({ w }: { w: WorkerSummary }) {
-  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id, w.workspace_id);
   const [rows, setRows] = useState<TriggerRow[] | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -1168,7 +1222,7 @@ function saveInputTemplates(workerId: string, templates: InputTemplate[]): void 
 // Operations > Inputs: a segmented named-template picker above the REAL
 // WorkerInputForm (single source of truth, same widget the /run page uses).
 function OpsInputsPanel({ w }: { w: WorkerSummary }) {
-  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id, w.workspace_id);
   const inputs = d?.config?.inputs ?? w.inputs ?? [];
   const [templates, setTemplates] = useState<InputTemplate[]>([]);
   const [activeIdx, setActiveIdx] = useState(0); // 0 = "Default" (the saved backend recipe)
@@ -1704,7 +1758,7 @@ function AddAlertForm({
 // Operations > Limits: spend cap / reliability / runtime / approvals / egress,
 // read from the worker.yml manifest (runtime.limits + connection approval flags).
 function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id, w.workspace_id);
   if (d === undefined) return <Loading />;
   if (d === null) return <DetailError />;
   const runtime = d.config?.runtime;
@@ -1825,7 +1879,7 @@ function SetupTab({ w, onOpenSource }: { w: WorkerSummary; onOpenSource?: () => 
 
 /** Small count badges for the Setup sub-tabs, derived from the manifest. */
 function useSetupSubCounts(w: WorkerSummary): Partial<Record<SetupSubtab, number>> {
-  const [d] = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id, w.workspace_id);
   return useMemo(() => {
     const inputs = (d?.config?.inputs ?? w.inputs ?? []).length;
     const triggers =
@@ -1899,7 +1953,7 @@ function WorkerDetailActions({
 }) {
   const router = useRouter();
   const workspaceHref = useWorkspaceHref();
-  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id, w.workspace_id);
   const [editOpen, setEditOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2344,7 +2398,7 @@ export default function WorkersCollection({
     resolveMissing: async (id) => {
       try {
         const d = await api.workers.get(id);
-        detailCache.set(d.id, d); // warm the detail-pane cache too
+        cacheWorkerDetail(d, d.workspace_id); // warm the detail-pane cache too
         return detailToSummary(d);
       } catch {
         return null;
@@ -2393,6 +2447,20 @@ export default function WorkersCollection({
     columns: {
       template: "1.9fr 1fr 1fr 130px 40px", // #895: wireframe pageWorkers grid
       headers: ["Worker", "Tools", "Last run", "Status", ""],
+    },
+    sort: {
+      columns: {
+        0: { value: (w) => w.name },
+        1: { value: (w) => (w.connections ?? []).join(" ") },
+        2: {
+          value: (w) => {
+            const raw = w.recent_stats?.last_run_at ?? w.last_run?.created_at;
+            return raw ? Date.parse(raw) : null;
+          },
+          defaultDirection: "desc",
+        },
+        3: { value: (w) => workerStatusPill(w)?.label ?? "" },
+      },
     },
     row: (w) => ({
       // V4 SPEC rule 3: no avatar for workers.

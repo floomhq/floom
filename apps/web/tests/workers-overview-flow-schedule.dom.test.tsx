@@ -133,6 +133,9 @@ describe("Worker Overview flow and schedule state", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Mac Disk Guard/i }));
 
     await waitFor(() => expect(screen.getByLabelText("Loading")).toBeInTheDocument());
+    const pendingSummary = document.querySelector(".c-dsum");
+    expect(pendingSummary?.textContent).toContain("Loading");
+    expect(pendingSummary?.textContent).not.toMatch(/5\s*Runs/);
     expect(document.body.textContent).not.toContain(stalePlaceholder);
     expect(screen.queryByText("Result")).not.toBeInTheDocument();
 
@@ -164,7 +167,10 @@ describe("Worker Overview flow and schedule state", () => {
     expect(screen.getAllByText("Active - draft").length).toBeGreaterThan(0);
 
     await waitFor(() => {
-      const cached = client.getQueryData<typeof worker[]>(["workers", { include_archived: true }]);
+      const cached = client
+        .getQueriesData<typeof worker[]>({ queryKey: ["workers"] })
+        .map(([, data]) => data)
+        .find((data) => Array.isArray(data) && data[0]?.id === WORKER_ID);
       expect(cached?.[0]?.recent_stats?.runs_7d).toBe(6);
       expect(cached?.[0]?.last_run?.id).toBe("fresh-schedule-run");
     });

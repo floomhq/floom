@@ -17,7 +17,7 @@ vi.mock("next/navigation", () => ({
 
 const TEST_TIMEOUT = 15_000;
 const WORKERS_LIST_QUERY_OPTS = { include_archived: true } as const;
-const WORKERS_LIST_QUERY_KEY = ["workers", WORKERS_LIST_QUERY_OPTS] as const;
+const WORKERS_LIST_QUERY_KEY = ["workers", { ...WORKERS_LIST_QUERY_OPTS, workspace_id: "local-default" }] as const;
 
 const WORKER_ID = "invoice-reconciler";
 const worker = {

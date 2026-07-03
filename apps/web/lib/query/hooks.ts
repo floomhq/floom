@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
-import { keepPreviousData, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { safeStorageGet } from "@/lib/safe-storage";
 import type {
   ApprovalRow,
   ContextSummary,
@@ -19,16 +20,42 @@ import type {
 export const WORKERS_LIST_QUERY_OPTS = { include_archived: true } as const;
 export const RUNS_FIRST_PAGE_QUERY_PARAMS = { limit: 50, offset: 0 } as const;
 
+function workspaceScope(): string {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search || "");
+    const urlWorkspace = params.get("workspace_id") || params.get("ws");
+    if (urlWorkspace) return urlWorkspace;
+    return safeStorageGet("local", "workeros.activeWorkspaceId") || "local-default";
+  }
+  return "local-default";
+}
+
+function scopedParams<T extends Record<string, unknown>>(params?: T): T & { workspace_id: string } {
+  return { ...(params ?? {} as T), workspace_id: workspaceScope() };
+}
+
 export const qk = {
-  overview: ["system", "overview"] as const,
-  workers: (opts?: { include_archived?: boolean }) => ["workers", opts ?? {}] as const,
-  connections: ["connections"] as const,
-  secrets: ["secrets"] as const,
-  contexts: ["contexts"] as const,
-  approvals: (status = "pending") => ["approvals", status] as const,
-  approvalsCount: ["approvals", "count"] as const,
-  members: ["workspace", "members"] as const,
-  runs: (params?: Record<string, unknown>) => ["runs", params ?? {}] as const,
+  get overview() {
+    return ["system", "overview", workspaceScope()] as const;
+  },
+  workers: (opts?: { include_archived?: boolean }) => ["workers", scopedParams(opts)] as const,
+  get connections() {
+    return ["connections", { workspace_id: workspaceScope() }] as const;
+  },
+  get secrets() {
+    return ["secrets", { workspace_id: workspaceScope() }] as const;
+  },
+  get contexts() {
+    return ["contexts", { workspace_id: workspaceScope() }] as const;
+  },
+  approvals: (status = "pending") => ["approvals", status, workspaceScope()] as const,
+  get approvalsCount() {
+    return ["approvals", "count", workspaceScope()] as const;
+  },
+  get members() {
+    return ["workspace", "members", workspaceScope()] as const;
+  },
+  runs: (params?: Record<string, unknown>) => ["runs", scopedParams(params)] as const,
 };
 
 // Each hook is cache-first (see QueryProvider defaults: staleTime 30s,
@@ -77,7 +104,6 @@ export function useOverview(initialData?: SystemOverview | null) {
     queryKey: qk.overview,
     queryFn: () => api.system.overview(),
     initialData: initialData ?? undefined,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -91,7 +117,6 @@ export function useWorkers(
     queryFn: () => api.workers.list(opts),
     initialData,
     enabled,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -100,7 +125,6 @@ export function useConnections(initialData?: ConnectionItem[]) {
     queryKey: qk.connections,
     queryFn: () => api.connections.list(),
     initialData,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -110,7 +134,6 @@ export function useSecrets(initialData?: SecretItem[], enabled = true) {
     queryFn: () => api.secrets.list(),
     initialData,
     enabled,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -122,7 +145,6 @@ export function useContexts(initialData?: ContextSummary[]) {
       return Array.isArray(rows) ? rows : [];
     },
     initialData: Array.isArray(initialData) ? initialData : undefined,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -131,7 +153,6 @@ export function useApprovals(status = "pending", initialData?: ApprovalRow[]) {
     queryKey: qk.approvals(status),
     queryFn: () => api.approvals.list(status),
     initialData,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -140,7 +161,6 @@ export function useApprovalsCountQuery(initialData?: { pending: number }) {
     queryKey: qk.approvalsCount,
     queryFn: () => api.approvals.count(),
     initialData,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -152,7 +172,6 @@ export function useMembers(initialData?: WorkspaceMember[]) {
         .then((r) => r.members)
         .catch(() => [] as WorkspaceMember[]),
     initialData,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -161,6 +180,5 @@ export function useRuns(params?: Parameters<typeof api.runs.list>[0], initialDat
     queryKey: qk.runs(params as Record<string, unknown>),
     queryFn: () => api.runs.list(params),
     initialData,
-    placeholderData: keepPreviousData,
   });
 }

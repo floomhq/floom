@@ -614,6 +614,16 @@ export default function BrainCollection({
       headers: ["Folder", "Files", "Updated", ""],
       statusColumn: false,
     },
+    sort: {
+      columns: {
+        0: { value: (c) => c.name },
+        1: { value: (c) => c.file_count ?? 0 },
+        2: {
+          value: (c) => c.updated_at ? Date.parse(c.updated_at) : null,
+          defaultDirection: "desc",
+        },
+      },
+    },
     row: (c) => ({
       leading: (
         <span className="c-logo">

@@ -855,6 +855,11 @@ html.dark .grain {
 /* §3: list rows on hairline dividers, NO outer container border/shadow. */
 .c-ltable { border:var(--bd-list); border-radius:var(--radius-card); overflow:hidden; background:var(--bg-card); box-shadow:none; }
 .c-lhead { display:grid; gap:14px; padding:11px 18px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted-foreground); background:var(--bg-2); border-bottom:var(--bd-div); }
+.c-sorthead { display:inline-flex; max-width:100%; align-items:center; gap:4px; color:inherit; font:inherit; letter-spacing:inherit; text-transform:inherit; text-align:left; white-space:nowrap; }
+.c-sorthead svg { opacity:.55; flex:0 0 auto; }
+.c-sorthead.on { color:var(--ink); }
+.c-sorthead:hover { color:var(--ink-soft); }
+.c-sorthead:focus-visible { outline:2px solid var(--ring); outline-offset:2px; border-radius:5px; }
 .c-lrow { display:grid; gap:14px; align-items:center; padding:0 18px; min-height:64px; border-bottom:var(--bd-div); cursor:pointer; text-align:left; width:100%; background:none; }
 .c-lrow:last-child { border-bottom:0; }
 .c-lrow:hover { background:var(--bg-2); }

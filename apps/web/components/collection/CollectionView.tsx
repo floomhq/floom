@@ -7,7 +7,9 @@ import { IconButton } from "@/components/ui/icon-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   type CollectionConfig,
+  type CollectionSortState,
   type CollectionState,
+  type SortValue,
   type TagFamilyKey,
   type ViewMode,
 } from "@/lib/collection/types";
@@ -30,10 +32,39 @@ export interface CollectionViewProps<T> {
 
 const PAGE_X = 28;
 
+function isEmptySortValue(value: SortValue): boolean {
+  return value == null || (typeof value === "string" && value.trim() === "");
+}
+
+function normalizeSortValue(value: Exclude<SortValue, null | undefined>): string | number | boolean {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "string") {
+    return value.trim().toLocaleLowerCase();
+  }
+  return value;
+}
+
+function compareSortValues(a: SortValue, b: SortValue): number {
+  const aEmpty = isEmptySortValue(a);
+  const bEmpty = isEmptySortValue(b);
+  if (aEmpty || bEmpty) {
+    if (aEmpty && bEmpty) return 0;
+    return aEmpty ? 1 : -1;
+  }
+  const av = normalizeSortValue(a as Exclude<SortValue, null | undefined>);
+  const bv = normalizeSortValue(b as Exclude<SortValue, null | undefined>);
+  if (typeof av === "string" && typeof bv === "string") {
+    return av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+  }
+  if (av === bv) return 0;
+  return av < bv ? -1 : 1;
+}
+
 export function CollectionView<T>({ config, state, onChange, onInvalidSel }: CollectionViewProps<T>) {
   const [listCollapsed, setListCollapsed] = useState(false);
   const [creating, setCreating] = useState(false); // +Add opens in the detail pane
   const [page, setPage] = useState(0);
+  const [sort, setSort] = useState<CollectionSortState | null>(null);
   const gridEnabled = config.view?.grid ?? false;
   const restingFrameStyle = config.restingMaxWidth
     ? { width: "100%", maxWidth: config.restingMaxWidth, marginInline: "auto" }
@@ -56,6 +87,22 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     () => filterItems(items, state, { searchOf: config.searchOf, tagsOf: config.tagsOf }),
     [items, config.searchOf, config.tagsOf, state],
   );
+  const sorted = useMemo(() => {
+    if (!sort) return filtered;
+    const column = config.sort?.columns[sort.column];
+    if (!column) return filtered;
+    return filtered
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => {
+        const result = compareSortValues(column.value(a.item), column.value(b.item));
+        const stable = result === 0 ? a.index - b.index : result;
+        if (result !== 0 && isEmptySortValue(column.value(a.item)) !== isEmptySortValue(column.value(b.item))) {
+          return result;
+        }
+        return sort.direction === "asc" ? stable : -stable;
+      })
+      .map(({ item }) => item);
+  }, [config.sort, filtered, sort]);
 
   // Reset to page 0 when the filtered set changes (search/tag churn).
   const filteredLen = filtered.length;
@@ -192,12 +239,12 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       setListCollapsed((v) => !v);
       return;
     }
-    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && filtered.length) {
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && sorted.length) {
       const down = e.key === "ArrowDown";
       if (isOpen) {
         // Split mode: arrows change the open selection.
         e.preventDefault();
-        const ids = filtered.map(config.idOf);
+        const ids = sorted.map(config.idOf);
         const idx = state.sel ? ids.indexOf(state.sel) : -1;
         const nextIdx = down ? Math.min(ids.length - 1, idx + 1) : Math.max(0, idx <= 0 ? 0 : idx - 1);
         patch({ sel: ids[nextIdx], tab: null });
@@ -331,7 +378,18 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   const totalPages = Math.ceil(filtered.length / LIST_PAGE_SIZE);
   const safePage = Math.min(page, Math.max(0, totalPages - 1));
   const pagedItems = (compact: boolean) =>
-    compact ? filtered : filtered.slice(safePage * LIST_PAGE_SIZE, (safePage + 1) * LIST_PAGE_SIZE);
+    compact ? sorted : sorted.slice(safePage * LIST_PAGE_SIZE, (safePage + 1) * LIST_PAGE_SIZE);
+
+  const onSort = (column: number) => {
+    const spec = config.sort?.columns[column];
+    if (!spec) return;
+    setSort((current) => {
+      if (!current || current.column !== column) {
+        return { column, direction: spec.defaultDirection ?? "asc" };
+      }
+      return { column, direction: current.direction === "asc" ? "desc" : "asc" };
+    });
+  };
 
   const pageControls = (compact: boolean) => {
     if (compact || totalPages <= 1) return null;
@@ -431,6 +489,9 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           selectedId={state.sel}
           onSelect={open}
           compact={compact}
+          sort={compact ? null : sort}
+          sortableColumns={config.sort?.columns}
+          onSort={compact ? undefined : onSort}
         />
         {pageControls(compact)}
       </>

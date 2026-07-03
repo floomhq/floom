@@ -95,6 +95,24 @@ export interface ListColumns {
   menuColumn?: boolean;
 }
 
+export type SortDirection = "asc" | "desc";
+export type SortValue = string | number | boolean | Date | null | undefined;
+
+export interface CollectionSortState {
+  column: number;
+  direction: SortDirection;
+}
+
+export interface CollectionSortColumn<T> {
+  value: (item: T) => SortValue;
+  /** Direction used the first time the user clicks this column. Defaults to asc. */
+  defaultDirection?: SortDirection;
+}
+
+export interface CollectionSortConfig<T> {
+  columns: Partial<Record<number, CollectionSortColumn<T>>>;
+}
+
 /** A label/value fact — the unit of summary rows, pairs, and key/value rows. */
 export interface DetailFact {
   key: string;
@@ -280,6 +298,8 @@ export interface CollectionConfig<T> {
   columns: ListColumns;
   /** Optional day/section grouping for the resting list (Runs — SPEC §5). */
   group?: (item: T) => string;
+  /** Optional shared table sorting. Keys match `columns.headers` indexes. */
+  sort?: CollectionSortConfig<T>;
   row: (item: T) => ListRowSpec;
   card?: (item: T) => CardSpec;
 

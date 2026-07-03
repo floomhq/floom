@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { groupPostHogWorkspace } from "@/lib/posthog";
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
@@ -53,6 +54,7 @@ type WorkspaceSwitcherCache = {
 
 let workspaceSwitcherCache: WorkspaceSwitcherCache | null = null;
 let workspaceSwitcherLoadPromise: Promise<WorkspaceSwitcherCache> | null = null;
+const WORKSPACE_SWITCHER_CACHE_KEY = "floom.workspaceSwitcher.identity.v1";
 
 function workspaceStateFromList(data: Awaited<ReturnType<typeof api.workspace.list>>): WorkspaceState {
   const browserActiveId = getActiveWorkspaceId();
@@ -68,7 +70,27 @@ function workspaceStateFromList(data: Awaited<ReturnType<typeof api.workspace.li
 
 function cacheWorkspaceSwitcherState(next: WorkspaceSwitcherCache) {
   workspaceSwitcherCache = next;
+  try {
+    safeStorageSet("local", WORKSPACE_SWITCHER_CACHE_KEY, JSON.stringify(next));
+  } catch {
+    // Identity cache is paint-only; API data remains authoritative.
+  }
   return next;
+}
+
+function readCachedWorkspaceSwitcherState(): WorkspaceSwitcherCache | null {
+  if (workspaceSwitcherCache) return workspaceSwitcherCache;
+  try {
+    const raw = safeStorageGet("local", WORKSPACE_SWITCHER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WorkspaceSwitcherCache;
+    if (!parsed?.state || !Array.isArray(parsed.state.workspaces) || !parsed.state.activeId) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export function replaceUrlWorkspaceParam(workspaceId: string) {
@@ -120,7 +142,7 @@ function WorkspaceAvatar({
 export function WorkspaceSwitcher() {
   const router = useRouter();
   const queryClient = useContext(QueryClientContext);
-  const [state, setState] = useState<WorkspaceState | null>(() => workspaceSwitcherCache?.state ?? null);
+  const [state, setState] = useState<WorkspaceState | null>(() => readCachedWorkspaceSwitcherState()?.state ?? null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -136,7 +158,7 @@ export function WorkspaceSwitcher() {
   const [duplicating, setDuplicating] = useState(false);
   const [sharingLink, setSharingLink] = useState(false);
   const [canExportWorkspace, setCanExportWorkspace] = useState(
-    () => workspaceSwitcherCache?.canExportWorkspace ?? false
+    () => readCachedWorkspaceSwitcherState()?.canExportWorkspace ?? false
   );
   const importInputRef = useRef<HTMLInputElement>(null);
   // #1005: cloud speaks invite copy, OSS speaks template-zip copy.
@@ -145,7 +167,6 @@ export function WorkspaceSwitcher() {
   const actionAvailability = getWorkspaceActionAvailability(cloudMode);
 
   useEffect(() => {
-    if (workspaceSwitcherCache) return;
     let cancelled = false;
     loadWorkspaceSwitcherState()
       .then((next) => {

@@ -756,6 +756,14 @@ export default function ConnectionsCollection({
       template: "1.8fr 110px 1fr 120px 40px",
       headers: ["Connects to", "Type", "Detail", "Status", ""],
     },
+    sort: {
+      columns: {
+        0: { value: (i) => i.name },
+        1: { value: (i) => TYPE_LABEL[i.kind] },
+        2: { value: (i) => `${i.detail ?? ""} ${i.account ?? ""}` },
+        3: { value: (i) => STATUS_PILL[i.statusKey]?.label ?? "" },
+      },
+    },
     row: (i) => ({
       leading: <Logo item={i} />,
       primary: i.name,

@@ -1,6 +1,13 @@
 "use client";
 
-import type { ListColumns, ListRowSpec, RowMenuItem } from "@/lib/collection/types";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import type {
+  CollectionSortColumn,
+  CollectionSortState,
+  ListColumns,
+  ListRowSpec,
+  RowMenuItem,
+} from "@/lib/collection/types";
 import { ActionMenu } from "@/components/ui/action-menu";
 import { StatusPill } from "./StatusPill";
 
@@ -15,6 +22,9 @@ interface CollectionListProps<T> {
   group?: (item: T) => string;
   /** Compact = split-left list (single column; CSS hides cols/pill/menu). */
   compact?: boolean;
+  sort?: CollectionSortState | null;
+  sortableColumns?: Partial<Record<number, CollectionSortColumn<T>>>;
+  onSort?: (column: number) => void;
 }
 
 function RowMenu({ items }: { items: RowMenuItem[] }) {
@@ -103,6 +113,9 @@ export function CollectionList<T>({
   onSelect,
   group,
   compact,
+  sort,
+  sortableColumns,
+  onSort,
 }: CollectionListProps<T>) {
   const rowTemplate = `${columns.template}${columns.statusColumn === false ? "" : " __status__"}${columns.menuColumn === false ? "" : " __menu__"}`.trim();
   const gridTemplate = rowTemplate.replace(/__status__|__menu__/g, "").replace(/\s+/g, " ").trim();
@@ -133,13 +146,44 @@ export function CollectionList<T>({
     !compact && columns.headers.length > 0 ? (
       <div
         className="c-lhead"
+        role="row"
         style={{
           gridTemplateColumns: gridTemplate,
         }}
       >
-        {columns.headers.map((h, i) => (
-          <div key={i}>{h}</div>
-        ))}
+        {columns.headers.map((h, i) => {
+          const sortable = Boolean(sortableColumns?.[i] && onSort && h.trim());
+          const active = sort?.column === i ? sort.direction : null;
+          const ariaSort = active === "asc" ? "ascending" : active === "desc" ? "descending" : "none";
+          const nextSortLabel =
+            active === "asc"
+              ? `Sort ${h} descending`
+              : active === "desc"
+                ? `Sort ${h} ascending`
+                : `Sort by ${h}`;
+          return (
+            <div key={i} role="columnheader" aria-sort={sortable ? ariaSort : undefined}>
+              {sortable ? (
+                <button
+                  type="button"
+                  className={`c-sorthead ${active ? "on" : ""}`}
+                  aria-label={nextSortLabel}
+                  aria-pressed={active != null}
+                  onClick={() => onSort?.(i)}
+                >
+                  <span>{h}</span>
+                  {active === "asc" ? (
+                    <ChevronUp className="size-3.5" aria-hidden="true" />
+                  ) : (
+                    <ChevronDown className="size-3.5" aria-hidden="true" />
+                  )}
+                </button>
+              ) : (
+                h
+              )}
+            </div>
+          );
+        })}
       </div>
     ) : null;
 
