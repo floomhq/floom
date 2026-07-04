@@ -2009,6 +2009,21 @@ function WorkerDetailActions({
           Run
         </button>
       )}
+      {(canManage || can("share", w) || can("edit", w)) && (
+        // Share is the growth lever — promote it to a visible header button
+        // instead of burying it in the ⋯ overflow menu. Opens the same Share
+        // modal (company access + grants + anonymous public link with revoke).
+        <button
+          type="button"
+          className="c-addbtn"
+          style={{ ...pillBtn, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
+          onClick={() => setShareOpen(true)}
+          title="Share this worker"
+        >
+          <Share2 className="size-4" />
+          Share
+        </button>
+      )}
       {(canManage || can("edit", w)) && (
         <ActionMenu
           label="More worker actions"
@@ -2032,9 +2047,8 @@ function WorkerDetailActions({
                   .catch((err: Error) => toast.error(err.message || "Could not update worker"));
               },
             },
-            // Share — opens the real Share modal (company access + grants +
-            // anonymous public link with revoke), not a bare copy-link.
-            { label: "Share", icon: <Share2 className="size-4" />, onSelect: () => setShareOpen(true) },
+            // Share was promoted to a visible header button (growth lever) —
+            // no longer duplicated here in the ⋯ overflow.
             {
               label: "Duplicate",
               icon: <CopyPlus className="size-4" />,
@@ -2122,6 +2136,11 @@ function WorkerDetailActions({
         }}
         publicLink={{
           create: async () => (await api.workers.shareLink(w.id)).url,
+          // share-loop: show an existing public link (copyable) on open.
+          fetchExisting: async () => {
+            const { links } = await api.workers.shareLinks(w.id);
+            return links[0]?.url ?? null;
+          },
           revoke: async () => {
             await api.workers.revokeShareLink(w.id);
           },

@@ -173,6 +173,95 @@ def test_worker_standalone_share_wraps_public_worker_projection():
         assert "owner_id" not in public.text
 
 
+def test_worker_standalone_share_derives_connections_from_manifest_and_secrets():
+    """Template bundles declare tools in the manifest contract + bot-token secrets,
+    not always in the materialized config.connections. The public share card must
+    still surface the real required connections (gmail from manifest, slack from
+    SLACK_BOT_TOKEN) so the Tools panel + og-image logos are correct (#share-loop)."""
+    with tempfile.TemporaryDirectory(prefix="workeros-share-conn-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        worker = {
+            "id": "share-worker",
+            "owner_id": "local-user",
+            "name": "SpendReady Lead Ops",
+            "description": "Webhook-ready lead ops template.",
+            "trigger_type": "manual",
+            "runner": "e2b",
+            # Materialized config carries NO connections (reproduces the live bug)
+            # but declares the Slack bot token secret.
+            "config": {
+                "id": "share-worker",
+                "name": "SpendReady Lead Ops",
+                "trigger": {"type": "manual"},
+                "runtime": {"type": "python", "entrypoint": "run.py"},
+                "connections": [],
+                "inputs": [],
+                "outputs": [],
+                "secrets": ["SLACK_BOT_TOKEN"],
+            },
+            # Manifest (contract 0.3) declares gmail under both connections and
+            # capabilities.connections.
+            "manifest": {
+                "id": "share-worker",
+                "name": "SpendReady Lead Ops",
+                "runtime": {"type": "python", "entrypoint": "run.py"},
+                "connections": [
+                    {"app": "gmail", "allowed_tools": ["GMAIL_SEND_EMAIL"]},
+                ],
+                "capabilities": {"connections": ["gmail"], "secrets": ["SLACK_BOT_TOKEN"]},
+                "_files": {
+                    "worker.yml": "id: share-worker\nname: SpendReady Lead Ops\n",
+                    "run.py": "print('ok')\n",
+                },
+            },
+        }
+
+        class WorkersRepo:
+            def get(self, *, user_id: str, worker_id: str):
+                return worker if worker_id == "share-worker" else None
+
+            def get_any(self, *, worker_id: str):
+                return worker if worker_id == "share-worker" else None
+
+            def list(self, user_id: str):
+                return [worker]
+
+        class RunsRepo:
+            def list_for_worker(self, **kwargs):
+                return []
+
+        class MembersRepo:
+            def get(self, *, workspace_id: str, user_id: str):
+                return {"display_name": "Floom Builder", "email": "builder@example.com"}
+
+        class UsersRepo:
+            def get(self, *, user_id: str):
+                return None
+
+        class Repos:
+            workers = WorkersRepo()
+            runs = RunsRepo()
+            members = MembersRepo()
+            users = UsersRepo()
+
+        main.app.dependency_overrides[main.get_repos] = lambda: Repos()
+        try:
+            link = client.post("/workers/share-worker/share-link", headers=_headers())
+            assert link.status_code == 200, link.text
+            token = link.json()["token"]
+            public = client.get(f"/s/{token}")
+        finally:
+            main.app.dependency_overrides.clear()
+
+        assert public.status_code == 200, public.text
+        body = public.json()
+        conns = body["worker"]["connections"]
+        assert "gmail" in conns, conns
+        assert "slack" in conns, conns
+        # SLACK_BOT_TOKEN must never leak into the public payload.
+        assert "SLACK_BOT_TOKEN" not in public.text
+
+
 def test_worker_standalone_share_actor_falls_back_to_owner_user_without_workspace():
     with tempfile.TemporaryDirectory(prefix="workeros-share-user-", ignore_cleanup_errors=True) as td:
         main, client = _boot(Path(td))

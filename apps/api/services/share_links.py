@@ -81,7 +81,14 @@ _SHARE_LINKS_TABLE_SQL = """
         entity_id TEXT NOT NULL,
         file_path TEXT NOT NULL DEFAULT '',
         owner_id TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        -- share-loop: the raw public token, stored so the dashboard can
+        -- RE-DISPLAY an existing link instead of the "shown once" ceremony.
+        -- These are PUBLIC, unlisted links (not bearer secrets to a private
+        -- resource), so re-showing the URL is not a security regression; the
+        -- link stops working the moment it is revoked. Nullable for legacy
+        -- (#934-hashed) rows whose raw token was discarded.
+        share_token TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
         ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
@@ -169,6 +176,10 @@ def _ensure_standalone_share_links_table() -> None:
         conn.executescript(_SHARE_LINKS_TABLE_SQL)
         if cols and _standalone_share_links_has_entity_unique(conn):
             _rebuild_standalone_share_links_without_entity_unique(conn)
+        # share-loop: additive column for re-displaying existing public links.
+        cols_after = {row["name"] for row in conn.execute("PRAGMA table_info(standalone_share_links)")}
+        if "share_token" not in cols_after:
+            conn.execute("ALTER TABLE standalone_share_links ADD COLUMN share_token TEXT")
 
 
 def _standalone_share_repo(repos: Any | None, *methods: str) -> Any | None:
@@ -207,10 +218,40 @@ def _create_or_get_standalone_share_link(
 
     share_repo = _standalone_share_repo(repos, "create_standalone_share")
     if share_repo is not None:
+        # share-loop: reuse an existing active public link for this entity so the
+        # dashboard shows a STABLE URL instead of minting a new one (and orphaning
+        # the previously-shared link) on every open.
+        existing = _list_standalone_share_urls(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            owner_id=owner_id,
+            file_path=safe_file_path,
+            repos=repos,
+        )
+        if existing:
+            return {"token": existing[0]["token"], "url": existing[0]["url"], "entity_type": entity_type}
         ts = now_iso()
         for _ in range(8):
             candidate = _mint_standalone_share_token(slug=slug)
             try:
+                share_repo.create_standalone_share(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    file_path=safe_file_path,
+                    owner_id=owner_id,
+                    token_hash=_hash_share_token(candidate),
+                    created_at=ts,
+                    # Persisted so the link can be re-displayed. The repo ignores
+                    # this kwarg on backends that predate the column.
+                    share_token=candidate,
+                )
+                return {
+                    "token": candidate,
+                    "url": _standalone_share_url(candidate),
+                    "entity_type": entity_type,
+                }
+            except TypeError:
+                # Older repo signature without share_token — fall back.
                 share_repo.create_standalone_share(
                     entity_type=entity_type,
                     entity_id=entity_id,
@@ -229,10 +270,19 @@ def _create_or_get_standalone_share_link(
         raise HTTPException(status_code=500, detail="Could not create share link")
 
     _ensure_standalone_share_links_table()
-    # #2144: only SHA-256(token) is stored, so the raw value of an existing row
-    # cannot be returned. Re-sharing mints an additional active token instead of
-    # overwriting the old hash; explicit revoke deletes every token for the
-    # shared entity.
+    # share-loop: the raw token is now persisted in share_token so an existing
+    # public link can be RE-DISPLAYED (these are public, unlisted links, not
+    # bearer secrets). Reuse an active link for the entity instead of minting a
+    # second one; revoke still deletes every row for the entity.
+    existing = _list_standalone_share_urls(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        owner_id=owner_id,
+        file_path=safe_file_path,
+        repos=repos,
+    )
+    if existing:
+        return {"token": existing[0]["token"], "url": existing[0]["url"], "entity_type": entity_type}
     token = ""
     ts = now_iso()
     with get_db() as conn:
@@ -242,10 +292,10 @@ def _create_or_get_standalone_share_link(
                 conn.execute(
                     """
                     INSERT INTO standalone_share_links
-                        (token_hash, entity_type, entity_id, file_path, owner_id, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (token_hash, entity_type, entity_id, file_path, owner_id, created_at, share_token)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (_hash_share_token(candidate), entity_type, entity_id, safe_file_path, owner_id, ts),
+                    (_hash_share_token(candidate), entity_type, entity_id, safe_file_path, owner_id, ts, candidate),
                 )
                 token = candidate
                 break
@@ -259,6 +309,67 @@ def _create_or_get_standalone_share_link(
         "url": _standalone_share_url(token),
         "entity_type": entity_type,
     }
+
+
+def _list_standalone_share_urls(
+    *,
+    entity_type: str,
+    entity_id: str,
+    owner_id: str,
+    file_path: str = "",
+    repos: Any | None = None,
+) -> list[Dict[str, str]]:
+    """Existing, active public share links for an entity (reconstructable URLs).
+
+    Returns only links whose raw token was persisted (``share_token``). Legacy
+    #934-hashed rows without a stored token are omitted (their URL is
+    unrecoverable by design). Enables the dashboard to show + copy an existing
+    public link instead of the "shown once" ceremony.
+    """
+    from db import get_db, now_iso
+    safe_file_path = file_path or ""
+    share_repo = _standalone_share_repo(repos, "list_standalone_shares")
+    rows: list[Dict[str, Any]] = []
+    if share_repo is not None:
+        try:
+            rows = [
+                dict(r)
+                for r in (
+                    share_repo.list_standalone_shares(
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        owner_id=owner_id,
+                        file_path=safe_file_path,
+                        now_iso_str=now_iso(),
+                    )
+                    or []
+                )
+            ]
+        except Exception:
+            logger.warning("standalone share-link repository list failed", exc_info=True)
+            rows = []
+    else:
+        _ensure_standalone_share_links_table()
+        with get_db() as conn:
+            rows = [
+                dict(r)
+                for r in conn.execute(
+                    """
+                    SELECT share_token, created_at
+                    FROM standalone_share_links
+                    WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (entity_type, entity_id, safe_file_path, owner_id),
+                ).fetchall()
+            ]
+    out: list[Dict[str, str]] = []
+    for row in rows:
+        raw = str(row.get("share_token") or "").strip()
+        if not raw:
+            continue
+        out.append({"token": raw, "url": _standalone_share_url(raw), "entity_type": entity_type})
+    return out
 
 
 def _load_standalone_share_row(token: str, repos: Any | None = None) -> Optional[Dict[str, Any]]:

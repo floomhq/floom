@@ -31,10 +31,11 @@ import {
 //   2. Public link      — an anonymous, no-sign-in standalone URL (view & duplicate).
 // Sharing is always view-and-duplicate, never live collaboration.
 //
-// The public share-link backend is create-or-ROTATE and stores only sha256(token)
-// (#934): there is NO GET, so we cannot read whether a link is live. The honest
-// model is a session state machine — we only ever know the URL we minted in THIS
-// mounted session. We never claim a link does or does not exist across reloads.
+// share-loop: public links are now STABLE + retrievable. The raw token is
+// persisted (it's a public, unlisted link, not a bearer secret), so an asset can
+// expose fetchExisting() to GET the live URL and this modal shows it directly on
+// open. create() is create-or-GET (idempotent); revoke() deletes it. Assets
+// without a retrieval path fall back to the mint-on-demand state machine.
 
 type PublicLinkState =
   | { status: "unknown" }
@@ -67,8 +68,12 @@ export interface ShareModalProps {
 
   /** Public anonymous link. Omit to hide the whole Public-link section. */
   publicLink?: {
-    /** POST .../share-link → returns the URL. Create-or-rotate. */
+    /** POST .../share-link → returns the URL. Create-or-GET (stable). */
     create: () => Promise<string>;
+    /** GET .../share-links → the existing public URL if one is live, else null.
+        share-loop: lets the modal SHOW + copy an existing link on open instead
+        of the "shown once" ceremony. Omit when the asset has no retrieval path. */
+    fetchExisting?: () => Promise<string | null>;
     /** DELETE .../share-link. Omit when the link is non-revocable (approval HMAC). */
     revoke?: () => Promise<void>;
     /** A deterministic, always-valid URL (e.g. approval review link). When set,
@@ -106,6 +111,28 @@ export function ShareModal({ open, onOpenChange, asset, companyAccess, publicLin
       .then(setGrants)
       .catch((err) => reportError("Could not load the share links.", err));
   }, [open, grantAsset]);
+
+  // share-loop: on open, retrieve an EXISTING public link (if any) so we can
+  // show + copy it directly instead of asking the user to mint a new one. Only
+  // runs when the asset exposes a fetchExisting path and there's no static URL.
+  const fetchExisting = publicLink?.fetchExisting;
+  const hasStaticUrl = Boolean(publicLink?.staticUrl);
+  useEffect(() => {
+    if (!open || !fetchExisting || hasStaticUrl) return;
+    let cancelled = false;
+    setPub({ status: "unknown" });
+    fetchExisting()
+      .then((url) => {
+        if (cancelled || !mounted.current) return;
+        if (url) setPub({ status: "active", url });
+      })
+      .catch(() => {
+        /* fall back to the create affordance on any lookup failure */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, fetchExisting, hasStaticUrl]);
 
   // -------- Specific-people grants (#767/#768) --------
   const invite = async () => {

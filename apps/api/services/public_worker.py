@@ -71,6 +71,106 @@ def _public_connection_labels(config: "WorkerConfig") -> List[str]:
     return labels
 
 
+# Well-known secrets that imply a required service connection even when the
+# worker declares the tool via a raw bot token rather than a Composio/MCP
+# connection entry (e.g. a Slack template that ships `SLACK_BOT_TOKEN`). Kept
+# deterministic and display-only — never exposes the secret value itself.
+_SECRET_CONNECTION_HINTS: Dict[str, str] = {
+    "SLACK_BOT_TOKEN": "slack",
+    "SLACK_APP_TOKEN": "slack",
+    "SLACK_USER_TOKEN": "slack",
+    "SLACK_SIGNING_SECRET": "slack",
+}
+
+
+def _manifest_connection_labels(worker: Dict[str, Any]) -> List[str]:
+    """Display-only connection slugs derived from a worker's stored manifest.
+
+    Contract (schema 0.3) template bundles declare their required services under
+    the manifest's top-level ``connections`` and ``capabilities.connections``,
+    which is NOT always mirrored into the materialized ``config.connections`` the
+    public projection reads. Recover those slugs so the share card + og-image
+    show the real tools instead of "No tools". Never emits urls/env/auth.
+    """
+    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    if not isinstance(manifest, dict):
+        return []
+    labels: List[str] = []
+
+    def _slug_from(entry: Any) -> str:
+        if isinstance(entry, str):
+            return entry.strip()
+        if isinstance(entry, dict):
+            mcp = entry.get("mcp")
+            if isinstance(mcp, dict):
+                label = mcp.get("label")
+                if isinstance(label, str) and label.strip():
+                    return label.strip()
+            for key in ("app", "slug", "toolkit", "label", "name"):
+                value = entry.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return ""
+
+    sources: List[Any] = []
+    top = manifest.get("connections")
+    if isinstance(top, list):
+        sources.extend(top)
+    caps = manifest.get("capabilities")
+    if isinstance(caps, dict):
+        cap_conns = caps.get("connections")
+        if isinstance(cap_conns, list):
+            sources.extend(cap_conns)
+    for entry in sources:
+        slug = _slug_from(entry)
+        if slug:
+            labels.append(slug)
+    return labels
+
+
+def _secret_connection_labels(worker: Dict[str, Any], config: "WorkerConfig") -> List[str]:
+    """Service slugs implied by well-known bot-token secrets (e.g. Slack)."""
+    secret_names: List[str] = []
+    for name in (getattr(config, "secrets", None) or []):
+        if isinstance(name, str) and name.strip():
+            secret_names.append(name.strip())
+    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    if isinstance(manifest, dict):
+        caps = manifest.get("capabilities")
+        if isinstance(caps, dict):
+            for name in (caps.get("secrets") or []):
+                if isinstance(name, str) and name.strip():
+                    secret_names.append(name.strip())
+    labels: List[str] = []
+    for name in secret_names:
+        slug = _SECRET_CONNECTION_HINTS.get(name.upper())
+        if slug:
+            labels.append(slug)
+    return labels
+
+
+def _public_share_connection_labels(worker: Dict[str, Any], config: "WorkerConfig") -> List[str]:
+    """All required connection slugs for the public share card + og image.
+
+    Merges (in order) the materialized ``config.connections``, the stored
+    manifest's contract ``connections`` / ``capabilities.connections``, and
+    well-known secret hints (Slack bot token). De-duplicated, order-preserving.
+    Display-only: never emits a url, env, command, auth, or secret value.
+    """
+    ordered: List[str] = []
+    seen: set[str] = set()
+    for label in (
+        _public_connection_labels(config)
+        + _manifest_connection_labels(worker)
+        + _secret_connection_labels(worker, config)
+    ):
+        key = label.lower()
+        if key not in seen:
+            seen.add(key)
+            ordered.append(label)
+    return ordered
+
+
 def _public_worker_response(worker: Dict[str, Any], config: "WorkerConfig") -> "PublicWorker":
     """Project a full worker dict + parsed config into the public allow-list.
 
@@ -95,7 +195,7 @@ def _public_worker_response(worker: Dict[str, Any], config: "WorkerConfig") -> "
         example_output=worker.get("example_output"),
         trigger_type=str(worker.get("trigger_type") or "manual"),
         runtime=(config.runtime.type if config.runtime else None),
-        connections=_public_connection_labels(config),
+        connections=_public_share_connection_labels(worker, config),
         inputs=[
             PublicWorkerInput(
                 name=inp.name,

@@ -39,6 +39,7 @@ from services.git_service import _git_author
 from services.secrets_env import _platform_openai_api_key
 from services.share_links import (
     _create_or_get_standalone_share_link,
+    _list_standalone_share_urls,
     _revoke_standalone_share_link,
 )
 from services.worker_access import (
@@ -90,6 +91,33 @@ def create_worker_share_link(
         slug=str(worker["id"]),
         regenerate=body.regenerate,
     )
+
+
+@worker_admin_router.get("/workers/{worker_id}/share-links")
+def list_worker_share_links(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """share-loop: existing public share links for a worker (re-displayable URLs).
+
+    Lets the dashboard SHOW the current public link (copyable) instead of the
+    "shown once" ceremony. Returns only links whose raw token was persisted;
+    legacy hashed-only rows are omitted (URL unrecoverable by design)."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(worker, user_id=auth.user_id, repos=repos)
+    if not perms.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this worker")
+    links = _list_standalone_share_urls(
+        entity_type="worker",
+        entity_id=str(worker["id"]),
+        owner_id=str(worker.get("owner_id") or auth.user_id),
+        repos=repos,
+    )
+    return {"links": links}
 
 
 @worker_admin_router.delete("/workers/{worker_id}/share-link")
