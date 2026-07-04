@@ -11,6 +11,7 @@ fixtures); the public URL is built from ``core.urls._frontend_base_url``.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import logging
 import re
 import secrets as pysecrets
@@ -230,36 +231,31 @@ def _create_or_get_standalone_share_link(
         )
         if existing:
             return {"token": existing[0]["token"], "url": existing[0]["url"], "entity_type": entity_type}
+        # Detect share_token support by INSPECTING the signature rather than
+        # catching TypeError — the latter would swallow a genuine TypeError
+        # raised from inside the repo call and mask a real bug.
+        try:
+            supports_share_token = "share_token" in inspect.signature(
+                share_repo.create_standalone_share
+            ).parameters
+        except (TypeError, ValueError):
+            supports_share_token = False
         ts = now_iso()
         for _ in range(8):
             candidate = _mint_standalone_share_token(slug=slug)
+            kwargs: Dict[str, Any] = dict(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                file_path=safe_file_path,
+                owner_id=owner_id,
+                token_hash=_hash_share_token(candidate),
+                created_at=ts,
+            )
+            if supports_share_token:
+                # Persisted so the link can be re-displayed.
+                kwargs["share_token"] = candidate
             try:
-                share_repo.create_standalone_share(
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    file_path=safe_file_path,
-                    owner_id=owner_id,
-                    token_hash=_hash_share_token(candidate),
-                    created_at=ts,
-                    # Persisted so the link can be re-displayed. The repo ignores
-                    # this kwarg on backends that predate the column.
-                    share_token=candidate,
-                )
-                return {
-                    "token": candidate,
-                    "url": _standalone_share_url(candidate),
-                    "entity_type": entity_type,
-                }
-            except TypeError:
-                # Older repo signature without share_token — fall back.
-                share_repo.create_standalone_share(
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    file_path=safe_file_path,
-                    owner_id=owner_id,
-                    token_hash=_hash_share_token(candidate),
-                    created_at=ts,
-                )
+                share_repo.create_standalone_share(**kwargs)
                 return {
                     "token": candidate,
                     "url": _standalone_share_url(candidate),
