@@ -31,7 +31,7 @@ import logging
 from typing import Dict, Any, Callable, List, Optional
 from pathlib import Path
 
-from models import WorkerConfig, WorkerContext, WorkerResult, declared_composio_connections
+from models import WorkerConfig, WorkerContext, WorkerResult, declared_composio_connections, optional_composio_connections
 from worker_registry import get_worker_config
 
 logger = logging.getLogger("floom.runner_utils")
@@ -217,6 +217,8 @@ def _resolve_connections(
     if not declared:
         return {}, None
 
+    optional = optional_composio_connections(config)
+
     from db import get_db
 
     missing = []
@@ -242,6 +244,9 @@ def _resolve_connections(
             row = cursor.execute(sql, params).fetchone()
             if row:
                 connection_ids[app_name.lower()] = row["composio_connection_id"]
+            elif app_name.lower() in optional:
+                # Optional connection not present: silently omit, do not fail.
+                log_fn(f"Optional connection not found for app '{app_name}', skipping", level="info")
             else:
                 missing.append(app_name)
 
