@@ -1,18 +1,22 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import type { PublicWorker } from "@/lib/types";
 
+const mockRouterPush = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: mockRouterPush }),
 }));
 
+const mockSetActiveWorkspaceId = vi.fn();
+const mockImportFromShare = vi.fn();
 vi.mock("@/lib/api", () => ({
   api: {
     workers: {
-      importFromShare: vi.fn(),
+      importFromShare: mockImportFromShare,
     },
   },
+  setActiveWorkspaceId: mockSetActiveWorkspaceId,
 }));
 
 const worker: PublicWorker = {
@@ -77,5 +81,45 @@ describe("WorkerShareCard public panes", () => {
     expect(screen.getByText("Worker setup")).toBeInTheDocument();
     expect(screen.getByText(/name: Linear Triage/)).toBeInTheDocument();
     expect(screen.getByText(/brief: markdown/)).toBeInTheDocument();
+  });
+});
+
+describe("WorkerShareCard import workspace pickup (L6)", () => {
+  it("calls setActiveWorkspaceId with response workspace_id before routing", async () => {
+    mockImportFromShare.mockResolvedValueOnce({
+      worker_id: "wk_abc123",
+      url: "/workers/wk_abc123",
+      workspace_id: "ws_new456",
+    });
+    mockRouterPush.mockClear();
+    mockSetActiveWorkspaceId.mockClear();
+
+    render(<WorkerShareCard worker={worker} authed token="share_abc" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add to workspace/i }));
+
+    await waitFor(() => {
+      expect(mockSetActiveWorkspaceId).toHaveBeenCalledWith("ws_new456");
+    });
+    expect(mockRouterPush).toHaveBeenCalledWith(expect.stringContaining("wk_abc123"));
+  });
+
+  it("still routes when workspace_id is absent (non-cloud / existing user)", async () => {
+    mockImportFromShare.mockResolvedValueOnce({
+      worker_id: "wk_def789",
+      url: "/workers/wk_def789",
+    });
+    mockRouterPush.mockClear();
+    mockSetActiveWorkspaceId.mockClear();
+
+    render(<WorkerShareCard worker={worker} authed token="share_def" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add to workspace/i }));
+
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalledWith(expect.stringContaining("wk_def789"));
+    });
+    // setActiveWorkspaceId must NOT be called when workspace_id is absent
+    expect(mockSetActiveWorkspaceId).not.toHaveBeenCalled();
   });
 });

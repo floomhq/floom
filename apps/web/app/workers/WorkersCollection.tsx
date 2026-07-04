@@ -76,6 +76,7 @@ import {
   X,
 } from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
 import { WorkerFlow } from "@/components/WorkerFlow";
@@ -402,6 +403,93 @@ function friendlyToken(value?: string | null): string {
     .join(" ");
 }
 
+// L6: Inline activation banner shown when an imported worker has missing
+// connections. Dismissible per-worker via sessionStorage. Reuses the
+// safeStorageGet/Set helpers already in scope. No new design primitives.
+function MissingConnectionsBanner({ w }: { w: WorkerSummary }) {
+  const missing = w.missing_connections ?? [];
+  const DISMISS_KEY = `connect-banner-dismissed:${w.id}`;
+  const [dismissed, setDismissed] = useState(() => safeStorageGet("session", DISMISS_KEY) === "1");
+  const router = useRouter();
+  const workspaceHref = useWorkspaceHref();
+
+  if (dismissed || missing.length === 0) return null;
+
+  const workerPath = workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}`);
+  const allConnected = missing.length === 0;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        margin: "0 0 2px",
+        padding: "10px 14px",
+        background: "var(--bg-2)",
+        borderRadius: "var(--radius-card)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>
+          Connect your tools to bring this worker to life
+        </p>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={() => {
+            safeStorageSet("session", DISMISS_KEY, "1");
+            setDismissed(true);
+          }}
+          style={{ flexShrink: 0, padding: 2, color: "var(--ink-faint)", background: "none", border: "none", cursor: "pointer", lineHeight: 1 }}
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {missing.map((slug) => (
+          <Link
+            key={slug}
+            href={workspaceHref(
+              `/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent(workerPath)}`,
+            )}
+            className="c-addbtn"
+            style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <BrandLogo icon={normalizeConnectionSlug(slug)} className="size-3.5" />
+            Connect {slug}
+          </Link>
+        ))}
+        <button
+          type="button"
+          disabled={!allConnected}
+          onClick={() => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`))}
+          className="c-addbtn"
+          style={{ opacity: allConnected ? 1 : 0.45, cursor: allConnected ? "pointer" : "default" }}
+          title={allConnected ? undefined : "Connect all tools above first"}
+        >
+          Run a test
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Normalise a missing_connections slug for BrandLogo (mirrors WorkerShareCard). */
+function normalizeConnectionSlug(slug: string): string {
+  const lower = slug.toLowerCase();
+  const ALIASES: Record<string, string> = {
+    googlecalendar: "google-calendar",
+    googledrive: "google-drive",
+    googledocs: "google-docs",
+    googlesheets: "google-sheets",
+    googlemeet: "google-meet",
+  };
+  return ALIASES[lower] ?? lower;
+}
+
 function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id, w.workspace_id);
   const stats = d === undefined ? undefined : d?.recent_stats ?? w.recent_stats;
@@ -431,6 +519,8 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
   ];
   return (
     <div>
+      {/* L6 activation: missing-connections banner (only when connections unmet) */}
+      <MissingConnectionsBanner w={w} />
       {/* #1290: "Latest output" removed — its purpose was unclear to operators
           (Federico: "why is latest output shown?") and it only showed run status +
           ID with no actual output text. The History tab shows the run list. */}

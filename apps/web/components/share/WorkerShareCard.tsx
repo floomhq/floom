@@ -6,7 +6,7 @@ import { useState } from "react";
 import type { ComponentType } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, setActiveWorkspaceId } from "@/lib/api";
 import { Check, Clipboard, Clock, Copy, Download, MousePointerClick, Settings2, Terminal, Webhook, Zap } from "lucide-react";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { Avatar } from "@/components/ui/Avatar";
@@ -154,6 +154,13 @@ export function WorkerShareCard({
     try {
       const result = await api.workers.importFromShare(token);
       setImportedId(result.worker_id);
+      // L6: if the response carries the workspace the worker was imported into
+      // (cloud-side enrichment), stamp it into localStorage/cookie so the
+      // redirect lands in the correct workspace for brand-new users who have
+      // no activeWorkspaceId yet.
+      if (result.workspace_id) {
+        setActiveWorkspaceId(result.workspace_id);
+      }
       router.push(workspaceHref(`/workers?sel=${encodeURIComponent(result.worker_id)}`));
     } catch {
       setImporting(false);
