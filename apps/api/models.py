@@ -690,10 +690,12 @@ class WorkerConnection(BaseModel):
     #   connections:
     #     - app: gmail
     #       allowed_tools: [GMAIL_FETCH_EMAILS]
+    #       optional: true   # run does not fail if the user has not connected this app
     app: Optional[str] = None
     allowed_tools: Optional[List[str]] = None
     scope: Optional[str] = None
     scopes: Optional[List[str]] = None
+    optional: Optional[bool] = None
 
     @model_validator(mode="after")
     def validate_connection_kind(self) -> "WorkerConnection":
@@ -711,6 +713,7 @@ class WorkerConnection(BaseModel):
                 allowed_tools=self.allowed_tools,
                 scope=self.scope,
                 scopes=self.scopes,
+                optional=bool(self.optional),
             )
         return self
 
@@ -744,6 +747,7 @@ class WorkerComposioConnection(BaseModel):
     allowed_tools: Optional[List[str]] = None
     scope: Optional[str] = None
     scopes: Optional[List[str]] = None
+    optional: bool = False
 
     @field_validator("app")
     @classmethod
@@ -857,6 +861,24 @@ def declared_composio_connections(config: Optional["WorkerConfig"]) -> Dict[str,
         if app in explicit_allowlists:
             declared[app] = sorted(explicit_allowlists[app])
     return declared
+
+
+def optional_composio_connections(config: Optional["WorkerConfig"]) -> set:
+    """Return the set of lowercased app slugs whose Composio connection is marked optional.
+
+    An optional connection is skipped (not hard-failed) at run time when the user
+    has not connected the app. Legacy string shorthand connections are never optional.
+    """
+    result: set = set()
+    if not config:
+        return result
+    for connection in config.connections or []:
+        if isinstance(connection, str):
+            continue
+        composio = getattr(connection, "composio", None)
+        if composio is not None and composio.optional:
+            result.add(composio.app.lower())
+    return result
 
 
 def declared_composio_connection_scopes(config: Optional["WorkerConfig"]) -> Dict[str, List[str]]:
