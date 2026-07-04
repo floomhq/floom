@@ -23,7 +23,7 @@ import re
 import zipfile
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
@@ -64,9 +64,14 @@ logger = logging.getLogger("floom.api")
 worker_admin_router = APIRouter()
 
 
+class _WorkerShareLinkBody(BaseModel):
+    regenerate: bool = Field(default=False, description="Re-mint a fresh readable token, revoking existing ones.")
+
+
 @worker_admin_router.post("/workers/{worker_id}/share-link")
 def create_worker_share_link(
     worker_id: str,
+    body: _WorkerShareLinkBody = Body(default=_WorkerShareLinkBody()),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
@@ -82,6 +87,8 @@ def create_worker_share_link(
         entity_id=str(worker["id"]),
         owner_id=str(worker.get("owner_id") or auth.user_id),
         repos=repos,
+        slug=str(worker["id"]),
+        regenerate=body.regenerate,
     )
 
 

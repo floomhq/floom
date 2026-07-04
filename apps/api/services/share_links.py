@@ -51,7 +51,21 @@ def _urlsafe_alnum(length: int) -> str:
     return value[:length]
 
 
-def _mint_standalone_share_token() -> str:
+def _clean_slug(raw: str) -> str:
+    """Lowercase, keep [a-z0-9-] only, collapse repeated hyphens, trim to 48 chars."""
+    s = raw.lower()
+    s = re.sub(r"[^a-z0-9-]", "-", s)
+    s = re.sub(r"-{2,}", "-", s)
+    s = s.strip("-")
+    return s[:48]
+
+
+def _mint_standalone_share_token(slug: str | None = None) -> str:
+    rand = _urlsafe_alnum(8)
+    if slug:
+        clean = _clean_slug(slug)
+        if clean:
+            return f"fls_{clean}-{rand}"
     return f"fls_{_urlsafe_alnum(24)}"
 
 
@@ -173,16 +187,29 @@ def _create_or_get_standalone_share_link(
     owner_id: str,
     file_path: str = "",
     repos: Any | None = None,
+    slug: str | None = None,
+    regenerate: bool = False,
 ) -> Dict[str, str]:
     from db import get_db, now_iso
     safe_file_path = file_path or ""
     if not entity_id or not owner_id:
         raise HTTPException(status_code=409, detail="Item cannot be shared")
+
+    if regenerate:
+        # Delete existing tokens for this entity so the new minted one is fresh.
+        _revoke_standalone_share_link(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            owner_id=owner_id,
+            file_path=safe_file_path,
+            repos=repos,
+        )
+
     share_repo = _standalone_share_repo(repos, "create_standalone_share")
     if share_repo is not None:
         ts = now_iso()
         for _ in range(8):
-            candidate = _mint_standalone_share_token()
+            candidate = _mint_standalone_share_token(slug=slug)
             try:
                 share_repo.create_standalone_share(
                     entity_type=entity_type,
@@ -210,7 +237,7 @@ def _create_or_get_standalone_share_link(
     ts = now_iso()
     with get_db() as conn:
         for _ in range(8):
-            candidate = _mint_standalone_share_token()
+            candidate = _mint_standalone_share_token(slug=slug)
             try:
                 conn.execute(
                     """
