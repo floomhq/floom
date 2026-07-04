@@ -81,9 +81,15 @@ def _missing_connections_for_scheduled_worker(
         if isinstance(c, str) and c.strip():
             required_slugs.append(c.strip().lower())
         elif isinstance(c, dict):
+            # Optional connections (e.g. Gmail OR Outlook) never block a scheduled run.
+            if c.get("optional") is True or (c.get("composio") or {}).get("optional") is True:
+                continue
             slug = (c.get("app") or c.get("slug") or "").strip().lower()
             if slug:
                 required_slugs.append(slug)
+        elif getattr(getattr(c, "composio", None), "optional", False):
+            # Parsed WorkerConnection whose composio spec is optional: skip, never block.
+            continue
     if not required_slugs:
         return []
     try:

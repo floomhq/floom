@@ -879,7 +879,12 @@ def _worker_required_secret_names(w: Dict[str, Any]) -> List[str]:
     return ordered
 
 def _worker_connection_slugs(w: Dict[str, Any]) -> List[str]:
-    """Required connection slugs declared by a worker manifest (never tokens)."""
+    """Required connection slugs declared by a worker manifest (never tokens).
+
+    Connections marked ``optional: true`` are excluded: the run must not be
+    blocked when the user has not connected them (e.g. Gmail OR Outlook, where
+    connecting one is enough).
+    """
     config = w.get("config") or {}
     raw = config.get("connections") or []
     slugs: List[str] = []
@@ -887,6 +892,8 @@ def _worker_connection_slugs(w: Dict[str, Any]) -> List[str]:
         if isinstance(c, str) and c.strip():
             slugs.append(c.strip())
         elif isinstance(c, dict):
+            if c.get("optional") is True or (c.get("composio") or {}).get("optional") is True:
+                continue
             label = (c.get("mcp", {}) or {}).get("label") or c.get("app") or c.get("slug")
             if isinstance(label, str) and label.strip():
                 slugs.append(label.strip())
