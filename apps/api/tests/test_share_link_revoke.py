@@ -105,26 +105,35 @@ def test_create_then_revoke_worker_share_link(client_and_main):
     assert _token_count(main) == 1
 
 
-def test_reshare_keeps_prior_worker_link_until_revoke(client_and_main):
+def test_reshare_returns_stable_worker_link_until_revoke(client_and_main):
+    # share-loop: public links are now STABLE + re-displayable. A second POST
+    # returns the SAME token (create-or-GET) instead of minting a second orphaned
+    # link, so the dashboard can re-show the existing URL. Revoke still deletes
+    # it. (Supersedes the old #2144 mint-a-new-token-each-time behavior.)
     client, main = client_and_main
     first = client.post("/workers/shareable/share-link")
     second = client.post("/workers/shareable/share-link")
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
-    assert first.json()["token"] != second.json()["token"]
-    assert _token_count(main) == 2
+    assert first.json()["token"] == second.json()["token"]
+    assert _token_count(main) == 1
 
     from fastapi.testclient import TestClient
     anon = TestClient(client.app, raise_server_exceptions=False)
     assert anon.get(f"/s/{first.json()['token']}").status_code == 200
-    assert anon.get(f"/s/{second.json()['token']}").status_code == 200
+
+    # The dashboard can retrieve the existing link to re-display it.
+    listed = client.get("/workers/shareable/share-links")
+    assert listed.status_code == 200, listed.text
+    tokens = [link["token"] for link in listed.json()["links"]]
+    assert first.json()["token"] in tokens
 
     revoked = client.delete("/workers/shareable/share-link")
     assert revoked.status_code == 200, revoked.text
     assert revoked.json()["revoked"] is True
     assert _token_count(main) == 0
     assert anon.get(f"/s/{first.json()['token']}").status_code == 404
-    assert anon.get(f"/s/{second.json()['token']}").status_code == 404
+    assert client.get("/workers/shareable/share-links").json()["links"] == []
 
 
 def test_revoke_unknown_worker_404(client_and_main):

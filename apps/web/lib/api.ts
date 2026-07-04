@@ -366,6 +366,12 @@ export const api = {
       });
       return link;
     },
+    // share-loop: list existing public share links so the dashboard can
+    // re-display an active link instead of the "shown once" ceremony.
+    shareLinks: (id: string) =>
+      fetchJson<{ links: import("./types").StandaloneShareLink[] }>(
+        `/workers/${encodeURIComponent(id)}/share-links`,
+      ),
     // #766: revoke (disable) a worker's public share link. POSTing again rotates a fresh one.
     revokeShareLink: (id: string) =>
       fetchJson<{ revoked: boolean }>(`/workers/${encodeURIComponent(id)}/share-link`, {
