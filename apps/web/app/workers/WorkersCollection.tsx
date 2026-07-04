@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ActionMenu } from "@/components/ui/action-menu";
@@ -1398,6 +1399,82 @@ const ALERT_EVENTS = ["failed", "completed"] as const;
 type AlertEvent = (typeof ALERT_EVENTS)[number];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// L3 — "Email me a summary after each run" one-click toggle.
+// Creates/removes a completed+failed alert with the signed-in user's email.
+// The toggle is ON when an alert row exists whose email_to includes the user's
+// email and whose on array covers both "completed" and "failed".
+function RunSummaryEmailToggle({
+  workerId,
+  alerts,
+  onChanged,
+}: {
+  workerId: string;
+  alerts: WorkerAlert[] | undefined | null;
+  onChanged: () => void;
+}) {
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.me().then((u) => setUserEmail(u?.email ?? null)).catch(() => {});
+  }, []);
+
+  if (!userEmail) return null;
+
+  // Find an existing alert that covers this user's email for both run events.
+  const matchingAlert = alerts?.find((a) => {
+    const events = new Set(a.on);
+    return (
+      events.has("completed") &&
+      events.has("failed") &&
+      Array.isArray(a.email_to) &&
+      a.email_to.some((e) => e.toLowerCase() === userEmail.toLowerCase())
+    );
+  }) ?? null;
+
+  const isOn = matchingAlert !== null;
+
+  const toggle = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (isOn && matchingAlert) {
+        await api.workers.alerts.remove(workerId, matchingAlert.id);
+        toast.success("Run email summary disabled.");
+      } else {
+        await api.workers.alerts.create(workerId, {
+          on: ["completed", "failed"],
+          email_to: [userEmail],
+          description: "Run email summary",
+        });
+        toast.success(`Run summaries will be emailed to ${userEmail}.`);
+      }
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update alert");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <DetailGroup label="Email summary">
+      <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
+        <div className="c-lp-tx">
+          <div className="nm">Email me a summary after each run</div>
+          <div className="sub">{isOn ? `Sending to ${userEmail}` : userEmail}</div>
+        </div>
+        <Switch
+          checked={isOn}
+          disabled={busy || alerts === undefined}
+          onCheckedChange={() => void toggle()}
+          aria-label="Email run summary toggle"
+        />
+      </div>
+    </DetailGroup>
+  );
+}
+
 function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
   const [alerts, setAlerts] = useState<WorkerAlert[] | undefined | null>(undefined);
 
@@ -1416,6 +1493,13 @@ function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
 
   return (
     <div>
+      {/* L3: one-click "Email me a summary" toggle — sits above the full config form. */}
+      <RunSummaryEmailToggle
+        workerId={w.id}
+        alerts={alerts}
+        onChanged={() => void reload()}
+      />
+
       <DetailGroup label="Configured alerts">
         {alerts === undefined ? (
           <Loading />
