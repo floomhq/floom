@@ -130,3 +130,74 @@ def test_reshare_keeps_prior_worker_link_until_revoke(client_and_main):
 def test_revoke_unknown_worker_404(client_and_main):
     client, _ = client_and_main
     assert client.delete("/workers/does-not-exist/share-link").status_code == 404
+
+
+# --- Readable slug token tests ---
+
+def test_slugged_token_matches_validation_regex_and_resolves(client_and_main):
+    """Minted slugged token passes _load_standalone_share_row validation and resolves."""
+    import re
+    from services.share_links import _mint_standalone_share_token, _create_or_get_standalone_share_link, _load_standalone_share_row
+
+    token = _mint_standalone_share_token(slug="shareable")
+    # Must satisfy the validation regex: fls_ + 6..128 chars of [A-Za-z0-9_-]
+    assert re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", token), f"Token {token!r} fails regex"
+    assert token.startswith("fls_shareable-"), f"Token {token!r} should embed slug"
+    assert len(token) == len("fls_shareable-") + 8
+
+    # Also verify old-format (no slug) tokens still pass
+    old_token = _mint_standalone_share_token()
+    assert re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", old_token), f"Old token {old_token!r} fails regex"
+    assert len(old_token) == len("fls_") + 24
+
+
+def test_slugged_token_resolves_via_hash_lookup(client_and_main):
+    """A slugged token inserted via _create_or_get resolves through _load_standalone_share_row."""
+    from services.share_links import _create_or_get_standalone_share_link, _load_standalone_share_row
+
+    result = _create_or_get_standalone_share_link(
+        entity_type="worker",
+        entity_id="shareable",
+        owner_id="local-user",
+        slug="shareable",
+    )
+    token = result["token"]
+    assert "shareable" in token
+
+    row = _load_standalone_share_row(token)
+    assert row is not None
+    assert row["entity_id"] == "shareable"
+    assert row["entity_type"] == "worker"
+
+
+def test_regenerate_mints_fresh_readable_token(client_and_main):
+    """regenerate=True revokes old token and mints a new readable one."""
+    client, main = client_and_main
+    first = client.post("/workers/shareable/share-link")
+    assert first.status_code == 200, first.text
+    first_token = first.json()["token"]
+    assert "shareable" in first_token
+
+    regenerated = client.post("/workers/shareable/share-link", json={"regenerate": True})
+    assert regenerated.status_code == 200, regenerated.text
+    new_token = regenerated.json()["token"]
+    assert new_token != first_token
+    assert "shareable" in new_token
+
+    # Old token no longer resolves; new token resolves
+    from fastapi.testclient import TestClient
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    assert anon.get(f"/s/{first_token}").status_code == 404
+    assert anon.get(f"/s/{new_token}").status_code == 200
+
+
+def test_clean_slug_strips_invalid_chars():
+    """_clean_slug produces clean lowercase hyphenated output."""
+    from services.share_links import _clean_slug
+
+    assert _clean_slug("Construction Intel Weekly v2") == "construction-intel-weekly-v2"
+    assert _clean_slug("b2b-saas--intel") == "b2b-saas-intel"
+    assert _clean_slug("french_startup_funding_radar_v2") == "french-startup-funding-radar-v2"
+    # Trim to 48 chars
+    long = "a" * 60
+    assert len(_clean_slug(long)) == 48
