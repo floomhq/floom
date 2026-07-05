@@ -4,6 +4,8 @@ import {
   DEFAULT_PUBLIC_API_BASE,
   getPublicApiBase,
   getPublicApiHost,
+  getPublicSiteOrigin,
+  DEFAULT_CLOUD_PUBLIC_SITE_ORIGIN,
   isCloudDeploy,
 } from "@/lib/api-base";
 
@@ -98,5 +100,35 @@ describe("#953 internal infra hosts are never displayed", () => {
   it("does NOT remap lookalike domains (railway.app.evil.com)", () => {
     vi.stubEnv("NEXT_PUBLIC_API_BASE", "https://up.railway.app.evil.com");
     expect(getPublicApiBase()).toBe("https://up.railway.app.evil.com");
+  });
+});
+
+describe("public site origin (#1022 shareable absolute URLs)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("defaults to the Cloud apex on a Cloud deploy, never a platform alias", () => {
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
+    // Even if the request arrives on a per-deployment alias, Cloud returns the apex.
+    expect(getPublicSiteOrigin("r9-detail.floom.dev")).toBe(DEFAULT_CLOUD_PUBLIC_SITE_ORIGIN);
+    expect(getPublicSiteOrigin(null)).toBe("https://floom.dev");
+  });
+
+  it("prefers an explicit NEXT_PUBLIC_SITE_ORIGIN override and trims slashes", () => {
+    vi.stubEnv("NEXT_PUBLIC_SITE_ORIGIN", "https://workers.acme.com/");
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
+    expect(getPublicSiteOrigin("r9-detail.floom.dev")).toBe("https://workers.acme.com");
+  });
+
+  it("derives the origin from the request host when self-hosted (OSS)", () => {
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "");
+    expect(getPublicSiteOrigin("workers.example.org")).toBe("https://workers.example.org");
+    expect(getPublicSiteOrigin("localhost:3000")).toBe("http://localhost:3000");
+  });
+
+  it("never surfaces an internal infra host (falls back to the apex)", () => {
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "");
+    expect(getPublicSiteOrigin("svc.up.railway.app")).toBe(DEFAULT_CLOUD_PUBLIC_SITE_ORIGIN);
   });
 });

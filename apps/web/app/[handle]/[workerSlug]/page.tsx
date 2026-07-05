@@ -1,9 +1,31 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { fetchPublicWorkerPermalink } from "@/lib/server-api";
+import { getPublicSiteOrigin } from "@/lib/api-base";
 import { isAuthenticated } from "@/lib/server-auth";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import { ShareNav } from "@/components/share/ShareCardShell";
+
+// Absolute, basePath-aware permalink URL for a public worker card.
+//
+// Next resolves relative metadata URLs against `metadataBase`, which defaults to
+// the raw platform deployment origin (e.g. r9-detail…floom.dev) AND drops the
+// hosted `/app` basePath from co-located `opengraph-image` routes (#1022) — so
+// both og:image and canonical pointed at an unfetchable 404 URL. We build the
+// absolute URL explicitly instead: real public host + basePath + %40-encoded
+// handle/slug. Returns { page, image } with no trailing slash.
+function permalinkUrls(
+  card: { workspace: { handle: string }; public_slug: string },
+  requestHost: string | null,
+): { page: string; image: string } {
+  const origin = getPublicSiteOrigin(requestHost);
+  const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/+$/, "");
+  const handleSeg = encodeURIComponent(`@${card.workspace.handle}`);
+  const slugSeg = encodeURIComponent(card.public_slug);
+  const page = `${origin}${basePath}/${handleSeg}/${slugSeg}`;
+  return { page, image: `${page}/opengraph-image` };
+}
 
 // L4 permalink page: /@{handle}/{worker_slug}.
 //
@@ -40,21 +62,25 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     card.description ||
     card.worker.description ||
     `${card.worker.name}, a Floom AI worker template you can add to your workspace.`;
-  const permalink = card.permalink; // /@handle/slug
+  const hdrs = await headers();
+  const requestHost = hdrs.get("x-forwarded-host") ?? hdrs.get("host");
+  const { page: pageUrl, image: imageUrl } = permalinkUrls(card, requestHost);
   return {
     title,
     description,
-    alternates: { canonical: permalink },
+    alternates: { canonical: pageUrl },
     openGraph: {
       type: "website",
       title,
       description,
-      url: permalink,
+      url: pageUrl,
+      images: [{ url: imageUrl, width: 1200, height: 630, alt: title }],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
+      images: [imageUrl],
     },
   };
 }

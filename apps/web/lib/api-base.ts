@@ -59,3 +59,33 @@ export function getPublicApiHost(): string {
     return base.replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "");
   }
 }
+
+// Canonical public origin of the dashboard apex (managed Cloud is fronted by
+// floom.dev). Used to build absolute shareable URLs (og:image, canonical) that
+// scrapers can fetch — a relative path resolved against Next's metadataBase
+// falls back to the raw platform deployment alias (e.g. r9-detail…vercel.app),
+// which 404s cross-project and is infra identity, never the public surface.
+export const DEFAULT_CLOUD_PUBLIC_SITE_ORIGIN = "https://floom.dev";
+
+/**
+ * Absolute public site origin — scheme + host only, no path, no trailing slash.
+ *
+ * Priority: explicit `NEXT_PUBLIC_SITE_ORIGIN` (self-host override) → the
+ * managed Cloud apex → the request host (self-host zero-config) → the Cloud
+ * apex as a safe last resort. On Cloud the apex is returned directly, so a
+ * per-deployment platform alias (r9-detail…) is never surfaced; the request-host
+ * branch additionally drops internal infra hosts, mirroring getPublicApiBase().
+ *
+ * @param requestHost optional `Host`/`x-forwarded-host` from the inbound request
+ */
+export function getPublicSiteOrigin(requestHost?: string | null): string {
+  const configured = process.env.NEXT_PUBLIC_SITE_ORIGIN?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  if (isCloudDeploy()) return DEFAULT_CLOUD_PUBLIC_SITE_ORIGIN;
+  const host = requestHost?.trim();
+  if (host && !isInternalInfraHost(host)) {
+    const local = /^(localhost|127\.|\[::1\])/i.test(host);
+    return `${local ? "http" : "https"}://${host}`;
+  }
+  return DEFAULT_CLOUD_PUBLIC_SITE_ORIGIN;
+}
