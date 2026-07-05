@@ -124,7 +124,15 @@ function CallbackInner() {
         redirect: "follow",
         credentials: "same-origin",
       })
-        .then((res) => navigateAfterCallback(res.url))
+        .then((res) => {
+          // fetch() only rejects on network-level failures — a raw 5xx from
+          // the backend with no redirect resolves normally with !res.ok, and
+          // res.url would still be the /api/proxy/... request URL (not
+          // /connections), so the pathname check above already falls through
+          // to the default dest. Treat a non-OK final response the same as a
+          // caught fetch failure instead of silently landing on the list.
+          navigateAfterCallback(res.url, !res.ok);
+        })
         .catch(() => navigateAfterCallback(undefined, true));
     }
   }, [params, router]);
