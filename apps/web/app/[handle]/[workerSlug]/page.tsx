@@ -39,7 +39,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const description =
     card.description ||
     card.worker.description ||
-    `${card.worker.name} — a Floom AI worker template you can add to your workspace.`;
+    `${card.worker.name}, a Floom AI worker template you can add to your workspace.`;
   const permalink = card.permalink; // /@handle/slug
   return {
     title,
