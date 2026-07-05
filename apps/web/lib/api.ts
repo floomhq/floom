@@ -383,7 +383,9 @@ export const api = {
         body: JSON.stringify({ token }),
       }),
     importFromPermalink: (handle: string, workerSlug: string) =>
-      fetchJson<{ worker_id: string; url: string }>("/workers/import-from-permalink", {
+      // workspace_id: cloud-side L6 enrichment so the client can
+      // setActiveWorkspaceId() before redirecting (absent on single-tenant).
+      fetchJson<{ worker_id: string; url: string; workspace_id?: string }>("/workers/import-from-permalink", {
         method: "POST",
         body: JSON.stringify({ handle, worker_slug: workerSlug }),
       }),
