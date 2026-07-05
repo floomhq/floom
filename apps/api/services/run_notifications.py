@@ -225,6 +225,23 @@ def _open_pinned_webhook(req: urllib.request.Request, *, timeout: int):
     return opener.open(req, timeout=timeout)
 
 
+def _strip_to_plain_text(raw: str) -> str:
+    """Strip HTML tags and normalise whitespace for plain-text summary lines."""
+    import re
+    text = re.sub(r"<[^>]+>", " ", raw)
+    return " ".join(text.split())
+
+
+def _format_duration_ms(ms: int | None) -> str | None:
+    """Convert milliseconds to a human-readable string (e.g. '2m 13s' or '45s')."""
+    if ms is None or ms < 0:
+        return None
+    total_s = ms // 1000
+    if total_s < 60:
+        return f"{total_s}s"
+    return f"{total_s // 60}m {total_s % 60}s"
+
+
 def _run_email_html(
     *,
     worker_name: str,
@@ -233,6 +250,10 @@ def _run_email_html(
     status_label: str,
     timestamp: str,
     error: str | None,
+    # L3: run summary fields — all optional so existing callers need no changes.
+    output_summary: str | None = None,
+    duration_label: str | None = None,
+    trigger_source: str | None = None,
 ) -> str:
     """Branded run-notification email. Branding is env-configurable for self-hosters:
     WORKEROS_BRAND_NAME (default "Floom"), WORKERS_FRONTEND_URL (header/footer link),
@@ -274,11 +295,34 @@ def _run_email_html(
     ]
     if error:
         rows.append(("Error", f"<span style=\"font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#E5533D;\">{error}</span>"))
+    if duration_label:
+        rows.append(("Duration", escape(duration_label)))
+    if trigger_source:
+        rows.append(("Trigger", escape(trigger_source)))
     row_html = "".join(
         f"<tr><td style=\"padding:6px 0;font-size:13px;color:#62697A;width:96px;vertical-align:top;\">{label}</td>"
         f"<td style=\"padding:6px 0;font-size:14px;color:#16171A;\">{value}</td></tr>"
         for label, value in rows
     )
+    # L3: output summary block — plain-text excerpt, hard-truncated to 1000 chars.
+    # Never inline raw multi-KB/MB output; strip HTML tags first.
+    if output_summary:
+        stripped = _strip_to_plain_text(output_summary)
+        truncated = stripped[:1000]
+        truncation_note = (
+            f' <a href="{safe_run_url}" style="color:#3563CC;text-decoration:underline;">… view full run</a>'
+            if len(stripped) > 1000
+            else ""
+        )
+        summary_block = (
+            f'<div style="margin:22px 0 0;padding:14px 16px;background:#F3F4F6;border-radius:6px;">'
+            f'<p style="margin:0 0 6px;font-size:11px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:#62697A;">Output summary</p>'
+            f'<p style="margin:0;font-size:13px;line-height:1.6;color:#16171A;white-space:pre-wrap;">'
+            f'{escape(truncated)}{truncation_note}'
+            f'</p></div>\n'
+        )
+    else:
+        summary_block = ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>{brand}</title></head>
 <body style="margin:0;padding:0;background:#FBFBFC;font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#16171A;-webkit-font-smoothing:antialiased;">
@@ -290,7 +334,7 @@ def _run_email_html(
 <h1 style="margin:0 0 18px;font-size:24px;line-height:1.25;font-weight:650;color:#16171A;">{worker_name} {headline}</h1>
 <p style="font-size:15px;line-height:1.6;margin:0 0 22px;color:#16171A;">Floom finished a worker run in your workspace. The details are below, and the full run log is ready in the dashboard.</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{row_html}</table>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px;"><tr><td style="border-radius:8px;background:#111317;"><a href="{safe_run_url}" style="display:inline-block;background:#111317;color:#FFFFFF;text-decoration:none;padding:13px 18px;border-radius:8px;font-size:14px;font-weight:700;line-height:1;">View run</a></td></tr></table>
+{summary_block}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px;"><tr><td style="border-radius:8px;background:#111317;"><a href="{safe_run_url}" style="display:inline-block;background:#111317;color:#FFFFFF;text-decoration:none;padding:13px 18px;border-radius:8px;font-size:14px;font-weight:700;line-height:1;">View full run</a></td></tr></table>
 <p style="font-size:13px;line-height:1.55;margin:16px 0 0;color:#62697A;">You are receiving this because email alerts are enabled for this {safe_brand} workspace.</p>
 </td></tr>
 <tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#62697A;">
@@ -321,6 +365,10 @@ def _send_email_notification(
     status: str,
     error: str | None,
     subject_template: str | None = None,
+    # L3: optional run summary fields for completed-run emails.
+    output_summary: str | None = None,
+    duration_ms: int | None = None,
+    trigger_source: str | None = None,
 ) -> None:
     """Send a run-notification email via Resend (RESEND_API_KEY env var required)."""
     api_key = os.environ.get("RESEND_API_KEY", "").strip()
@@ -342,6 +390,7 @@ def _send_email_notification(
     safe_status_label = escape(status_label)
     safe_error = escape(error) if error else None
 
+    duration_label = _format_duration_ms(duration_ms)
     html = _run_email_html(
         worker_name=safe_worker_name,
         worker_id=safe_worker_id,
@@ -349,6 +398,9 @@ def _send_email_notification(
         status_label=safe_status_label,
         timestamp=timestamp,
         error=safe_error,
+        output_summary=output_summary,
+        duration_label=duration_label,
+        trigger_source=trigger_source,
     )
 
     text_lines = [
@@ -357,8 +409,17 @@ def _send_email_notification(
         f"Status: {status_label}",
         f"Time: {timestamp}",
     ]
+    if duration_label:
+        text_lines.append(f"Duration: {duration_label}")
+    if trigger_source:
+        text_lines.append(f"Trigger: {trigger_source}")
     if error:
         text_lines += ["", f"Error: {error}"]
+    if output_summary:
+        stripped = _strip_to_plain_text(output_summary)
+        truncated = stripped[:1000]
+        suffix = " … (view full run)" if len(stripped) > 1000 else ""
+        text_lines += ["", "Output summary:", truncated + suffix]
 
     try:
         import resend
@@ -389,6 +450,7 @@ def _fire_alert_webhooks(
     status: str,
     error: str | None,
     repos: "Repositories",
+    user_id: str | None = None,
 ) -> None:
     """Fire registered webhook and email alerts matching the run's terminal status.
 
@@ -407,6 +469,22 @@ def _fire_alert_webhooks(
         worker_name = (w_row or {}).get("name", worker_id)
     except Exception:
         worker_name = worker_id
+
+    # L3: resolve run summary fields for completed-run email bodies.
+    _run_output_summary: str | None = None
+    _run_duration_ms: int | None = None
+    _run_trigger_source: str | None = None
+    try:
+        _run_row = repos.runs.get(user_id=user_id, run_id=run_id) if user_id else None
+        if _run_row:
+            _output = (_run_row.get("output") or {}) if isinstance(_run_row.get("output"), dict) else {}
+            _raw_summary = str(_output.get("summary") or _output.get("result") or "").strip()
+            if _raw_summary:
+                _run_output_summary = _raw_summary
+            _run_duration_ms = _run_row.get("duration_ms")
+            _run_trigger_source = _run_row.get("trigger_source")
+    except Exception:
+        pass
 
     payload = json.dumps({
         "run_id": run_id,
@@ -480,6 +558,9 @@ def _fire_alert_webhooks(
                 worker_id=worker_id,
                 status=status,
                 error=error,
+                output_summary=_run_output_summary,
+                duration_ms=_run_duration_ms,
+                trigger_source=_run_trigger_source,
             )
 
 
@@ -531,6 +612,7 @@ def _dispatch_terminal_run_alerts(
             status=status,
             error=error,
             repos=repos,
+            user_id=user_id,
         )
 
         # Feature #1382: DM the run owner on Slack and WhatsApp when a run
