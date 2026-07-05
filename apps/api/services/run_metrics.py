@@ -84,9 +84,11 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     # redeploy-killed runs out of the unknown bucket and aligns PostHog (which
     # calls classify_failure) with the runs API.
     "interrupted_by_restart": "crash",
+    "orphaned": "crash",
     "run_abandoned_server_restart": "crash",
     "run_claimed_without_dispatch": "crash",
     "schedule_missed": "crash",
+    "scheduler_row_error": "crash",
     # configuration / worker definition problems
     "invalid_worker": "config",
     "worker_not_found": "config",

@@ -475,6 +475,7 @@ _TRANSIENT_RETRY_ERROR_CODES = {
     "llm_rate_limited",
     "interrupted_by_restart",
     "mcp_connect_failed",
+    "orphaned",
     "run_abandoned_server_restart",
     "run_claimed_without_dispatch",
     "timeout",
@@ -1939,6 +1940,12 @@ INTERRUPTED_RUN_ERROR = "Run was interrupted by an API restart before completion
 INTERRUPTED_RUN_ERROR_CODE = "interrupted_by_restart"
 ABANDONED_RUN_ERROR = "run abandoned (server restarted): no active executor after timeout window"
 ABANDONED_RUN_ERROR_CODE = "run_abandoned_server_restart"
+# The PERIODIC reaper (steady-state sweep between deploys) marks stale rows with
+# a distinct code so a run that silently hung mid-flight is diagnosable
+# separately from deploy/restart abandonment (which startup recovery labels
+# run_abandoned_server_restart).
+ORPHANED_RUN_ERROR = "run orphaned: still marked running past the run timeout with no active executor"
+ORPHANED_RUN_ERROR_CODE = "orphaned"
 DISPATCH_ORPHAN_ERROR = "run abandoned before sandbox dispatch: claimed by queue drain but no executor reached sandbox startup"
 DISPATCH_ORPHAN_ERROR_CODE = "run_claimed_without_dispatch"
 WORKER_DELETED_RUN_ERROR = "Worker deleted before run completed."
@@ -2140,6 +2147,8 @@ def _fail_stale_running_rows(
     timeout: int,
     grace: int,
     now_dt: datetime,
+    error: str = ABANDONED_RUN_ERROR,
+    error_code: str = ABANDONED_RUN_ERROR_CODE,
 ) -> list[dict[str, Any]]:
     """Status-gated fail of stale `running` rows; returns the rows it failed."""
     cutoff_iso = (now_dt - timedelta(seconds=timeout + grace)).isoformat()
@@ -2148,8 +2157,8 @@ def _fail_stale_running_rows(
     failed = repos_obj.runs.fail_stale_running(
         cutoff_iso=cutoff_iso,
         exclude_run_ids=active_ids,
-        error=ABANDONED_RUN_ERROR,
-        error_code=ABANDONED_RUN_ERROR_CODE,
+        error=error,
+        error_code=error_code,
     )
     for row in failed:
         run_id = str(row.get("run_id") or row.get("id") or "")
@@ -2161,7 +2170,7 @@ def _fail_stale_running_rows(
                 user_id=str(user_id),
                 run_id=run_id,
                 level="error",
-                message=ABANDONED_RUN_ERROR,
+                message=error,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 trace_id=None,
             )
@@ -2238,6 +2247,8 @@ def reap_abandoned_runs(
     now: datetime | None = None,
     timeout_seconds: int | None = None,
     grace_seconds: int | None = None,
+    error: str = ABANDONED_RUN_ERROR,
+    error_code: str = ABANDONED_RUN_ERROR_CODE,
 ) -> int:
     """Fail stale `running` rows that no longer have a live executor.
 
@@ -2248,7 +2259,16 @@ def reap_abandoned_runs(
     """
     repos_obj = _repos(repos)
     timeout, grace, now_dt = _resolve_reaper_window(timeout_seconds, grace_seconds, now)
-    return len(_fail_stale_running_rows(repos_obj, timeout=timeout, grace=grace, now_dt=now_dt))
+    return len(
+        _fail_stale_running_rows(
+            repos_obj,
+            timeout=timeout,
+            grace=grace,
+            now_dt=now_dt,
+            error=error,
+            error_code=error_code,
+        )
+    )
 
 
 def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool:
@@ -2324,6 +2344,8 @@ def recover_abandoned_runs(
     now: datetime | None = None,
     timeout_seconds: int | None = None,
     grace_seconds: int | None = None,
+    error: str = ABANDONED_RUN_ERROR,
+    error_code: str = ABANDONED_RUN_ERROR_CODE,
 ) -> dict[str, int]:
     """Reap stale `running` rows AND auto-requeue the ones within retry budget.
 
@@ -2335,7 +2357,16 @@ def recover_abandoned_runs(
     repos_obj = _repos(repos)
     timeout, grace, now_dt = _resolve_reaper_window(timeout_seconds, grace_seconds, now)
     failed = _fail_dispatch_orphan_rows(repos_obj, now_dt=now_dt)
-    failed.extend(_fail_stale_running_rows(repos_obj, timeout=timeout, grace=grace, now_dt=now_dt))
+    failed.extend(
+        _fail_stale_running_rows(
+            repos_obj,
+            timeout=timeout,
+            grace=grace,
+            now_dt=now_dt,
+            error=error,
+            error_code=error_code,
+        )
+    )
     requeued = 0
     if failed and _auto_requeue_abandoned_enabled():
         for row in failed:
@@ -2557,7 +2588,13 @@ def _run_reaper_loop() -> None:
         try:
             # #1434: recover (reap + bounded auto-requeue) instead of a bare reap,
             # so a run orphaned by a restart is retried rather than hard-failed.
-            recover_abandoned_runs()
+            # Steady-state sweeps label rows `orphaned` (the process did NOT
+            # restart; the run silently lost its executor) so they are
+            # distinguishable from startup/restart abandonment.
+            recover_abandoned_runs(
+                error=ORPHANED_RUN_ERROR,
+                error_code=ORPHANED_RUN_ERROR_CODE,
+            )
         except Exception as exc:
             logger.warning("Run reaper sweep failed: %s", exc)
 

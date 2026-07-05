@@ -480,3 +480,78 @@ def test_requeue_interrupted_does_not_loop_on_restart_retry(repo_bundle, monkeyp
     # Already a restart_retry -> must not requeue again (bounded across deploys).
     assert run_service._requeue_interrupted_run_in_place(repos, "run-int2", "user-a") is False
     assert repos.runs.get(user_id="user-a", run_id="run-int2")["status"] == RunStatus.FAILED.value
+
+
+# --- steady-state (periodic) reaper labels rows `orphaned`, not restart -------
+
+def test_recover_with_orphaned_labels_marks_row_orphaned(repo_bundle, monkeypatch):
+    """The periodic reaper sweep passes error/error_code overrides so a run
+    that silently lost its executor BETWEEN deploys is labeled `orphaned`
+    (distinct from run_abandoned_server_restart, which the startup recovery
+    keeps for deploy/restart abandonment)."""
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    stale = (now - dt.timedelta(seconds=700)).isoformat()
+    _make_stale_running(repos, manifest, "run-hung", started=stale)
+    # The run DID reach sandbox startup (it hung mid-execution), so the
+    # dispatch-orphan sweep skips it and the stale-running sweep labels it.
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id="run-hung",
+        level="info",
+        message="[e2b] Spawning sandbox for worker-a",
+        timestamp=stale,
+    )
+
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: None)
+
+    result = run_service.recover_abandoned_runs(
+        repos=repos,
+        now=now,
+        timeout_seconds=300,
+        grace_seconds=60,
+        error=run_service.ORPHANED_RUN_ERROR,
+        error_code=run_service.ORPHANED_RUN_ERROR_CODE,
+    )
+
+    assert result["failed"] == 1
+    row = repos.runs.get(user_id="user-a", run_id="run-hung")
+    assert row["status"] == RunStatus.FAILED.value
+    assert row["error"] == run_service.ORPHANED_RUN_ERROR
+    assert row["error_code"] == "orphaned"
+    logs = repos.runs.list_logs(user_id="user-a", run_id="run-hung")
+    assert run_service.ORPHANED_RUN_ERROR in [log["message"] for log in logs]
+
+
+def test_run_reaper_loop_sweeps_with_orphaned_error_code(monkeypatch):
+    """Regression (bug B): the periodic loop must (a) actually sweep and
+    (b) label swept rows `orphaned`. Before this fix the cloud deployment
+    never even started the loop, so runs sat in `running` for hours until
+    the next deploy's startup recovery caught them."""
+    import run_service
+
+    calls: list[dict] = []
+
+    class _OneSweepStop:
+        def __init__(self):
+            self.waits = 0
+
+        def wait(self, timeout=None):
+            self.waits += 1
+            return self.waits > 1  # first wait: run one sweep; then stop
+
+    monkeypatch.setattr(run_service, "_run_reaper_stop", _OneSweepStop())
+    monkeypatch.setattr(
+        run_service,
+        "recover_abandoned_runs",
+        lambda **kw: calls.append(kw) or {"failed": 0, "requeued": 0},
+    )
+
+    run_service._run_reaper_loop()
+
+    assert len(calls) == 1
+    assert calls[0]["error_code"] == run_service.ORPHANED_RUN_ERROR_CODE == "orphaned"
+    assert calls[0]["error"] == run_service.ORPHANED_RUN_ERROR
