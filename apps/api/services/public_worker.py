@@ -373,11 +373,27 @@ def _list_local_workspace_rows() -> list[Dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def _resolve_public_workspace_handle(handle: str) -> Dict[str, Any]:
+def _resolve_public_workspace_handle(handle: str, repos: "Repositories" | None = None) -> Dict[str, Any]:
+    """Resolve a workspace by handle.
+
+    Primary path (cloud + L4): the stored, unique ``handle`` column via
+    ``repos.workers.resolve_workspace_by_handle`` — a workspace/worker rename
+    never breaks a shared /@handle URL. Fallback (OSS single-tenant, or an
+    engine pin predating the repo method): the legacy name-slug scan over
+    ``local_workspaces``. Both normalize the handle the same way.
+    """
     raw = str(handle or "").strip().lstrip("@").strip("/")
     slug = _slugify_handle(raw)
     if not slug or not _HANDLE_RE.fullmatch(slug):
         raise HTTPException(status_code=404, detail="Workspace profile not found")
+
+    resolver = getattr(getattr(repos, "workers", None), "resolve_workspace_by_handle", None)
+    if callable(resolver):
+        row = resolver(handle=slug)
+        if row:
+            return {**row, "handle": str(row.get("handle") or slug)}
+        # Fall through to the legacy scan only if the repo has no local rows to
+        # offer (keeps OSS behavior when the stored column is unpopulated).
 
     workspaces = _list_local_workspace_rows()
     exact_id = [row for row in workspaces if str(row.get("id") or "").lower() == raw.lower()]
@@ -392,10 +408,62 @@ def _resolve_public_workspace_handle(handle: str) -> Dict[str, Any]:
     raise HTTPException(status_code=404, detail="Workspace profile not found")
 
 
+def _public_worker_card_by_handle_slug(
+    handle: str, worker_slug: str, repos: "Repositories"
+) -> Dict[str, Any]:
+    """Resolve a single PUBLIC worker permalink (/@{handle}/{worker_slug}).
+
+    Resolves the workspace by stored handle, then the worker by its stored
+    per-workspace ``public_slug`` (public-only via ``get_public_by_slug``).
+    Returns the strict PublicWorker card projection wrapped with the workspace
+    identity + canonical permalink path. Anything not found or not public ->
+    404 (never confirms a private worker's existence).
+    """
+    from models import WorkerConfig
+
+    workspace = _resolve_public_workspace_handle(handle, repos)
+    workspace_id = str(workspace.get("id") or "local-default")
+    profile_handle = str(workspace.get("handle") or _slugify_handle(workspace.get("name") or workspace_id))
+
+    normalized_slug = _slugify_handle(str(worker_slug or ""))
+    getter = getattr(repos.workers, "get_public_by_slug", None)
+    worker = getter(workspace_id=workspace_id, public_slug=normalized_slug) if callable(getter) else None
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    try:
+        config = WorkerConfig(**(worker.get("config") or {}))
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or ""),
+            name=str(worker.get("name") or ""),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    public = _public_worker_response(worker, config).model_dump()
+    permalink = f"/@{profile_handle}/{normalized_slug}"
+    return {
+        "entity_type": "worker_permalink",
+        "workspace": {
+            "id": workspace_id,
+            "name": str(workspace.get("name") or workspace_id),
+            "handle": profile_handle,
+            "profile_path": _workspace_profile_path(profile_handle),
+        },
+        "worker": public,
+        "public_slug": normalized_slug,
+        "permalink": permalink,
+        "title": public.get("name"),
+        "description": public.get("description") or public.get("long_description"),
+        "share_path": _worker_share_path(worker),
+        "shared_by": _public_workspace_actor(workspace, repos),
+    }
+
+
 def _public_workspace_profile(handle: str, repos: "Repositories", *, limit: int = 50) -> Dict[str, Any]:
     from models import WorkerConfig
 
-    workspace = _resolve_public_workspace_handle(handle)
+    workspace = _resolve_public_workspace_handle(handle, repos)
     workspace_id = str(workspace.get("id") or "local-default")
     workers = repos.workers.list_public_for_workspace(workspace_id=workspace_id, limit=limit)
     if not workers:

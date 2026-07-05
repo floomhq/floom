@@ -154,3 +154,28 @@ export async function fetchPublicWorkspaceProfile(handle: string) {
     { next: { revalidate: 30 }, includeWorkspace: false, includeSecret: false }
   );
 }
+
+/**
+ * Resolve a PUBLIC worker permalink (/@{handle}/{worker_slug}).
+ *
+ * Returns null for a 404 (non-public or unknown handle/slug) so the page can
+ * render notFound() without leaking whether a private worker exists; re-throws
+ * any other transport error. Public + cacheable (no auth), so the SSR fetch is
+ * edge-revalidated to absorb scraper traffic.
+ */
+export async function fetchPublicWorkerPermalink(
+  handle: string,
+  workerSlug: string
+): Promise<import("./types").PublicWorkerPermalink | null> {
+  try {
+    return await serverFetch<import("./types").PublicWorkerPermalink>(
+      `/workers/public/by-handle/${encodeURIComponent(handle)}/${encodeURIComponent(workerSlug)}`,
+      { next: { revalidate: 300 }, includeWorkspace: false, includeSecret: false }
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("API error 404")) {
+      return null;
+    }
+    throw err;
+  }
+}

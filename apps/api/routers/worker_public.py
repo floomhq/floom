@@ -53,8 +53,12 @@ from services.context_access import (
 from services.public_view import _json_noindex, _public_noindex_headers
 from services.public_worker import (
     _load_public_worker,
+    _public_worker_card_by_handle_slug,
     _public_worker_response,
+    _public_worker_share_from_worker,
     _public_workspace_profile,
+    _resolve_public_workspace_handle,
+    _slugify_handle,
     _standalone_share_payload,
 )
 from services.run_access import _sanitize_download_name
@@ -148,6 +152,23 @@ def get_public_workspace_profile(
     return _json_noindex(_public_workspace_profile(handle, repos, limit=limit))
 
 
+@worker_public_router.get("/workers/public/by-handle/{handle}/{worker_slug}")
+def get_public_worker_by_handle_slug(
+    handle: str,
+    worker_slug: str,
+    repos: Repositories = Depends(get_repos),
+) -> JSONResponse:
+    """Resolve a PUBLIC worker permalink (/@{handle}/{worker_slug}).
+
+    Powers the L4 permalink page + og-image. Resolves the workspace by its
+    stored handle and the worker by its stored per-workspace public_slug, and
+    returns ONLY public card fields for a worker with visibility='public'.
+    Non-public / unknown handle or slug -> 404 (never confirms existence). The
+    SSR'd HTML page (not this JSON) is what search engines index.
+    """
+    return JSONResponse(_public_worker_card_by_handle_slug(handle, worker_slug, repos))
+
+
 @worker_public_router.get("/workers/public/{worker_id}/run-meta")
 def get_public_worker_run_meta(
     worker_id: str,
@@ -236,6 +257,43 @@ def import_worker_from_share(
     payload = _standalone_share_payload(body.token, repos)
     if payload.get("entity_type") != "worker":
         raise HTTPException(status_code=400, detail="Share link is not a worker")
+    share_files = payload.get("files") or []
+    if not share_files:
+        raise HTTPException(status_code=409, detail="Worker has no importable files")
+    draft_files = [DraftFile(path=f["path"], content=f.get("content") or "") for f in share_files if f.get("path")]
+    if not any(f.path == "worker.yml" for f in draft_files):
+        raise HTTPException(status_code=409, detail="Worker share is missing worker.yml")
+    new_id = _register_worker_from_files(draft_files, user_id=auth.user_id, repos=repos, dedupe_id=True)
+    return {"worker_id": new_id, "url": f"/workers/{new_id}"}
+
+
+class _ImportFromPermalinkRequest(BaseModel):
+    handle: str = Field(..., min_length=1, max_length=80)
+    worker_slug: str = Field(..., min_length=1, max_length=80)
+
+
+@worker_public_router.post("/workers/import-from-permalink")
+def import_worker_from_permalink(
+    body: _ImportFromPermalinkRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """"Use this template" on a public permalink (/@{handle}/{worker_slug}).
+
+    Authenticated clone of a PUBLIC worker into the caller's workspace, sourced
+    by stored handle + public_slug (no share token round-trip). Same clone path
+    as import-from-share (_register_worker_from_files, dedupe on collision), and
+    the same auth surface — it only ever clones a worker whose visibility is
+    'public'. Non-public / unknown -> 404.
+    """
+    workspace = _resolve_public_workspace_handle(body.handle, repos)
+    workspace_id = str(workspace.get("id") or "local-default")
+    normalized_slug = _slugify_handle(str(body.worker_slug or ""))
+    getter = getattr(repos.workers, "get_public_by_slug", None)
+    worker = getter(workspace_id=workspace_id, public_slug=normalized_slug) if callable(getter) else None
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    payload = _public_worker_share_from_worker(worker, repos)
     share_files = payload.get("files") or []
     if not share_files:
         raise HTTPException(status_code=409, detail="Worker has no importable files")

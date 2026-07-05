@@ -382,6 +382,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ token }),
       }),
+    importFromPermalink: (handle: string, workerSlug: string) =>
+      fetchJson<{ worker_id: string; url: string }>("/workers/import-from-permalink", {
+        method: "POST",
+        body: JSON.stringify({ handle, worker_slug: workerSlug }),
+      }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: async (id: string, inputs: Record<string, unknown>) => {

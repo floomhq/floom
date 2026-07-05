@@ -81,6 +81,26 @@ class WorkerRepository(Protocol):
         """Public/listed workers for a no-login workspace profile."""
         ...
 
+    def resolve_workspace_by_handle(self, *, handle: str) -> RowDict | None:
+        """Resolve a workspace row by its stored, unique ``handle`` column.
+
+        Powers the L4 permalink read path (/@{handle}/{slug}). Returns the
+        workspace row (id, name, handle, owner_user_id, ...) or None if no
+        workspace has that handle. MUST NOT fall back to name-slug matching:
+        the handle is a stored column and is the single source of truth.
+        """
+        ...
+
+    def get_public_by_slug(self, *, workspace_id: str, public_slug: str) -> RowDict | None:
+        """Resolve a PUBLIC worker by (workspace_id, public_slug).
+
+        Returns the worker row ONLY when it exists AND its visibility is
+        'public'. Non-public or absent -> None (the caller 404s, never
+        confirming a private worker's existence). Card projection happens in
+        the service layer; this returns the raw row.
+        """
+        ...
+
     def create(self, *, user_id: str, **fields: Any) -> RowDict: ...
 
     def update(self, *, user_id: str, worker_id: str, **fields: Any) -> RowDict | None: ...

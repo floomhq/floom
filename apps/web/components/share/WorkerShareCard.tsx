@@ -125,12 +125,17 @@ export function WorkerShareCard({
   token,
   files = [],
   sharedBy,
+  permalink,
 }: {
   worker: PublicWorker;
   authed?: boolean;
   token?: string;
   files?: PublicShareFile[];
   sharedBy?: { label: string; display_name?: string; email?: string } | null;
+  // L4 permalink source (/@{handle}/{worker_slug}): when set, "Use this
+  // template" clones the public worker via the handle+slug import path instead
+  // of a share token, and the login redirect returns to the permalink.
+  permalink?: { handle: string; workerSlug: string; path: string };
 }) {
   const router = useRouter();
   const workspaceHref = useWorkspaceHref();
@@ -149,10 +154,13 @@ export function WorkerShareCard({
   const sharerLabel = sharedBy?.label || "a Floom user";
 
   async function handleImport() {
-    if (!token || importing) return;
+    if (importing) return;
+    if (!token && !permalink) return;
     setImporting(true);
     try {
-      const result = await api.workers.importFromShare(token);
+      const result = permalink
+        ? await api.workers.importFromPermalink(permalink.handle, permalink.workerSlug)
+        : await api.workers.importFromShare(token!);
       setImportedId(result.worker_id);
       // L6: if the response carries the workspace the worker was imported into
       // (cloud-side enrichment), stamp it into localStorage/cookie so the
@@ -179,10 +187,14 @@ export function WorkerShareCard({
   }
 
   // CTA element differs: authed users get an import button; guests go to login.
-  const ctaHref = authed ? undefined : shareLoginHref(token);
+  const ctaHref = authed
+    ? undefined
+    : permalink
+      ? `/login?next=${encodeURIComponent(permalink.path)}`
+      : shareLoginHref(token);
   const ctaLabel = importedId ? "View worker" : importing ? "Importing..." : "Add to workspace";
 
-  const importButton = authed && token ? (
+  const importButton = authed && (token || permalink) ? (
     <button
       type="button"
       onClick={() => void handleImport()}
