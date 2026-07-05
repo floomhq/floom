@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -94,10 +94,21 @@ function WorkerConnectionRow({
   connection: ConnectionItem | undefined;
 }) {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const app = getSupportedApp(slug);
   const accountLabel = connection
     ? maskAccountLabel(getConnectionAccountLabel(connection as ConnectionRecord))
     : null;
+  // Deep-link straight into the OAuth flow for THIS app, with return_to set
+  // back to the run page the user was on — instead of dumping them on the
+  // plain /connections list with no way back. Mirrors the pattern already
+  // used by WorkersCollection's MissingConnectionsBanner (`/connections/
+  // connect/{slug}?return_to=...`), which the redirect flow honors on
+  // success (ConnectionsRedirectPage -> router.replace(returnTo)).
+  const connectHref = withWorkspaceParam(
+    `/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent(pathname || "/connections")}`,
+    searchParams,
+  );
   return (
     <div className="flex items-center gap-2.5 text-sm">
       <span className="shrink-0">
@@ -109,7 +120,7 @@ function WorkerConnectionRow({
           <span className="block truncate text-xs text-muted-foreground">{accountLabel}</span>
         ) : (
           <Link
-            href={withWorkspaceParam("/connections", searchParams)}
+            href={connectHref}
             className="block text-xs text-[var(--accent)] no-underline hover:underline"
           >
             Not connected · Connect
