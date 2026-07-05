@@ -30,6 +30,7 @@ from core.config import (
     _is_cloud_deploy,
 )
 from secret_scan import scan_bytes
+from services.db_retry import retry_on_deadlock
 
 if TYPE_CHECKING:
     from db import Repositories
@@ -742,6 +743,7 @@ def _git_commit_context_rename(
         logger.warning("git commit failed for context rename %s -> %s: %s", old_name, new_name, exc)
 
 
+@retry_on_deadlock
 def _increment_file_ref_counts(file_ids: List[str]) -> None:
     """Increment file ref_counts in one short transaction tolerant of run bursts.
 
@@ -750,6 +752,15 @@ def _increment_file_ref_counts(file_ids: List[str]) -> None:
     path uses), instead of the module-import-time ``DB_PATH`` global. The stale
     global could diverge from the live path (deploy-dir swaps / test suites that
     re-pin the DB), silently writing ref_count updates to the wrong database.
+
+    Lock ordering (Postgres 40P01 deadlock fix): the ``files`` rows are updated
+    in a deterministic order sorted by ``id``. ``file_ids`` arrives in per-run
+    input-declaration order, which differs between workers, so two concurrent
+    run bindings that reference the SAME shared files in different orders would
+    otherwise acquire the row locks in opposite orders and deadlock. Sorting by
+    the primary key gives every transaction the same acquisition order, so they
+    serialize instead of deadlocking. ``@retry_on_deadlock`` is a belt-and-braces
+    guard against any residual storage-layer deadlock; it is a no-op on SQLite.
     """
     from db import get_db
 
@@ -757,7 +768,7 @@ def _increment_file_ref_counts(file_ids: List[str]) -> None:
         return
     counts = collections.Counter(file_ids)
     with get_db() as conn:
-        for file_id, count in counts.items():
+        for file_id, count in sorted(counts.items()):
             conn.execute(
                 "UPDATE files SET ref_count = ref_count + ? WHERE id = ?",
                 (count, file_id),

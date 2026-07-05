@@ -292,6 +292,7 @@ from services.git_service import (
 # Upload pipeline (validation/quota/signing/blob GC) lives in services.uploads;
 # re-exported here for the approval upload routes, runs artifact ownership
 # checks, _gc_orphan_blobs, and approval public-link signing still in main.
+from services.db_retry import TransientDatabaseError, is_deadlock_error
 from services.uploads import (
     _DEFAULT_UPLOAD_MAX_BYTES,
     _DEFAULT_UPLOAD_HOURLY_CAP_BYTES,
@@ -2176,8 +2177,31 @@ async def pydantic_validation_error_handler(_request, exc: ValidationError):
     )
 
 
+@app.exception_handler(TransientDatabaseError)
+async def transient_db_error_handler(_request, exc: TransientDatabaseError):
+    # A DB write deadlocked and the retry budget was spent. Log the full chained
+    # driver error server-side (SQLSTATE + query detail live on __cause__); the
+    # client gets a generic, retryable 503 and NEVER the raw Postgres error text
+    # ("deadlock detected", "Process NNN waits for ShareLock ...").
+    logger.error("Transient database error (deadlock retries exhausted)", exc_info=exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Temporarily busy, please retry.", "code": "db_busy"},
+    )
+
+
 @app.exception_handler(Exception)
 async def generic_error_handler(_request, exc: Exception):
+    # Never let a raw database error (Postgres deadlock / other driver error)
+    # serialize into the response body. Detect a 40P01 deadlock that reached the
+    # app boundary uncaught, log it fully server-side, and return the same
+    # generic retryable 503 as the exhausted-retry path.
+    if is_deadlock_error(exc):
+        logger.error("Database deadlock reached the app boundary uncaught", exc_info=exc)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Temporarily busy, please retry.", "code": "db_busy"},
+        )
     logger.exception("Unhandled exception")
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 

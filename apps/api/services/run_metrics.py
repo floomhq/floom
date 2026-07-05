@@ -67,6 +67,15 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "executor_thread_pre_sandbox_exception": "crash",
     "approval_loop_killed": "crash",
     "worker_reported_error": "crash",
+    # Worker-level failure with no more specific code (run_service
+    # WORKER_ERROR_CODE fallback). A worker that failed IS a crash-class outcome,
+    # not "unknown".
+    "worker_error": "crash",
+    # E2B sandbox spawn/transport failures. Previously classified only via the
+    # "sandbox" message substring; mapping the code explicitly makes it robust to
+    # a reworded message.
+    "e2b_sandbox_error": "crash",
+    "sandbox_crash": "crash",
     "invalid_result_json": "crash",
     "missing_result": "crash",
     # shutdown / redeploy-abandoned runs (spec §11 classifier gap): these are
@@ -89,11 +98,15 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     # auth / credentials
     "missing_secret": "auth",
     "missing_connection": "auth",
+    "connection_rejected": "auth",
     "llm_auth_error": "auth",
     "llm_model_not_configured": "config",
     # network / external connectivity
     "mcp_connect_failed": "network",
     "llm_provider_error": "network",
+    # upstream HTTP failures surfaced from the sandbox / run drivers
+    "upstream_http_4xx": "network",
+    "upstream_http_5xx": "network",
     # resource limits
     "sandbox_oom": "resource",
     "output_too_large": "resource",
