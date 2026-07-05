@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, ChevronDown, Copy, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -563,7 +564,22 @@ function UsedByPanel({ connection, workers }: { connection: ConnectionItem; work
           ))}
         </div>
       ) : (
-        <DetailEmpty>No workers use this connection yet.</DetailEmpty>
+        // Activation fix: this was a dead end — the empty state stated a
+        // fact and gave the user nowhere to go, right where dwell time on
+        // /connections is highest and runs are lowest. Point forward at
+        // workers instead.
+        <DetailEmpty>
+          No workers use this connection yet.{" "}
+          <Link
+            href={workspaceHref(
+              `/workers?q=${encodeURIComponent(humaniseAppName(connection.app_name || ""))}`,
+            )}
+            className="text-[var(--accent)] no-underline hover:underline"
+          >
+            Browse workers that could use it
+          </Link>
+          , or create one from the prompt box on Workers.
+        </DetailEmpty>
       )}
     </DetailGroup>
   );
@@ -624,6 +640,9 @@ export default function ConnectionsCollection({
   initialConnectionsPromise?: Promise<ConnectionItem[]>;
 }) {
   const workspaceHref = useWorkspaceHref();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   useStreamedInitialData(qk.connections, initialConnectionsPromise);
   // Pass undefined (not []) as initialData when empty so the query still fetches
   // on a cold start — an empty-array initialData would mark the query "fresh" and
@@ -684,6 +703,43 @@ export default function ConnectionsCollection({
     }, 25_000);
     return () => clearTimeout(timeout);
   }, [firstLoadPending]);
+
+  // Activation fix: the OAuth callback (connections/callback/page.tsx) lands
+  // here with `?connected=1&app=...` on success or `?connected=0&error=...`
+  // on failure, but nothing ever read those params — a successful connect
+  // silently dumped the user on the plain list, and a FAILED connect (the
+  // backend deletes the orphaned row and redirects the same way) looked
+  // identical, with zero indication anything went wrong. Surface both as a
+  // toast, once, then strip the one-time params (keep `sel`/`tab`/etc. —
+  // those are the Collection's own URL state and still open the row).
+  const connectFeedbackShownRef = useRef(false);
+  useEffect(() => {
+    const connected = searchParams.get("connected");
+    if (connected === null || connectFeedbackShownRef.current) return;
+    connectFeedbackShownRef.current = true;
+    const appSlug = searchParams.get("app");
+    const appName = appSlug ? humaniseAppName(appSlug) : "App";
+    if (connected === "1") {
+      toast.success(`${appName} connected.`);
+    } else {
+      const errorCode = searchParams.get("error");
+      const detail =
+        errorCode === "oauth_state"
+          ? "The authorization link expired or was already used. Try connecting again."
+          : errorCode === "oauth_failed"
+            ? "The provider didn't finish authorizing. Try connecting again."
+            : "Something went wrong finishing the connection. Try again.";
+      toast.error(`Couldn't connect ${appName}`, { description: detail });
+    }
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("connected");
+    next.delete("error");
+    next.delete("connection_id");
+    next.delete("app");
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
 
