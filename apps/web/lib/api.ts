@@ -378,7 +378,7 @@ export const api = {
         method: "DELETE",
       }),
     importFromShare: (token: string) =>
-      fetchJson<{ worker_id: string; url: string }>("/workers/import-from-share", {
+      fetchJson<{ worker_id: string; url: string; workspace_id?: string }>("/workers/import-from-share", {
         method: "POST",
         body: JSON.stringify({ token }),
       }),
