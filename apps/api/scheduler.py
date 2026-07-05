@@ -483,145 +483,184 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             )
             continue
 
-        scheduled_inputs, missing_inputs = _effective_scheduled_inputs(
-            repos,
-            worker_id,
-            user_id=user_id,
-            workspace_id=workspace_id,
-        )
-        if missing_inputs:
-            _create_synthetic_failed_schedule_run(
-                repos,
-                worker_id=worker_id,
-                user_id=user_id,
-                now_iso=now_iso_str,
-                trigger_ref=trigger_id,
-                input_json=scheduled_inputs,
-                error=(
-                    "Missing required scheduled input(s): "
-                    + ", ".join(missing_inputs)
-                ),
-                error_code="missing_required_input",
-            )
-            if new_next:
-                repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
-            logger.warning(
-                "Skipping schedule trigger %s for worker %s: missing required scheduled input(s): %s",
-                trigger_id,
-                worker_id,
-                ", ".join(missing_inputs),
-            )
-            continue
-
-        # #551: Block upfront if required secrets/connections are not configured.
-        _sched_missing_secrets = _missing_secrets_for_scheduled_worker(
-            repos,
-            worker_id,
-            user_id,
-            workspace_id=workspace_id,
-        )
-        if _sched_missing_secrets:
-            _create_synthetic_failed_schedule_run(
-                repos,
-                worker_id=worker_id,
-                user_id=user_id,
-                now_iso=now_iso_str,
-                trigger_ref=trigger_id,
-                input_json=scheduled_inputs,
-                error="Missing secrets: " + ", ".join(_sched_missing_secrets),
-                error_code="missing_secret",
-            )
-            if new_next:
-                repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
-            logger.warning(
-                "Skipping schedule trigger %s for worker %s: missing secret(s): %s",
-                trigger_id, worker_id, ", ".join(_sched_missing_secrets),
-            )
-            continue
-        _sched_missing_conns = _missing_connections_for_scheduled_worker(
-            repos,
-            worker_id,
-            user_id,
-            workspace_id=workspace_id,
-        )
-        if _sched_missing_conns:
-            _create_synthetic_failed_schedule_run(
-                repos,
-                worker_id=worker_id,
-                user_id=user_id,
-                now_iso=now_iso_str,
-                trigger_ref=trigger_id,
-                input_json=scheduled_inputs,
-                error="Missing connections: " + ", ".join(_sched_missing_conns),
-                error_code="missing_connection",
-            )
-            if new_next:
-                repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
-            logger.warning(
-                "Skipping schedule trigger %s for worker %s: missing connection(s): %s",
-                trigger_id, worker_id, ", ".join(_sched_missing_conns),
-            )
-            continue
-
-        logger.info(
-            "Firing schedule trigger %s for worker %s (was due %s)",
-            trigger_id,
-            worker_id,
-            next_at_str,
-        )
         try:
-            run_id = create_run(
+            scheduled_inputs, missing_inputs = _effective_scheduled_inputs(
+                repos,
                 worker_id,
-                scheduled_inputs,
-                trigger_source="schedule",
                 user_id=user_id,
-                trigger_ref=trigger_id,
-                repos=repos,
+                workspace_id=workspace_id,
             )
-            start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
-            repos.workers.mark_trigger_fired(
-                trigger_id=trigger_id,
-                last_fired_at=now_iso_str,
-                next_run_at=new_next,
-            )
-            _emit_trigger_fired(
-                owner_id=user_id,
-                worker_id=worker_id,
-                run_id=run_id,
-                trigger_type="schedule",
-                trigger_id=trigger_id,
-            )
-            # Keep the worker-scalar bookkeeping roughly in sync for any legacy
-            # readers of workers.last_scheduled_run_at.
-            try:
-                repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
-            except Exception:
-                pass
-            logger.info(
-                "Schedule trigger %s started run %s for worker %s, next at %s",
-                trigger_id,
-                run_id,
+            if missing_inputs:
+                _create_synthetic_failed_schedule_run(
+                    repos,
+                    worker_id=worker_id,
+                    user_id=user_id,
+                    now_iso=now_iso_str,
+                    trigger_ref=trigger_id,
+                    input_json=scheduled_inputs,
+                    error=(
+                        "Missing required scheduled input(s): "
+                        + ", ".join(missing_inputs)
+                    ),
+                    error_code="missing_required_input",
+                )
+                if new_next:
+                    repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                logger.warning(
+                    "Skipping schedule trigger %s for worker %s: missing required scheduled input(s): %s",
+                    trigger_id,
+                    worker_id,
+                    ", ".join(missing_inputs),
+                )
+                continue
+
+            # #551: Block upfront if required secrets/connections are not configured.
+            _sched_missing_secrets = _missing_secrets_for_scheduled_worker(
+                repos,
                 worker_id,
-                new_next,
+                user_id,
+                workspace_id=workspace_id,
             )
-        except Exception as exc:
+            if _sched_missing_secrets:
+                _create_synthetic_failed_schedule_run(
+                    repos,
+                    worker_id=worker_id,
+                    user_id=user_id,
+                    now_iso=now_iso_str,
+                    trigger_ref=trigger_id,
+                    input_json=scheduled_inputs,
+                    error="Missing secrets: " + ", ".join(_sched_missing_secrets),
+                    error_code="missing_secret",
+                )
+                if new_next:
+                    repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                logger.warning(
+                    "Skipping schedule trigger %s for worker %s: missing secret(s): %s",
+                    trigger_id, worker_id, ", ".join(_sched_missing_secrets),
+                )
+                continue
+            _sched_missing_conns = _missing_connections_for_scheduled_worker(
+                repos,
+                worker_id,
+                user_id,
+                workspace_id=workspace_id,
+            )
+            if _sched_missing_conns:
+                _create_synthetic_failed_schedule_run(
+                    repos,
+                    worker_id=worker_id,
+                    user_id=user_id,
+                    now_iso=now_iso_str,
+                    trigger_ref=trigger_id,
+                    input_json=scheduled_inputs,
+                    error="Missing connections: " + ", ".join(_sched_missing_conns),
+                    error_code="missing_connection",
+                )
+                if new_next:
+                    repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                logger.warning(
+                    "Skipping schedule trigger %s for worker %s: missing connection(s): %s",
+                    trigger_id, worker_id, ", ".join(_sched_missing_conns),
+                )
+                continue
+
+            logger.info(
+                "Firing schedule trigger %s for worker %s (was due %s)",
+                trigger_id,
+                worker_id,
+                next_at_str,
+            )
+            try:
+                run_id = create_run(
+                    worker_id,
+                    scheduled_inputs,
+                    trigger_source="schedule",
+                    user_id=user_id,
+                    trigger_ref=trigger_id,
+                    repos=repos,
+                )
+                start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
+                repos.workers.mark_trigger_fired(
+                    trigger_id=trigger_id,
+                    last_fired_at=now_iso_str,
+                    next_run_at=new_next,
+                )
+                _emit_trigger_fired(
+                    owner_id=user_id,
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    trigger_type="schedule",
+                    trigger_id=trigger_id,
+                )
+                # Keep the worker-scalar bookkeeping roughly in sync for any legacy
+                # readers of workers.last_scheduled_run_at.
+                try:
+                    repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+                except Exception:
+                    pass
+                logger.info(
+                    "Schedule trigger %s started run %s for worker %s, next at %s",
+                    trigger_id,
+                    run_id,
+                    worker_id,
+                    new_next,
+                )
+            except Exception as exc:
+                _advance_next_run_after_failure(
+                    repos,
+                    worker_id=worker_id,
+                    trigger_id=trigger_id,
+                    next_run_at=new_next,
+                )
+                logger.exception(
+                    "Failed to fire schedule trigger %s for worker %s: %s",
+                    trigger_id,
+                    worker_id,
+                    exc,
+                )
+                if new_next:
+                    try:
+                        repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                    except Exception:
+                        pass
+        except Exception as row_exc:
+            # #2214: a single worker's broken config/manifest (e.g. an invalid
+            # WorkerConfig on disk) used to raise up through this per-row loop,
+            # uncaught. That (a) aborted processing of every OTHER due trigger
+            # in this tick, (b) tripped `_tick()`'s "trigger-row path failed,
+            # fall back to worker-scalar path" branch even though trigger rows
+            # ARE available — which re-processed the SAME broken worker via the
+            # legacy loop with the identical `now_iso_str`, producing duplicate
+            # schedule_missed markers with identical timestamps — and (c) since
+            # the crash happened before any next_run_at advancement, the
+            # trigger was re-claimed and re-crashed every lease cycle (~180s)
+            # forever, spamming schedule_missed runs while the real worker
+            # never got a diagnosable error and never actually dispatched.
+            # Isolate each row: never let one worker's failure affect any
+            # other trigger or fall back to the legacy path, always advance
+            # the schedule so it can self-heal, and record the REAL reason.
+            logger.exception(
+                "Schedule trigger %s for worker %s failed with an unexpected error; "
+                "recording a diagnosable failure instead of leaving the trigger stuck",
+                trigger_id,
+                worker_id,
+            )
+            _create_synthetic_failed_schedule_run(
+                repos,
+                worker_id=worker_id,
+                user_id=user_id,
+                now_iso=now_iso_str,
+                trigger_source="schedule",
+                trigger_ref=trigger_id,
+                error=f"Scheduler failed to process this trigger: {row_exc}",
+                error_code="scheduler_row_error",
+            )
             _advance_next_run_after_failure(
                 repos,
                 worker_id=worker_id,
                 trigger_id=trigger_id,
                 next_run_at=new_next,
             )
-            logger.exception(
-                "Failed to fire schedule trigger %s for worker %s: %s",
-                trigger_id,
-                worker_id,
-                exc,
-            )
-            if new_next:
-                try:
-                    repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
-                except Exception:
-                    pass
     return len(rows)
 
 
@@ -723,129 +762,151 @@ def _tick() -> None:
             )
             continue
 
-        # Fire the run
-        scheduled_inputs, missing_inputs = _effective_scheduled_inputs(
-            repos,
-            worker_id,
-            user_id=user_id,
-            workspace_id=workspace_id,
-        )
-        if missing_inputs:
-            _create_synthetic_failed_schedule_run(
-                repos,
-                worker_id=worker_id,
-                user_id=user_id,
-                now_iso=now_iso_str,
-                input_json=scheduled_inputs,
-                error=(
-                    "Missing required scheduled input(s): "
-                    + ", ".join(missing_inputs)
-                ),
-                error_code="missing_required_input",
-            )
-            if new_next:
-                repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
-            logger.warning(
-                "Skipping scheduled run for worker %s: missing required scheduled input(s): %s",
-                worker_id,
-                ", ".join(missing_inputs),
-            )
-            continue
-
-        # #551: Block upfront if required secrets/connections are not configured.
-        _sched_missing_secrets = _missing_secrets_for_scheduled_worker(
-            repos,
-            worker_id,
-            user_id,
-            workspace_id=workspace_id,
-        )
-        if _sched_missing_secrets:
-            _create_synthetic_failed_schedule_run(
-                repos,
-                worker_id=worker_id,
-                user_id=user_id,
-                now_iso=now_iso_str,
-                input_json=scheduled_inputs,
-                error="Missing secrets: " + ", ".join(_sched_missing_secrets),
-                error_code="missing_secret",
-            )
-            if new_next:
-                repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
-            logger.warning(
-                "Skipping scheduled run for worker %s: missing secret(s): %s",
-                worker_id, ", ".join(_sched_missing_secrets),
-            )
-            continue
-        _sched_missing_conns = _missing_connections_for_scheduled_worker(
-            repos,
-            worker_id,
-            user_id,
-            workspace_id=workspace_id,
-        )
-        if _sched_missing_conns:
-            _create_synthetic_failed_schedule_run(
-                repos,
-                worker_id=worker_id,
-                user_id=user_id,
-                now_iso=now_iso_str,
-                input_json=scheduled_inputs,
-                error="Missing connections: " + ", ".join(_sched_missing_conns),
-                error_code="missing_connection",
-            )
-            if new_next:
-                repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
-            logger.warning(
-                "Skipping scheduled run for worker %s: missing connection(s): %s",
-                worker_id, ", ".join(_sched_missing_conns),
-            )
-            continue
-
-        logger.info(
-            "Firing scheduled run for worker %s (was due %s)", worker_id, next_at_str
-        )
+        # Fire the run. Isolated per-worker (see the matching comment in
+        # _tick_trigger_rows / #2214): a single worker's broken config must
+        # never abort processing of the other scheduled workers in this tick.
         try:
-            run_id = create_run(
+            scheduled_inputs, missing_inputs = _effective_scheduled_inputs(
+                repos,
                 worker_id,
-                scheduled_inputs,
-                trigger_source="schedule",
                 user_id=user_id,
-                repos=repos,
+                workspace_id=workspace_id,
             )
-            start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
+            if missing_inputs:
+                _create_synthetic_failed_schedule_run(
+                    repos,
+                    worker_id=worker_id,
+                    user_id=user_id,
+                    now_iso=now_iso_str,
+                    input_json=scheduled_inputs,
+                    error=(
+                        "Missing required scheduled input(s): "
+                        + ", ".join(missing_inputs)
+                    ),
+                    error_code="missing_required_input",
+                )
+                if new_next:
+                    repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+                logger.warning(
+                    "Skipping scheduled run for worker %s: missing required scheduled input(s): %s",
+                    worker_id,
+                    ", ".join(missing_inputs),
+                )
+                continue
 
-            # Update last_scheduled_run_at + next_run_at
-            new_next = compute_next_run_at(cron_expr, now, cron_timezone)
-            repos.workers.mark_scheduled_run(
-                worker_id=worker_id,
-                last_scheduled_run_at=now_iso_str,
-                next_run_at=new_next,
-            )
-            _emit_trigger_fired(
-                owner_id=user_id,
-                worker_id=worker_id,
-                run_id=run_id,
-                trigger_type="schedule",
-            )
-            logger.info(
-                "Scheduled run %s started for worker %s, next at %s",
-                run_id,
+            # #551: Block upfront if required secrets/connections are not configured.
+            _sched_missing_secrets = _missing_secrets_for_scheduled_worker(
+                repos,
                 worker_id,
-                new_next,
+                user_id,
+                workspace_id=workspace_id,
             )
-        except Exception as exc:
+            if _sched_missing_secrets:
+                _create_synthetic_failed_schedule_run(
+                    repos,
+                    worker_id=worker_id,
+                    user_id=user_id,
+                    now_iso=now_iso_str,
+                    input_json=scheduled_inputs,
+                    error="Missing secrets: " + ", ".join(_sched_missing_secrets),
+                    error_code="missing_secret",
+                )
+                if new_next:
+                    repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+                logger.warning(
+                    "Skipping scheduled run for worker %s: missing secret(s): %s",
+                    worker_id, ", ".join(_sched_missing_secrets),
+                )
+                continue
+            _sched_missing_conns = _missing_connections_for_scheduled_worker(
+                repos,
+                worker_id,
+                user_id,
+                workspace_id=workspace_id,
+            )
+            if _sched_missing_conns:
+                _create_synthetic_failed_schedule_run(
+                    repos,
+                    worker_id=worker_id,
+                    user_id=user_id,
+                    now_iso=now_iso_str,
+                    input_json=scheduled_inputs,
+                    error="Missing connections: " + ", ".join(_sched_missing_conns),
+                    error_code="missing_connection",
+                )
+                if new_next:
+                    repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+                logger.warning(
+                    "Skipping scheduled run for worker %s: missing connection(s): %s",
+                    worker_id, ", ".join(_sched_missing_conns),
+                )
+                continue
+
+            logger.info(
+                "Firing scheduled run for worker %s (was due %s)", worker_id, next_at_str
+            )
+            try:
+                run_id = create_run(
+                    worker_id,
+                    scheduled_inputs,
+                    trigger_source="schedule",
+                    user_id=user_id,
+                    repos=repos,
+                )
+                start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
+
+                # Update last_scheduled_run_at + next_run_at
+                new_next = compute_next_run_at(cron_expr, now, cron_timezone)
+                repos.workers.mark_scheduled_run(
+                    worker_id=worker_id,
+                    last_scheduled_run_at=now_iso_str,
+                    next_run_at=new_next,
+                )
+                _emit_trigger_fired(
+                    owner_id=user_id,
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    trigger_type="schedule",
+                )
+                logger.info(
+                    "Scheduled run %s started for worker %s, next at %s",
+                    run_id,
+                    worker_id,
+                    new_next,
+                )
+            except Exception as exc:
+                _advance_next_run_after_failure(
+                    repos,
+                    worker_id=worker_id,
+                    next_run_at=new_next,
+                )
+                logger.exception(
+                    "Failed to fire scheduled run for worker %s: %s", worker_id, exc
+                )
+                if new_next:
+                    try:
+                        repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+                    except Exception:
+                        pass
+        except Exception as row_exc:
+            logger.exception(
+                "Scheduled run for worker %s failed with an unexpected error; "
+                "recording a diagnosable failure instead of leaving the schedule stuck",
+                worker_id,
+            )
+            _create_synthetic_failed_schedule_run(
+                repos,
+                worker_id=worker_id,
+                user_id=user_id,
+                now_iso=now_iso_str,
+                error=f"Scheduler failed to process this worker: {row_exc}",
+                error_code="scheduler_row_error",
+            )
             _advance_next_run_after_failure(
                 repos,
                 worker_id=worker_id,
                 next_run_at=new_next,
             )
-            logger.exception(
-                "Failed to fire scheduled run for worker %s: %s", worker_id, exc
-            )
-            if new_next:
-                try:
-                    repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
-                except Exception:
-                    pass
 
 
 def start_scheduler() -> None:
