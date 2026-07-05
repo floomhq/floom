@@ -139,10 +139,9 @@ describe("MissingConnectionsBanner (L6 activation)", () => {
     expect(gmailLink.href).toContain("return_to=");
   });
 
-  it("shows a disabled 'Run a test' button when connections are missing", async () => {
+  it("does NOT render a 'Run a test' button in the banner (it was permanently disabled dead code; the real Run button lives in the detail header)", async () => {
     await renderWithWorker(workerWithMissingConnections);
-    const runBtn = screen.getByRole("button", { name: /run a test/i });
-    expect(runBtn).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /run a test/i })).not.toBeInTheDocument();
   });
 
   it("dismisses the banner when X is clicked", async () => {
