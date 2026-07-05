@@ -989,6 +989,48 @@ def _worker_result_failure_fields(result_data: dict[str, Any]) -> tuple[Any, Any
     return result_error, result_error_code
 
 
+def _recover_worker_reported_failure(
+    sandbox: Any,
+    result_path: str,
+    log_fn: Callable,
+    *,
+    worker_stdout: Any = None,
+    worker_stderr: Any = None,
+) -> "tuple[str, str] | None":
+    """Recover a worker-reported error/error_code from result.json after a
+    NON-ZERO worker exit.
+
+    A worker that writes a structured result.json (a rejected connection, a
+    vendor 401/403, a validation failure) and then ``sys.exit(1)`` used to be
+    flattened to the generic ``execution_error`` because the non-zero-exit
+    branch returned before result.json was ever read. That silent loss is the
+    bulk of the "unknown"/opaque failure bucket. When result.json parses and
+    names a failure, return the worker's own ``(error, error_code)``; otherwise
+    return ``None`` so the caller keeps ``execution_error``.
+    """
+    try:
+        result_data, parse_error = _read_result_json(
+            sandbox,
+            result_path,
+            log_fn,
+            worker_stdout=worker_stdout,
+            worker_stderr=worker_stderr,
+        )
+    except Exception:  # pragma: no cover - defensive; never mask the exit failure
+        return None
+    if parse_error is not None or not isinstance(result_data, dict):
+        return None
+    status = str(result_data.get("status") or "").strip().lower()
+    has_error = bool(str(result_data.get("error") or "").strip())
+    has_code = bool(str(result_data.get("error_code") or "").strip())
+    if status not in ("error", "failed") and not has_error and not has_code:
+        return None
+    # Force the failure path so the worker_reported_error fallback + non-empty
+    # message apply while a real worker-provided error_code is preserved.
+    error, error_code = _worker_result_failure_fields({**result_data, "status": "error"})
+    return str(error), str(error_code)
+
+
 def _create_sandbox_with_key_fallback(
     sandbox_cls: Any,
     *,
@@ -2389,6 +2431,21 @@ class E2BSandboxDriver(SandboxDriver):
                     stderr=exc_stderr,
                 )
                 log_fn(f"[e2b] Worker exited with code {exc_exit_code}", "error")
+                recovered = _recover_worker_reported_failure(
+                    sandbox,
+                    f"{workdir}/result.json",
+                    log_fn,
+                    worker_stdout=exc_stdout,
+                    worker_stderr=exc_stderr,
+                )
+                if recovered is not None:
+                    recovered_error, recovered_code = recovered
+                    return WorkerResult(
+                        status="error",
+                        error=recovered_error,
+                        error_code=recovered_code,
+                        retryable=False,
+                    )
                 return WorkerResult(
                     status="error",
                     error=err,
@@ -2428,6 +2485,21 @@ class E2BSandboxDriver(SandboxDriver):
                     stderr=proc_stderr,
                 )
                 log_fn(f"[e2b] Worker exited with code {proc.exit_code}", "error")
+                recovered = _recover_worker_reported_failure(
+                    sandbox,
+                    f"{workdir}/result.json",
+                    log_fn,
+                    worker_stdout="".join(streamed_stdout) or proc_stdout,
+                    worker_stderr="".join(streamed_stderr) or proc_stderr,
+                )
+                if recovered is not None:
+                    recovered_error, recovered_code = recovered
+                    return WorkerResult(
+                        status="error",
+                        error=recovered_error,
+                        error_code=recovered_code,
+                        retryable=False,
+                    )
                 return WorkerResult(
                     status="error",
                     error=err,

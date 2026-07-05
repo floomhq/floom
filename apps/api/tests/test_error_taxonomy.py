@@ -19,8 +19,13 @@ API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
+import json
+
 import run_service
-from runner_sandbox.e2b_driver import _sandbox_exception_result
+from runner_sandbox.e2b_driver import (
+    _recover_worker_reported_failure,
+    _sandbox_exception_result,
+)
 from services import run_metrics
 from routers.connections import _connection_app_slug
 
@@ -29,6 +34,21 @@ class _HttpError(Exception):
     def __init__(self, message: str, status_code: int):
         super().__init__(message)
         self.status_code = status_code
+
+
+class _FakeSandboxFiles:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def read(self, _path):
+        if self._payload is None:
+            raise FileNotFoundError("no result.json")
+        return self._payload
+
+
+class _FakeSandbox:
+    def __init__(self, payload):
+        self.files = _FakeSandboxFiles(payload)
 
 
 # --- e2b driver upstream HTTP classification -------------------------------
@@ -129,3 +149,72 @@ def test_connection_app_slug_uses_caller_fallback_first():
 def test_connection_app_slug_empty_when_unknown():
     assert _connection_app_slug({"app_name": "", "mcp_label": ""}) == ""
     assert _connection_app_slug(None) == ""
+
+
+# --- non-zero-exit result.json recovery (the main "unknown" source) ---------
+
+
+def _noop_log(_msg, _level="info"):
+    pass
+
+
+def test_recover_worker_reported_code_on_nonzero_exit():
+    # Worker wrote a structured failure result then sys.exit(1). The driver must
+    # recover the worker's OWN error_code instead of flattening to execution_error.
+    payload = json.dumps(
+        {
+            "status": "error",
+            "outputs": {},
+            "error": "Unipile rejected the LinkedIn account",
+            "error_code": "connection_rejected",
+        }
+    )
+    recovered = _recover_worker_reported_failure(
+        _FakeSandbox(payload), "/w/result.json", _noop_log
+    )
+    assert recovered == ("Unipile rejected the LinkedIn account", "connection_rejected")
+
+
+def test_recover_worker_failure_without_code_gets_worker_reported():
+    payload = json.dumps({"status": "failed", "outputs": {}, "error": "boom"})
+    recovered = _recover_worker_reported_failure(
+        _FakeSandbox(payload), "/w/result.json", _noop_log
+    )
+    assert recovered == ("boom", "worker_reported_error")
+
+
+def test_recover_returns_none_when_no_result_json():
+    # No result.json -> caller keeps execution_error.
+    assert (
+        _recover_worker_reported_failure(_FakeSandbox(None), "/w/result.json", _noop_log)
+        is None
+    )
+
+
+def test_recover_returns_none_for_successful_result():
+    # A worker that exited non-zero but wrote a success result is NOT a
+    # worker-reported failure; caller keeps execution_error.
+    payload = json.dumps({"status": "success", "outputs": {"ok": True}})
+    assert (
+        _recover_worker_reported_failure(_FakeSandbox(payload), "/w/result.json", _noop_log)
+        is None
+    )
+
+
+# --- auth-rejection code inference from a codeless message ------------------
+
+
+def test_infer_connection_rejected_from_auth_message():
+    assert run_service._infer_failure_code_from_message("HTTP 401 Unauthorized") == "connection_rejected"
+    assert run_service._infer_failure_code_from_message("token invalid: 403 Forbidden") == "connection_rejected"
+    assert run_service._infer_failure_code_from_message("invalid api key") == "connection_rejected"
+
+
+def test_infer_returns_none_for_non_auth_message():
+    assert run_service._infer_failure_code_from_message("KeyError: 'x'") is None
+    assert run_service._infer_failure_code_from_message("") is None
+    assert run_service._infer_failure_code_from_message(None) is None
+
+
+def test_connection_rejected_classifies_as_auth():
+    assert run_metrics.classify_failure(error_code="connection_rejected") == "auth"

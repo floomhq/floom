@@ -1751,6 +1751,33 @@ def _classify_run_exception(exc: BaseException) -> str:
     return "run_execution_exception"
 
 
+# Auth-rejection signals in a worker failure message that carried NO structured
+# error_code. A rejected connection / vendor 401/403 otherwise fell through to
+# the generic bucket even though the message plainly says it is an auth problem.
+_AUTH_REJECTION_RE = re.compile(
+    r"\b(?:401|403|unauthorized|forbidden|invalid[ _-]?token|invalid[ _-]?api[ _-]?key"
+    r"|authentication failed|permission denied|access denied|account .*rejected)\b",
+    re.IGNORECASE,
+)
+
+
+def _infer_failure_code_from_message(error: str | None) -> str | None:
+    """Infer a real error_code from a codeless worker failure MESSAGE.
+
+    Additive: only consulted when a failure result carried no structured
+    error_code. Currently recognises the auth-rejection class (a connected
+    account or key was rejected) so those runs record ``connection_rejected``
+    instead of the opaque worker/unknown fallback. Returns ``None`` when nothing
+    specific is recognised.
+    """
+    text = error or ""
+    if not text.strip():
+        return None
+    if _AUTH_REJECTION_RE.search(text):
+        return "connection_rejected"
+    return None
+
+
 def update_run_status(
     run_id: str,
     status: str,
@@ -3495,11 +3522,16 @@ def execute_run(
         if result.status in ("error", "failed"):
             result_error = result.error
             # A worker/driver failure result should always carry a code; when it
-            # does not, record ``worker_error`` rather than letting it fall through
-            # to the generic ``unknown_error`` bucket downstream in
+            # does not, infer one from the message (e.g. an auth rejection) and
+            # otherwise record ``worker_error`` rather than letting it fall
+            # through to the generic ``unknown_error`` bucket downstream in
             # update_run_status. Additive: only fills the gap, never overrides a
             # code the driver already set.
-            result_error_code = result.error_code or WORKER_ERROR_CODE
+            result_error_code = (
+                result.error_code
+                or _infer_failure_code_from_message(result.error)
+                or WORKER_ERROR_CODE
+            )
             if was_shutdown_cancelled(run_id):
                 result_error = INTERRUPTED_RUN_ERROR
                 result_error_code = INTERRUPTED_RUN_ERROR_CODE

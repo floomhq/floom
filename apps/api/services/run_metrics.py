@@ -98,6 +98,7 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     # auth / credentials
     "missing_secret": "auth",
     "missing_connection": "auth",
+    "connection_rejected": "auth",
     "llm_auth_error": "auth",
     "llm_model_not_configured": "config",
     # network / external connectivity
