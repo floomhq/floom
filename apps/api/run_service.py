@@ -234,11 +234,17 @@ from services.run_notifications import (
     _fire_alert_webhooks,
     _dispatch_terminal_run_alerts,
 )
+from services.db_retry import call_with_deadlock_retry
 UNKNOWN_RUN_ERROR_CODE = "unknown_error"
 UNKNOWN_RUN_ERROR_MESSAGE = (
     "Run failed before the engine captured a specific failure reason. "
     "Check the run logs and retry."
 )
+# Meaningful fallback for a worker/driver failure result that arrives WITHOUT a
+# structured error_code. Previously such results fell through to
+# ``unknown_error`` (the "unknown" failure bucket); ``worker_error`` records
+# that the worker itself failed even when it did not name a specific code.
+WORKER_ERROR_CODE = "worker_error"
 
 
 # #1026: the drain loop executes each queued run in a fresh thread, which does
@@ -1695,6 +1701,56 @@ def _emit_approval_requested(
         logger.debug("PostHog approval_requested emit failed for %s", run_id, exc_info=True)
 
 
+def _http_status_from_exception(exc: BaseException) -> int | None:
+    """Best-effort HTTP status code carried by an httpx/requests-style exception.
+
+    Mirrors the sandbox driver's extraction: the status may sit directly on the
+    exception (``status_code``/``status``) or on an attached ``response``.
+    """
+    for attr in ("status_code", "status", "http_status", "http_status_code"):
+        value = getattr(exc, attr, None)
+        try:
+            if value is not None:
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+    response = getattr(exc, "response", None)
+    if response is not None:
+        value = getattr(response, "status_code", None) or getattr(response, "status", None)
+        try:
+            if value is not None:
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _classify_run_exception(exc: BaseException) -> str:
+    """Map an uncaught run-execution exception to a meaningful error_code.
+
+    Additive taxonomy over the historical blanket ``run_execution_exception``:
+    a crashed run that raised an httpx/requests error, a timeout, or a sandbox
+    failure now records the distinguishable code so the failure stops landing in
+    the generic "crash" bucket with no upstream detail. Anything not
+    distinguishable keeps the existing ``run_execution_exception`` code.
+    """
+    # Timeouts (asyncio.TimeoutError is an alias of TimeoutError on 3.11+).
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    status = _http_status_from_exception(exc)
+    if status is not None:
+        if 400 <= status < 500:
+            return "upstream_http_4xx"
+        if 500 <= status < 600:
+            return "upstream_http_5xx"
+    text = str(exc).lower()
+    if "timed out" in text or "timeout" in text or "deadline exceeded" in text:
+        return "timeout"
+    if "sandbox" in text:
+        return "sandbox_crash"
+    return "run_execution_exception"
+
+
 def update_run_status(
     run_id: str,
     status: str,
@@ -1748,13 +1804,20 @@ def update_run_status(
             )
         error = normalized_error
         error_code = normalized_error_code
-    repos_obj.runs.update_status(
-        user_id=owner_id,
-        run_id=run_id,
-        status=status,
-        output_json=output,
-        error=error,
-        error_code=error_code,
+    # Run-status writes are the hottest concurrent write path (the drain loop +
+    # SSE + terminal transitions all converge here); wrap the write so a Postgres
+    # 40P01 deadlock is retried with jittered backoff instead of failing the
+    # transition. No-op on SQLite.
+    call_with_deadlock_retry(
+        lambda: repos_obj.runs.update_status(
+            user_id=owner_id,
+            run_id=run_id,
+            status=status,
+            output_json=output,
+            error=error,
+            error_code=error_code,
+        ),
+        label="runs.update_status",
     )
     if status in {
         RunStatus.COMPLETED.value,
@@ -3431,7 +3494,12 @@ def execute_run(
         # Both "error" and "failed" terminal statuses map to a failed run
         if result.status in ("error", "failed"):
             result_error = result.error
-            result_error_code = result.error_code
+            # A worker/driver failure result should always carry a code; when it
+            # does not, record ``worker_error`` rather than letting it fall through
+            # to the generic ``unknown_error`` bucket downstream in
+            # update_run_status. Additive: only fills the gap, never overrides a
+            # code the driver already set.
+            result_error_code = result.error_code or WORKER_ERROR_CODE
             if was_shutdown_cancelled(run_id):
                 result_error = INTERRUPTED_RUN_ERROR
                 result_error_code = INTERRUPTED_RUN_ERROR_CODE
@@ -3819,6 +3887,11 @@ def execute_run(
     except Exception as exc:
         logger.exception("Run %s crashed for worker %s", run_id, worker_id)
         error_message = str(exc) or exc.__class__.__name__
+        # Classify the crash into a distinguishable error_code (timeout /
+        # upstream_http_4xx / upstream_http_5xx / sandbox_crash) so the failure
+        # does not collapse into the opaque blanket bucket; falls back to
+        # ``run_execution_exception`` when nothing more specific is knowable.
+        crash_error_code = _classify_run_exception(exc)
         # PostHog Error Tracking (Track A §A4): capture the real exception with
         # type + stack trace so crashes group into debuggable issues, beyond the
         # flat run_failed.error_category label. No-op + never raises when
@@ -3829,14 +3902,14 @@ def execute_run(
             worker_id=worker_id,
             owner_id=owner_id,
             trace_id=trace_id,
-            error_code="run_execution_exception",
+            error_code=crash_error_code,
         )
         try:
             update_run_status(
                 run_id,
                 RunStatus.FAILED.value,
                 error=error_message,
-                error_code="run_execution_exception",
+                error_code=crash_error_code,
                 user_id=owner_id,
                 repos=repos_obj,
             )

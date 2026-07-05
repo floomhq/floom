@@ -1587,6 +1587,31 @@ def create_mcp_connection(
     return _public_connection_item(item)
 
 
+def _connection_app_slug(
+    row: Optional[Dict[str, Any]], fallback: Optional[str] = None
+) -> str:
+    """Resolve the app slug for a connection from the connection object.
+
+    The ``connection_added`` / ``connection_failed`` telemetry must carry the
+    app slug (gmail, slack, an MCP label, ...). Composio rows store it as
+    ``app_name``; MCP-kind connections store it as ``mcp_label`` with an empty
+    ``app_name``. Reading only ``app_name`` emitted ``app: None`` for MCP
+    connections and for any row whose ``app_name`` was not populated, poisoning
+    the funnel breakdown. Resolve through the fields the connection object
+    actually carries, preferring an already-known caller value.
+    """
+    fb = str(fallback or "").strip()
+    if fb:
+        return fb
+    if not row:
+        return ""
+    for key in ("app_name", "mcp_label", "display_name"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _emit_connection_resolved(
     *,
     event: str,
@@ -1719,7 +1744,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
                 event="connection_failed",
                 connection_id=str(existing["id"]),
                 owner_id=str(existing["user_id"]),
-                provider=existing.get("app_name"),
+                provider=_connection_app_slug(existing),
                 failure_status=final_status,
             )
             landing_app = existing.get("app_name") or ""
@@ -1764,14 +1789,14 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
                 event="connection_added",
                 connection_id=str(landing_id or existing["id"]),
                 owner_id=str(existing["user_id"]),
-                provider=landing_app or existing.get("app_name"),
+                provider=_connection_app_slug(existing, fallback=landing_app),
             )
         elif remote_status in ("expired", "failed"):
             _emit_connection_resolved(
                 event="connection_failed",
                 connection_id=str(landing_id or existing["id"]),
                 owner_id=str(existing["user_id"]),
-                provider=landing_app or existing.get("app_name"),
+                provider=_connection_app_slug(existing, fallback=landing_app),
                 failure_status=final_status,
             )
 

@@ -948,6 +948,26 @@ def _sandbox_exception_result(
             error_code="timeout",
             retryable=True,
         )
+    # When the sandbox failure carries an HTTP status (an upstream API the
+    # sandbox spawn/transport hit returned 4xx/5xx), record the distinguishable
+    # upstream code instead of the generic e2b_sandbox_error so the failure
+    # taxonomy separates "our upstream returned an error" from "the sandbox
+    # itself broke". Additive: exceptions without a status keep e2b_sandbox_error.
+    status_code = _status_code_from_exception(exc)
+    if status_code is not None and 400 <= status_code < 500:
+        return WorkerResult(
+            status="error",
+            error=f"E2B sandbox failed with an upstream {status_code} response: {detail}",
+            error_code="upstream_http_4xx",
+            retryable=False,
+        )
+    if status_code is not None and 500 <= status_code < 600:
+        return WorkerResult(
+            status="error",
+            error=f"E2B sandbox failed with an upstream {status_code} response: {detail}",
+            error_code="upstream_http_5xx",
+            retryable=True,
+        )
     return WorkerResult(
         status="error",
         error=f"E2B sandbox failed before the worker timeout was reached: {detail}",
