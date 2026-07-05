@@ -204,3 +204,19 @@ def test_public_worker_permalink_404s_unknown_handle_or_slug():
 
         assert client.get("/workers/public/by-handle/nobody/gmail-inbox-cleaner").status_code == 404
         assert client.get("/workers/public/by-handle/fede-secretary/no-such-worker").status_code == 404
+
+
+def test_import_from_permalink_refuses_private_worker():
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        # A private worker must not be clonable via its handle+slug even by an
+        # authed caller (the endpoint only ever resolves visibility='public').
+        resp = client.post(
+            "/workers/import-from-permalink",
+            headers={"x-floom-secret": "workspace-profile-test-secret"},
+            json={"handle": "fede-secretary", "worker_slug": "private-worker"},
+        )
+        assert resp.status_code == 404
+        assert "private-worker" not in resp.text
