@@ -42,34 +42,44 @@ const workerWithMissingConnections: WorkerSummary = {
 
 const workerAllConnected: WorkerSummary = {
   ...workerWithMissingConnections,
+  id: "connected-worker",
+  name: "My Slack Notifier",
   status: "healthy",
   missing_connections: [],
 };
 
-const workerDetail = {
-  ...workerWithMissingConnections,
-  config: {
-    id: WORKER_ID,
-    name: "My Gmail Digest",
-    trigger: { type: "schedule" },
-    runtime: { type: "python311", entrypoint: "run.py", runner: "e2b", mode: "agent" },
-    inputs: [],
-    outputs: [],
-    contexts: [],
-    connections: [{ app_name: "gmail" }, { app_name: "slack" }],
-    secrets: [],
-  },
-  files: [{ path: "worker.yml", content: "name: My Gmail Digest\n" }],
-  recent_runs: [],
-};
+function makeWorkerDetail(w: WorkerSummary) {
+  return {
+    ...w,
+    config: {
+      id: w.id,
+      name: w.name,
+      trigger: { type: "schedule" },
+      runtime: { type: "python311", entrypoint: "run.py", runner: "e2b", mode: "agent" },
+      inputs: [],
+      outputs: [],
+      contexts: [],
+      connections: (w.connections ?? []).map((c) => ({ app_name: c })),
+      secrets: [],
+    },
+    files: [{ path: "worker.yml", content: `name: ${w.name}\n` }],
+    recent_runs: [],
+  };
+}
+
+// workerListMock is mutable so per-test cases can override which worker the
+// background refresh returns (prevents cache pollution when testing the
+// "no missing connections" case alongside the "has missing connections" case).
+const { workerListMock } = vi.hoisted(() => ({ workerListMock: vi.fn() }));
 
 vi.mock("@/lib/api", () => ({
   getPersistedActiveWorkspaceId: vi.fn(() => "local-default"),
   setActiveWorkspaceId: vi.fn(),
   api: {
     workers: {
-      list: vi.fn().mockResolvedValue([workerWithMissingConnections]),
-      get: vi.fn().mockResolvedValue(workerDetail),
+      list: workerListMock,
+      // get returns minimal shape; banner reads from WorkerSummary (w), not detail.
+      get: vi.fn().mockResolvedValue({ config: { connections: [], contexts: [], inputs: [], outputs: [], secrets: [] }, files: [], recent_runs: [] }),
       listVersions: vi.fn().mockResolvedValue([]),
       alerts: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), remove: vi.fn() },
       feedback: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
@@ -85,6 +95,8 @@ vi.mock("@/lib/useApprovalsSync", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: list returns the worker with missing connections.
+  workerListMock.mockResolvedValue([workerWithMissingConnections]);
   router.searchParams = "";
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -104,7 +116,7 @@ async function renderWithWorker(worker: WorkerSummary) {
       <WorkersCollection initialWorkers={[worker as never]} />
     </QueryClientProvider>,
   );
-  fireEvent.click(await screen.findByRole("button", { name: /My Gmail Digest/i }));
+  fireEvent.click(await screen.findByRole("button", { name: new RegExp(worker.name, "i") }));
   await waitFor(() => expect(document.querySelector(".c-dhead")).toBeTruthy());
 }
 
@@ -141,16 +153,8 @@ describe("MissingConnectionsBanner (L6 activation)", () => {
   });
 
   it("does NOT show the banner when missing_connections is empty", async () => {
-    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    cleanup();
-    const client = makeQueryClient();
-    render(
-      <QueryClientProvider client={client}>
-        <WorkersCollection initialWorkers={[workerAllConnected as never]} />
-      </QueryClientProvider>,
-    );
-    fireEvent.click(await screen.findByRole("button", { name: /My Gmail Digest/i }));
-    await waitFor(() => expect(document.querySelector(".c-dhead")).toBeTruthy());
+    workerListMock.mockResolvedValue([workerAllConnected]);
+    await renderWithWorker(workerAllConnected);
     expect(screen.queryByText(/connect your tools to bring this worker to life/i)).not.toBeInTheDocument();
   });
 });

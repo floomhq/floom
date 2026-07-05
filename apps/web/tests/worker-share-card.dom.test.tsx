@@ -3,13 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import type { PublicWorker } from "@/lib/types";
 
-const mockRouterPush = vi.fn();
+// Use vi.hoisted so these refs are available inside vi.mock factory (hoisted).
+const { mockRouterPush, mockSetActiveWorkspaceId, mockImportFromShare } = vi.hoisted(() => ({
+  mockRouterPush: vi.fn(),
+  mockSetActiveWorkspaceId: vi.fn(),
+  mockImportFromShare: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockRouterPush }),
 }));
 
-const mockSetActiveWorkspaceId = vi.fn();
-const mockImportFromShare = vi.fn();
 vi.mock("@/lib/api", () => ({
   api: {
     workers: {
