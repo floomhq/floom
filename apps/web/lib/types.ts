@@ -526,6 +526,18 @@ export interface PublicWorkspaceProfile {
   workers: PublicWorker[];
 }
 
+export interface PublicWorkerPermalink {
+  entity_type: "worker_permalink";
+  workspace: PublicWorkspaceSummary;
+  worker: PublicWorker;
+  public_slug: string;
+  permalink: string;
+  title: string;
+  description?: string | null;
+  share_path?: string | null;
+  shared_by?: PublicWorkspaceActor | null;
+}
+
 export interface StandaloneShareLink {
   token: string;
   url: string;

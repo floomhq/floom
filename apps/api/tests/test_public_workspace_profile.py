@@ -133,3 +133,74 @@ def test_public_workspace_profile_404s_unknown_handle():
         resp = client.get("/workspaces/public/missing-workspace")
 
         assert resp.status_code == 404
+
+
+def _seed_public_and_private(main):
+    """Create one public + one private worker in a named workspace. Returns handle."""
+    from auth.local_workspaces import ensure_default_workspace, update_local_workspace
+
+    ensure_default_workspace("local-user")
+    update_local_workspace("local-user", "local-default", name="Fede Secretary")
+    repos = main.get_repositories()
+    repos.workers.create(
+        user_id="local-user",
+        worker_id="gmail-inbox-cleaner",
+        workspace_id="local-default",
+        name="Gmail Inbox Cleaner",
+        manifest_json=_manifest("gmail-inbox-cleaner", "Gmail Inbox Cleaner"),
+    )
+    repos.workers.create(
+        user_id="local-user",
+        worker_id="private-worker",
+        workspace_id="local-default",
+        name="Private Worker",
+        manifest_json=_manifest("private-worker", "Private Worker"),
+    )
+    with main.get_db() as conn:
+        conn.execute(
+            "UPDATE workers SET visibility = 'public' WHERE id = ?",
+            ("gmail-inbox-cleaner",),
+        )
+    return "fede-secretary"
+
+
+def test_public_worker_permalink_returns_public_card_only():
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        resp = client.get("/workers/public/by-handle/fede-secretary/gmail-inbox-cleaner")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["entity_type"] == "worker_permalink"
+        assert body["worker"]["name"] == "Gmail Inbox Cleaner"
+        assert body["public_slug"] == "gmail-inbox-cleaner"
+        assert body["permalink"] == "/@fede-secretary/gmail-inbox-cleaner"
+        assert body["workspace"]["handle"] == "fede-secretary"
+        # No sensitive leakage.
+        assert "GMAIL_REFRESH_TOKEN" not in resp.text
+        assert "owner_id" not in resp.text
+        assert "local-user" not in resp.text
+
+
+def test_public_worker_permalink_404s_private_worker():
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        # private-worker exists but is NOT public -> 404 (never confirms existence).
+        resp = client.get("/workers/public/by-handle/fede-secretary/private-worker")
+
+        assert resp.status_code == 404
+        assert "Private Worker" not in resp.text
+        assert "private-worker" not in resp.text
+
+
+def test_public_worker_permalink_404s_unknown_handle_or_slug():
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        assert client.get("/workers/public/by-handle/nobody/gmail-inbox-cleaner").status_code == 404
+        assert client.get("/workers/public/by-handle/fede-secretary/no-such-worker").status_code == 404
