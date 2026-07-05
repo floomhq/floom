@@ -1035,6 +1035,53 @@ class SqliteWorkerRepository:
             ).fetchall()
         return [_worker_record_from_row(row) for row in rows]
 
+    def resolve_workspace_by_handle(self, *, handle: str) -> dict[str, Any] | None:
+        """OSS single-tenant: match a local_workspaces row by slugified name.
+
+        OSS has no stored ``handle`` column, so the handle is derived from the
+        workspace name (the pre-L4 behavior). Cloud stores handles as a real
+        unique column and overrides this with an exact lookup. Returns the row
+        augmented with a derived ``handle`` field, or None.
+        """
+        from services.public_worker import _slugify_handle
+
+        slug = _slugify_handle(str(handle or "").lstrip("@"))
+        if not slug:
+            return None
+        try:
+            with get_db() as conn:
+                rows = conn.execute(
+                    "SELECT id, owner_user_id, name, created_at FROM local_workspaces "
+                    "ORDER BY created_at, id"
+                ).fetchall()
+        except Exception:
+            return None
+        for row in rows:
+            record = dict(row)
+            if _slugify_handle(record.get("name") or record.get("id")) == slug:
+                record["handle"] = slug
+                return record
+        return None
+
+    def get_public_by_slug(self, *, workspace_id: str, public_slug: str) -> dict[str, Any] | None:
+        """OSS single-tenant: match a PUBLIC worker by slugified name/id.
+
+        OSS has no stored ``public_slug`` column, so the slug is derived from
+        the worker name (falling back to id). Cloud stores public_slug as a real
+        per-workspace unique column and overrides this with an exact lookup.
+        Only 'public' workers are returned.
+        """
+        from services.public_worker import _slugify_handle
+
+        target = _slugify_handle(str(public_slug or ""))
+        if not target:
+            return None
+        for record in self.list_public_for_workspace(workspace_id=workspace_id, limit=100):
+            derived = _slugify_handle(record.get("name") or record.get("id"))
+            if derived == target:
+                return record
+        return None
+
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
         manifest_json = fields.get("manifest_json") or {}
