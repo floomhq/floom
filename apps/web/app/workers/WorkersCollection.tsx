@@ -2282,6 +2282,16 @@ function WorkerDetailActions({
           run form lives there (the same WorkerInputForm), so the worker detail
           no longer carries a duplicate run dialog. */}
 
+      {/* One URL per worker forever (Fede 2026-07-06): a public worker's
+          Share modal shows the canonical /@handle/slug permalink as a
+          static, non-revocable link (there's nothing to revoke — it's just
+          the worker's URL; making the worker private again is the Company
+          access control above, and that's what gates the bare URL, not a
+          share token). A private/workspace worker keeps the mint/revoke
+          state machine, but the URL it returns is now the SAME permalink
+          shape with an unguessable ?share=<token> key instead of a separate
+          /s/<token> link, so the URL a recipient bookmarks never changes
+          even if the worker is later published. */}
       <ShareModal
         open={shareOpen}
         onOpenChange={setShareOpen}
@@ -2296,17 +2306,29 @@ function WorkerDetailActions({
           },
           grantAsset: { type: "worker", id: w.id },
         }}
-        publicLink={{
-          create: async () => (await api.workers.shareLink(w.id)).url,
-          // share-loop: show an existing public link (copyable) on open.
-          fetchExisting: async () => {
-            const { links } = await api.workers.shareLinks(w.id);
-            return links[0]?.url ?? null;
-          },
-          revoke: async () => {
-            await api.workers.revokeShareLink(w.id);
-          },
-        }}
+        publicLink={
+          (d?.visibility ?? w.visibility) === "public"
+            ? {
+                // create is required by ShareModal's prop type but never
+                // invoked at runtime when staticUrl is set (matches the
+                // existing app/preview/share/page.tsx pattern).
+                create: async () => (d ?? w).public_link ?? "",
+                staticUrl: (d ?? w).public_link ?? undefined,
+                label: "Permalink",
+              }
+            : {
+                create: async () => (await api.workers.shareLink(w.id)).url,
+                // share-loop: show an existing public link (copyable) on open.
+                fetchExisting: async () => {
+                  const { links } = await api.workers.shareLinks(w.id);
+                  return links[0]?.url ?? null;
+                },
+                revoke: async () => {
+                  await api.workers.revokeShareLink(w.id);
+                },
+                label: "Private link",
+              }
+        }
       />
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

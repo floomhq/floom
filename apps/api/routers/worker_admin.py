@@ -36,6 +36,7 @@ from models import (
     _WorkerSuggestion,
 )
 from services.git_service import _git_author
+from services.public_worker import _worker_canonical_permalink_path
 from services.secrets_env import _platform_openai_api_key
 from services.share_links import (
     _create_or_get_standalone_share_link,
@@ -83,6 +84,11 @@ def create_worker_share_link(
     perms = _worker_permissions(worker, user_id=auth.user_id, repos=repos)
     if not perms.can_share:
         raise HTTPException(status_code=403, detail="You cannot share this worker")
+    # One URL per worker forever: mint/reuse the standard fls_ share token, but
+    # surface it as the canonical /@handle/slug permalink + ?share=<token> key
+    # instead of a separate /s/<token> link (Fede 2026-07-06). Falls back to
+    # the legacy /s/<token> shape only if the workspace has no resolvable
+    # handle (an engine pin predating the L4 handle column).
     return _create_or_get_standalone_share_link(
         entity_type="worker",
         entity_id=str(worker["id"]),
@@ -90,6 +96,7 @@ def create_worker_share_link(
         repos=repos,
         slug=str(worker["id"]),
         regenerate=body.regenerate,
+        permalink_path=_worker_canonical_permalink_path(worker, repos),
     )
 
 
@@ -116,6 +123,7 @@ def list_worker_share_links(
         entity_id=str(worker["id"]),
         owner_id=str(worker.get("owner_id") or auth.user_id),
         repos=repos,
+        permalink_path=_worker_canonical_permalink_path(worker, repos),
     )
     return {"links": links}
 

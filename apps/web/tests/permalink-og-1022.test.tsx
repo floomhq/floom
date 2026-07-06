@@ -182,6 +182,7 @@ describe("#1022 permalink metadata", () => {
     const page = await import("@/app/[handle]/[workerSlug]/page");
     const meta = await page.generateMetadata({
       params: Promise.resolve({ handle: "%40depontefede", workerSlug: "morning-brief" }),
+      searchParams: Promise.resolve({}),
     });
     const img = meta.openGraph?.images;
     const imageUrl = Array.isArray(img) ? (img[0] as { url: string }).url : undefined;
@@ -199,8 +200,38 @@ describe("#1022 permalink metadata", () => {
     const page = await import("@/app/[handle]/[workerSlug]/page");
     const meta = await page.generateMetadata({
       params: Promise.resolve({ handle: "%40nobody", workerSlug: "nope" }),
+      searchParams: Promise.resolve({}),
     });
     expect(meta.robots).toMatchObject({ index: false });
     expect(meta.openGraph).toBeUndefined();
+  });
+
+  it("passes the ?share= param through to the fetch and noindexes a shared_link permalink", async () => {
+    // Fede 2026-07-06: a ?share=<token> permalink is an unguessable, unlisted
+    // key — it must never be indexed or unfurled with the token baked into a
+    // canonical/OG url (no second unauthenticated fetch, no crawler exposure).
+    resetMocks();
+    fetchPublicWorkerPermalink.mockResolvedValue({ ...CARD, access: "shared_link" });
+    const page = await import("@/app/[handle]/[workerSlug]/page");
+    const meta = await page.generateMetadata({
+      params: Promise.resolve({ handle: "%40depontefede", workerSlug: "morning-brief" }),
+      searchParams: Promise.resolve({ share: "fls_abc123" }),
+    });
+    expect(fetchPublicWorkerPermalink).toHaveBeenCalledWith("@depontefede", "morning-brief", "fls_abc123");
+    expect(meta.robots).toMatchObject({ index: false, follow: false });
+    expect(meta.openGraph).toBeUndefined();
+    expect(meta.alternates).toBeUndefined();
+  });
+
+  it("keeps the full public og/canonical treatment when access is public even with a (redundant) share param", async () => {
+    resetMocks();
+    fetchPublicWorkerPermalink.mockResolvedValue({ ...CARD, access: "public" });
+    const page = await import("@/app/[handle]/[workerSlug]/page");
+    const meta = await page.generateMetadata({
+      params: Promise.resolve({ handle: "%40depontefede", workerSlug: "morning-brief" }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(meta.alternates?.canonical).toBe("https://floom.dev/app/%40depontefede/morning-brief");
+    expect(meta.openGraph).toBeDefined();
   });
 });

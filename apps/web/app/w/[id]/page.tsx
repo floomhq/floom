@@ -6,8 +6,8 @@
 // tab-bar file view (see WorkerShareCard). noindex.
 import Link from "next/link";
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { fetchPublicWorker } from "@/lib/server-api";
+import { notFound, redirect } from "next/navigation";
+import { fetchPublicWorker, fetchWorkerPermalinkRedirect } from "@/lib/server-api";
 import { isAuthenticated } from "@/lib/server-auth";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import { ShareCardShell } from "@/components/share/ShareCardShell";
@@ -29,6 +29,24 @@ export default async function PublicWorkerPage({
   const { id } = await params;
   const { token } = await searchParams;
   if (!token) notFound();
+
+  // /w/<id>?token=<hmac> is a legacy surface now — the canonical URL is the
+  // /@handle/slug permalink (Fede 2026-07-06: "one URL per worker forever").
+  // Permanently redirect old links to the canonical shape, finding-or-minting
+  // a durable, revocable ?share= link for a non-public worker along the way
+  // (a strict improvement over this legacy HMAC, which had no revoke path).
+  // The redirect() call is deliberately OUTSIDE the try/catch below — it
+  // throws a Next.js control-flow signal that must propagate, not be treated
+  // as a fetch failure. Falls back to rendering the legacy card further down
+  // only when the lookup fails or the workspace has no resolvable handle (an
+  // engine pin predating the L4 handle column).
+  let redirectUrl: string | null = null;
+  try {
+    redirectUrl = await fetchWorkerPermalinkRedirect(id, token);
+  } catch {
+    redirectUrl = null;
+  }
+  if (redirectUrl) redirect(redirectUrl);
 
   let worker: PublicWorker;
   try {

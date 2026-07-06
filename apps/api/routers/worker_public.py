@@ -156,17 +156,62 @@ def get_public_workspace_profile(
 def get_public_worker_by_handle_slug(
     handle: str,
     worker_slug: str,
+    share: Optional[str] = Query(None, min_length=6, max_length=128),
     repos: Repositories = Depends(get_repos),
 ) -> JSONResponse:
-    """Resolve a PUBLIC worker permalink (/@{handle}/{worker_slug}).
+    """Resolve a worker permalink (/@{handle}/{worker_slug}[?share=<token>]).
 
     Powers the L4 permalink page + og-image. Resolves the workspace by its
-    stored handle and the worker by its stored per-workspace public_slug, and
-    returns ONLY public card fields for a worker with visibility='public'.
-    Non-public / unknown handle or slug -> 404 (never confirms existence). The
-    SSR'd HTML page (not this JSON) is what search engines index.
+    stored handle and the worker by its stored per-workspace public_slug.
+    Returns public card fields for a worker with visibility='public', OR
+    (Fede 2026-07-06: "access is a property, not a URL namespace") for a
+    non-public worker when a valid ``share`` token for THIS worker is
+    supplied — the same ``fls_`` standalone-share-link token the Share modal
+    mints, reused as an unguessable key on the one canonical URL instead of a
+    separate ``/s/<token>`` link. Non-public / unknown handle or slug / bad or
+    missing token -> identical 404 (never confirms existence). The SSR'd HTML
+    page (not this JSON) is what search engines index.
     """
-    return JSONResponse(_public_worker_card_by_handle_slug(handle, worker_slug, repos))
+    return JSONResponse(_public_worker_card_by_handle_slug(handle, worker_slug, repos, share_token=share))
+
+
+@worker_public_router.get("/workers/public/{worker_id}/permalink-redirect")
+def get_worker_permalink_redirect(
+    worker_id: str,
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Optional[str]]:
+    """Legacy /w/{id}?token=<hmac> -> canonical permalink redirect target.
+
+    Verifies the same signed HMAC the historical /w/ page always has (never a
+    new capability — anyone who could reach the old page can reach this).
+    Returns the bare permalink for a public worker, or a durable ``?share=``
+    link (found-or-minted via the standard ``fls_`` share-link table) for a
+    non-public one — a strict improvement over the legacy HMAC, which had no
+    revoke path. ``path`` is None only when the workspace has no resolvable
+    handle (an engine pin predating the L4 handle column); callers should fall
+    back to rendering the legacy standalone share card in that case.
+    """
+    worker = _load_public_worker(worker_id, token, repos)
+    permalink_path = None
+    from services.public_worker import _worker_canonical_permalink_path
+
+    permalink_path = _worker_canonical_permalink_path(worker, repos)
+    if not permalink_path:
+        return {"url": None}
+    if str(worker.get("visibility") or "private") == "public":
+        from services.share_links import _public_share_frontend_base_url
+
+        return {"url": f"{_public_share_frontend_base_url()}{permalink_path}"}
+    share = _create_or_get_standalone_share_link(
+        entity_type="worker",
+        entity_id=str(worker.get("id") or worker_id),
+        owner_id=str(worker.get("owner_id") or ""),
+        repos=repos,
+        slug=str(worker.get("id") or worker_id),
+        permalink_path=permalink_path,
+    )
+    return {"url": share.get("url")}
 
 
 @worker_public_router.get("/workers/public/{worker_id}/run-meta")

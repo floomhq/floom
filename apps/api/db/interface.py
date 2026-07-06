@@ -101,6 +101,31 @@ class WorkerRepository(Protocol):
         """
         ...
 
+    def get_by_public_slug_any_visibility(self, *, workspace_id: str, public_slug: str) -> RowDict | None:
+        """Resolve a worker by (workspace_id, public_slug) regardless of visibility.
+
+        Sibling of ``get_public_by_slug`` WITHOUT the visibility filter — backs
+        the ``?share=<token>`` unguessable-key path on the permalink (Fede
+        2026-07-06: "one canonical URL per worker forever, access is a
+        property not a URL namespace"). Callers MUST still verify a valid
+        share token for the returned worker before granting access; this
+        method alone does not authorize anything, and by itself is safe to
+        call because the caller never returns its result directly to an
+        unauthenticated request without that check. Optional capability —
+        callers feature-detect via ``getattr(..., None)`` and 404 if absent,
+        so an engine pin predating this method degrades to "share links don't
+        unlock a private permalink yet" rather than 500ing.
+        """
+        ...
+
+    def get_workspace_handle(self, *, workspace_id: str) -> str | None:
+        """Reverse of ``resolve_workspace_by_handle``: the stored handle for a
+        workspace id, or None if unresolvable (unknown id, or an engine pin
+        predating the L4 handle column). Used to build a worker's canonical
+        permalink path from a worker row that only carries workspace_id.
+        """
+        ...
+
     def create(self, *, user_id: str, **fields: Any) -> RowDict: ...
 
     def update(self, *, user_id: str, worker_id: str, **fields: Any) -> RowDict | None: ...

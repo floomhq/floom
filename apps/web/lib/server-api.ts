@@ -139,6 +139,23 @@ export async function fetchPublicWorker(id: string, token: string) {
   );
 }
 
+/**
+ * Legacy /w/<id>?token=<hmac> -> canonical permalink redirect target.
+ *
+ * `url` is null when the workspace has no resolvable handle (an engine pin
+ * predating the L4 handle column) — the page falls back to rendering the
+ * legacy standalone share card in that case. `cache: "no-store"`: this may
+ * mint a fresh, revocable share link server-side on first hit for a private
+ * worker, so it must never be treated as a cacheable GET.
+ */
+export async function fetchWorkerPermalinkRedirect(id: string, token: string): Promise<string | null> {
+  const { url } = await serverFetch<{ url: string | null }>(
+    `/workers/public/${encodeURIComponent(id)}/permalink-redirect?token=${encodeURIComponent(token)}`,
+    { cache: "no-store", includeWorkspace: false, includeSecret: false }
+  );
+  return url;
+}
+
 /** Fetch a no-login standalone share payload for /s/<token>. */
 export async function fetchStandaloneShare(token: string) {
   return serverFetch<import("./types").StandaloneShare>(
@@ -156,21 +173,29 @@ export async function fetchPublicWorkspaceProfile(handle: string) {
 }
 
 /**
- * Resolve a PUBLIC worker permalink (/@{handle}/{worker_slug}).
+ * Resolve a worker permalink (/@{handle}/{worker_slug}[?share=<token>]).
  *
- * Returns null for a 404 (non-public or unknown handle/slug) so the page can
- * render notFound() without leaking whether a private worker exists; re-throws
- * any other transport error. Public + cacheable (no auth), so the SSR fetch is
- * edge-revalidated to absorb scraper traffic.
+ * Returns null for a 404 (non-public / unknown handle-slug / invalid share
+ * token) so the page can render notFound() without leaking whether a private
+ * worker exists; re-throws any other transport error. The bare (no share
+ * token) public path is cacheable (no auth) so the SSR fetch is
+ * edge-revalidated to absorb scraper traffic. A *shareToken* request is
+ * per-recipient and revocable, so it bypasses the data cache entirely
+ * (`cache: "no-store"`) — a 5-minute-stale cache would keep a just-revoked
+ * link working.
  */
 export async function fetchPublicWorkerPermalink(
   handle: string,
-  workerSlug: string
+  workerSlug: string,
+  shareToken?: string
 ): Promise<import("./types").PublicWorkerPermalink | null> {
+  const query = shareToken ? `?share=${encodeURIComponent(shareToken)}` : "";
   try {
     return await serverFetch<import("./types").PublicWorkerPermalink>(
-      `/workers/public/by-handle/${encodeURIComponent(handle)}/${encodeURIComponent(workerSlug)}`,
-      { next: { revalidate: 300 }, includeWorkspace: false, includeSecret: false }
+      `/workers/public/by-handle/${encodeURIComponent(handle)}/${encodeURIComponent(workerSlug)}${query}`,
+      shareToken
+        ? { cache: "no-store", includeWorkspace: false, includeSecret: false }
+        : { next: { revalidate: 300 }, includeWorkspace: false, includeSecret: false }
     );
   } catch (err) {
     if (err instanceof Error && err.message.includes("API error 404")) {

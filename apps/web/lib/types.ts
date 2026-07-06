@@ -322,15 +322,22 @@ export interface WorkerSummary {
   missing_connections?: string[];  // #556: required connections not yet configured
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
-  public_link?: string;   // owner-only public runner link to /w/<id>?token=, public workers only
+  public_link?: string;   // canonical /@handle/slug permalink, public workers only
   // Members STEP 1: ownership + per-asset visibility + computed permissions.
   owner_id?: string | null;
   visibility?: AssetVisibility;
   permissions?: AssetPermissions;
 }
 
-/** Per-asset visibility. `specific_people` is reserved (hidden in the UI). */
-export type AssetVisibility = "private" | "workspace" | "specific_people";
+/**
+ * Per-asset visibility. `specific_people` is reserved (hidden in the UI).
+ * `public` is a real, readable backend value (curated/gallery workers) but is
+ * NOT settable via the Share modal's Company-access control — see
+ * `lib/sharing/share-model.ts`'s `GENERAL_ACCESS_OPTIONS` (private/workspace
+ * only, "no public company-access level, killed deliberately, rule #8").
+ * Included here so a worker's raw `visibility` field types correctly.
+ */
+export type AssetVisibility = "private" | "workspace" | "specific_people" | "public";
 
 /** Computed access matrix for the requesting user against an asset. */
 export interface AssetPermissions {
@@ -535,6 +542,8 @@ export interface PublicWorkerPermalink {
   title: string;
   description?: string | null;
   share_path?: string | null;
+  /** "public" (bare URL) or "shared_link" (resolved via a valid ?share= token). */
+  access?: "public" | "shared_link";
   shared_by?: PublicWorkspaceActor | null;
 }
 
@@ -606,6 +615,12 @@ export interface StandaloneShare {
   files: PublicShareFile[];
   approvals?: ApprovalRow[];
   workspace_id?: string;
+  /** worker entity_type only: the canonical /@handle/slug permalink this
+   * legacy /s/<token> link now redirects to (bare if public, ?share=<token>
+   * appended otherwise). Null when the workspace has no resolvable handle
+   * (an engine pin predating the L4 handle column) — the page then falls
+   * back to rendering the legacy standalone share card. */
+  permalink_redirect_url?: string | null;
 }
 
 export interface WorkerSuggestion {

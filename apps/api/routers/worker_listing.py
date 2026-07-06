@@ -361,7 +361,7 @@ def list_workers(
                 missing_connections=_missing_connections,
                 inputs=_inputs,
                 runtime=_runtime_type,
-                public_link=_worker_public_link(w) if str(w.get("visibility") or "private") == "public" else None,
+                public_link=_worker_public_link(w, repos) if str(w.get("visibility") or "private") == "public" else None,
                 owner_id=w.get("owner_id"),
                 visibility=str(w.get("visibility") or "private"),
                 starred=w["id"] in _starred_ids,  # #782
