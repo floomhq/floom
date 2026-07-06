@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.1.11 (2026-07-06)
+
+### Agent-first onboarding
+
+- **Auto-triggering Floom skill, on by default.** `mcp install` already dropped a Floom skill on every target; its frontmatter `description` now names concrete trigger phrases (recurring task, "every day/hour/week", schedule, background job, "set up a worker", monitor + notify, digest, inbox triage, draft follow-ups) so agent skill routing reaches for Floom on matching intent. New `--no-skill` flag opts out.
+- **Hand-it-to-your-agent onboarding prompt.** Post-install output leads with `Read https://floom.dev/onboard and walk me through setting up Floom.` as the primary next step; `npx ... mcp install` is the manual path in the README.
+
 ## 4.0.0 (2026-05-29)
 
 ### UX-only breaking changes
