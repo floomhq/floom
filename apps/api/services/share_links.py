@@ -46,8 +46,12 @@ def _standalone_share_url(token: str, *, permalink_path: str | None = None) -> s
         # Worker shares mint the canonical permalink + an unguessable ?share=
         # key instead of a separate /s/<token> URL (Fede 2026-07-06: "access
         # is a property, not a URL namespace" — one URL per worker forever).
-        sep = "&" if "?" in permalink_path else "?"
-        return f"{base}{permalink_path}{sep}share={urllib.parse.quote(token, safe='')}"
+        # permalink_path is always a bare "/@handle/slug" path (never carries
+        # its own query string) — asserted, not just assumed, so a future
+        # caller that DOES pass one fails loudly instead of silently emitting
+        # a malformed "?a=b&share=..." URL missing its leading "?".
+        assert "?" not in permalink_path, f"permalink_path must not carry a query string: {permalink_path!r}"
+        return f"{base}{permalink_path}?share={urllib.parse.quote(token, safe='')}"
     return f"{base}/s/{urllib.parse.quote(token, safe='')}"
 
 
