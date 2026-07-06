@@ -40,8 +40,18 @@ def _public_share_frontend_base_url() -> str:
     return base.rstrip("/")
 
 
-def _standalone_share_url(token: str) -> str:
+def _standalone_share_url(token: str, *, permalink_path: str | None = None) -> str:
     base = _public_share_frontend_base_url()
+    if permalink_path:
+        # Worker shares mint the canonical permalink + an unguessable ?share=
+        # key instead of a separate /s/<token> URL (Fede 2026-07-06: "access
+        # is a property, not a URL namespace"; one URL per worker forever).
+        # permalink_path is always a bare "/@handle/slug" path (never carries
+        # its own query string); asserted, not just assumed, so a future
+        # caller that DOES pass one fails loudly instead of silently emitting
+        # a malformed "?a=b&share=..." URL missing its leading "?".
+        assert "?" not in permalink_path, f"permalink_path must not carry a query string: {permalink_path!r}"
+        return f"{base}{permalink_path}?share={urllib.parse.quote(token, safe='')}"
     return f"{base}/s/{urllib.parse.quote(token, safe='')}"
 
 
@@ -201,6 +211,7 @@ def _create_or_get_standalone_share_link(
     repos: Any | None = None,
     slug: str | None = None,
     regenerate: bool = False,
+    permalink_path: str | None = None,
 ) -> Dict[str, str]:
     from db import get_db, now_iso
     safe_file_path = file_path or ""
@@ -228,6 +239,7 @@ def _create_or_get_standalone_share_link(
             owner_id=owner_id,
             file_path=safe_file_path,
             repos=repos,
+            permalink_path=permalink_path,
         )
         if existing:
             return {"token": existing[0]["token"], "url": existing[0]["url"], "entity_type": entity_type}
@@ -258,7 +270,7 @@ def _create_or_get_standalone_share_link(
                 share_repo.create_standalone_share(**kwargs)
                 return {
                     "token": candidate,
-                    "url": _standalone_share_url(candidate),
+                    "url": _standalone_share_url(candidate, permalink_path=permalink_path),
                     "entity_type": entity_type,
                 }
             except Exception:
@@ -276,6 +288,7 @@ def _create_or_get_standalone_share_link(
         owner_id=owner_id,
         file_path=safe_file_path,
         repos=repos,
+        permalink_path=permalink_path,
     )
     if existing:
         return {"token": existing[0]["token"], "url": existing[0]["url"], "entity_type": entity_type}
@@ -302,7 +315,7 @@ def _create_or_get_standalone_share_link(
         raise HTTPException(status_code=500, detail="Could not create share link")
     return {
         "token": token,
-        "url": _standalone_share_url(token),
+        "url": _standalone_share_url(token, permalink_path=permalink_path),
         "entity_type": entity_type,
     }
 
@@ -314,6 +327,7 @@ def _list_standalone_share_urls(
     owner_id: str,
     file_path: str = "",
     repos: Any | None = None,
+    permalink_path: str | None = None,
 ) -> list[Dict[str, str]]:
     """Existing, active public share links for an entity (reconstructable URLs).
 
@@ -364,7 +378,13 @@ def _list_standalone_share_urls(
         raw = str(row.get("share_token") or "").strip()
         if not raw:
             continue
-        out.append({"token": raw, "url": _standalone_share_url(raw), "entity_type": entity_type})
+        out.append(
+            {
+                "token": raw,
+                "url": _standalone_share_url(raw, permalink_path=permalink_path),
+                "entity_type": entity_type,
+            }
+        )
     return out
 
 

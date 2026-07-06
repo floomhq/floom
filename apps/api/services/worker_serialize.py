@@ -150,11 +150,37 @@ def _worker_public_token(worker: Dict[str, Any]) -> str:
     ).hexdigest()
 
 
-def _worker_public_link(worker: Dict[str, Any]) -> Optional[str]:
-    """Owner-only standalone share URL for a worker (or None if id is missing)."""
+def _worker_public_link(worker: Dict[str, Any], repos: Any | None = None) -> Optional[str]:
+    """Public link for a worker with visibility='public'.
+
+    The canonical permalink ``/@{handle}/{public_slug}`` when the workspace
+    handle resolves (one URL per worker forever, Fede 2026-07-06), else the
+    legacy ``/w/{id}?token=<hmac>`` shape (an engine pin predating the L4
+    handle column, or *repos* unavailable). Note: this helper doesn't import
+    ``services.public_worker`` (which builds the same permalink) because that
+    module imports FROM this one (``_worker_public_token``); importing back
+    would be circular, so the handle+slug lookup is inlined here instead.
+    """
     worker_id = str(worker.get("id") or "")
     if not worker_id:
         return None
+    if repos is not None:
+        getter = getattr(getattr(repos, "workers", None), "get_workspace_handle", None)
+        if callable(getter):
+            workspace_id = str(worker.get("workspace_id") or "local-default").strip() or "local-default"
+            try:
+                handle = getter(workspace_id=workspace_id)
+            except Exception:
+                handle = None
+            if handle:
+                stored_slug = str(worker.get("public_slug") or "").strip()
+                slug = stored_slug or re.sub(
+                    r"[^a-z0-9]+", "-", str(worker.get("name") or worker_id).strip().lower()
+                ).strip("-")[:64].strip("-")
+                if slug:
+                    from services.share_links import _public_share_frontend_base_url
+
+                    return f"{_public_share_frontend_base_url()}/@{handle}/{slug}"
     token = _worker_public_token(worker)
     return f"{_frontend_base_url()}/w/{worker_id}?token={token}"
 
@@ -777,7 +803,7 @@ def _build_worker_detail(
         last_fired_at=worker.get("last_scheduled_run_at"),
         missing_secrets=_det_missing_secrets,
         missing_connections=_det_missing_connections,
-        public_link=_worker_public_link(worker) if str(worker.get("visibility") or "private") == "public" else None,
+        public_link=_worker_public_link(worker, repos) if str(worker.get("visibility") or "private") == "public" else None,
         owner_id=worker.get("owner_id"),
         visibility=str(worker.get("visibility") or "private"),
         permissions=_worker_permissions(worker, user_id=user_id, repos=repos, owner_aliases=owner_aliases),

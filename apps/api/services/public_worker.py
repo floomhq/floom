@@ -36,6 +36,7 @@ from services.context_access import (
 from services.share_links import (
     _load_short_link_public_worker,
     _load_standalone_share_row,
+    _public_share_frontend_base_url,
 )
 from services.worker_serialize import (
     _read_worker_files,
@@ -266,7 +267,12 @@ def _public_share_actor(worker: Dict[str, Any], repos: "Repositories" | None) ->
     return out
 
 
-def _public_worker_share_from_worker(worker: Dict[str, Any], repos: "Repositories" | None = None) -> Dict[str, Any]:
+def _public_worker_share_from_worker(
+    worker: Dict[str, Any],
+    repos: "Repositories" | None = None,
+    *,
+    token: str | None = None,
+) -> Dict[str, Any]:
     from models import WorkerConfig
 
     try:
@@ -291,6 +297,21 @@ def _public_worker_share_from_worker(worker: Dict[str, Any], repos: "Repositorie
         for f in raw_files
         if not f.binary
     ]
+    # Worker permalink-redirect target: /s/<token> for a worker is a legacy
+    # surface now; the canonical URL is the /@handle/slug permalink. When the
+    # workspace handle resolves, hand the frontend an absolute redirect target
+    # (bare for a public worker, ?share=<token> for a non-public one so the
+    # legacy link keeps granting the same access it always did). Absolute
+    # (not relative) so a Next.js redirect() called from inside the
+    # dashboard's /app-basePath'd deployment lands the browser at the bare
+    # apex URL instead of staying parked under /app/.
+    permalink_path = _worker_canonical_permalink_path(worker, repos)
+    is_public = str(worker.get("visibility") or "private") == "public"
+    permalink_redirect_url: str | None = None
+    if permalink_path:
+        permalink_redirect_url = f"{_public_share_frontend_base_url()}{permalink_path}"
+        if not is_public and token:
+            permalink_redirect_url = f"{permalink_redirect_url}?share={urllib.parse.quote(token, safe='')}"
     return {
         "entity_type": "worker",
         "title": public.get("name"),
@@ -298,6 +319,9 @@ def _public_worker_share_from_worker(worker: Dict[str, Any], repos: "Repositorie
         "shared_by": _public_share_actor(worker, repos),
         "worker": public,
         "files": share_files,
+        "permalink_path": permalink_path,
+        "is_public": is_public,
+        "permalink_redirect_url": permalink_redirect_url,
     }
 
 
@@ -323,6 +347,52 @@ def _worker_share_path(worker: Dict[str, Any]) -> str | None:
     except Exception:
         return None
     return f"/w/{urllib.parse.quote(worker_id, safe='')}?token={urllib.parse.quote(token, safe='')}"
+
+
+def _worker_public_slug_value(worker: Dict[str, Any]) -> str:
+    """The worker's canonical permalink slug segment.
+
+    Cloud stores ``public_slug`` as a real per-workspace-unique column
+    (assigned at worker create, present regardless of visibility: L4
+    backfill). OSS has no such column, so it's derived the same way
+    ``get_public_by_slug``/``resolve_workspace_by_handle`` already derive it
+    (from name, falling back to id), kept in lockstep so a worker's
+    permalink slug is stable and never depends on which repo backend answers.
+    """
+    stored = str(worker.get("public_slug") or "").strip()
+    if stored:
+        return _slugify_handle(stored)
+    return _slugify_handle(worker.get("name") or worker.get("id"))
+
+
+def _worker_workspace_handle(worker: Dict[str, Any], repos: "Repositories | None") -> str | None:
+    """Resolve the stored workspace ``handle`` for a worker's workspace_id.
+
+    Returns None (never raises) when the repo can't answer: callers treat a
+    missing handle as "permalink unavailable" and fall back to whatever they
+    were doing before (e.g. the legacy /w/ HMAC link), so an engine pin
+    predating this capability degrades gracefully instead of 500ing.
+    """
+    if repos is None:
+        return None
+    workspace_id = str(worker.get("workspace_id") or "local-default").strip() or "local-default"
+    getter = getattr(getattr(repos, "workers", None), "get_workspace_handle", None)
+    if not callable(getter):
+        return None
+    try:
+        handle = getter(workspace_id=workspace_id)
+    except Exception:
+        return None
+    return str(handle).strip() if handle else None
+
+
+def _worker_canonical_permalink_path(worker: Dict[str, Any], repos: "Repositories | None") -> str | None:
+    """``/@{handle}/{public_slug}`` for a worker, or None if the handle can't
+    be resolved (e.g. an older repo backend without the L4 handle column)."""
+    handle = _worker_workspace_handle(worker, repos)
+    if not handle:
+        return None
+    return f"/@{handle}/{_worker_public_slug_value(worker)}"
 
 
 def _public_workspace_actor(workspace: Dict[str, Any], repos: "Repositories" | None) -> Dict[str, str] | None:
@@ -409,15 +479,29 @@ def _resolve_public_workspace_handle(handle: str, repos: "Repositories" | None =
 
 
 def _public_worker_card_by_handle_slug(
-    handle: str, worker_slug: str, repos: "Repositories"
+    handle: str, worker_slug: str, repos: "Repositories", *, share_token: str | None = None
 ) -> Dict[str, Any]:
-    """Resolve a single PUBLIC worker permalink (/@{handle}/{worker_slug}).
+    """Resolve a worker permalink (/@{handle}/{worker_slug}[?share=<token>]).
 
     Resolves the workspace by stored handle, then the worker by its stored
-    per-workspace ``public_slug`` (public-only via ``get_public_by_slug``).
-    Returns the strict PublicWorker card projection wrapped with the workspace
-    identity + canonical permalink path. Anything not found or not public ->
-    404 (never confirms a private worker's existence).
+    per-workspace ``public_slug``. Two access paths, tried in order:
+
+    1. Public (default, matches historical behavior): ``get_public_by_slug``
+       only ever returns a row when ``visibility == "public"``.
+    2. Unguessable-key (new): if the worker isn't public but a ``share_token``
+       was supplied, resolve the slug WITHOUT the visibility filter
+       (``get_by_public_slug_any_visibility``) and require the token to
+       resolve (via the standard ``fls_`` standalone-share-link table) to
+       THIS worker's ``(entity_id, owner_id)`` with ``entity_type=="worker"``.
+
+    A visibility flip never changes this URL: making a worker private again
+    only removes path 1 (bare access 404s, identical to an unknown slug;
+    existence is never confirmed either way); an already-issued share token
+    keeps working via path 2 until it's explicitly revoked, because the two
+    paths are backed by independent state (the ``visibility`` column vs the
+    ``standalone_share_links`` table).
+
+    Anything not found, not public, and not validly shared -> 404.
     """
     from models import WorkerConfig
 
@@ -428,7 +512,29 @@ def _public_worker_card_by_handle_slug(
     normalized_slug = _slugify_handle(str(worker_slug or ""))
     getter = getattr(repos.workers, "get_public_by_slug", None)
     worker = getter(workspace_id=workspace_id, public_slug=normalized_slug) if callable(getter) else None
+    access = "public"
+
+    if not worker and share_token:
+        any_getter = getattr(repos.workers, "get_by_public_slug_any_visibility", None)
+        candidate = (
+            any_getter(workspace_id=workspace_id, public_slug=normalized_slug)
+            if callable(any_getter)
+            else None
+        )
+        if candidate:
+            row = _load_standalone_share_row(share_token, repos)
+            if (
+                row
+                and str(row.get("entity_type") or "") == "worker"
+                and str(row.get("entity_id") or "") == str(candidate.get("id") or "")
+                and str(row.get("owner_id") or "") == str(candidate.get("owner_id") or "")
+            ):
+                worker = candidate
+                access = "shared_link"
+
     if not worker:
+        # Identical 404 whether the slug doesn't exist or exists but is
+        # private with no/an invalid share token: never confirms existence.
         raise HTTPException(status_code=404, detail="Worker not found")
 
     try:
@@ -455,7 +561,11 @@ def _public_worker_card_by_handle_slug(
         "permalink": permalink,
         "title": public.get("name"),
         "description": public.get("description") or public.get("long_description"),
-        "share_path": _worker_share_path(worker),
+        # Canonical permalink, not the legacy /w/<id>?token=<hmac> shape: this
+        # card is only ever built for a worker we've already confirmed access
+        # to (public or validly shared), so the bare permalink is correct here.
+        "share_path": permalink,
+        "access": access,
         "shared_by": _public_workspace_actor(workspace, repos),
     }
 
@@ -486,7 +596,11 @@ def _public_workspace_profile(handle: str, repos: "Repositories", *, limit: int 
                 "id": public.get("id"),
                 "title": public.get("name"),
                 "description": public.get("description") or public.get("long_description"),
-                "share_path": _worker_share_path(worker),
+                # list_public_for_workspace only ever returns visibility='public'
+                # rows, so the bare canonical permalink is always correct here
+                # (no access-control implication, replaces the legacy /w/
+                # HMAC link this card used to emit).
+                "share_path": f"/@{workspace.get('handle') or _slugify_handle(workspace.get('name') or workspace_id)}/{_worker_public_slug_value(worker)}",
                 "worker": public,
             }
         )
@@ -636,7 +750,7 @@ def _standalone_share_payload(
             worker = repos.workers.get_any(worker_id=str(row.get("entity_id") or ""))
             if not worker or str(worker.get("owner_id") or "") != str(row.get("owner_id") or ""):
                 raise HTTPException(status_code=404, detail="Share link not found")
-            return _public_worker_share_from_worker(worker, repos)
+            return _public_worker_share_from_worker(worker, repos, token=token)
         if entity_type == "brain_file":
             return _public_brain_file_share(row)
         if entity_type == "brain_pack":

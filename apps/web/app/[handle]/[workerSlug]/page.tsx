@@ -39,6 +39,7 @@ function permalinkUrls(
 
 type Props = {
   params: Promise<{ handle: string; workerSlug: string }>;
+  searchParams: Promise<{ share?: string }>;
 };
 
 function decode(value: string): string {
@@ -49,11 +50,12 @@ function decode(value: string): string {
   }
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { handle: rawHandle, workerSlug: rawSlug } = await params;
+  const { share } = await searchParams;
   const handle = decode(rawHandle);
   const workerSlug = decode(rawSlug);
-  const card = await fetchPublicWorkerPermalink(handle, workerSlug).catch(() => null);
+  const card = await fetchPublicWorkerPermalink(handle, workerSlug, share).catch(() => null);
   if (!card) {
     return { title: "Floom worker", robots: { index: false, follow: false } };
   }
@@ -62,6 +64,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     card.description ||
     card.worker.description ||
     `${card.worker.name}, a Floom AI worker template you can add to your workspace.`;
+  // An unguessable ?share= link is deliberately unlisted (Fede 2026-07-06):
+  // noindex, and skip the OG/canonical/image build entirely rather than bake
+  // the secret token into a canonical URL or a second unauthenticated
+  // og-image fetch this page hasn't audited for token handling.
+  if (card.access && card.access !== "public") {
+    return { title, description, robots: { index: false, follow: false } };
+  }
   const hdrs = await headers();
   const requestHost = hdrs.get("x-forwarded-host") ?? hdrs.get("host");
   const { page: pageUrl, image: imageUrl } = permalinkUrls(card, requestHost);
@@ -85,8 +94,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function WorkerPermalinkPage({ params }: Props) {
+export default async function WorkerPermalinkPage({ params, searchParams }: Props) {
   const { handle: rawHandle, workerSlug: rawSlug } = await params;
+  const { share } = await searchParams;
   const handle = decode(rawHandle);
   const workerSlug = decode(rawSlug);
 
@@ -94,7 +104,11 @@ export default async function WorkerPermalinkPage({ params }: Props) {
   // /{handle}/{slug} without the '@' is not a permalink -> 404.
   if (!handle.startsWith("@")) notFound();
 
-  const card = await fetchPublicWorkerPermalink(handle, workerSlug);
+  // Visibility is a property of the worker, not the URL (Fede 2026-07-06):
+  // bare renders a public worker; ?share=<token> renders a non-public one iff
+  // the token is valid for it. Both paths 404 identically otherwise: the
+  // permalink never confirms a private worker's existence.
+  const card = await fetchPublicWorkerPermalink(handle, workerSlug, share);
   if (!card) notFound();
 
   const authed = await isAuthenticated();
