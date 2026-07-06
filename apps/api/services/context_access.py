@@ -689,7 +689,7 @@ def _git_commit_context(
     *,
     message: str,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> None:
     import git_ops as _git_ops
     from services.git_service import _ensure_git_workspace_ready, _git_ops_lock, _git_workspace
@@ -714,7 +714,7 @@ def _git_commit_context_rename(
     *,
     message: str,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> None:
     """#1813: commit a folder rename, staging the removed old path and the added
     new path in one commit so git records the move.

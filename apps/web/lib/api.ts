@@ -1309,7 +1309,7 @@ export const api = {
       const blob = await res.blob();
       const cd = res.headers.get("content-disposition") || "";
       const match = /filename="?([^"]+)"?/.exec(cd);
-      const filename = match?.[1] || "workeros-workspace-template.zip";
+      const filename = match?.[1] || "floom-workspace-template.zip";
       return { blob, filename };
     },
     importTemplate: async (

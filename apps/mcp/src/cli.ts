@@ -519,7 +519,7 @@ export function buildCliProgram(commandName: CommandName = "floom"): Command {
     .action(async (target: string | undefined, options: { json?: boolean }) =>
       runAction(mcpTestCommand(target, options)));
   mcp.command("add")
-    .description("Add workeros/floom to an MCP client config")
+    .description("Add Floom to an MCP client config")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
     .option("--show-token", "Print live credentials in generic output")
     .option("--no-skill", "Skip installing the auto-triggering Floom skill (installed by default)")

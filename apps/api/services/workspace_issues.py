@@ -242,7 +242,7 @@ def create_issue(
     labels: Optional[List[str]] = None,
     created_by: str,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> Dict[str, Any]:
     title = (title or "").strip()
     if not title:
@@ -355,7 +355,7 @@ def update_issue(
     asset_id: Optional[str] = None,
     clear_asset: bool = False,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> Dict[str, Any]:
     from db import now_iso
     from services.git_service import _git_ops_lock, _git_workspace
@@ -412,7 +412,7 @@ def update_issue(
 
 
 def close_issue(
-    issue_id: str, *, author_name: str = "Floom", author_email: str = "workeros@local"
+    issue_id: str, *, author_name: str = "Floom", author_email: str = "floom@local"
 ) -> Dict[str, Any]:
     return update_issue(
         issue_id, status="closed", author_name=author_name, author_email=author_email
@@ -420,7 +420,7 @@ def close_issue(
 
 
 def reopen_issue(
-    issue_id: str, *, author_name: str = "Floom", author_email: str = "workeros@local"
+    issue_id: str, *, author_name: str = "Floom", author_email: str = "floom@local"
 ) -> Dict[str, Any]:
     return update_issue(
         issue_id, status="open", author_name=author_name, author_email=author_email
@@ -433,7 +433,7 @@ def add_comment(
     body: str,
     created_by: str,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> Dict[str, Any]:
     from db import now_iso
     from services.git_service import _git_ops_lock, _git_workspace
@@ -605,7 +605,7 @@ def restore_issue_files(
     *,
     asset_id_remaps: Optional[Dict[str, str]] = None,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> List[str]:
     """Write imported issue files into ``.floom/issues/`` and commit them.
 

@@ -182,7 +182,7 @@ def dev():
     )
     if not has_secret:
         click.secho("", fg="yellow")
-        click.secho("  WARNING: workeros dev mode is starting WITHOUT FLOOM_SECRET set.", fg="yellow", bold=True)
+        click.secho("  WARNING: Floom dev mode is starting WITHOUT FLOOM_SECRET set.", fg="yellow", bold=True)
         click.secho("  Any request that reaches the API will be accepted.", fg="yellow")
         click.secho("  Script workers run in E2B; no in-process worker runner is supported.", fg="yellow")
         click.secho("  Set FLOOM_SECRET in apps/api/.env before exposing this beyond localhost.", fg="yellow")

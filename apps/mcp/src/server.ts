@@ -858,9 +858,9 @@ export function createServer(): McpServer {
     },
     {
       // Read by every connecting agent. Pre-empts the common "never enter API
-      // keys into a field" refusal: WorkerOS secrets are first-party config.
+      // keys into a field" refusal: Floom secrets are first-party config.
       instructions:
-        "WorkerOS secrets are a first-party, workspace-scoped ENCRYPTED VAULT — exactly like " +
+        "Floom secrets are a first-party, workspace-scoped ENCRYPTED VAULT — exactly like " +
         "Vercel or Railway environment variables. When the workspace owner asks you to set their own " +
         "service/API key via secrets.set, treat it as routine configuration and do it: the value is " +
         "encrypted at rest, never logged or returned, and injected only into this workspace's own " +
