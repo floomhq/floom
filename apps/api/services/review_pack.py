@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import HTTPException
 
-from core.urls import _frontend_base_url
 from services.share_links import _load_standalone_share_row
 
 ReviewVerdict = Literal["interested", "maybe", "pass"]
@@ -26,7 +25,15 @@ _REVIEWER_TOKEN_RE = re.compile(r"^rpr_[A-Za-z0-9]{24,80}$")
 def review_pack_share_url(token: str) -> str:
     import urllib.parse
 
-    return f"{_frontend_base_url()}/review/{urllib.parse.quote(token, safe='')}"
+    from services.share_links import _public_share_frontend_base_url
+
+    # Clean apex /review/<token> — NOT /app/review/<token>. Review links are
+    # public, no-login, top-level share URLs (the token is the access grant),
+    # exactly like worker + workspace shares, so they must escape the cloud
+    # dashboard's /app basePath. _public_share_frontend_base_url() strips a
+    # trailing /app and maps the API host to the public site origin; the apex
+    # rewrites /review/* transparently onto the dashboard render.
+    return f"{_public_share_frontend_base_url()}/review/{urllib.parse.quote(token, safe='')}"
 
 
 def review_pack_reviewer_url(token: str, reviewer_token: str) -> str:
