@@ -4498,6 +4498,59 @@ class SqliteAlertRepository:
         return cursor.rowcount > 0
 
 
+class SqliteAlertThrottleRepository:
+    """SQLite implementation of AlertThrottleRepository (failure-alert throttle log)."""
+
+    def record(
+        self,
+        *,
+        workspace_id: str,
+        worker_id: str,
+        signature: str,
+        sent_at_iso: str,
+    ) -> None:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO alert_throttle (workspace_id, worker_id, signature, sent_at) VALUES (?, ?, ?, ?)",
+                (workspace_id, worker_id, signature, sent_at_iso),
+            )
+
+    def count_since(
+        self,
+        *,
+        since_iso: str,
+        workspace_id: str | None = None,
+        worker_id: str | None = None,
+        signature: str | None = None,
+    ) -> int:
+        clauses = ["sent_at >= ?"]
+        params: list[Any] = [since_iso]
+        if workspace_id is not None:
+            clauses.append("workspace_id = ?")
+            params.append(workspace_id)
+        if worker_id is not None:
+            clauses.append("worker_id = ?")
+            params.append(worker_id)
+        if signature is not None:
+            clauses.append("signature = ?")
+            params.append(signature)
+        sql = "SELECT COUNT(*) FROM alert_throttle WHERE " + " AND ".join(clauses)
+        with get_db() as conn:
+            row = conn.execute(sql, params).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    def clear_dedup(self, *, workspace_id: str, worker_id: str) -> None:
+        # Keep the daily-cap history intact; only drop this worker's dedup rows
+        # so the next failure re-alerts. We delete this worker's rows entirely —
+        # the cap is enforced on the (still-present) other-worker rows plus the
+        # in-day count; a recovered worker's past sends no longer gate it.
+        with get_db() as conn:
+            conn.execute(
+                "DELETE FROM alert_throttle WHERE workspace_id = ? AND worker_id = ?",
+                (workspace_id, worker_id),
+            )
+
+
 class SqliteFeedbackRepository:
     """SQLite implementation of FeedbackRepository (per-worker feedback comments)."""
 

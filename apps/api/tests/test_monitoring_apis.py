@@ -909,7 +909,7 @@ class TestEmailNotifications:
         assert payload["to"] == ["ops@example.com"]
         assert payload["subject"] == "Worker Weekly <Digest> failed"
         assert "https://workers.floom.dev/brand/floom-email-logo@2x.png" in payload["html"]
-        assert "View run" in payload["html"]
+        assert "View full run" in payload["html"]
         assert "background:#FFFFFF;border:1px solid #E5E7EB;border-radius:8px" in payload["html"]
         assert "#F3F4F6" not in payload["html"]
         assert "Weekly &lt;Digest&gt;" in payload["html"]
