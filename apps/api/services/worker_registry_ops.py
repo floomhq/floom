@@ -439,7 +439,7 @@ def _git_commit_worker(
     *,
     message: str,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> None:
     import git_ops as _git_ops
     try:

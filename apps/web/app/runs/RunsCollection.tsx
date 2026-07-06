@@ -604,7 +604,7 @@ export default function RunsCollection({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `workeros-runs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `floom-runs-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success(`Exported ${all.length} runs`);
@@ -624,7 +624,7 @@ export default function RunsCollection({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `workeros-runs-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `floom-runs-${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success(`Exported ${ids.length} runs`);

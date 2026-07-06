@@ -189,7 +189,7 @@ def clone_or_init(workspace_dir: Path, remote_url: str) -> bool:
             f"git clone failed: {result.stderr.strip()}\n"
             "Check WORKEROS_GIT_REMOTE and that the token/SSH key has read access."
         )
-    _git(["config", "user.email", "workeros@local"], workspace_dir)
+    _git(["config", "user.email", "floom@local"], workspace_dir)
     _git(["config", "user.name", "Floom"], workspace_dir)
     return True
 
@@ -209,7 +209,7 @@ def ensure_repo(workspace_dir: Path) -> bool:
 
     workspace_dir.mkdir(parents=True, exist_ok=True)
     _git(["init"], workspace_dir)
-    _git(["config", "user.email", "workeros@local"], workspace_dir)
+    _git(["config", "user.email", "floom@local"], workspace_dir)
     _git(["config", "user.name", "Floom"], workspace_dir)
 
     gitignore = workspace_dir / ".gitignore"
@@ -230,7 +230,7 @@ def ensure_repo(workspace_dir: Path) -> bool:
                 "commit",
                 "-m",
                 "chore: initial workspace snapshot",
-                "--author=Floom <workeros@local>",
+                "--author=Floom <floom@local>",
             ],
             workspace_dir,
             check=False,
@@ -244,7 +244,7 @@ def commit_paths(
     rel_paths: list[str],
     message: str,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> Optional[str]:
     """Stage rel_paths and create a commit.
 
@@ -476,6 +476,6 @@ def clone_or_init_with_github_token(workspace_dir: Path, remote_url: str, token:
             f"git clone failed: {result.stderr.strip()}\n"
             "Check the GitHub token has read access."
         )
-    _git(["config", "user.email", "workeros@local"], workspace_dir)
+    _git(["config", "user.email", "floom@local"], workspace_dir)
     _git(["config", "user.name", "Floom"], workspace_dir)
     return True

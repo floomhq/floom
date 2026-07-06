@@ -132,7 +132,7 @@ def _git_commit_workspace_md(
     *,
     message: str,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> None:
     import git_ops as _git_ops
 
@@ -155,7 +155,7 @@ def _git_commit_workspace_base_md(
     *,
     message: str,
     author_name: str = "Floom",
-    author_email: str = "workeros@local",
+    author_email: str = "floom@local",
 ) -> None:
     import git_ops as _git_ops
 
@@ -327,7 +327,7 @@ def _build_workspace_template_zip(
     return buf.getvalue()
 
 
-WORKSPACE_TEMPLATE_FILENAME = "workeros-workspace-template.zip"
+WORKSPACE_TEMPLATE_FILENAME = "floom-workspace-template.zip"
 
 
 def _workspace_template_response(payload: bytes) -> Response:

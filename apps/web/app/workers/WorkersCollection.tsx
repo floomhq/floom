@@ -1871,7 +1871,7 @@ function AddAlertForm({
           <Input
             id={`alert-url-${workerId}`}
             type="url"
-            placeholder="https://hooks.example.com/workeros"
+            placeholder="https://hooks.example.com/floom"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             aria-invalid={!urlValid}
