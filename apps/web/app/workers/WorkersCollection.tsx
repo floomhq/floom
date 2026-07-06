@@ -410,13 +410,11 @@ function MissingConnectionsBanner({ w }: { w: WorkerSummary }) {
   const missing = w.missing_connections ?? [];
   const DISMISS_KEY = `connect-banner-dismissed:${w.id}`;
   const [dismissed, setDismissed] = useState(() => safeStorageGet("session", DISMISS_KEY) === "1");
-  const router = useRouter();
   const workspaceHref = useWorkspaceHref();
 
   if (dismissed || missing.length === 0) return null;
 
   const workerPath = workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}`);
-  const allConnected = missing.length === 0;
 
   return (
     <div
@@ -462,16 +460,6 @@ function MissingConnectionsBanner({ w }: { w: WorkerSummary }) {
             Connect {slug}
           </Link>
         ))}
-        <button
-          type="button"
-          disabled={!allConnected}
-          onClick={() => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`))}
-          className="c-addbtn"
-          style={{ opacity: allConnected ? 1 : 0.45, cursor: allConnected ? "pointer" : "default" }}
-          title={allConnected ? undefined : "Connect all tools above first"}
-        >
-          Run a test
-        </button>
       </div>
     </div>
   );

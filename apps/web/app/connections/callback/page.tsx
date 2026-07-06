@@ -72,13 +72,17 @@ function CallbackInner() {
 
       const callbackPath = `/api/proxy/connections/callback?${qs.toString()}`;
 
-      function navigateAfterCallback(finalUrl?: string) {
+      function navigateAfterCallback(finalUrl?: string, fetchFailed?: boolean) {
         let dest = "/connections";
         if (finalUrl) {
           try {
-            // Extract the ?connected=1&app=...&connection_id=... params that
-            // the backend embeds in the redirect target (used by ConnectionsClient
-            // to show a toast and highlight the new row — M58).
+            // Extract the ?connected=1&app=...&connection_id=... (or
+            // ?connected=0&error=...) params that the backend embeds in the
+            // redirect target (used by ConnectionsCollection to show a toast
+            // and highlight the new row — M58). `error` was previously
+            // dropped here, so a FAILED connection (backend deletes the
+            // orphaned row and redirects with connected=0&error=oauth_failed)
+            // landed on a bare /connections list with zero explanation.
             const parsed = new URL(finalUrl, window.location.origin);
             if (parsed.pathname === "/connections") {
               const feedbackQs = new URLSearchParams();
@@ -86,6 +90,8 @@ function CallbackInner() {
               if (c) feedbackQs.set("connected", c);
               const app = parsed.searchParams.get("app");
               if (app) feedbackQs.set("app", app);
+              const err = parsed.searchParams.get("error");
+              if (err) feedbackQs.set("error", err);
               const cid = parsed.searchParams.get("connection_id");
               if (cid) feedbackQs.set("connection_id", cid);
               const sel = parsed.searchParams.get("sel") || cid;
@@ -94,8 +100,16 @@ function CallbackInner() {
               dest = qStr ? `/connections?${qStr}` : "/connections";
             }
           } catch {
-            // Malformed URL — fall back to plain /connections.
+            // Malformed URL — fall back to a visible network-error state
+            // below rather than a silent plain /connections.
           }
+        }
+        if (fetchFailed && dest === "/connections") {
+          // The proxy fetch itself failed (offline, timeout, 5xx with no
+          // body) — we never even reached a backend redirect, so there is no
+          // `connected=`/`error=` to forward. Surface a generic failure
+          // instead of silently landing on the list as if nothing happened.
+          dest = "/connections?connected=0&error=network";
         }
         if (window.opener) {
           window.close();
@@ -110,8 +124,16 @@ function CallbackInner() {
         redirect: "follow",
         credentials: "same-origin",
       })
-        .then((res) => navigateAfterCallback(res.url))
-        .catch(() => navigateAfterCallback());
+        .then((res) => {
+          // fetch() only rejects on network-level failures — a raw 5xx from
+          // the backend with no redirect resolves normally with !res.ok, and
+          // res.url would still be the /api/proxy/... request URL (not
+          // /connections), so the pathname check above already falls through
+          // to the default dest. Treat a non-OK final response the same as a
+          // caught fetch failure instead of silently landing on the list.
+          navigateAfterCallback(res.url, !res.ok);
+        })
+        .catch(() => navigateAfterCallback(undefined, true));
     }
   }, [params, router]);
 
