@@ -892,6 +892,40 @@ class AlertRepository(Protocol):
     def delete(self, *, alert_id: str, worker_id: str) -> bool: ...
 
 
+class AlertThrottleRepository(Protocol):
+    """Persistence for failure-alert throttling (dedup + workspace daily cap).
+
+    Append-only log of failure-alert emails actually sent. Backend-agnostic:
+    the throttle POLICY lives in services/alert_throttle.py; this store only
+    records sends and counts them over time windows.
+    """
+
+    def record(
+        self,
+        *,
+        workspace_id: str,
+        worker_id: str,
+        signature: str,
+        sent_at_iso: str,
+    ) -> None: ...
+
+    def count_since(
+        self,
+        *,
+        since_iso: str,
+        workspace_id: str | None = None,
+        worker_id: str | None = None,
+        signature: str | None = None,
+    ) -> int: ...
+
+    def clear_dedup(self, *, workspace_id: str, worker_id: str) -> None:
+        """Drop this worker's throttle history (called on recovery) so the next
+        failure re-alerts immediately instead of waiting out the cooldown
+        window. Best-effort. The workspace daily cap is a per-UTC-day backstop
+        and still resets at midnight regardless."""
+        ...
+
+
 class FeedbackRepository(Protocol):
     """Lightweight per-worker feedback comments (SPEC §12)."""
 

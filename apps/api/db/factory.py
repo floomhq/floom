@@ -8,6 +8,7 @@ from typing import Optional
 
 from .interface import (
     AlertRepository,
+    AlertThrottleRepository,
     ApprovalRepository,
     AssetAccessRepository,
     CliAuthRepository,
@@ -27,6 +28,7 @@ from .interface import (
 )
 from .sqlite import (
     SqliteAlertRepository,
+    SqliteAlertThrottleRepository,
     SqliteApprovalRepository,
     SqliteAssetAccessRepository,
     SqliteCliAuthRepository,
@@ -76,6 +78,11 @@ class Repositories(NamedTuple):
     share_links: Optional[ShareLinkRepository] = None
     # Durable worker-level rules learned from scoped approval rejections.
     worker_rules: Optional[WorkerRuleRepository] = None
+    # Failure-alert throttle store (dedup + per-workspace daily email cap).
+    # Optional so a downstream factory predating it keeps constructing
+    # Repositories(...); services/alert_throttle.py falls back to an in-process
+    # throttle when this is None.
+    alert_throttle: Optional[AlertThrottleRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -97,6 +104,7 @@ def _local_repositories() -> Repositories:
         run_feedback=SqliteRunFeedbackRepository(),
         share_links=SqliteShareLinkRepository(),
         worker_rules=SqliteWorkerRuleRepository(),
+        alert_throttle=SqliteAlertThrottleRepository(),
     )
 
 

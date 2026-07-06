@@ -25,7 +25,7 @@ import urllib.request
 from datetime import datetime, timezone
 from html import escape
 from email.utils import parseaddr
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from models import (
     RunStatus,
@@ -451,11 +451,19 @@ def _fire_alert_webhooks(
     error: str | None,
     repos: "Repositories",
     user_id: str | None = None,
+    failure_email_allowed: "Callable[[], bool] | None" = None,
 ) -> None:
     """Fire registered webhook and email alerts matching the run's terminal status.
 
     Runs in a daemon thread so it never blocks run finalisation.
     Errors are logged but never re-raised.
+
+    ``failure_email_allowed`` (optional) is a throttle gate: when the run FAILED
+    it is called before sending a failure email and, if it returns False, the
+    email is suppressed (webhooks still fire). This is how the dedup +
+    per-workspace daily cap in services/alert_throttle.py stops a crash-looping
+    worker from exhausting the shared email quota. Webhooks and success emails
+    are never throttled. Default None preserves the pre-throttle behaviour.
     """
     try:
         alert_rows = repos.alerts.list(worker_id=worker_id)
@@ -551,6 +559,19 @@ def _fire_alert_webhooks(
                 to_addrs = json.loads(email_to_raw)
             except Exception:
                 to_addrs = [e.strip() for e in email_to_raw.split(",") if e.strip()]
+            # Throttle failure emails only (storm source). A suppressed email
+            # does NOT skip the webhook above; success emails are never gated.
+            if (
+                status == RunStatus.FAILED.value
+                and failure_email_allowed is not None
+                and not failure_email_allowed()
+            ):
+                logger.info(
+                    "Suppressing throttled per-worker failure email for worker %s run %s",
+                    worker_id,
+                    run_id,
+                )
+                continue
             _send_email_notification(
                 to_addrs=to_addrs,
                 worker_name=worker_name,
@@ -582,12 +603,47 @@ def _dispatch_terminal_run_alerts(
     if status not in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
         return
 
-    # Resolve worker name once for channel DMs.
+    # Resolve worker name + workspace once for channel DMs and alert throttling.
+    _workspace_id_for_alert: str | None = None
     try:
         _w_row_alert = repos.workers.get_any(worker_id=worker_id)
         _worker_name_for_alert = (_w_row_alert or {}).get("name") or worker_id
+        _workspace_id_for_alert = (_w_row_alert or {}).get("workspace_id")
     except Exception:
         _worker_name_for_alert = worker_id
+
+    # Failure-alert throttle gate. Reserves at most ONE alert slot per failed
+    # run (lazily, on first real send attempt) shared across the per-worker
+    # email and the workspace failure email, so a single failed run counts once
+    # against the dedup window + per-workspace daily cap. Success runs are never
+    # gated. Any error fails OPEN (send) so throttling can't silence real alerts.
+    _alert_gate_state = {"resolved": False, "allowed": True}
+
+    def _failure_email_allowed() -> bool:
+        if status != RunStatus.FAILED.value:
+            return True
+        if not _alert_gate_state["resolved"]:
+            try:
+                from services.alert_throttle import (
+                    should_send_failure_alert,
+                    failure_signature,
+                )
+
+                _sig = failure_signature(error=error, status=status)
+                _alert_gate_state["allowed"] = should_send_failure_alert(
+                    repos=repos,
+                    workspace_id=_workspace_id_for_alert,
+                    worker_id=worker_id,
+                    signature=_sig,
+                )
+            except Exception:
+                logger.debug(
+                    "failure-alert throttle gate errored; allowing send",
+                    exc_info=True,
+                )
+                _alert_gate_state["allowed"] = True
+            _alert_gate_state["resolved"] = True
+        return bool(_alert_gate_state["allowed"])
 
     # Resolve a one-line result summary for the completion DM.
     _result_summary: str | None = None
@@ -613,6 +669,7 @@ def _dispatch_terminal_run_alerts(
             error=error,
             repos=repos,
             user_id=user_id,
+            failure_email_allowed=_failure_email_allowed,
         )
 
         # Feature #1382: DM the run owner on Slack and WhatsApp when a run
@@ -645,14 +702,28 @@ def _dispatch_terminal_run_alerts(
             )
 
         if status != RunStatus.FAILED.value:
+            # Worker recovered — clear its throttle history so the NEXT failure
+            # re-alerts immediately rather than waiting out the cooldown window.
+            try:
+                from services.alert_throttle import note_worker_recovered
+
+                note_worker_recovered(
+                    repos=repos,
+                    workspace_id=_workspace_id_for_alert,
+                    worker_id=worker_id,
+                )
+            except Exception:
+                logger.debug("failure-alert recovery note failed for run %s", run_id, exc_info=True)
             return
         # #794: workspace 'failure_email_enabled' toggle — email the workspace's
         # configured address on ANY run failure (distinct from the per-worker
         # email_to alert above). Best-effort; skipped when no recipient/RESEND.
+        # Throttled by the shared failure-alert gate so a crash-looping worker
+        # can't exhaust the shared email quota.
         try:
             if _workspace_toggle("failure_email_enabled", env_var="WORKEROS_FAILURE_EMAIL", default=False):
                 recipients = _workspace_failure_email_recipients()
-                if recipients:
+                if recipients and _failure_email_allowed():
                     _send_email_notification(
                         to_addrs=recipients,
                         worker_name=worker_id,
@@ -660,6 +731,12 @@ def _dispatch_terminal_run_alerts(
                         worker_id=worker_id,
                         status=status,
                         error=error,
+                    )
+                elif recipients:
+                    logger.info(
+                        "Suppressing throttled workspace failure email for worker %s run %s",
+                        worker_id,
+                        run_id,
                     )
         except Exception:
             logger.debug("workspace failure-email dispatch failed for run %s", run_id, exc_info=True)

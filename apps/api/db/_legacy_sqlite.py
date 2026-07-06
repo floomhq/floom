@@ -2229,6 +2229,25 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 92: opaque short OAuth authorize links ---------------------
     _ensure_connection_authorize_links_table,
+    # -- migration 93: failure-alert throttle log (dedup + workspace daily cap)
+    # One row per failure-alert email actually SENT. Used by
+    # services/alert_throttle.py to (a) suppress repeat alerts for the same
+    # (workspace, worker, signature) inside a cooldown window and (b) enforce a
+    # hard per-workspace/day cap so a crash-looping worker can never exhaust the
+    # shared email quota. Append-only; pruning is optional/best-effort.
+    """
+    CREATE TABLE IF NOT EXISTS alert_throttle (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        workspace_id TEXT NOT NULL DEFAULT 'local-default',
+        worker_id    TEXT NOT NULL,
+        signature    TEXT NOT NULL,
+        sent_at      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_alert_throttle_ws_sent
+        ON alert_throttle(workspace_id, sent_at);
+    CREATE INDEX IF NOT EXISTS idx_alert_throttle_dedup
+        ON alert_throttle(workspace_id, worker_id, signature, sent_at);
+    """,
 ]
 
 
