@@ -30,12 +30,12 @@ export default async function PublicWorkerPage({
   const { token } = await searchParams;
   if (!token) notFound();
 
-  // /w/<id>?token=<hmac> is a legacy surface now — the canonical URL is the
+  // /w/<id>?token=<hmac> is a legacy surface now; the canonical URL is the
   // /@handle/slug permalink (Fede 2026-07-06: "one URL per worker forever").
   // Permanently redirect old links to the canonical shape, finding-or-minting
   // a durable, revocable ?share= link for a non-public worker along the way
   // (a strict improvement over this legacy HMAC, which had no revoke path).
-  // The redirect() call is deliberately OUTSIDE the try/catch below — it
+  // The redirect() call is deliberately OUTSIDE the try/catch below: it
   // throws a Next.js control-flow signal that must propagate, not be treated
   // as a fetch failure. Falls back to rendering the legacy card further down
   // only when the lookup fails or the workspace has no resolvable handle (an

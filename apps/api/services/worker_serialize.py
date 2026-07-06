@@ -154,11 +154,11 @@ def _worker_public_link(worker: Dict[str, Any], repos: Any | None = None) -> Opt
     """Public link for a worker with visibility='public'.
 
     The canonical permalink ``/@{handle}/{public_slug}`` when the workspace
-    handle resolves (one URL per worker forever — Fede 2026-07-06), else the
+    handle resolves (one URL per worker forever, Fede 2026-07-06), else the
     legacy ``/w/{id}?token=<hmac>`` shape (an engine pin predating the L4
     handle column, or *repos* unavailable). Note: this helper doesn't import
     ``services.public_worker`` (which builds the same permalink) because that
-    module imports FROM this one (``_worker_public_token``) — importing back
+    module imports FROM this one (``_worker_public_token``); importing back
     would be circular, so the handle+slug lookup is inlined here instead.
     """
     worker_id = str(worker.get("id") or "")

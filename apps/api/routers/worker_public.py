@@ -166,7 +166,7 @@ def get_public_worker_by_handle_slug(
     Returns public card fields for a worker with visibility='public', OR
     (Fede 2026-07-06: "access is a property, not a URL namespace") for a
     non-public worker when a valid ``share`` token for THIS worker is
-    supplied — the same ``fls_`` standalone-share-link token the Share modal
+    supplied, the same ``fls_`` standalone-share-link token the Share modal
     mints, reused as an unguessable key on the one canonical URL instead of a
     separate ``/s/<token>`` link. Non-public / unknown handle or slug / bad or
     missing token -> identical 404 (never confirms existence). The SSR'd HTML
@@ -184,10 +184,10 @@ def get_worker_permalink_redirect(
     """Legacy /w/{id}?token=<hmac> -> canonical permalink redirect target.
 
     Verifies the same signed HMAC the historical /w/ page always has (never a
-    new capability — anyone who could reach the old page can reach this).
+    new capability: anyone who could reach the old page can reach this).
     Returns the bare permalink for a public worker, or a durable ``?share=``
     link (found-or-minted via the standard ``fls_`` share-link table) for a
-    non-public one — a strict improvement over the legacy HMAC, which had no
+    non-public one, a strict improvement over the legacy HMAC, which had no
     revoke path. ``path`` is None only when the workspace has no resolvable
     handle (an engine pin predating the L4 handle column); callers should fall
     back to rendering the legacy standalone share card in that case.

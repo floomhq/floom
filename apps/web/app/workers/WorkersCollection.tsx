@@ -2284,7 +2284,7 @@ function WorkerDetailActions({
 
       {/* One URL per worker forever (Fede 2026-07-06): a public worker's
           Share modal shows the canonical /@handle/slug permalink as a
-          static, non-revocable link (there's nothing to revoke — it's just
+          static, non-revocable link (there's nothing to revoke; it's just
           the worker's URL; making the worker private again is the Company
           access control above, and that's what gates the bare URL, not a
           share token). A private/workspace worker keeps the mint/revoke

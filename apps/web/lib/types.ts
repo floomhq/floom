@@ -332,7 +332,7 @@ export interface WorkerSummary {
 /**
  * Per-asset visibility. `specific_people` is reserved (hidden in the UI).
  * `public` is a real, readable backend value (curated/gallery workers) but is
- * NOT settable via the Share modal's Company-access control — see
+ * NOT settable via the Share modal's Company-access control, see
  * `lib/sharing/share-model.ts`'s `GENERAL_ACCESS_OPTIONS` (private/workspace
  * only, "no public company-access level, killed deliberately, rule #8").
  * Included here so a worker's raw `visibility` field types correctly.
@@ -618,7 +618,7 @@ export interface StandaloneShare {
   /** worker entity_type only: the canonical /@handle/slug permalink this
    * legacy /s/<token> link now redirects to (bare if public, ?share=<token>
    * appended otherwise). Null when the workspace has no resolvable handle
-   * (an engine pin predating the L4 handle column) — the page then falls
+   * (an engine pin predating the L4 handle column); the page then falls
    * back to rendering the legacy standalone share card. */
   permalink_redirect_url?: string | null;
 }

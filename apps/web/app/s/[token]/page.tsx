@@ -42,12 +42,12 @@ export default async function StandaloneSharePage({ params }: Props) {
     notFound();
   }
 
-  // Worker shares are a legacy surface now — the canonical URL is the
+  // Worker shares are a legacy surface now; the canonical URL is the
   // /@handle/slug permalink (Fede 2026-07-06: "one URL per worker forever").
   // Old /s/<token> links keep working: permanently redirect to the canonical
   // shape instead of rendering here. redirect() is called with an ABSOLUTE
   // apex URL (not a relative path) so it escapes the dashboard's /app
-  // basePath cleanly — a relative redirect() from inside a basePath-scoped
+  // basePath cleanly: a relative redirect() from inside a basePath-scoped
   // Next.js app would stay parked under /app/, which is the exact "ugly
   // /app/ in the address bar" bug this migration is fixing.
   if (share.entity_type === "worker" && share.permalink_redirect_url) {

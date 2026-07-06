@@ -143,7 +143,7 @@ export async function fetchPublicWorker(id: string, token: string) {
  * Legacy /w/<id>?token=<hmac> -> canonical permalink redirect target.
  *
  * `url` is null when the workspace has no resolvable handle (an engine pin
- * predating the L4 handle column) — the page falls back to rendering the
+ * predating the L4 handle column); the page falls back to rendering the
  * legacy standalone share card in that case. `cache: "no-store"`: this may
  * mint a fresh, revocable share link server-side on first hit for a private
  * worker, so it must never be treated as a cacheable GET.
@@ -181,7 +181,7 @@ export async function fetchPublicWorkspaceProfile(handle: string) {
  * token) public path is cacheable (no auth) so the SSR fetch is
  * edge-revalidated to absorb scraper traffic. A *shareToken* request is
  * per-recipient and revocable, so it bypasses the data cache entirely
- * (`cache: "no-store"`) — a 5-minute-stale cache would keep a just-revoked
+ * (`cache: "no-store"`): a 5-minute-stale cache would keep a just-revoked
  * link working.
  */
 export async function fetchPublicWorkerPermalink(

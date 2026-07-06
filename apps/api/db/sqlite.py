@@ -1084,7 +1084,7 @@ class SqliteWorkerRepository:
 
     def get_by_public_slug_any_visibility(self, *, workspace_id: str, public_slug: str) -> dict[str, Any] | None:
         """OSS single-tenant: match ANY worker (regardless of visibility) by
-        slugified name/id — sibling of ``get_public_by_slug`` without the
+        slugified name/id, sibling of ``get_public_by_slug`` without the
         visibility filter, backing the ``?share=<token>`` permalink path."""
         from services.public_worker import _slugify_handle
 

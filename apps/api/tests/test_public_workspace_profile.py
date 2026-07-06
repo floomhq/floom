@@ -95,7 +95,7 @@ def test_public_workspace_profile_lists_only_public_workers_without_sensitive_fi
         assert body["assets"][0]["type"] == "worker"
         # URL consistency (Fede 2026-07-06): a public worker's card always
         # points at its canonical /@handle/slug permalink now, never the
-        # legacy /w/<id>?token=<hmac> link — every asset here is already
+        # legacy /w/<id>?token=<hmac> link, every asset here is already
         # confirmed public (list_public_for_workspace only returns
         # visibility='public' rows), so there's no access-control reason to
         # keep minting the legacy HMAC form.
@@ -238,7 +238,7 @@ def _auth_headers():
 
 def test_private_worker_permalink_404s_bare_identical_to_unknown_slug():
     """A private worker's bare permalink 404s exactly like a nonexistent slug
-    (no share token) — the response body must not differ, so existence is
+    (no share token); the response body must not differ, so existence is
     never confirmed either way."""
     with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
         main, client = _boot(Path(td))
@@ -289,7 +289,7 @@ def test_private_worker_permalink_with_invalid_share_token_404s_identically():
 
 
 def test_share_token_does_not_unlock_a_different_worker():
-    """A valid token for worker A must not grant access to worker B's slug —
+    """A valid token for worker A must not grant access to worker B's slug:
     the token is checked against THIS worker's (entity_id, owner_id), not just
     "any live token"."""
     with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
@@ -330,7 +330,7 @@ def test_revoking_share_link_locks_out_the_permalink():
 def test_visibility_flip_does_not_break_an_already_issued_share_link():
     """Visibility flips never change the URL (Fede 2026-07-06): making a
     worker public then private again must not invalidate a share token that
-    was already issued while it was private — the two access paths are backed
+    was already issued while it was private; the two access paths are backed
     by independent state (the visibility column vs. the share-link table)."""
     with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
         main, client = _boot(Path(td))
@@ -357,7 +357,7 @@ def test_visibility_flip_does_not_break_an_already_issued_share_link():
 def test_worker_share_link_url_uses_canonical_permalink_shape():
     """The Share modal's mint endpoint (POST .../share-link) returns the
     /@handle/slug?share=<token> shape for a worker, not a bare /s/<token>
-    link — same token/table, different presentation (Fede 2026-07-06)."""
+    link, same token/table, different presentation (Fede 2026-07-06)."""
     with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
         main, client = _boot(Path(td))
         _seed_public_and_private(main)

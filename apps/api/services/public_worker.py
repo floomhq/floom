@@ -298,7 +298,7 @@ def _public_worker_share_from_worker(
         if not f.binary
     ]
     # Worker permalink-redirect target: /s/<token> for a worker is a legacy
-    # surface now — the canonical URL is the /@handle/slug permalink. When the
+    # surface now; the canonical URL is the /@handle/slug permalink. When the
     # workspace handle resolves, hand the frontend an absolute redirect target
     # (bare for a public worker, ?share=<token> for a non-public one so the
     # legacy link keeps granting the same access it always did). Absolute
@@ -353,10 +353,10 @@ def _worker_public_slug_value(worker: Dict[str, Any]) -> str:
     """The worker's canonical permalink slug segment.
 
     Cloud stores ``public_slug`` as a real per-workspace-unique column
-    (assigned at worker create, present regardless of visibility — L4
+    (assigned at worker create, present regardless of visibility: L4
     backfill). OSS has no such column, so it's derived the same way
     ``get_public_by_slug``/``resolve_workspace_by_handle`` already derive it
-    (from name, falling back to id) — kept in lockstep so a worker's
+    (from name, falling back to id), kept in lockstep so a worker's
     permalink slug is stable and never depends on which repo backend answers.
     """
     stored = str(worker.get("public_slug") or "").strip()
@@ -368,7 +368,7 @@ def _worker_public_slug_value(worker: Dict[str, Any]) -> str:
 def _worker_workspace_handle(worker: Dict[str, Any], repos: "Repositories | None") -> str | None:
     """Resolve the stored workspace ``handle`` for a worker's workspace_id.
 
-    Returns None (never raises) when the repo can't answer — callers treat a
+    Returns None (never raises) when the repo can't answer: callers treat a
     missing handle as "permalink unavailable" and fall back to whatever they
     were doing before (e.g. the legacy /w/ HMAC link), so an engine pin
     predating this capability degrades gracefully instead of 500ing.
@@ -495,7 +495,7 @@ def _public_worker_card_by_handle_slug(
        THIS worker's ``(entity_id, owner_id)`` with ``entity_type=="worker"``.
 
     A visibility flip never changes this URL: making a worker private again
-    only removes path 1 (bare access 404s, identical to an unknown slug —
+    only removes path 1 (bare access 404s, identical to an unknown slug;
     existence is never confirmed either way); an already-issued share token
     keeps working via path 2 until it's explicitly revoked, because the two
     paths are backed by independent state (the ``visibility`` column vs the
@@ -534,7 +534,7 @@ def _public_worker_card_by_handle_slug(
 
     if not worker:
         # Identical 404 whether the slug doesn't exist or exists but is
-        # private with no/an invalid share token — never confirms existence.
+        # private with no/an invalid share token: never confirms existence.
         raise HTTPException(status_code=404, detail="Worker not found")
 
     try:
@@ -561,7 +561,7 @@ def _public_worker_card_by_handle_slug(
         "permalink": permalink,
         "title": public.get("name"),
         "description": public.get("description") or public.get("long_description"),
-        # Canonical permalink, not the legacy /w/<id>?token=<hmac> shape — this
+        # Canonical permalink, not the legacy /w/<id>?token=<hmac> shape: this
         # card is only ever built for a worker we've already confirmed access
         # to (public or validly shared), so the bare permalink is correct here.
         "share_path": permalink,
@@ -598,7 +598,7 @@ def _public_workspace_profile(handle: str, repos: "Repositories", *, limit: int 
                 "description": public.get("description") or public.get("long_description"),
                 # list_public_for_workspace only ever returns visibility='public'
                 # rows, so the bare canonical permalink is always correct here
-                # (no access-control implication — replaces the legacy /w/
+                # (no access-control implication, replaces the legacy /w/
                 # HMAC link this card used to emit).
                 "share_path": f"/@{workspace.get('handle') or _slugify_handle(workspace.get('name') or workspace_id)}/{_worker_public_slug_value(worker)}",
                 "worker": public,

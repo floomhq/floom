@@ -1,7 +1,7 @@
 // One URL per worker forever (Fede 2026-07-06): the legacy /s/<token> page
 // permanently redirects a worker share to its canonical /@handle/slug
 // permalink instead of rendering here. Non-worker entity types (brain_file,
-// brain_pack, run, approvals_batch) are unaffected — they keep rendering
+// brain_pack, run, approvals_batch) are unaffected; they keep rendering
 // inline as before.
 import { afterEach, describe, expect, it, vi } from "vitest";
 

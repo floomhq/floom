@@ -1,7 +1,7 @@
 // One URL per worker forever (Fede 2026-07-06): the legacy /w/<id>?token=
 // page permanently redirects to the canonical /@handle/slug permalink
 // instead of rendering here (finding-or-minting a durable ?share= link for a
-// non-public worker along the way — a strict improvement over the legacy
+// non-public worker along the way; a strict improvement over the legacy
 // HMAC, which had no revoke path).
 import { afterEach, describe, expect, it, vi } from "vitest";
 

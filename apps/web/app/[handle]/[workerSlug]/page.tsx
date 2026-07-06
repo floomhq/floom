@@ -106,7 +106,7 @@ export default async function WorkerPermalinkPage({ params, searchParams }: Prop
 
   // Visibility is a property of the worker, not the URL (Fede 2026-07-06):
   // bare renders a public worker; ?share=<token> renders a non-public one iff
-  // the token is valid for it. Both paths 404 identically otherwise — the
+  // the token is valid for it. Both paths 404 identically otherwise: the
   // permalink never confirms a private worker's existence.
   const card = await fetchPublicWorkerPermalink(handle, workerSlug, share);
   if (!card) notFound();
