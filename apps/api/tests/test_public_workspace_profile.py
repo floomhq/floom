@@ -93,7 +93,13 @@ def test_public_workspace_profile_lists_only_public_workers_without_sensitive_fi
         }
         assert body["counts"] == {"workers": 1, "assets": 1}
         assert body["assets"][0]["type"] == "worker"
-        assert body["assets"][0]["share_path"].startswith("/w/gmail-inbox-cleaner?token=")
+        # URL consistency (Fede 2026-07-06): a public worker's card always
+        # points at its canonical /@handle/slug permalink now, never the
+        # legacy /w/<id>?token=<hmac> link, every asset here is already
+        # confirmed public (list_public_for_workspace only returns
+        # visibility='public' rows), so there's no access-control reason to
+        # keep minting the legacy HMAC form.
+        assert body["assets"][0]["share_path"] == "/@fede-secretary/gmail-inbox-cleaner"
         assert body["workers"][0]["name"] == "Gmail Inbox Cleaner"
         assert body["workers"][0]["connections"] == ["gmail"]
         assert "private-worker" not in resp.text
@@ -220,3 +226,150 @@ def test_import_from_permalink_refuses_private_worker():
         )
         assert resp.status_code == 404
         assert "private-worker" not in resp.text
+
+
+# --- One URL per worker forever: ?share=<token> unguessable-key access -----
+# (Fede 2026-07-06: "access is a property, not a URL namespace")
+
+
+def _auth_headers():
+    return {"x-floom-secret": "workspace-profile-test-secret"}
+
+
+def test_private_worker_permalink_404s_bare_identical_to_unknown_slug():
+    """A private worker's bare permalink 404s exactly like a nonexistent slug
+    (no share token); the response body must not differ, so existence is
+    never confirmed either way."""
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        private_resp = client.get("/workers/public/by-handle/fede-secretary/private-worker")
+        unknown_resp = client.get("/workers/public/by-handle/fede-secretary/does-not-exist")
+
+        assert private_resp.status_code == 404 == unknown_resp.status_code
+        assert private_resp.json() == unknown_resp.json()
+
+
+def test_private_worker_permalink_with_valid_share_token_resolves():
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        mint = client.post(
+            "/workers/private-worker/share-link",
+            headers=_auth_headers(),
+        )
+        assert mint.status_code == 200, mint.text
+        token = mint.json()["token"]
+        share_url = mint.json()["url"]
+        assert share_url.endswith(f"/@fede-secretary/private-worker?share={token}")
+
+        resp = client.get(f"/workers/public/by-handle/fede-secretary/private-worker?share={token}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["worker"]["name"] == "Private Worker"
+        assert body["access"] == "shared_link"
+        assert "GMAIL_REFRESH_TOKEN" not in resp.text
+        assert "local-user" not in resp.text
+
+
+def test_private_worker_permalink_with_invalid_share_token_404s_identically():
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        bad_token_resp = client.get(
+            "/workers/public/by-handle/fede-secretary/private-worker?share=fls_totally-bogus-token-value"
+        )
+        no_token_resp = client.get("/workers/public/by-handle/fede-secretary/private-worker")
+
+        assert bad_token_resp.status_code == 404 == no_token_resp.status_code
+        assert bad_token_resp.json() == no_token_resp.json()
+
+
+def test_share_token_does_not_unlock_a_different_worker():
+    """A valid token for worker A must not grant access to worker B's slug:
+    the token is checked against THIS worker's (entity_id, owner_id), not just
+    "any live token"."""
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+        repos = main.get_repositories()
+        repos.workers.create(
+            user_id="local-user",
+            worker_id="other-private-worker",
+            workspace_id="local-default",
+            name="Other Private Worker",
+            manifest_json=_manifest("other-private-worker", "Other Private Worker"),
+        )
+
+        mint = client.post("/workers/private-worker/share-link", headers=_auth_headers())
+        token = mint.json()["token"]
+
+        resp = client.get(f"/workers/public/by-handle/fede-secretary/other-private-worker?share={token}")
+        assert resp.status_code == 404
+
+
+def test_revoking_share_link_locks_out_the_permalink():
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        mint = client.post("/workers/private-worker/share-link", headers=_auth_headers())
+        token = mint.json()["token"]
+        assert client.get(f"/workers/public/by-handle/fede-secretary/private-worker?share={token}").status_code == 200
+
+        revoke = client.delete("/workers/private-worker/share-link", headers=_auth_headers())
+        assert revoke.status_code == 200 and revoke.json()["revoked"] is True
+
+        resp = client.get(f"/workers/public/by-handle/fede-secretary/private-worker?share={token}")
+        assert resp.status_code == 404
+
+
+def test_visibility_flip_does_not_break_an_already_issued_share_link():
+    """Visibility flips never change the URL (Fede 2026-07-06): making a
+    worker public then private again must not invalidate a share token that
+    was already issued while it was private; the two access paths are backed
+    by independent state (the visibility column vs. the share-link table)."""
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        mint = client.post("/workers/private-worker/share-link", headers=_auth_headers())
+        token = mint.json()["token"]
+        assert client.get(f"/workers/public/by-handle/fede-secretary/private-worker?share={token}").status_code == 200
+
+        # Flip public, then back to private.
+        with main.get_db() as conn:
+            conn.execute("UPDATE workers SET visibility = 'public' WHERE id = ?", ("private-worker",))
+        assert client.get("/workers/public/by-handle/fede-secretary/private-worker").status_code == 200
+        with main.get_db() as conn:
+            conn.execute("UPDATE workers SET visibility = 'private' WHERE id = ?", ("private-worker",))
+
+        # Bare URL 404s again (private), but the share link issued earlier still works.
+        assert client.get("/workers/public/by-handle/fede-secretary/private-worker").status_code == 404
+        resp = client.get(f"/workers/public/by-handle/fede-secretary/private-worker?share={token}")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["access"] == "shared_link"
+
+
+def test_worker_share_link_url_uses_canonical_permalink_shape():
+    """The Share modal's mint endpoint (POST .../share-link) returns the
+    /@handle/slug?share=<token> shape for a worker, not a bare /s/<token>
+    link, same token/table, different presentation (Fede 2026-07-06)."""
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-share-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        mint = client.post("/workers/private-worker/share-link", headers=_auth_headers())
+        assert mint.status_code == 200, mint.text
+        url = mint.json()["url"]
+        assert "/@fede-secretary/private-worker?share=" in url
+        assert "/s/" not in url
+
+        # GET .../share-links (the "show existing link" re-display path) must
+        # reconstruct the SAME shape, not the legacy /s/<token> form.
+        listed = client.get("/workers/private-worker/share-links", headers=_auth_headers())
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["links"][0]["url"] == url

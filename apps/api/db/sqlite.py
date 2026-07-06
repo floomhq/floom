@@ -1082,6 +1082,52 @@ class SqliteWorkerRepository:
                 return record
         return None
 
+    def get_by_public_slug_any_visibility(self, *, workspace_id: str, public_slug: str) -> dict[str, Any] | None:
+        """OSS single-tenant: match ANY worker (regardless of visibility) by
+        slugified name/id, sibling of ``get_public_by_slug`` without the
+        visibility filter, backing the ``?share=<token>`` permalink path."""
+        from services.public_worker import _slugify_handle
+
+        target = _slugify_handle(str(public_slug or ""))
+        if not target:
+            return None
+        with get_db() as conn:
+            rows = conn.execute(
+                _worker_select_sql(
+                    "WHERE COALESCE(w.workspace_id, 'local-default') = ?",
+                    "LIMIT 200",
+                ),
+                (workspace_id or "local-default",),
+            ).fetchall()
+        for row in rows:
+            record = _worker_record_from_row(row)
+            derived = _slugify_handle(record.get("name") or record.get("id"))
+            if derived == target:
+                return record
+        return None
+
+    def get_workspace_handle(self, *, workspace_id: str) -> str | None:
+        """OSS single-tenant: the derived handle for a local_workspaces row.
+
+        Mirrors ``resolve_workspace_by_handle``'s derivation (slugified name,
+        falling back to id) so a worker's permalink handle always matches what
+        the reverse (handle -> workspace) lookup would resolve.
+        """
+        from services.public_worker import _slugify_handle
+
+        raw = str(workspace_id or "").strip() or "local-default"
+        try:
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT id, name FROM local_workspaces WHERE id = ? LIMIT 1",
+                    (raw,),
+                ).fetchone()
+        except Exception:
+            row = None
+        if not row:
+            return None
+        return _slugify_handle(row["name"] or row["id"]) or None
+
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
         manifest_json = fields.get("manifest_json") or {}
