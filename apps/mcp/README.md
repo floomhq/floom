@@ -15,14 +15,27 @@ The CLI targets hosted Floom Cloud by default. Self-hosted/local mode is only fo
 | **Hosted** (default) | `https://workeros-api.floom.dev` | browser/device login or bearer token | multi-workspace |
 | **Self-hosted** | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
 
-## Hosted Quickstart
+## Quickstart — hand it to your agent
+
+The fastest path is to let your coding agent (Claude Code, Cursor, ...) do the
+setup. Paste this into the agent:
+
+```
+Read https://floom.dev/onboard and walk me through setting up Floom.
+```
+
+It installs the MCP, signs you in, and builds your first worker with you.
+
+Or install manually:
 
 ```bash
 npx -y @floomhq/floom mcp install --target claude
 ```
 
-`mcp install` targets Floom Cloud by default, selects the active workspace, and
-writes the MCP config for the client. Hosted HTTP MCP configs need a durable
+`mcp install` targets Floom Cloud by default, selects the active workspace,
+writes the MCP config for the client, and drops an auto-triggering Floom skill
+so your agent reaches for Floom on recurring/scheduled/background requests. Pass
+`--no-skill` to skip the skill. Hosted HTTP MCP configs need a durable
 Personal Access Token because browser login JWTs expire; generate one in the
 dashboard, then set `FLOOM_TOKEN` or `WORKEROS_API_TOKEN` before running install. Use
 `--target cursor`, `--target vscode`, `--target windsurf`, `--target continue`,

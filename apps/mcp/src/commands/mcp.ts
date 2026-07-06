@@ -99,13 +99,19 @@ async function writeAndLogFloomSkill(
   }
 }
 
+const ONBOARD_PROMPT_URL = "https://floom.dev/onboard";
+
 function logInstallSuccessNextStep(): void {
   log.blank();
   log.ok("Floom is ready");
   log.blank();
   log.step("Installed MCP for your agent");
-  log.step("Next: open your agent and ask:");
   log.blank();
+  log.step("Give this to your agent — it walks you through the rest:");
+  log.blank();
+  log.info(`  "Read ${ONBOARD_PROMPT_URL} and walk me through setting up Floom."`);
+  log.blank();
+  log.info("Or just ask it:");
   log.info('  "Use Floom to create and run my first read-only worker."');
   log.blank();
   log.info("Tip: connect Gmail, GitHub, Slack, or Linear in Floom first for a better first worker.");
@@ -289,9 +295,17 @@ async function resolveMcpConfig(
   };
 }
 
-export async function mcpInstallCommand(options: { target?: ClientTarget; showToken?: boolean }): Promise<number> {
+export async function mcpInstallCommand(options: {
+  target?: ClientTarget;
+  showToken?: boolean;
+  // Commander maps `--no-skill` to `skill === false`; default (undefined/true)
+  // installs the auto-triggering Floom skill so the agent reaches for Floom on
+  // recurring/scheduled/background intents. `--no-skill` opts out.
+  skill?: boolean;
+}): Promise<number> {
   const home = resolveHomeDir();
   if (!home) throw new Error("HOME is required");
+  const installSkill = options.skill !== false;
 
   if (options.target && !isSupportedTarget(options.target)) {
     log.err(`Unknown target: ${options.target}`);
@@ -343,7 +357,9 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
         `Credentials are redacted by default. Re-run \`${getCommandName()} mcp install --target generic --show-token\` only when you are ready to paste into a private MCP config.`,
       );
     }
-    await writeAndLogFloomSkill({ target: "generic" }, join(process.cwd(), "FLOOM.md"), "FLOOM.md", "stderr");
+    if (installSkill) {
+      await writeAndLogFloomSkill({ target: "generic" }, join(process.cwd(), "FLOOM.md"), "FLOOM.md", "stderr");
+    }
     return 0;
   }
 
@@ -368,7 +384,9 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
     log.ok(`Installed Floom MCP config for ${client.name}`);
     log.kv("Config path", displayPath);
-    await writeAndLogFloomSkill(client, configPath);
+    if (installSkill) {
+      await writeAndLogFloomSkill(client, configPath);
+    }
     logInstallSuccessNextStep();
     return 0;
   }
@@ -387,14 +405,18 @@ export async function mcpInstallCommand(options: { target?: ClientTarget; showTo
     const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
     log.ok(`Installed Floom MCP config for ${client.name} (auto-detected)`);
     log.kv("Config path", displayPath);
-    await writeAndLogFloomSkill(client, configPath);
+    if (installSkill) {
+      await writeAndLogFloomSkill(client, configPath);
+    }
     logInstallSuccessNextStep();
     return 0;
   }
 
   log.info("No supported MCP client config was found; defaulting to --target generic.");
   process.stdout.write(manualSnippets(mcpUrl, headers) + "\n");
-  await writeAndLogFloomSkill({ target: "generic" }, join(process.cwd(), "FLOOM.md"), "FLOOM.md", "stderr");
+  if (installSkill) {
+    await writeAndLogFloomSkill({ target: "generic" }, join(process.cwd(), "FLOOM.md"), "FLOOM.md", "stderr");
+  }
   return 0;
 }
 

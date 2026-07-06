@@ -1042,6 +1042,65 @@ test("mcp add patches agent config", async () => {
   }
 });
 
+test("mcp install drops the auto-triggering Floom skill by default and points to the onboarding prompt", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-skill-home-"));
+  try {
+    const claudeDir = join(home, ".claude");
+    await mkdir(claudeDir, { recursive: true });
+    await writeFile(join(claudeDir, "settings.json"), JSON.stringify({ mcpServers: {} }, null, 2));
+
+    const result = await runCli(["mcp", "install", "--target", "claude"], {
+      HOME: home,
+      WORKEROS_API_SECRET: "test-secret",
+    });
+    assert.equal(result.code, 0);
+
+    // Skill lands at ~/.claude/skills/floom/SKILL.md by default (no flag).
+    const skill = await readFile(join(home, ".claude", "skills", "floom", "SKILL.md"), "utf8");
+    assert.match(skill, /^---/);
+    assert.match(skill, /name: floom/);
+    // Auto-trigger phrases must be present so agent skill routing fires.
+    assert.match(skill, /recurring task/);
+    assert.match(skill, /schedule/i);
+    assert.match(skill, /background/i);
+
+    // Post-install output hands the onboarding prompt to the agent (primary path).
+    assert.match(result.stdout, /https:\/\/floom\.dev\/onboard/);
+    assert.match(result.stdout, /Give this to your agent/);
+    assert.match(result.stdout, /Added Floom skill/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("mcp install --no-skill opts out of the Floom skill", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-noskill-home-"));
+  try {
+    const claudeDir = join(home, ".claude");
+    await mkdir(claudeDir, { recursive: true });
+    await writeFile(join(claudeDir, "settings.json"), JSON.stringify({ mcpServers: {} }, null, 2));
+
+    const result = await runCli(["mcp", "install", "--target", "claude", "--no-skill"], {
+      HOME: home,
+      WORKEROS_API_SECRET: "test-secret",
+    });
+    assert.equal(result.code, 0);
+    assert.doesNotMatch(result.stdout, /Added Floom skill/);
+
+    let skillExists = true;
+    try {
+      await stat(join(home, ".claude", "skills", "floom", "SKILL.md"));
+    } catch {
+      skillExists = false;
+    }
+    assert.equal(skillExists, false, "SKILL.md must not be written with --no-skill");
+    // MCP config itself is still installed.
+    assert.match(result.stdout, /Installed Floom MCP config for Claude Code/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test("mcp install generic redacts credentials by default", async () => {
   const home = await mkdtemp(join(tmpdir(), "workeros-mcp-generic-home-"));
   try {
