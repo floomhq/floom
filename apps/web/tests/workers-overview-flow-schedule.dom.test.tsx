@@ -10,6 +10,7 @@ const router = vi.hoisted(() => ({
 
 const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
+  getRunMeta: vi.fn(),
   list: vi.fn(),
   listVersions: vi.fn(),
   listContexts: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/lib/api", () => ({
     workers: {
       list: apiMocks.list,
       get: apiMocks.get,
+      getRunMeta: apiMocks.getRunMeta,
       listVersions: apiMocks.listVersions,
       alerts: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), remove: vi.fn() },
       feedback: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
@@ -104,6 +106,7 @@ beforeEach(() => {
   router.searchParams = "";
   window.localStorage.clear();
   apiMocks.list.mockResolvedValue([worker]);
+  apiMocks.getRunMeta.mockResolvedValue(workerDetail);
   apiMocks.listVersions.mockResolvedValue([]);
   apiMocks.listContexts.mockResolvedValue([]);
 });
@@ -121,21 +124,27 @@ function renderWorkers() {
 }
 
 describe("Worker Overview flow and schedule state", () => {
-  it("shows a skeleton instead of the placeholder flow until the manifest detail loads", async () => {
+  it("renders summary stats instantly and shows a flow skeleton until the manifest detail loads", async () => {
     const stalePlaceholder = ["score", "(candi", "date, rub", "ric)"].join("");
     let resolveDetail!: (detail: typeof workerDetail) => void;
     const detailPromise = new Promise<typeof workerDetail>((resolve) => {
       resolveDetail = resolve;
     });
-    apiMocks.get.mockReturnValue(detailPromise);
+    // Overview reads the trimmed shape=run payload for the flow; keep both the
+    // light and full fetches pending so the flow stays on its skeleton.
+    apiMocks.getRunMeta.mockReturnValue(detailPromise);
+    apiMocks.get.mockReturnValue(new Promise<typeof workerDetail>(() => {}));
 
     await renderWorkers();
     fireEvent.click(await screen.findByRole("button", { name: /Mac Disk Guard/i }));
 
+    // The flow shows a skeleton while the detail loads...
     await waitFor(() => expect(screen.getByLabelText("Loading")).toBeInTheDocument());
+    // ...but the run stats come from the already-loaded list summary, so they
+    // render immediately instead of sitting on "Loading".
     const pendingSummary = document.querySelector(".c-dsum");
-    expect(pendingSummary?.textContent).toContain("Loading");
-    expect(pendingSummary?.textContent).not.toMatch(/5\s*Runs/);
+    expect(pendingSummary?.textContent).not.toContain("Loading");
+    expect(pendingSummary?.textContent).toMatch(/5\s*Runs/);
     expect(document.body.textContent).not.toContain(stalePlaceholder);
     expect(screen.queryByText("Result")).not.toBeInTheDocument();
 
