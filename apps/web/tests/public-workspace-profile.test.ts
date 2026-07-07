@@ -55,6 +55,17 @@ describe("public workspace profile", () => {
     expect(isPublicWorkerPermalinkPath("/app/@fede/meeting-prep")).toBe(false);
   });
 
+  // Codex review flagged (2026-07-07): page.tsx's own permalinkUrls() builds
+  // the canonical/OG link with encodeURIComponent(`@${handle}`), which escapes
+  // '@' to '%40'. usePathname() does not decode that back, so a literal-'@'
+  // regex alone would miss a crawler/unfurl bot following the page's own
+  // canonical URL. Confirm the %40 form still classifies as a permalink.
+  it("matches the %40-encoded canonical permalink form the page itself emits", () => {
+    expect(isPublicWorkerPermalinkPath("/%40fede/meeting-prep")).toBe(true);
+    expect(isPublicWorkerPermalinkPath("/%40openpaper/construction-intel-weekly")).toBe(true);
+    expect(isPublicWorkerPermalinkPath("/%40fede-secretary")).toBe(false);
+  });
+
   it("renders worker permalink pages outside the app shell", () => {
     const source = read("components/layout/AppShell.tsx");
     expect(source).toContain("isPublicWorkerPermalinkPath(pathname)");

@@ -15,6 +15,22 @@ export function isPublicWorkspaceProfilePath(pathname: string): boolean {
 // render it standalone, so it silently mounted inside the full authenticated
 // dashboard shell — Sidebar/EmilyDock/CommandPalette/DeepLinkRouter/
 // TermsAcceptanceGate — around a page never designed to coexist with them).
+//
+// Decodes the pathname first: the page's own permalinkUrls() builds the
+// canonical/OG URL with encodeURIComponent(`@${handle}`), which escapes '@' to
+// '%40', and Next's usePathname() does not decode that back. A literal-'@'-only
+// regex would match every real observed crash (PostHog: $current_url was a
+// literal "/app/@handle/slug" on every hit) but silently miss the canonical
+// link a crawler or unfurl bot follows. decodeURIComponent is wrapped because
+// a malformed percent-sequence in an attacker-controlled path must not throw.
 export function isPublicWorkerPermalinkPath(pathname: string): boolean {
-  return /^\/@[^/]+\/[^/]+\/?$/.test(pathname);
+  return /^\/@[^/]+\/[^/]+\/?$/.test(safeDecodePathname(pathname));
+}
+
+function safeDecodePathname(pathname: string): string {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return pathname;
+  }
 }
