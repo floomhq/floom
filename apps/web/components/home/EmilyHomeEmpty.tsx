@@ -166,7 +166,10 @@ function HomeStatCard({
         // The negative -mx-3.5 pulls it flush; height is fixed at 28px so the
         // card stays compact. preserveAspectRatio="none" (via variant="area")
         // scales the polyline to fill the full width regardless of bucket count.
-        <div className="mt-auto -mx-3.5 h-7 overflow-hidden">
+        // No overflow-hidden here: the hover tooltip renders above the sparkline
+        // (bottom-full) and must not be clipped by this box — the area fill
+        // already fades to transparent at the bottom edge, so nothing bleeds.
+        <div className="mt-auto -mx-3.5 h-7">
           <Sparkline
             data={sparkline}
             height={28}

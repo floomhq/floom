@@ -171,7 +171,15 @@ function displayBrandCopy(value?: string | null): string {
 }
 
 // ---- detail (lazy WorkerDetail, scoped by workspace so identities never bleed) ----
-const DETAIL_CACHE_FRESH_MS = 250;
+// Stale-while-revalidate: a cached detail is served IMMEDIATELY on tab switches
+// (so switching Overview/Runs/Source/… never re-blanks to a spinner) and is
+// silently revalidated in the background once older than the fresh window. The
+// cache key is workspace-scoped, so identities never bleed across workspaces —
+// that scoping (not a tiny fresh window) is what prevents the #2186 stale
+// cross-workspace renders. Before this the window was 250ms, which effectively
+// disabled the tab-switch cache and re-fired the heavy ~6-8s detail fetch on
+// nearly every tab click.
+const DETAIL_CACHE_FRESH_MS = 30_000;
 type DetailCacheEntry = {
   detail?: WorkerDetail;
   fetchedAt: number;
@@ -206,32 +214,40 @@ function readFreshWorkerDetail(workspaceId: string | null | undefined, workerId:
   return Date.now() - entry.fetchedAt <= DETAIL_CACHE_FRESH_MS ? entry.detail : undefined;
 }
 
+/** Any cached detail regardless of age — served immediately (stale-while-revalidate). */
+function readCachedWorkerDetail(workspaceId: string | null | undefined, workerId: string): WorkerDetail | undefined {
+  return detailCache.get(detailCacheKey(workspaceId, workerId))?.detail;
+}
+
 // Returns [detail, apply] where detail is:
-//   undefined → still loading
+//   undefined → still loading (no cached copy to show)
 //   null      → load failed (show an error/empty state)
-//   WorkerDetail → loaded
+//   WorkerDetail → loaded (possibly stale, revalidating in the background)
 function useWorkerDetail(
   id: string,
   workspaceId?: string | null,
 ): [WorkerDetail | undefined | null, (d: WorkerDetail) => void] {
   const cacheKey = detailCacheKey(workspaceId, id);
   const [detail, setDetail] = useState<WorkerDetail | undefined | null>(() =>
-    readFreshWorkerDetail(workspaceId, id)
+    readCachedWorkerDetail(workspaceId, id)
   );
   useEffect(() => {
     let alive = true;
     // settled = true once the load resolves or fails, so the safety timeout
     // below does not overwrite a successfully-loaded detail (stale-closure fix).
     let settled = false;
-    const fresh = readFreshWorkerDetail(workspaceId, id);
-    if (fresh) {
-      setDetail(fresh);
+    // Serve any cached detail immediately so tab switches never re-blank to a
+    // spinner; only fall back to the spinner when there is nothing cached.
+    const cached = readCachedWorkerDetail(workspaceId, id);
+    if (cached) setDetail(cached);
+    else setDetail(undefined);
+    // Fresh enough → no revalidation needed.
+    if (readFreshWorkerDetail(workspaceId, id)) {
       settled = true;
       return () => {
         alive = false;
       };
     }
-    setDetail(undefined);
     // Retry once before surfacing an error — a transiently slow backend should
     // not strand the detail tabs on "Could not load" (#1279 + round-03 source-load).
     const load = (attempt: number) => {
@@ -259,16 +275,19 @@ function useWorkerDetail(
             settled = true;
             // #1446: per-worker detail; log only (no toast per expanded worker).
             logError("Could not load worker details.", err);
-            setDetail(null); // null = failed to load → tabs show error, not a spinner
+            // Only surface the error state when we have nothing cached to show;
+            // a background revalidation failure must not wipe a served detail.
+            if (!readCachedWorkerDetail(workspaceId, id)) setDetail(null);
           }
         });
     };
     load(0);
     // Safety timeout: if the API proxy hangs entirely, surface an error after 25 s
     // (long enough to cover the retry above). Guard with `settled` so a
-    // successfully-loaded detail is never overwritten by this stale callback.
+    // successfully-loaded detail is never overwritten by this stale callback, and
+    // keep any cached detail rather than blanking it.
     const timeout = setTimeout(() => {
-      if (alive && !settled) setDetail(null);
+      if (alive && !settled && !readCachedWorkerDetail(workspaceId, id)) setDetail(null);
     }, 25_000);
     return () => {
       alive = false;
@@ -283,6 +302,77 @@ function useWorkerDetail(
     [workspaceId],
   );
   return [detail, apply];
+}
+
+// ---- lightweight Overview detail (shape=run) --------------------------------
+// The Overview tab renders only identity + config (the flow, "what it does",
+// library, use cases) and reads run stats from the list summary — it needs NONE
+// of the heavy full-detail assembly (recent runs, latest-run output, 3s stats
+// batch, recipe, secret/connection availability, on-disk bundle). Fetching the
+// trimmed `?shape=run` payload here makes opening a worker resolve in <1s
+// instead of blocking the flow behind the ~6-8s (warm) / tens-of-seconds (cold)
+// full `GET /workers/{id}`. A fresh FULL detail is a superset, so it is reused
+// when present rather than double-fetching.
+const overviewCache = new Map<string, DetailCacheEntry>();
+
+function readCachedOverview(workspaceId: string | null | undefined, workerId: string): WorkerDetail | undefined {
+  return (
+    readCachedWorkerDetail(workspaceId, workerId) ??
+    overviewCache.get(detailCacheKey(workspaceId, workerId))?.detail
+  );
+}
+
+function readFreshOverview(workspaceId: string | null | undefined, workerId: string): WorkerDetail | undefined {
+  const full = readFreshWorkerDetail(workspaceId, workerId);
+  if (full) return full;
+  const entry = overviewCache.get(detailCacheKey(workspaceId, workerId));
+  if (!entry?.detail) return undefined;
+  return Date.now() - entry.fetchedAt <= DETAIL_CACHE_FRESH_MS ? entry.detail : undefined;
+}
+
+function useWorkerOverview(id: string, workspaceId?: string | null): WorkerDetail | undefined | null {
+  const cacheKey = detailCacheKey(workspaceId, id);
+  const [detail, setDetail] = useState<WorkerDetail | undefined | null>(() =>
+    readCachedOverview(workspaceId, id)
+  );
+  useEffect(() => {
+    let alive = true;
+    const cached = readCachedOverview(workspaceId, id);
+    if (cached) setDetail(cached);
+    else setDetail(undefined);
+    if (readFreshOverview(workspaceId, id)) {
+      return () => {
+        alive = false;
+      };
+    }
+    const existing = overviewCache.get(cacheKey);
+    // Prefer the trimmed shape=run payload; fall back to the full get when a
+    // caller (e.g. a partial test mock) has no getRunMeta.
+    const fetchOverview =
+      typeof api.workers.getRunMeta === "function" ? api.workers.getRunMeta : api.workers.get;
+    const request = existing?.promise ?? fetchOverview(id);
+    overviewCache.set(cacheKey, {
+      detail: existing?.detail,
+      fetchedAt: existing?.fetchedAt ?? 0,
+      promise: request,
+    });
+    request
+      .then((d) => {
+        overviewCache.set(cacheKey, { detail: d, fetchedAt: Date.now() });
+        if (alive) setDetail(d);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        const entry = overviewCache.get(cacheKey);
+        if (entry?.promise === request) overviewCache.delete(cacheKey);
+        logError("Could not load worker overview.", err);
+        if (!readCachedOverview(workspaceId, id)) setDetail(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [cacheKey, id, workspaceId]);
+  return detail;
 }
 
 /**
@@ -480,27 +570,36 @@ function normalizeConnectionSlug(slug: string): string {
 }
 
 function OverviewTab({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id, w.workspace_id);
-  const stats = d === undefined ? undefined : d?.recent_stats ?? w.recent_stats;
-  const lastRun = d === undefined ? undefined : d?.last_run ?? w.last_run;
-  const scheduleState = scheduleStateLabel(w, d);
+  // Flow/config from the lightweight shape=run fetch → the flow renders in <1s
+  // instead of blocking on the heavy full detail. The full detail loads in the
+  // background (non-blocking): it supplies the freshest run stats and warms the
+  // cache so the file-backed tabs (Source/Setup/Versions/Tools/Library) are
+  // already loaded when the operator clicks them.
+  const overview = useWorkerOverview(w.id, w.workspace_id);
+  const [full] = useWorkerDetail(w.id, w.workspace_id);
+  const d = full ?? overview;
+  // Run stats come from the list summary (already loaded), so they render
+  // instantly and never sit on "Loading"; the full detail upgrades them to the
+  // freshest values once it arrives (stale-while-revalidate).
+  const stats = full?.recent_stats ?? w.recent_stats;
+  const lastRun = full?.last_run ?? w.last_run;
+  const scheduleState = scheduleStateLabel(w, d ?? undefined);
   const summaryItems = [
     {
       key: "last-run",
       label: "Last run",
-      value: d === undefined ? "Loading" : rel(stats?.last_run_at ?? lastRun?.created_at),
+      value: rel(stats?.last_run_at ?? lastRun?.created_at),
     },
     {
       key: "runs",
       label: "Runs",
-      value: d === undefined ? "Loading" : stats?.runs_7d ?? (lastRun ? 1 : 0),
+      value: stats?.runs_7d ?? (lastRun ? 1 : 0),
     },
     {
       key: "success",
       label: "Success",
-      value: d === undefined
-        ? "Loading"
-        : typeof stats?.success_rate_7d === "number"
+      value:
+        typeof stats?.success_rate_7d === "number"
           ? `${Math.round(stats.success_rate_7d * 100)}%`
           : "Not set",
     },
