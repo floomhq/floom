@@ -66,6 +66,21 @@ export interface ShareModalProps {
     grantAsset?: { type: ShareGrantAssetType; id: string };
   };
 
+  /** #1092: publish the worker's canonical /@handle/slug permalink to the open
+      web (visibility='public'). Owner-only, cloud-only, worker-only; omit to
+      hide the whole Public-page section. Distinct from `publicLink` (the
+      unlisted ?share= link): this makes the BARE, indexable permalink live. */
+  publish?: {
+    /** Whether the worker is currently published (visibility='public'). */
+    isPublic: boolean;
+    /** The live https://…/@handle/slug permalink when published. */
+    permalink?: string | null;
+    /** PATCH visibility=public (confirm intent). Resolves once published. */
+    onPublish: () => Promise<void>;
+    /** PATCH visibility=private. Resolves once unpublished (bare URL 404s). */
+    onUnpublish: () => Promise<void>;
+  };
+
   /** Public anonymous link. Omit to hide the whole Public-link section. */
   publicLink?: {
     /** POST .../share-link → returns the URL. Create-or-GET (stable). */
@@ -84,7 +99,7 @@ export interface ShareModalProps {
   };
 }
 
-export function ShareModal({ open, onOpenChange, asset, companyAccess, publicLink }: ShareModalProps) {
+export function ShareModal({ open, onOpenChange, asset, companyAccess, publish, publicLink }: ShareModalProps) {
   const grantAsset = companyAccess?.grantAsset;
   const visibility = companyAccess?.visibility;
   const isWorker = asset.type === "worker";
@@ -95,6 +110,9 @@ export function ShareModal({ open, onOpenChange, asset, companyAccess, publicLin
   const [visBusy, setVisBusy] = useState(false);
   const [pendingWorkspace, setPendingWorkspace] = useState(false);
   const [pub, setPub] = useState<PublicLinkState>({ status: "unknown" });
+  // #1092: publish (make /@handle/slug permalink public) state.
+  const [pubBusy, setPubBusy] = useState(false);
+  const [pendingPublish, setPendingPublish] = useState<null | "publish" | "unpublish">(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -213,6 +231,20 @@ export function ShareModal({ open, onOpenChange, asset, companyAccess, publicLin
   const copy = async (url: string) => {
     await navigator.clipboard.writeText(url);
     toast.success("Link copied.");
+  };
+
+  // -------- Publish to web (#1092) --------
+  const runPublish = async (fn: () => Promise<void>, kind: "publish" | "unpublish") => {
+    setPubBusy(true);
+    try {
+      await fn();
+      if (mounted.current) setPendingPublish(null);
+      toast.success(kind === "publish" ? "Published to the web." : "Unpublished.");
+    } catch (err) {
+      toast.error((err as Error).message || "Could not update the public page.");
+    } finally {
+      if (mounted.current) setPubBusy(false);
+    }
   };
 
   return (
@@ -339,7 +371,114 @@ export function ShareModal({ open, onOpenChange, asset, companyAccess, publicLin
           </section>
         )}
 
-        {companyAccess && publicLink && <Separator />}
+        {(companyAccess || publish) && publish && <Separator />}
+
+        {/* ============ Public page (publish the /@handle/slug permalink) #1092 ============ */}
+        {publish && (
+          <section className="space-y-2">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-mute)]">
+              <Globe size={12} /> Public page
+            </p>
+
+            {publish.isPublic ? (
+              <div className="space-y-2">
+                <p className="text-sm text-[var(--ink-soft)]">
+                  Published. Anyone with the link can view this page and add the worker.
+                </p>
+                {publish.permalink ? (
+                  <PublicLinkRow
+                    url={publish.permalink}
+                    scope="Your public page"
+                    onCopy={() => void copy(publish.permalink!)}
+                  />
+                ) : null}
+                {pendingPublish === "unpublish" ? (
+                  <div className="space-y-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3" style={{ border: "var(--bd-input)" }}>
+                    <p className="text-sm font-medium text-[var(--ink)]">Unpublish this page?</p>
+                    <p className="text-xs text-[var(--ink-mute)]">
+                      The public page will stop working (its link will 404). You can publish again later.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-[var(--radius-button)] px-3 py-1.5 text-sm text-[var(--muted-foreground)]"
+                        style={{ border: "var(--bd-input)" }}
+                        disabled={pubBusy}
+                        onClick={() => setPendingPublish(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-[var(--radius-button)] px-3 py-1.5 text-sm font-medium text-[var(--destructive,#b42318)]"
+                        style={{ border: "var(--bd-input)" }}
+                        disabled={pubBusy}
+                        onClick={() => void runPublish(publish.onUnpublish, "unpublish")}
+                      >
+                        {pubBusy ? "Unpublishing…" : "Unpublish"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded-[var(--radius-button)] px-3 py-1.5 text-sm text-[var(--muted-foreground)]"
+                    style={{ border: "var(--bd-input)" }}
+                    disabled={pubBusy}
+                    onClick={() => setPendingPublish("unpublish")}
+                  >
+                    Unpublish
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm text-[var(--ink-soft)]">
+                  Not published. Publishing gives this worker a public page anyone can view and add.
+                </p>
+                {pendingPublish === "publish" ? (
+                  <div className="space-y-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3" style={{ border: "var(--bd-input)" }}>
+                    <p className="text-sm font-medium text-[var(--ink)]">Publish this worker to the web?</p>
+                    <p className="text-xs text-[var(--ink-mute)]">
+                      Anyone with the link can view this page and add the worker. Secrets, connection
+                      credentials, and run history are never included. You can unpublish anytime.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-[var(--radius-button)] px-3 py-1.5 text-sm text-[var(--muted-foreground)]"
+                        style={{ border: "var(--bd-input)" }}
+                        disabled={pubBusy}
+                        onClick={() => setPendingPublish(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="c-addbtn"
+                        disabled={pubBusy}
+                        onClick={() => void runPublish(publish.onPublish, "publish")}
+                      >
+                        {pubBusy ? "Publishing…" : "Publish page"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="c-addbtn"
+                    disabled={pubBusy}
+                    onClick={() => setPendingPublish("publish")}
+                  >
+                    Publish to web
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {(companyAccess || publish) && publicLink && <Separator />}
 
         {/* ============ Public link ============ */}
         {publicLink && (
