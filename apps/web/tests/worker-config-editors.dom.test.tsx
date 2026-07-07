@@ -121,6 +121,48 @@ describe("WorkerBrainEditor", () => {
     );
     expect(screen.queryByRole("button", { name: /Connect a memory folder/i })).not.toBeInTheDocument();
   });
+
+  it("groups the attach-a-folder dropdown as a tree: top-level folders flat, memory-* under a collapsible memory parent", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <WorkerBrainEditor
+        contexts={[]}
+        availablePacks={[
+          { name: "pricing" },
+          { name: "memory-account-research-brief" },
+          { name: "memory-agentwallet-sentinel" },
+          { name: "company-facts" },
+        ]}
+        editable
+        onChange={onChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Attach a folder/ }));
+
+    // Top-level (non-memory) folders render as selectable options.
+    expect(screen.getByRole("option", { name: "pricing" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "company-facts" })).toBeInTheDocument();
+
+    // The two memory-* packs live under a single collapsible "memory" parent
+    // (count badge = 2), mirroring the Library tree — not flat at top level.
+    const memoryGroup = screen.getByRole("button", { name: /^memory 2$/ });
+    expect(memoryGroup).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("option", { name: "memory-account-research-brief" })).toBeInTheDocument();
+
+    // Collapsing hides the children.
+    await user.click(memoryGroup);
+    expect(memoryGroup).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("option", { name: "memory-account-research-brief" })).not.toBeInTheDocument();
+    // ...while top-level folders stay visible.
+    expect(screen.getByRole("option", { name: "pricing" })).toBeInTheDocument();
+
+    // Re-expand and attach a memory child.
+    await user.click(memoryGroup);
+    await user.click(screen.getByRole("option", { name: "memory-agentwallet-sentinel" }));
+    await user.click(screen.getByRole("button", { name: /Attach/ }));
+    expect(onChange).toHaveBeenLastCalledWith(["memory-agentwallet-sentinel"]);
+  });
 });
 
 describe("WorkerToolsEditor", () => {

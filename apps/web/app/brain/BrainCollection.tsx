@@ -18,7 +18,7 @@ import {
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineDragItem } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
-import { formatBytes, writeKey } from "@/lib/brain/format";
+import { formatBytes, writeKey, isWorkerMemoryContext } from "@/lib/brain/format";
 import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
 
 const detailCache = new Map<string, ContextDetail>();
@@ -33,9 +33,7 @@ function RelativeUpdated({ value }: { value?: string | null }) {
   return <span suppressHydrationWarning>{formatRelative(value ?? "")}</span>;
 }
 
-export function isWorkerMemoryContext(name: string): boolean {
-  return /^memory-[a-z0-9][a-z0-9._-]*$/i.test(name);
-}
+export { isWorkerMemoryContext };
 
 export function isWorkerMemoryPack(ctx: Pick<ContextSummary, "name" | "category" | "worker_count">): boolean {
   if (isWorkerMemoryContext(ctx.name)) return true;

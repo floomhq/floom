@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useState } from "react";
-import { Brain, ChevronDown, Folder, Plus, X } from "lucide-react";
+import { useId, useMemo, useState } from "react";
+import { Brain, ChevronDown, ChevronRight, Folder, FolderTree, Plus, X } from "lucide-react";
 import type { WorkerContextSpec } from "@/lib/types";
 import {
   contextSpecName,
@@ -9,6 +9,7 @@ import {
   setContextWriteable,
   toggleContext,
 } from "@/lib/worker-manifest";
+import { isWorkerMemoryContext } from "@/lib/brain/format";
 import { ChipPreviewDialog, type ChipPreviewTarget } from "@/components/worker/ChipPreviewDialog";
 
 interface WorkerBrainEditorProps {
@@ -55,11 +56,26 @@ export function WorkerBrainEditor({
 }: WorkerBrainEditorProps) {
   const [attach, setAttach] = useState("");
   const [open, setOpen] = useState(false);
+  // Memory group starts expanded so its children are discoverable on open; the
+  // user can collapse it to scan the top-level (non-memory) folders.
+  const [memoryOpen, setMemoryOpen] = useState(true);
   // #1303: read-only preview popup for a clicked brain-folder chip.
   const [preview, setPreview] = useState<ChipPreviewTarget | null>(null);
   const listboxId = useId();
   const attachedNames = new Set(contexts.map(contextSpecName));
   const unattached = availablePacks.filter((p) => !attachedNames.has(p.name));
+  // Mirror the Library tree: `memory-*` packs are children of a synthetic
+  // `memory` parent; everything else stays top-level. Same rule (shared
+  // isWorkerMemoryContext) the Library page uses, so the two views never drift.
+  const { topLevelPacks, memoryChildren } = useMemo(() => {
+    const top: { name: string }[] = [];
+    const mem: { name: string }[] = [];
+    for (const p of unattached) {
+      (isWorkerMemoryContext(p.name) ? mem : top).push(p);
+    }
+    mem.sort((a, b) => a.name.localeCompare(b.name));
+    return { topLevelPacks: top, memoryChildren: mem };
+  }, [unattached]);
   const selected = unattached.find((p) => p.name === attach);
   const memoryAttached = Boolean(memoryFolderName && attachedNames.has(memoryFolderName));
   const showMemoryCta = Boolean(editable && memoryFolderName && onAttachMemory && !memoryAttached);
@@ -204,7 +220,7 @@ export function WorkerBrainEditor({
                 aria-label="Attach folder"
                 className="absolute left-0 right-0 top-full z-20 mt-1 max-h-52 overflow-auto rounded-[var(--radius-card)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)] [border:var(--bd-card)]"
               >
-                {unattached.map((p) => (
+                {topLevelPacks.map((p) => (
                   <button
                     key={p.name}
                     type="button"
@@ -224,6 +240,46 @@ export function WorkerBrainEditor({
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
                   </button>
                 ))}
+                {memoryChildren.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      aria-expanded={memoryOpen}
+                      className="flex w-full items-center gap-2 rounded-[var(--radius-button)] px-2.5 py-2 text-left text-sm text-muted-foreground hover:bg-[var(--bg-2)] hover:text-foreground"
+                      onClick={() => setMemoryOpen((v) => !v)}
+                    >
+                      {memoryOpen ? (
+                        <ChevronDown size={14} className="shrink-0" />
+                      ) : (
+                        <ChevronRight size={14} className="shrink-0" />
+                      )}
+                      <FolderTree size={14} className="shrink-0" />
+                      <span className="min-w-0 flex-1 truncate font-medium text-foreground">memory</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{memoryChildren.length}</span>
+                    </button>
+                    {memoryOpen &&
+                      memoryChildren.map((p) => (
+                        <button
+                          key={p.name}
+                          type="button"
+                          role="option"
+                          aria-selected={p.name === attach}
+                          className={`flex w-full items-center gap-2 rounded-[var(--radius-button)] py-2 pl-8 pr-2.5 text-left text-sm ${
+                            p.name === attach
+                              ? "bg-[var(--bg-2)] text-foreground"
+                              : "text-muted-foreground hover:bg-[var(--bg-2)] hover:text-foreground"
+                          }`}
+                          onClick={() => {
+                            setAttach(p.name);
+                            setOpen(false);
+                          }}
+                        >
+                          <Folder size={14} className="shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                        </button>
+                      ))}
+                  </>
+                )}
               </div>
             )}
           </div>
