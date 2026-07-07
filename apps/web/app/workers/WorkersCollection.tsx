@@ -103,7 +103,7 @@ import {
   toggleContext,
 } from "@/lib/worker-manifest";
 import { can, isViewOnly, canLeaveFeedback, visibilityLabel, FEEDBACK_BACKEND_AVAILABLE } from "@/lib/permissions";
-import { isCloudDeploy } from "@/lib/api-base";
+import { isCloudDeploy, getPublicSiteOrigin } from "@/lib/api-base";
 import {
   isSystemWorker,
   workerStatusPill,
@@ -2413,45 +2413,102 @@ const WORKER_PROMPT_EXAMPLES = [
 ];
 
 function WorkersEmptyQuickStart() {
+  // Two real activation paths. Primary = pick a ready-made template and run it
+  // (Cloud gallery); once imported it lands as a visible worker here. Secondary
+  // = set Floom up in a coding agent (MCP). On OSS self-host there is no gallery,
+  // so the coding-agent path is promoted to primary and the templates row is
+  // omitted (never link to a page that does not exist).
+  const showTemplates = isCloudDeploy();
+  const templatesUrl = `${getPublicSiteOrigin()}/templates`;
   return (
-    <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-4 text-center">
-      <div>
-        <div className="text-sm font-medium text-ink">Quick start</div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Go to your coding agent, install the Floom MCP server, and ask it to create workers like these:
-        </p>
-      </div>
-
-      <div className="grid w-full gap-2 text-left">
-        {WORKER_PROMPT_EXAMPLES.map((example) => (
-          <div
-            key={example}
-            className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-[12px] leading-5 text-ink [border:var(--bd-card)]"
+    <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-5 text-center">
+      <div className="flex w-full max-w-[440px] flex-col gap-2.5 text-left">
+        {showTemplates && (
+          <a
+            href={templatesUrl}
+            className="flex w-full items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--accent)] px-4 py-3 text-white transition-opacity hover:opacity-90"
           >
-            {example}
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-1.5 font-mono text-[12px] leading-5 text-muted-foreground">
-        <div>npx -y @floomhq/floom mcp install</div>
-      </div>
-
-      <div className="flex flex-wrap justify-center gap-2">
+            <span className="flex flex-col">
+              <span className="text-[13.5px] font-semibold">Browse templates</span>
+              <span className="text-[12px] text-white/85">
+                Pick a ready-made worker and run it in a click
+              </span>
+            </span>
+            <ArrowRight className="shrink-0 text-white/80" size={15} />
+          </a>
+        )}
         <Link
-          className="c-addbtn"
           href="/connections/mcp?from_install=workers-empty"
+          className={
+            showTemplates
+              ? "flex w-full items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3 transition-colors hover:bg-[var(--bg-3)]"
+              : "flex w-full items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--accent)] px-4 py-3 text-white transition-opacity hover:opacity-90"
+          }
         >
-          Install MCP
+          <span className="flex flex-col text-left">
+            <span
+              className={
+                showTemplates
+                  ? "text-[13.5px] font-medium text-ink"
+                  : "text-[13.5px] font-semibold text-white"
+              }
+            >
+              Set up from your coding agent
+            </span>
+            <span
+              className={
+                showTemplates
+                  ? "text-[12px] text-muted-foreground"
+                  : "text-[12px] text-white/85"
+              }
+            >
+              Install the Floom MCP server in Claude Code, Cursor, or Codex
+            </span>
+          </span>
+          <ArrowRight
+            className={showTemplates ? "shrink-0 text-muted-foreground" : "shrink-0 text-white/80"}
+            size={15}
+          />
         </Link>
-        <Link
-          className="c-vpill"
-          href="https://floom.dev/v3/docs/worker-yml"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Worker guide
-        </Link>
+      </div>
+
+      <div className="w-full max-w-[440px] text-center">
+        <div className="text-sm font-medium text-ink">Prefer your coding agent?</div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Install the Floom MCP server, then ask it to create workers like these:
+        </p>
+
+        <div className="mt-3 grid w-full gap-2 text-left">
+          {WORKER_PROMPT_EXAMPLES.map((example) => (
+            <div
+              key={example}
+              className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-[12px] leading-5 text-ink"
+            >
+              {example}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 grid gap-1.5 font-mono text-[12px] leading-5 text-muted-foreground">
+          <div>npx -y @floomhq/floom mcp install</div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap justify-center gap-2">
+          <Link
+            className="c-addbtn"
+            href="/connections/mcp?from_install=workers-empty"
+          >
+            Install MCP
+          </Link>
+          <Link
+            className="c-vpill"
+            href="https://floom.dev/v3/docs/worker-yml"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Worker guide
+          </Link>
+        </div>
       </div>
     </div>
   );
@@ -2881,8 +2938,10 @@ export default function WorkersCollection({
     },
     states: {
       empty: {
-        title: "Create your first worker",
-        help: "Workers are YAML-defined automations with code, tools, secrets, memory, and run history.",
+        title: "Hire your first worker",
+        help: isCloudDeploy()
+          ? "Pick a ready-made worker and run it, or set Floom up in your coding agent."
+          : "Set Floom up in your coding agent to create your first worker, then run and manage it here.",
         action: <WorkersEmptyQuickStart />,
       },
       filteredEmpty: {

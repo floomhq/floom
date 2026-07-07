@@ -1,7 +1,7 @@
 // First-run / onboarding gates (#1698 + #1699).
 //
 // #1699 — zero-state home: a workspace with ZERO workers AND zero runs must see
-//   the EmilyHomeEmpty first-worker hero ("Let's hire your first worker"), NOT
+//   the EmilyHomeEmpty first-worker hero ("Hire your first worker"), NOT
 //   the populated greeting ("X done this week") that assumes data. A populated
 //   workspace (>0 workers) keeps the normal home — the gate is workers-success
 //   keyed (resolveWorkersGate), never tripped on error/loading.

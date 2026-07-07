@@ -4,11 +4,22 @@ import { describe, expect, it } from "vitest";
 
 const SRC = readFileSync(join(__dirname, "../app/workers/WorkersCollection.tsx"), "utf8");
 
-describe("workers empty state quick start", () => {
-  it("guides new users to create their first worker with the MCP quickstart", () => {
-    expect(SRC).toContain("Create your first worker");
-    expect(SRC).toContain("Quick start");
-    expect(SRC).toContain("Go to your coding agent, install the Floom MCP server");
+describe("workers empty state — two real activation paths", () => {
+  it("routes new users to the two real paths (templates primary + coding agent)", () => {
+    // Honest first-worker framing — no "create it here" claim that dead-ends.
+    expect(SRC).toContain("Hire your first worker");
+    expect(SRC).not.toContain("Create your first worker");
+
+    // Primary path (Cloud): browse the templates gallery.
+    expect(SRC).toContain("Browse templates");
+    expect(SRC).toContain("/templates`");
+    expect(SRC).toContain("getPublicSiteOrigin()");
+    // Templates path is Cloud-gated (no dead /templates link on OSS self-host).
+    expect(SRC).toContain("isCloudDeploy()");
+
+    // Secondary path: set Floom up from the coding agent (MCP).
+    expect(SRC).toContain("Set up from your coding agent");
+    expect(SRC).toContain("Install the Floom MCP server");
     expect(SRC).toContain("npx -y @floomhq/floom mcp install");
     expect(SRC).not.toContain("npm install -g @floomhq/floom");
     expect(SRC).not.toContain("floom login");

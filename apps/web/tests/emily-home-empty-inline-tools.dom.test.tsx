@@ -1,14 +1,13 @@
-// Emily home polish (Federico 2026-06-21) — first-worker zero-state pills.
+// Emily home — first-worker post-signup hero (funnel reframe).
 //
-// Three guarantees for the "Let's hire your first worker" home empty state:
-//   1. Example prompts highlight their tool names INLINE, each with the tool's
-//      real brand icon (BrandLogo sprite) — the same register as the marketing
-//      landing prompt box, NOT a separate "Uses [pill] [pill]" row.
-//   2. The empty state carries NO "Uses" / "Will use" chip-row label.
-//   3. The decorative radar mark above the heading is gone (cleaner hero).
-// The pill stays a real button whose accessible name is the full prompt text so
-// clicking it still seeds the composer (asserted in new-worker-emily-chat-only).
-import { describe, expect, it, vi, beforeEach } from "vitest";
+// The post-signup home must be HONEST about the two real activation paths and
+// must NOT promise Emily builds a worker from prose (prose authoring is disabled
+// server-side — chat_service WORKER_AUTHORING_RULES). Guarantees:
+//   1. Primary path (Cloud): "Browse templates" routes to the templates gallery.
+//   2. Secondary path: "Set up in your coding agent" opens the MCP install path.
+//   3. Emily is framed as a HELPER (ask a question) — no "Emily builds it" copy,
+//      no "Create a … worker" seed pills that dead-end on disabled authoring.
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("@/lib/query/hooks", () => ({
@@ -46,51 +45,61 @@ function renderFirstWorker() {
   return render(<EmilyHomeEmpty onSeed={() => {}} onPickMcp={() => {}} />);
 }
 
-describe("Emily home empty — first-worker zero-state polish", () => {
+describe("Emily home empty — first-worker two-path hero (Cloud)", () => {
+  beforeEach(() => {
+    // Templates gallery is a Cloud-only surface; the primary path only renders
+    // when the dashboard is the managed Cloud wrapper.
+    vi.stubEnv("NEXT_PUBLIC_WORKEROS_DEPLOY", "cloud");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("renders the first-worker hero heading", async () => {
     renderFirstWorker();
     expect(await screen.findByText(/hire your first worker/i)).toBeInTheDocument();
   });
 
-  it("example pills highlight tool names inline with brand icons", async () => {
-    const { container } = renderFirstWorker();
-    await screen.findByText(/hire your first worker/i);
-
-    // The "Create a Linear triage worker" pill is a button whose accessible name is the
-    // full prompt text (so seeding still works).
-    const pill = screen.getByRole("button", { name: /Create a Linear triage worker/i });
-    expect(pill).toBeInTheDocument();
-
-    // Inline brand icons: BrandLogo renders an <svg><use href="#brand-..."/>.
-    // Linear is highlighted inline within that pill.
-    const brandUses = Array.from(container.querySelectorAll("use"))
-      .map((u) => u.getAttribute("href") || "")
-      .filter((h) => h.startsWith("#brand-"));
-    expect(brandUses).toContain("#brand-linear");
-    expect(brandUses).toContain("#brand-github");
-    expect(brandUses).toContain("#brand-slack");
-    expect(brandUses).not.toContain("#brand-stripe");
-    expect(screen.queryByRole("button", { name: /Stripe/i })).not.toBeInTheDocument();
-  });
-
-  it("has NO separate 'Uses' / 'Will use' chip-row label", async () => {
+  it("does NOT claim Emily builds a worker from prose", async () => {
     renderFirstWorker();
     await screen.findByText(/hire your first worker/i);
-    expect(screen.queryByText(/^Uses$/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Will use$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/builds it, connects the tools/i)).not.toBeInTheDocument();
+    // No "Create a … worker" seed pills (they dead-end on disabled authoring).
+    expect(screen.queryByRole("button", { name: /Create a Linear triage worker/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Daily GitHub PR digest/i })).not.toBeInTheDocument();
   });
 
-  it("removes the decorative radar mark above the heading", async () => {
-    const { container } = renderFirstWorker();
-    const heading = await screen.findByText(/hire your first worker/i);
-    // The radar mark was a full 48x48 viewBox SVG sibling above the heading.
-    // After the change, any remaining inline SVG (e.g. pill capability glyphs)
-    // must NOT be the 48-viewBox radar mark.
-    const radar = container.querySelector('svg[viewBox="0 0 48 48"]');
-    expect(radar).toBeNull();
-    // Sanity: the heading hero block has no SVG rendered directly before it.
-    const heroBlock = heading.parentElement as HTMLElement;
-    expect(heroBlock.querySelector("svg")).toBeNull();
+  it("primary path: 'Browse templates' links to the templates gallery", async () => {
+    renderFirstWorker();
+    await screen.findByText(/hire your first worker/i);
+    const link = screen.getByRole("link", { name: /Browse templates/i });
+    expect(link.getAttribute("href")).toMatch(/\/templates$/);
+  });
+
+  it("secondary path: 'Set up in your coding agent' opens the MCP install path", async () => {
+    const onPickMcp = vi.fn();
+    render(<EmilyHomeEmpty onSeed={() => {}} onPickMcp={onPickMcp} />);
+    await screen.findByText(/hire your first worker/i);
+    screen.getByRole("button", { name: /Set up in your coding agent/i }).click();
+    expect(onPickMcp).toHaveBeenCalledTimes(1);
+  });
+
+  it("Emily-as-helper: seeds a question she can answer (not a build prompt)", async () => {
+    const onSeed = vi.fn();
+    render(<EmilyHomeEmpty onSeed={onSeed} onPickMcp={() => {}} />);
+    await screen.findByText(/hire your first worker/i);
+    screen.getByRole("button", { name: /How do workers work\?/i }).click();
+    expect(onSeed).toHaveBeenCalledWith("How do workers work?");
+  });
+});
+
+describe("Emily home empty — first-worker hero (OSS self-host, no gallery)", () => {
+  it("omits the templates path and promotes the coding-agent path", async () => {
+    // Default (non-cloud) env: no NEXT_PUBLIC_WORKEROS_DEPLOY=cloud.
+    renderFirstWorker();
+    await screen.findByText(/hire your first worker/i);
+    expect(screen.queryByRole("link", { name: /Browse templates/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Set up in your coding agent/i })).toBeInTheDocument();
   });
 });
 

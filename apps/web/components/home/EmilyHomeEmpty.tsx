@@ -9,10 +9,15 @@
 // fix-as-prompt note. It has NO textarea/composer of its own. It seeds the real
 // EmilyChatCore composer through `onSeed` and triggers the MCP modal via `onPickMcp`.
 //
-// Two layouts, gated by the workers fetch (resolveWorkersGate, NEVER on error/
+// Layouts, gated by the workers fetch (resolveWorkersGate, NEVER on error/
 // loading):
-//   - First-worker (zero real workers): "Let's hire your first worker" hero +
-//     create pills + "Find an MCP server".
+//   - First-worker HOME (zero real workers, NOT the explicit create flow):
+//     "Hire your first worker" hero that routes to the TWO real activation paths
+//     — pick a template + run it (primary, cloud gallery) and set Floom up in a
+//     coding agent (secondary, MCP). Emily is framed as a HELPER (inspect / run /
+//     explain), never advertised as a from-prose worker builder (prose authoring
+//     is disabled — see chat_service WORKER_AUTHORING_RULES).
+//   - Create (explicit "New worker"): unchanged worker-creation prompt surface.
 //   - Active: greeting + "{done} done this week · {N} need attention" pulse
 //     (the pulse degrades to just the greeting if the overview failed to load),
 //     then active/fix pills.
@@ -26,6 +31,7 @@ import type {
   OverviewSparklineBucket,
 } from "@/lib/types";
 import { api } from "@/lib/api";
+import { isCloudDeploy, getPublicSiteOrigin } from "@/lib/api-base";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { InlineToolToken } from "@/components/InlineToolToken";
 import { tokenisePrompt } from "@/lib/prompt-detect";
@@ -311,6 +317,35 @@ const CREATE_PILLS = [
   "Daily Slack standup reminder",
 ] as const;
 
+// First-worker HOME helper prompts. Emily can inspect/run/explain (NOT author
+// workers from prose), so these seed questions she can genuinely answer rather
+// than "build me X" prompts that dead-end on the disabled authoring path.
+const HELPER_PILLS = [
+  "How do workers work?",
+  "What can you connect to?",
+  "Show me what you can do",
+] as const;
+
+function ArrowRight({ light }: { light?: boolean }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={light ? "shrink-0 text-white/80" : "shrink-0 text-[var(--ink-mute)]"}
+      aria-hidden="true"
+    >
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </svg>
+  );
+}
+
 const ACTIVE_PILLS = [
   "What ran overnight?",
   "Create a Linear triage worker",
@@ -353,7 +388,17 @@ export function EmilyHomeEmpty({
     isError: workersQuery.isError,
   });
   const isFirstWorker = gate.isFirstWorker;
-  const showCreatePrompts = createMode || isFirstWorker;
+  // Post-signup HOME for a brand-new workspace (zero real workers) — NOT the
+  // explicit "New worker" create flow. This surface is honest about the two
+  // real activation paths and never promises Emily builds a worker from prose.
+  const firstWorkerHome = isFirstWorker && !createMode;
+  // Worker-creation prompt surface: the explicit create flow only (unchanged).
+  const showCreatePrompts = createMode;
+  // Templates gallery is a Cloud-only surface (floom.dev/templates). On OSS
+  // self-host there is no gallery, so the templates CTA is gated to Cloud and
+  // the coding-agent path becomes the primary there.
+  const showTemplates = isCloudDeploy();
+  const templatesUrl = `${getPublicSiteOrigin()}/templates`;
 
   // Fix-as-prompt: needs-attention items + per-worker fix pills.
   const attention = useMemo(() => overview?.needs_attention ?? [], [overview]);
@@ -386,10 +431,81 @@ export function EmilyHomeEmpty({
   return (
     <div className="flex w-full max-w-[760px] flex-col items-center px-6">
       {/* greeting / hero */}
-      {showCreatePrompts ? (
+      {firstWorkerHome ? (
+        <div className="flex w-full flex-col items-center pb-[22px]">
+          <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
+            Hire your first worker
+          </div>
+          <div className="mt-[7px] max-w-[420px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
+            {showTemplates ? (
+              <>
+                Pick a ready-made worker and run it, or set Floom up in your
+                coding agent. {assistantName} is here to help you choose, run,
+                and manage them.
+              </>
+            ) : (
+              <>
+                Set Floom up in your coding agent to create a worker, then{" "}
+                {assistantName} helps you run, inspect, and manage it here.
+              </>
+            )}
+          </div>
+
+          {/* Two real activation paths. Primary = pick a template + run it
+              (Cloud gallery). Secondary = set up in a coding agent (MCP). On OSS
+              (no gallery) the coding-agent path is promoted to primary. */}
+          <div className="mt-5 flex w-full max-w-[440px] flex-col gap-2.5">
+            {showTemplates && (
+              <a
+                href={templatesUrl}
+                className="flex w-full items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--accent)] px-4 py-3 text-left text-white transition-opacity hover:opacity-90"
+              >
+                <span className="flex flex-col">
+                  <span className="text-[13.5px] font-semibold">Browse templates</span>
+                  <span className="text-[12px] text-white/85">
+                    Pick a ready-made worker and run it in a click
+                  </span>
+                </span>
+                <ArrowRight light />
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onPickMcp}
+              className={
+                showTemplates
+                  ? "flex w-full items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3 text-left transition-colors hover:bg-[var(--bg-3)]"
+                  : "flex w-full items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--accent)] px-4 py-3 text-left text-white transition-opacity hover:opacity-90"
+              }
+            >
+              <span className="flex flex-col">
+                <span
+                  className={
+                    showTemplates
+                      ? "text-[13.5px] font-medium text-ink"
+                      : "text-[13.5px] font-semibold text-white"
+                  }
+                >
+                  Set up in your coding agent
+                </span>
+                <span
+                  className={
+                    showTemplates
+                      ? "text-[12px] text-[var(--text-muted)]"
+                      : "text-[12px] text-white/85"
+                  }
+                >
+                  Claude Code, Cursor, or Codex via the Floom MCP server
+                </span>
+              </span>
+              <ArrowRight light={!showTemplates} />
+            </button>
+          </div>
+        </div>
+      ) : showCreatePrompts ? (
         <div className="flex flex-col items-center pb-[22px]">
           <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
-            {isFirstWorker ? "Let's hire your first worker" : "What should this worker do?"}
+            What should this worker do?
           </div>
           <div className="mt-[7px] max-w-[360px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
             Describe what you want automated. {assistantName} builds it, connects the
@@ -436,7 +552,22 @@ export function EmilyHomeEmpty({
       )}
 
       {/* pills (BELOW the hero, ABOVE the real composer the host renders next) */}
-      {showCreatePrompts ? (
+      {firstWorkerHome ? (
+        // Emily-as-helper: seed questions she can genuinely answer (inspect /
+        // explain), NOT "build me X" prompts that dead-end on disabled authoring.
+        <div className="flex flex-col items-center gap-2.5">
+          <div className="text-[12px] text-[var(--ink-mute)]">
+            Or ask {assistantName} a question
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            {HELPER_PILLS.map((p) => (
+              <Pill key={p} onClick={() => onSeed(p)}>
+                {p}
+              </Pill>
+            ))}
+          </div>
+        </div>
+      ) : showCreatePrompts ? (
         <>
           <div className="flex flex-wrap justify-center gap-2">
             {CREATE_PILLS.map((p) => (
