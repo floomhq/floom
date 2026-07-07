@@ -14,7 +14,7 @@ import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/
 import { BootSplash } from "@/components/layout/BootSplash";
 import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 import { TermsAcceptanceGate } from "@/components/TermsAcceptanceGate";
-import { isPublicWorkspaceProfilePath } from "@/lib/public-workspace-routes";
+import { isPublicWorkspaceProfilePath, isPublicWorkerPermalinkPath } from "@/lib/public-workspace-routes";
 
 // Render exactly one Emily surface so only one chat instance mounts: the
 // desktop dock (≥1024px) or the mobile/tablet bottom-sheet (<1024px).
@@ -24,9 +24,20 @@ import { isPublicWorkspaceProfilePath } from "@/lib/public-workspace-routes";
 // (768–1023), where the 3-column shell would crush the content pane.
 
 // Public, shareable "skill card" pages render full-bleed without the app
-// sidebar / command palette. /w, /s, and /@handle are standalone public share pages.
-// /login is the access gate -- it must render without sidebar chrome (and is
-// the one page reachable while logged out, see middleware.ts).
+// sidebar / command palette. /w, /s, /@handle, and /@handle/workerSlug are
+// standalone public share pages. /login is the access gate -- it must render
+// without sidebar chrome (and is the one page reachable while logged out, see
+// middleware.ts).
+//
+// #2211 shipped the /@handle/workerSlug worker permalink page but never
+// extended this standalone check past the single-segment /@handle workspace
+// profile, so the permalink page fell through to the default branch below and
+// silently double-mounted inside the full authenticated shell (Sidebar,
+// EmilyDock, CommandPalette, DeepLinkRouter, TermsAcceptanceGate) alongside
+// its own bare <ShareNav>. That extra, never-designed-for-this-page chrome is
+// the root cause of the client-side $exception PostHog captured on
+// /app/@{handle}/{workerSlug} loads (confirmed systemic: hit 2+ accounts
+// across 5 different permalink slugs in 48h, not one user's browser).
 const standalonePrefixes = [
   "/approvals/review",
   "/w",
@@ -65,6 +76,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   const pathname = usePathname();
   const isDesktop = useIsDesktop();
   const standalone = isPublicWorkspaceProfilePath(pathname)
+    || isPublicWorkerPermalinkPath(pathname)
     || pathMatchesPrefixes(pathname, standalonePrefixes)
     || pathMatchesPrefixes(pathname, noSidebarPaths);
   const noDock = pathMatchesPrefixes(pathname, noDockPrefixes);

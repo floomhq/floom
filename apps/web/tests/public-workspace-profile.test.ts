@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isPublicWorkspaceProfilePath } from "@/lib/public-workspace-routes";
+import { isPublicWorkspaceProfilePath, isPublicWorkerPermalinkPath } from "@/lib/public-workspace-routes";
 
 function read(rel: string): string {
   return readFileSync(join(process.cwd(), rel), "utf-8");
@@ -35,5 +35,39 @@ describe("public workspace profile", () => {
     expect(isPublicWorkspaceProfilePath("/@fede-secretary/settings")).toBe(false);
     expect(isPublicWorkspaceProfilePath("/@")).toBe(false);
     expect(isPublicWorkspaceProfilePath("/app/@fede-secretary")).toBe(false);
+  });
+
+  // Regression: #2211 shipped the two-segment /@{handle}/{workerSlug} L4
+  // permalink page but never taught AppShell's standalone-chrome check about
+  // it, so it silently mounted inside the full authenticated dashboard shell
+  // (Sidebar/EmilyDock/CommandPalette/DeepLinkRouter/TermsAcceptanceGate) —
+  // the confirmed root cause of a client-side $exception hit on real permalink
+  // loads (systemic: 2+ accounts, 5 slugs, 48h). isPublicWorkerPermalinkPath is
+  // a SEPARATE predicate from isPublicWorkspaceProfilePath on purpose: the
+  // latter also drives proxy.ts's noindex marking, and the permalink page is
+  // deliberately indexable, so the two must not be folded into one function.
+  it("matches only two-segment worker permalink paths", () => {
+    expect(isPublicWorkerPermalinkPath("/@fede/meeting-prep")).toBe(true);
+    expect(isPublicWorkerPermalinkPath("/@fede/meeting-prep/")).toBe(true);
+    expect(isPublicWorkerPermalinkPath("/@openpaper/construction-intel-weekly")).toBe(true);
+    expect(isPublicWorkerPermalinkPath("/@fede-secretary")).toBe(false);
+    expect(isPublicWorkerPermalinkPath("/@")).toBe(false);
+    expect(isPublicWorkerPermalinkPath("/app/@fede/meeting-prep")).toBe(false);
+  });
+
+  // Codex review flagged (2026-07-07): page.tsx's own permalinkUrls() builds
+  // the canonical/OG link with encodeURIComponent(`@${handle}`), which escapes
+  // '@' to '%40'. usePathname() does not decode that back, so a literal-'@'
+  // regex alone would miss a crawler/unfurl bot following the page's own
+  // canonical URL. Confirm the %40 form still classifies as a permalink.
+  it("matches the %40-encoded canonical permalink form the page itself emits", () => {
+    expect(isPublicWorkerPermalinkPath("/%40fede/meeting-prep")).toBe(true);
+    expect(isPublicWorkerPermalinkPath("/%40openpaper/construction-intel-weekly")).toBe(true);
+    expect(isPublicWorkerPermalinkPath("/%40fede-secretary")).toBe(false);
+  });
+
+  it("renders worker permalink pages outside the app shell", () => {
+    const source = read("components/layout/AppShell.tsx");
+    expect(source).toContain("isPublicWorkerPermalinkPath(pathname)");
   });
 });
