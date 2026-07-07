@@ -18,6 +18,10 @@
 //   - /w/* : public worker share page (its data is fetched server-side via a
 //     signed HMAC token, so it needs no proxy exception — only page access)
 //   - /@handle : public workspace profile page
+//   - /@handle/workerSlug (+ %40-encoded form) : L4 public worker permalink
+//     page (#2211) — indexable, fetches its own data server-side via
+//     fetchPublicWorkerPermalink and soft-checks isAuthenticated() to decide
+//     the CTA, so it must stay reachable pre-session like /@handle above
 //   - /s/* : public standalone share pages for workers and Brain content
 //   - Next.js internals + static assets
 //
@@ -29,7 +33,7 @@
 // requires that protected shells are not statically pre-rendered).
 
 import { NextRequest, NextResponse } from "next/server";
-import { isPublicWorkspaceProfilePath } from "@/lib/public-workspace-routes";
+import { isPublicWorkspaceProfilePath, isPublicWorkerPermalinkPath } from "@/lib/public-workspace-routes";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/web-session";
 
 // Pages reachable WITHOUT a session cookie. Exact path or prefix match.
@@ -96,6 +100,11 @@ function isPublicPage(pathname: string): boolean {
   // unset there), so this is not an auth bypass for the real app surface.
   if (process.env.PREVIEW_HARNESS === "1" && pathname.startsWith("/preview")) return true;
   if (isPublicWorkspaceProfilePath(pathname)) return true;
+  // #2211 L4 worker permalink page: same "reachable pre-session" contract as
+  // the /@handle profile page above (see the doc comment at the top of this
+  // file). Deliberately NOT added to the noindex predicate a few lines down —
+  // this page is indexable by design.
+  if (isPublicWorkerPermalinkPath(pathname)) return true;
   return PUBLIC_PAGE_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(prefix),
   );
