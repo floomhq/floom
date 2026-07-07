@@ -91,7 +91,9 @@ _APPROVAL_LEAK_PATTERNS = (
     "not connected",
 )
 def _new_approval_batch_token() -> str:
-    return f"fls_{pysecrets.token_urlsafe(32)}"
+    # 16 bytes (~22 chars, 128 bits) is ample for a hashed capability token;
+    # matches the shortened default used across share/review links (2026-07-07).
+    return f"fls_{pysecrets.token_urlsafe(16)}"
 
 
 def _approval_batch_token_hash(token: str) -> str:

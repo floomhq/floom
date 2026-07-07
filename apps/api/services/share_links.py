@@ -77,7 +77,11 @@ def _mint_standalone_share_token(slug: str | None = None) -> str:
         clean = _clean_slug(slug)
         if clean:
             return f"fls_{clean}-{rand}"
-    return f"fls_{_urlsafe_alnum(24)}"
+    # 16 alnum chars (~95 bits) is ample for a hashed, unlisted capability
+    # token — matches the token_urlsafe(16) target used elsewhere for share
+    # links (2026-07-07, Fede: 32-byte tokens were "ugly-long" for no
+    # security benefit since these are stored hashed).
+    return f"fls_{_urlsafe_alnum(16)}"
 
 
 def _hash_share_token(token: str) -> str:
@@ -456,7 +460,7 @@ def _revoke_standalone_share_link(
 # Worker short-links: the per-worker /w/<short_id> redirect store (sibling of the
 # standalone share-link table above; one short_id per (worker, owner)).
 def _mint_worker_short_id() -> str:
-    return f"fls_{_urlsafe_alnum(24)}"
+    return f"fls_{_urlsafe_alnum(16)}"
 
 
 def _ensure_worker_short_links_table() -> None:
@@ -528,7 +532,9 @@ def _worker_short_link_response(worker: Dict[str, Any]) -> Dict[str, str]:
 
 def _load_short_link_public_worker(short_id: str, repos: "Repositories") -> Dict[str, Any]:
     from db import get_db
-    if not re.fullmatch(r"fls_[A-Za-z0-9]{24,64}", short_id or ""):
+    # 16 (2026-07-07 shorter default) .. 64: keep validating pre-existing
+    # 24-char short ids minted before the length was reduced.
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{16,64}", short_id or ""):
         raise HTTPException(status_code=404, detail="Short link not found")
     _ensure_worker_short_links_table()
     with get_db() as conn:
