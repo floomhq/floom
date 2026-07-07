@@ -277,16 +277,16 @@ def _llm_error_message(error_code: str, model: str | None = None) -> str:
         )
     if error_code == "token_cap_exceeded":
         return (
-            "This run used its full token budget before finishing. If the task is inherently large, try "
+            "Agent token cap exceeded before the run finished. If the task is inherently large, try "
             "splitting it into smaller steps or a narrower prompt. If a small task hits this repeatedly, "
             "the platform default AI model may be misbehaving (e.g. burning tokens on reasoning) — contact "
             "support and reference this run."
         )
     if error_code == "tool_iteration_cap_exceeded":
         return (
-            "This run took too many tool-call steps without finishing. Try a narrower prompt or fewer inputs "
-            "per run. If a normally-sized task hits this repeatedly, the platform default AI model may be "
-            "looping inefficiently — contact support and reference this run."
+            "Agent tool iteration cap exceeded before the run finished. Try a narrower prompt or fewer "
+            "inputs per run. If a normally-sized task hits this repeatedly, the platform default AI model "
+            "may be looping inefficiently — contact support and reference this run."
         )
     return "The AI provider failed while running this worker. Check the run logs for the redacted provider message and retry."
 
