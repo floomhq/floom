@@ -150,9 +150,29 @@ describe("middleware auth gate", () => {
     }
   });
 
-  it("does NOT make nested /@ routes public by prefix", async () => {
+  // #2211 L4 worker permalink (/@handle/workerSlug): deliberately public,
+  // same contract as /@handle above. Codex review caught that this fix's
+  // AppShell-only change left the page unreachable pre-session (redirected to
+  // /login before AppShell could render it standalone), so isPublicPage now
+  // reuses the same isPublicWorkerPermalinkPath predicate. The page itself
+  // (fetchPublicWorkerPermalink -> _public_worker_card_by_handle_slug) is the
+  // real authorization boundary: it 404s identically for a private worker,
+  // an unknown slug, or a bad share token, so this is safe to make reachable.
+  it("keeps the worker permalink page reachable without login (#2211)", async () => {
     const { proxy: middleware } = await import("@/proxy");
-    for (const p of ["/@fede-secretary/settings", "/@fede-secretary/private/run"]) {
+    for (const p of ["/@fede-secretary/some-worker", "/%40fede-secretary/some-worker"]) {
+      const res = await middleware(req(p));
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
+
+  it("does NOT make deeper-than-permalink /@ routes public by prefix", async () => {
+    // Only the exact two-segment permalink shape is public. Anything nested
+    // deeper (three+ segments) must stay behind the login gate — no route in
+    // this app is actually shaped this way, but this guards against a future
+    // prefix-matching mistake widening the bypass past the permalink page.
+    const { proxy: middleware } = await import("@/proxy");
+    for (const p of ["/@fede-secretary/private/run"]) {
       const res = await middleware(req(p));
       expect(res.status).toBe(307);
       expect(res.headers.get("location")).toContain("/login");

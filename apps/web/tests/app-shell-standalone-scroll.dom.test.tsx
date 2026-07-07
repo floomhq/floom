@@ -97,4 +97,26 @@ describe("AppShell standalone scroll container (#1717)", () => {
     expect(queryByText("Terms gate overlay")).not.toBeInTheDocument();
     expect(queryByText("authed user identity")).not.toBeInTheDocument();
   });
+
+  // Regression: #2211 shipped the /@{handle}/{workerSlug} L4 worker permalink
+  // page but never taught AppShell about the two-segment shape, so it fell
+  // through to the default (non-standalone) branch and double-mounted the
+  // full authenticated shell (Sidebar/EmilyDock/CommandPalette/
+  // TermsAcceptanceGate) around the permalink page's own bare <ShareNav> —
+  // the confirmed root cause of a client-side $exception on real permalink
+  // loads (PostHog: systemic across 2+ accounts, 5 slugs, 48h).
+  it("renders worker permalink pages standalone, without authenticated chrome or the terms gate", async () => {
+    pathname.mockReturnValue("/@openpaper/construction-intel-weekly");
+
+    const { AppShell } = await import("@/components/layout/AppShell");
+    const { queryByText } = render(
+      <AppShell>
+        <div>Permalink share card content</div>
+      </AppShell>,
+    );
+
+    expect(queryByText("Permalink share card content")).toBeInTheDocument();
+    expect(queryByText("Terms gate overlay")).not.toBeInTheDocument();
+    expect(queryByText("authed user identity")).not.toBeInTheDocument();
+  });
 });
