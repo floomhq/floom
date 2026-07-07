@@ -328,6 +328,22 @@ export const api = {
       });
       return worker;
     },
+    // #1092: publish a worker's /@handle/slug permalink to the open web. PATCH
+    // (not the PUT company-access path) is the cloud override that alone accepts
+    // visibility='public'; confirm=true is the required intent flag. Owner-only
+    // (server enforces 403 otherwise). Returns the live permalink URL. Cloud-only
+    // feature; the control is gated on isCloudDeploy() at the call site.
+    publish: (id: string) =>
+      fetchJson<{ visibility: import("./types").AssetVisibility; published_at: string | null; public_link: string | null }>(
+        `/workers/${encodeURIComponent(id)}/visibility`,
+        { method: "PATCH", body: JSON.stringify({ visibility: "public", confirm: true }) },
+      ),
+    // #1092: unpublish: flip back to private so the bare permalink 404s again.
+    unpublish: (id: string) =>
+      fetchJson<{ visibility: import("./types").AssetVisibility; published_at: string | null; public_link: string | null }>(
+        `/workers/${encodeURIComponent(id)}/visibility`,
+        { method: "PATCH", body: JSON.stringify({ visibility: "private" }) },
+      ),
     setStage: async (id: string, stage: import("./types").WorkerStage) => {
       const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/stage`, {
         method: "PUT",

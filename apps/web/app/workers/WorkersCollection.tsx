@@ -103,6 +103,7 @@ import {
   toggleContext,
 } from "@/lib/worker-manifest";
 import { can, isViewOnly, canLeaveFeedback, visibilityLabel, FEEDBACK_BACKEND_AVAILABLE } from "@/lib/permissions";
+import { isCloudDeploy } from "@/lib/api-base";
 import {
   isSystemWorker,
   workerStatusPill,
@@ -2306,8 +2307,33 @@ function WorkerDetailActions({
           },
           grantAsset: { type: "worker", id: w.id },
         }}
+        publish={
+          // #1092: publish/unpublish the /@handle/slug permalink. Cloud-only
+          // (the public projection lives on floom.dev) + owner-only (server also
+          // enforces 403). The Publish section owns the public permalink for the
+          // owner, so publicLink's public branch is suppressed below to avoid
+          // showing the URL twice.
+          isCloudDeploy() && (d?.permissions?.is_owner ?? false)
+            ? {
+                isPublic: (d?.visibility ?? w.visibility) === "public",
+                permalink: (d ?? w).public_link ?? null,
+                onPublish: async () => {
+                  const res = await api.workers.publish(w.id);
+                  applyDetail(await api.workers.get(w.id));
+                  onUpdated({ ...w, visibility: res.visibility, public_link: res.public_link ?? undefined });
+                },
+                onUnpublish: async () => {
+                  const res = await api.workers.unpublish(w.id);
+                  applyDetail(await api.workers.get(w.id));
+                  onUpdated({ ...w, visibility: res.visibility });
+                },
+              }
+            : undefined
+        }
         publicLink={
-          (d?.visibility ?? w.visibility) === "public"
+          isCloudDeploy() && (d?.permissions?.is_owner ?? false) && (d?.visibility ?? w.visibility) === "public"
+            ? undefined
+            : (d?.visibility ?? w.visibility) === "public"
             ? {
                 // create is required by ShareModal's prop type but never
                 // invoked at runtime when staticUrl is set (matches the
