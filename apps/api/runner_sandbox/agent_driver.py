@@ -270,7 +270,24 @@ def _llm_error_message(error_code: str, model: str | None = None) -> str:
         return "The configured AI provider is rate-limiting requests. The run can be retried."
     if error_code == "llm_model_not_configured":
         model_suffix = f" for {model}" if model else ""
-        return f"The platform AI model{model_suffix} is not fully configured. Set the required provider credentials and retry."
+        return (
+            f"The platform AI model{model_suffix} is not fully configured. This is a platform-side setup gap, "
+            "not something you did wrong. Retrying will not help until it is fixed. Contact support if this "
+            "repeats, or set your own AI provider key in Settings if this workspace has that option."
+        )
+    if error_code == "token_cap_exceeded":
+        return (
+            "This run used its full token budget before finishing. If the task is inherently large, try "
+            "splitting it into smaller steps or a narrower prompt. If a small task hits this repeatedly, "
+            "the platform default AI model may be misbehaving (e.g. burning tokens on reasoning) — contact "
+            "support and reference this run."
+        )
+    if error_code == "tool_iteration_cap_exceeded":
+        return (
+            "This run took too many tool-call steps without finishing. Try a narrower prompt or fewer inputs "
+            "per run. If a normally-sized task hits this repeatedly, the platform default AI model may be "
+            "looping inefficiently — contact support and reference this run."
+        )
     return "The AI provider failed while running this worker. Check the run logs for the redacted provider message and retry."
 
 
@@ -695,7 +712,7 @@ class AgentDriver(SandboxDriver):
                 if total_tokens >= max_total_tokens:
                     return WorkerResult(
                         status="error",
-                        error="Agent token cap exceeded",
+                        error=_llm_error_message("token_cap_exceeded"),
                         error_code="token_cap_exceeded",
                     )
 
@@ -737,7 +754,7 @@ class AgentDriver(SandboxDriver):
                     if exc.__class__.__name__ == "MaxTurnsExceeded":
                         return WorkerResult(
                             status="error",
-                            error="Agent tool iteration cap exceeded",
+                            error=_llm_error_message("tool_iteration_cap_exceeded"),
                             error_code="tool_iteration_cap_exceeded",
                         )
                     raise
@@ -755,7 +772,7 @@ class AgentDriver(SandboxDriver):
                     if exc.__class__.__name__ == "MaxTurnsExceeded":
                         return WorkerResult(
                             status="error",
-                            error="Agent tool iteration cap exceeded",
+                            error=_llm_error_message("tool_iteration_cap_exceeded"),
                             error_code="tool_iteration_cap_exceeded",
                         )
                     raise
@@ -769,7 +786,7 @@ class AgentDriver(SandboxDriver):
                 if stream_result["token_cap_exceeded"]:
                     return WorkerResult(
                         status="error",
-                        error="Agent token cap exceeded",
+                        error=_llm_error_message("token_cap_exceeded"),
                         error_code="token_cap_exceeded",
                     )
 
