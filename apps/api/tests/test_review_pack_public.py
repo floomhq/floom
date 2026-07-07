@@ -197,6 +197,31 @@ def test_review_pack_public_vote_roundtrip_is_bound_to_reviewer_token(monkeypatc
     assert len(feedback_files) == 1
 
 
+def test_review_pack_reviewer_token_is_shortened(monkeypatch, tmp_path):
+    """2026-07-07: reviewer tokens mint at 16 alnum chars (~95 bits) via the
+    guaranteed-length _urlsafe_alnum helper, down from a 40-char
+    generate-strip-truncate scheme — stored hashed, so the shorter length
+    loses no real security margin, and the fixed length removes the (~1.4e-11
+    per mint, Codex-flagged) chance of an under-length token. Also asserts
+    the batch/share token is shortened the same way."""
+    import re
+
+    main, _contexts_dir = _load_api(monkeypatch, tmp_path)
+    pack_id = "rp_short_token_client_2026-07-07"
+    context_name = "review_pack-short-token-client"
+
+    with TestClient(main.app) as client:
+        _write_pack(client, context_name, pack_id, _pack(pack_id))
+        token, reviewer_token = _mint(client, context_name, pack_id)
+
+    assert token.startswith("fls_")
+    assert len(token[len("fls_"):]) <= 24
+
+    assert reviewer_token.startswith("rpr_")
+    rand_part = reviewer_token[len("rpr_"):]
+    assert re.fullmatch(r"[A-Za-z0-9]{16}", rand_part), f"expected exactly 16 alnum chars, got {rand_part!r}"
+
+
 def test_review_pack_can_materialize_directly_from_run_output_utf8(monkeypatch, tmp_path):
     main, _contexts_dir = _load_api(monkeypatch, tmp_path)
     context_name = "review_pack-demo-client"

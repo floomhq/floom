@@ -6,7 +6,6 @@ import copy
 import hashlib
 import json
 import re
-import secrets
 import uuid as _uuid_mod
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -14,12 +13,15 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import HTTPException
 
-from services.share_links import _load_standalone_share_row
+from services.share_links import _load_standalone_share_row, _urlsafe_alnum
 
 ReviewVerdict = Literal["interested", "maybe", "pass"]
 
 _PACK_ID_RE = re.compile(r"^rp_[a-z0-9_]+_\d{4}-\d{2}-\d{2}$")
-_REVIEWER_TOKEN_RE = re.compile(r"^rpr_[A-Za-z0-9]{24,80}$")
+# 16 (2026-07-07 shorter default, minted via the guaranteed-length
+# _urlsafe_alnum helper — always exactly 16) .. 80: keeps validating
+# pre-existing 40-char tokens minted before the length was reduced.
+_REVIEWER_TOKEN_RE = re.compile(r"^rpr_[A-Za-z0-9]{16,80}$")
 
 
 def review_pack_share_url(token: str) -> str:
@@ -229,7 +231,13 @@ def ensure_reviewer_tokens(pack: Dict[str, Any]) -> Tuple[Dict[str, Any], List[D
         key = str(raw.get("key") or "").strip() or _reviewer_key_from_name(name)
         key = key[:48] or f"reviewer-{idx + 1}"
         role = str(raw.get("role") or "")[:120]
-        token = f"rpr_{secrets.token_urlsafe(32).replace('-', '').replace('_', '')[:40]}"
+        # 16 alnum chars (~95 bits) is ample for a hashed reviewer token
+        # (2026-07-07): matches the shortened default used across share links.
+        # Uses the guaranteed-length _urlsafe_alnum helper (loops until it has
+        # enough chars) rather than generate-strip-truncate, which could in
+        # rare cases (Codex review, 2026-07-07) fall below the validation
+        # regex's minimum length.
+        token = f"rpr_{_urlsafe_alnum(16)}"
         reviewers.append({
             "key": key,
             "name": name[:120],

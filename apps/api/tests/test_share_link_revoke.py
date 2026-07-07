@@ -157,7 +157,26 @@ def test_slugged_token_matches_validation_regex_and_resolves(client_and_main):
     # Also verify old-format (no slug) tokens still pass
     old_token = _mint_standalone_share_token()
     assert re.fullmatch(r"fls_[A-Za-z0-9_-]{6,128}", old_token), f"Old token {old_token!r} fails regex"
-    assert len(old_token) == len("fls_") + 24
+    assert len(old_token) == len("fls_") + 16
+
+
+def test_worker_short_id_is_shortened_and_legacy_still_validates():
+    """2026-07-07: short ids mint at 16 alnum chars (down from 24); the
+    validation regex must still accept legacy 24-char ids already persisted
+    in prod (tokens are hashed, so any prior length keeps verifying)."""
+    import re
+
+    from services.share_links import _mint_worker_short_id, _urlsafe_alnum
+
+    _SHORT_ID_RE = re.compile(r"fls_[A-Za-z0-9]{16,64}")
+
+    new_id = _mint_worker_short_id()
+    assert new_id.startswith("fls_")
+    assert len(new_id) == len("fls_") + 16
+    assert _SHORT_ID_RE.fullmatch(new_id), f"newly minted id {new_id!r} fails the loader's regex"
+
+    legacy_id = f"fls_{_urlsafe_alnum(24)}"  # shape of ids minted before this change
+    assert _SHORT_ID_RE.fullmatch(legacy_id), f"legacy 24-char id {legacy_id!r} must still validate"
 
 
 def test_slugged_token_resolves_via_hash_lookup(client_and_main):

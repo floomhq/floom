@@ -395,6 +395,21 @@ def test_batch_share_link_stores_hash_only_token(client_and_main):
     assert token not in repr(stored)
 
 
+def test_batch_share_link_token_is_shortened(client_and_main):
+    """2026-07-07: approval-batch share tokens mint at token_urlsafe(16)
+    (~22 chars) instead of token_urlsafe(32) (~43 chars) — tokens are stored
+    hashed, so the shorter length loses no real security margin."""
+    client, main = client_and_main
+    _seed_approval(main, approval_id="apr_short_token", run_id="run_short_token", worker_id="w_short_token")
+
+    token = _batch_token(client)
+
+    assert token.startswith("fls_")
+    rand_part = token[len("fls_"):]
+    assert len(rand_part) <= 24, f"expected a ~22-char random part, got {len(rand_part)}: {token!r}"
+    assert len(rand_part) >= 16
+
+
 def test_batch_share_link_revoke_and_expiry_reject_public_resolution(client_and_main):
     client, main = client_and_main
     _seed_approval(main, approval_id="apr_revoke", run_id="run_revoke", worker_id="w_revoke")
