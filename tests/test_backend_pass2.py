@@ -47,7 +47,9 @@ def test_worker_short_link_mints_and_resolves_public_card_without_leaks(monkeypa
     assert minted.status_code == 200, minted.text
     short = minted.json()
     assert short["short_id"].startswith("fls_")
-    assert len(short["short_id"]) >= len("fls_") + 24
+    # 2026-07-07: short ids mint at 16 alnum chars (down from 24) — a hashed,
+    # unlisted capability token doesn't need the extra entropy.
+    assert len(short["short_id"]) >= len("fls_") + 16
     assert short["short_url"].endswith(f"/{short['short_id']}")
 
     repeated = client.post(f"/workers/{worker_id}/short-link", headers=_headers("user-a"))
