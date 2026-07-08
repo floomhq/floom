@@ -196,22 +196,33 @@ def test_cancel_flag_db_read_failure_fails_closed_and_is_metrified(monkeypatch, 
 
     before = agent_driver.cancel_flag_db_read_errors_total()
 
+    from runner_sandbox.cancellation import _CANCEL_READ_FAILURE_STREAK_THRESHOLD
+
     with patch.object(db_module, "get_repositories", side_effect=RuntimeError("db unavailable")):
         with caplog.at_level("WARNING", logger="floom.runner_sandbox.cancel"):
-            result = agent_driver.AgentDriver()._cancel_requested("run-missing")
+            # Transient blips are swallowed; only a full streak of consecutive
+            # failed reads is treated as a cancel signal (2026-07-08 regression:
+            # a single mid-stream repo blip killed runs as "cancelled by user").
+            driver = agent_driver.AgentDriver()
+            results = [
+                driver._cancel_requested("run-missing")
+                for _ in range(_CANCEL_READ_FAILURE_STREAK_THRESHOLD)
+            ]
 
-    assert result is True
-    assert agent_driver.cancel_flag_db_read_errors_total() == before + 1
+    assert results[:-1] == [False] * (_CANCEL_READ_FAILURE_STREAK_THRESHOLD - 1)
+    assert results[-1] is True
+    errors_added = _CANCEL_READ_FAILURE_STREAK_THRESHOLD
+    assert agent_driver.cancel_flag_db_read_errors_total() == before + errors_added
     assert any("cancel flag read failed" in record.message.lower() for record in caplog.records)
 
     client = TestClient(main.app, raise_server_exceptions=False)
     metrics = client.get("/system/metrics", headers={"x-floom-secret": "test-secret"})
     assert metrics.status_code == 200, metrics.text
-    assert metrics.json()["cancel_flag_db_read_errors"] == before + 1
+    assert metrics.json()["cancel_flag_db_read_errors"] == before + errors_added
 
     prom = client.get("/metrics", headers={"x-floom-secret": "test-secret"})
     assert prom.status_code == 200, prom.text
-    assert f"workeros_cancel_flag_db_read_errors_total {before + 1}" in prom.text
+    assert f"workeros_cancel_flag_db_read_errors_total {before + errors_added}" in prom.text
     db.get_repositories.cache_clear()
 
 
