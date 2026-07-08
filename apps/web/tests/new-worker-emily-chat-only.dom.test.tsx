@@ -78,12 +78,17 @@ describe("new worker = the consistent Emily empty state (no bespoke hero)", () =
     expect(screen.queryByText(/Score new CRM contacts against a job brief/i)).not.toBeInTheDocument();
   });
 
-  it("renders the Emily empty shell with worker-creation pills", async () => {
+  it("renders the two real activation paths + assistant-helper pills", async () => {
     render(<EmilyChatCore fullPage createMode />);
-    expect(await screen.findByText(/What should this worker do/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Create a Linear triage worker/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Daily GitHub PR digest/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /What ran overnight/i })).not.toBeInTheDocument();
+    expect(await screen.findByText(/Add another worker/i)).toBeInTheDocument();
+    // PRIMARY: template gallery. SECONDARY: coding-agent / MCP.
+    expect(screen.getByRole("link", { name: /Browse templates/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Set up in your coding agent/i })).toBeInTheDocument();
+    // Helper prompts (the assistant guides; it does NOT build the worker here).
+    expect(screen.getByRole("button", { name: /Which template fits my team/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /What can Floom connect to/i })).toBeInTheDocument();
+    // The old false "Emily builds it" create pills are gone.
+    expect(screen.queryByRole("button", { name: /Create a Linear triage worker/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Show me this week's runs/i })).not.toBeInTheDocument();
   });
 
@@ -98,12 +103,12 @@ describe("new worker = the consistent Emily empty state (no bespoke hero)", () =
     expect(screen.queryByRole("heading", { name: /hire a new worker/i })).not.toBeInTheDocument();
   });
 
-  it("clicking a create pill primes the composer with that prompt", async () => {
+  it("clicking a helper pill primes the composer with that prompt", async () => {
     const user = userEvent.setup();
     render(<EmilyChatCore fullPage createMode />);
     const composer = (await screen.findByPlaceholderText("Message Emily...")) as HTMLTextAreaElement;
     expect(composer.value).toBe("");
-    await user.click(screen.getByRole("button", { name: /Create a Linear triage worker/i }));
-    expect(composer.value).toBe("Create a Linear triage worker");
+    await user.click(screen.getByRole("button", { name: /Which template fits my team/i }));
+    expect(composer.value).toBe("Which template fits my team?");
   });
 });

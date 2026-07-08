@@ -1,7 +1,7 @@
 // First-run / onboarding gates (#1698 + #1699).
 //
 // #1699 — zero-state home: a workspace with ZERO workers AND zero runs must see
-//   the EmilyHomeEmpty first-worker hero ("Let's hire your first worker"), NOT
+//   the EmilyHomeEmpty first-worker hero ("Get your first worker running"), NOT
 //   the populated greeting ("X done this week") that assumes data. A populated
 //   workspace (>0 workers) keeps the normal home — the gate is workers-success
 //   keyed (resolveWorkersGate), never tripped on error/loading.
@@ -97,7 +97,7 @@ describe("#1699 zero-state home gate", () => {
     workspace.workers = [];
     render(<EmilyChatCore homeMode />);
     // The teaching zero-state, NOT the data-assuming populated greeting.
-    expect(await screen.findByText(/hire your first worker/i)).toBeInTheDocument();
+    expect(await screen.findByText(/get your first worker running/i)).toBeInTheDocument();
     expect(screen.queryByText(/done this week/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Total workers")).not.toBeInTheDocument();
   });
@@ -106,7 +106,7 @@ describe("#1699 zero-state home gate", () => {
     workspace.workers = [{ id: "w1", archived: false, system: false, is_example: false }];
     render(<EmilyChatCore homeMode />);
     expect(await screen.findByText(/done this week/i)).toBeInTheDocument();
-    expect(screen.queryByText(/hire your first worker/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/get your first worker running/i)).not.toBeInTheDocument();
   });
 });
 

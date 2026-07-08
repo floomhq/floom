@@ -5,10 +5,18 @@ import { describe, expect, it } from "vitest";
 const SRC = readFileSync(join(__dirname, "../app/workers/WorkersCollection.tsx"), "utf8");
 
 describe("workers empty state quick start", () => {
-  it("guides new users to create their first worker with the MCP quickstart", () => {
+  it("leads with the template gallery as the primary activation path", () => {
     expect(SRC).toContain("Create your first worker");
-    expect(SRC).toContain("Quick start");
-    expect(SRC).toContain("Go to your coding agent, install the Floom MCP server");
+    // PRIMARY: start from a template (the gallery's Add-to-workspace path).
+    expect(SRC).toContain("Start from a template");
+    expect(SRC).toContain("Browse templates");
+    expect(SRC).toContain("/templates`");
+    expect(SRC).toContain("getPublicSiteOrigin");
+  });
+
+  it("keeps the coding-agent / MCP path as the secondary quickstart", () => {
+    expect(SRC).toContain("Build one from your coding agent");
+    expect(SRC).toContain("Install the Floom MCP server in Claude Code, Codex, or Cursor");
     expect(SRC).toContain("npx -y @floomhq/floom mcp install");
     expect(SRC).not.toContain("npm install -g @floomhq/floom");
     expect(SRC).not.toContain("floom login");
