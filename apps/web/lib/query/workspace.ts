@@ -5,6 +5,9 @@ import type { QueryClient } from "@tanstack/react-query";
 export const WORKSPACE_SCOPED_QUERY_ROOTS = [
   "system",
   "workers",
+  "worker-detail",
+  "worker-runs",
+  "worker-versions",
   "runs",
   "contexts",
   "connections",

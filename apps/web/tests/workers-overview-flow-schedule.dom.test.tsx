@@ -132,10 +132,18 @@ describe("Worker Overview flow and schedule state", () => {
     await renderWorkers();
     fireEvent.click(await screen.findByRole("button", { name: /Mac Disk Guard/i }));
 
+    // The Flow graph (needs the full detail's config/inputs/outputs, which
+    // aren't on the list summary) still shows its own single skeleton while
+    // the detail fetch is pending.
     await waitFor(() => expect(screen.getByLabelText("Loading")).toBeInTheDocument());
+    // The stat tiles (Last run / Runs / Success), however, paint instantly
+    // from the already-in-memory list summary instead of showing the literal
+    // string "Loading"; that gating on `d === undefined` was the root cause
+    // of the "Loading Loading Loading" stacked-spinner bug (perf fix: worker
+    // detail pane). Only the Flow graph blocks on the detail fetch.
     const pendingSummary = document.querySelector(".c-dsum");
-    expect(pendingSummary?.textContent).toContain("Loading");
-    expect(pendingSummary?.textContent).not.toMatch(/5\s*Runs/);
+    expect(pendingSummary?.textContent).not.toContain("Loading");
+    expect(pendingSummary?.textContent).toMatch(/5\s*Runs/);
     expect(document.body.textContent).not.toContain(stalePlaceholder);
     expect(screen.queryByText("Result")).not.toBeInTheDocument();
 

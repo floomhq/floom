@@ -7,7 +7,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, getPersistedActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
-import { useWorkers, useStreamedInitialData, qk, WORKERS_LIST_QUERY_OPTS } from "@/lib/query/hooks";
+import {
+  useWorkers,
+  useStreamedInitialData,
+  useWorkerDetailQuery,
+  useWorkerRunsQuery,
+  useWorkerVersionsQuery,
+  workerDetailQueryOptions,
+  workerRunsQueryOptions,
+  workerVersionsQueryOptions,
+  qk,
+  WORKERS_LIST_QUERY_OPTS,
+} from "@/lib/query/hooks";
 import { WORKSPACE_SCOPED_QUERY_ROOTS } from "@/lib/query/workspace";
 import type {
   WorkerSummary,
@@ -15,7 +26,6 @@ import type {
   WorkerContextSpec,
   WorkerConnectionSpec,
   WorkerFile,
-  VersionSummary,
   RunSummary,
   TriggerSpec,
   WorkerAlert,
@@ -170,117 +180,34 @@ function displayBrandCopy(value?: string | null): string {
   return (value ?? "").replace(legacyAllCapsSuffix, "Floom").replace(legacyTitle, "Floom");
 }
 
-// ---- detail (lazy WorkerDetail, scoped by workspace so identities never bleed) ----
-const DETAIL_CACHE_FRESH_MS = 250;
-type DetailCacheEntry = {
-  detail?: WorkerDetail;
-  fetchedAt: number;
-  promise?: Promise<WorkerDetail>;
-};
-const detailCache = new Map<string, DetailCacheEntry>();
-
-function activeWorkspaceScope(fallback?: string | null): string {
-  if (fallback) return fallback;
-  if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search || "");
-    const urlWorkspace = params.get("workspace_id") || params.get("ws");
-    if (urlWorkspace) return urlWorkspace;
-  }
-  return getPersistedActiveWorkspaceId() || "local-default";
-}
-
-function detailCacheKey(workspaceId: string | null | undefined, workerId: string): string {
-  return `${activeWorkspaceScope(workspaceId)}:${workerId}`;
-}
-
-function cacheWorkerDetail(detail: WorkerDetail, workspaceId?: string | null) {
-  detailCache.set(detailCacheKey(workspaceId ?? detail.workspace_id, detail.id), {
-    detail,
-    fetchedAt: Date.now(),
-  });
-}
-
-function readFreshWorkerDetail(workspaceId: string | null | undefined, workerId: string): WorkerDetail | undefined {
-  const entry = detailCache.get(detailCacheKey(workspaceId, workerId));
-  if (!entry?.detail) return undefined;
-  return Date.now() - entry.fetchedAt <= DETAIL_CACHE_FRESH_MS ? entry.detail : undefined;
-}
-
+// ---- detail (WorkerDetail via TanStack Query, scoped by workspace so
+// identities never bleed) ----
+//
+// Backed by the shared cache-first QueryClient (30s staleTime,
+// refetchOnMount:false, retry:1, see QueryProvider): a worker re-opened
+// within a session renders instantly from cache instead of re-running the
+// heavy backend assembly (recent runs, stats batch, recipe, secret/connection
+// checks, on-disk bundle; see api.workers.get's shape=run comment, ~6-8s warm
+// on Cloud), and every consumer mounted for the SAME worker id (header
+// actions, the active tab, SelectedWorkerSummaryRefresh) shares ONE in-flight
+// request instead of each firing its own.
+//
 // Returns [detail, apply] where detail is:
-//   undefined → still loading
+//   undefined → still loading (no cached data yet for this worker this session)
 //   null      → load failed (show an error/empty state)
-//   WorkerDetail → loaded
+//   WorkerDetail → loaded (may be a background-revalidating stale value)
 function useWorkerDetail(
   id: string,
   workspaceId?: string | null,
 ): [WorkerDetail | undefined | null, (d: WorkerDetail) => void] {
-  const cacheKey = detailCacheKey(workspaceId, id);
-  const [detail, setDetail] = useState<WorkerDetail | undefined | null>(() =>
-    readFreshWorkerDetail(workspaceId, id)
-  );
-  useEffect(() => {
-    let alive = true;
-    // settled = true once the load resolves or fails, so the safety timeout
-    // below does not overwrite a successfully-loaded detail (stale-closure fix).
-    let settled = false;
-    const fresh = readFreshWorkerDetail(workspaceId, id);
-    if (fresh) {
-      setDetail(fresh);
-      settled = true;
-      return () => {
-        alive = false;
-      };
-    }
-    setDetail(undefined);
-    // Retry once before surfacing an error — a transiently slow backend should
-    // not strand the detail tabs on "Could not load" (#1279 + round-03 source-load).
-    const load = (attempt: number) => {
-      const existing = detailCache.get(cacheKey);
-      const request = existing?.promise ?? api.workers.get(id);
-      detailCache.set(cacheKey, {
-        detail: existing?.detail,
-        fetchedAt: existing?.fetchedAt ?? 0,
-        promise: request,
-      });
-      request
-        .then((d) => {
-          settled = true;
-          cacheWorkerDetail(d, workspaceId);
-          if (alive) setDetail(d);
-        })
-        .catch((err) => {
-          if (!alive) return;
-          const entry = detailCache.get(cacheKey);
-          if (entry?.promise === request) {
-            detailCache.delete(cacheKey);
-          }
-          if (attempt < 1) setTimeout(() => load(attempt + 1), 1500);
-          else {
-            settled = true;
-            // #1446: per-worker detail; log only (no toast per expanded worker).
-            logError("Could not load worker details.", err);
-            setDetail(null); // null = failed to load → tabs show error, not a spinner
-          }
-        });
-    };
-    load(0);
-    // Safety timeout: if the API proxy hangs entirely, surface an error after 25 s
-    // (long enough to cover the retry above). Guard with `settled` so a
-    // successfully-loaded detail is never overwritten by this stale callback.
-    const timeout = setTimeout(() => {
-      if (alive && !settled) setDetail(null);
-    }, 25_000);
-    return () => {
-      alive = false;
-      clearTimeout(timeout);
-    };
-  }, [cacheKey, id, workspaceId]);
+  const queryClient = useQueryClient();
+  const query = useWorkerDetailQuery(id, workspaceId);
+  const detail = query.isError ? null : query.data;
   const apply = useCallback(
     (d: WorkerDetail) => {
-      cacheWorkerDetail(d, workspaceId);
-      setDetail(d);
+      queryClient.setQueryData(qk.workerDetail(id, workspaceId), d);
     },
-    [workspaceId],
+    [queryClient, id, workspaceId],
   );
   return [detail, apply];
 }
@@ -333,27 +260,30 @@ function detailToSummary(d: WorkerDetail): WorkerSummary {
   return summary;
 }
 
+// Keeps the list row's summary stats (last run / runs_7d / success rate) in
+// sync with the detail pane. This used to fire its OWN `api.workers.get`
+// request on every worker open, a duplicate round trip to the same expensive
+// endpoint `useWorkerDetail` (in the header's WorkerDetailActions) was already
+// fetching. Now it just reads the SAME cached query by passing the SAME
+// queryKey (id + workspaceId), so TanStack Query dedupes the two consumers
+// into exactly one in-flight request.
 function SelectedWorkerSummaryRefresh({
   workerId,
+  workspaceId,
   onLoaded,
 }: {
   workerId: string;
+  workspaceId?: string | null;
   onLoaded: (detail: WorkerDetail) => void;
 }) {
+  const query = useWorkerDetailQuery(workerId, workspaceId);
   useEffect(() => {
-    let alive = true;
-    api.workers
-      .get(workerId)
-      .then((detail) => {
-        if (!alive) return;
-        cacheWorkerDetail(detail, detail.workspace_id);
-        onLoaded(detail);
-      })
-      .catch((err) => logError("Could not refresh worker stats.", err));
-    return () => {
-      alive = false;
-    };
-  }, [workerId, onLoaded]);
+    if (query.data) onLoaded(query.data);
+    // onLoaded is a fresh useCallback identity per render from the parent;
+    // re-running it whenever the data itself changes (not on every parent
+    // render) is the intent here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.data]);
   return null;
 }
 
@@ -481,28 +411,33 @@ function normalizeConnectionSlug(slug: string): string {
 
 function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id, w.workspace_id);
-  const stats = d === undefined ? undefined : d?.recent_stats ?? w.recent_stats;
-  const lastRun = d === undefined ? undefined : d?.last_run ?? w.last_run;
+  // Paint instantly from the list summary `w` (already in memory, zero extra
+  // network cost), then silently upgrade once the full detail fetch resolves.
+  // Never show the literal string "Loading" here: gating each stat tile on
+  // `d === undefined` produced three stacked "Loading" values (last run / runs
+  // / success) plus the Flow section's own skeleton below, i.e. the "Loading
+  // Loading Loading" stacked-spinner look. Mirrors RunsTab's existing
+  // `d?.field ?? w.field` fallback pattern.
+  const stats = d?.recent_stats ?? w.recent_stats;
+  const lastRun = d?.last_run ?? w.last_run;
   const scheduleState = scheduleStateLabel(w, d);
   const summaryItems = [
     {
       key: "last-run",
       label: "Last run",
-      value: d === undefined ? "Loading" : rel(stats?.last_run_at ?? lastRun?.created_at),
+      value: rel(stats?.last_run_at ?? lastRun?.created_at),
     },
     {
       key: "runs",
       label: "Runs",
-      value: d === undefined ? "Loading" : stats?.runs_7d ?? (lastRun ? 1 : 0),
+      value: stats?.runs_7d ?? (lastRun ? 1 : 0),
     },
     {
       key: "success",
       label: "Success",
-      value: d === undefined
-        ? "Loading"
-        : typeof stats?.success_rate_7d === "number"
-          ? `${Math.round(stats.success_rate_7d * 100)}%`
-          : "Not set",
+      value: typeof stats?.success_rate_7d === "number"
+        ? `${Math.round(stats.success_rate_7d * 100)}%`
+        : "Not set",
     },
     ...(scheduleState ? [{ key: "schedule", label: "Schedule", value: scheduleState }] : []),
   ];
@@ -615,34 +550,14 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail | null }) {
 // while /runs showed the full history for the same worker. Using the proven
 // worker-scoped list query here makes the two surfaces agree.
 //
-// Module-level cache keyed by worker id so returning to a worker's Runs tab is
-// instant and never blanks.
-const workerRunsCache = new Map<string, RunSummary[]>();
+// Backed by TanStack Query (qk.workerRuns, cache-first) so returning to a
+// worker's Runs tab is instant and never blanks; and, via the parallel
+// prefetch fired when the worker opens (see the `detail:` config below), this
+// is usually already warm by the time the user clicks the Runs tab at all.
 const WORKER_RUNS_LIMIT = 20;
 
 function useWorkerRuns(workerId: string): RunSummary[] | undefined {
-  const [runs, setRuns] = useState<RunSummary[] | undefined>(() =>
-    workerRunsCache.get(workerId),
-  );
-  useEffect(() => {
-    let alive = true;
-    // Serve the cache immediately, then refresh in the background so a return to
-    // the tab is instant and never blanks (mirrors the worker-detail cache).
-    const cached = workerRunsCache.get(workerId);
-    if (cached) setRuns(cached);
-    api.runs
-      .list({ worker_id: workerId, limit: WORKER_RUNS_LIMIT })
-      .then((rows) => {
-        workerRunsCache.set(workerId, rows);
-        if (alive) setRuns(rows);
-      })
-      // #1446: per-worker tab; log only (no toast per expanded worker).
-      .catch((err) => logError("Could not load runs for this worker.", err));
-    return () => {
-      alive = false;
-    };
-  }, [workerId]);
-  return runs;
+  return useWorkerRunsQuery(workerId, WORKER_RUNS_LIMIT).data;
 }
 
 // Runs: recent runs w/ durations, link to the full Runs surface.
@@ -709,7 +624,14 @@ function RunsTab({ w }: { w: WorkerSummary }) {
 // age`, current marker, Diff (modal) + Restore (confirm). Endpoints BUILT.
 function VersionsTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id, w.workspace_id);
-  const [versions, setVersions] = useState<VersionSummary[] | null>(null);
+  const queryClient = useQueryClient();
+  // Backed by TanStack Query (qk.workerVersions, cache-first); previously this
+  // was a plain useState re-fetched on every mount with NO cache at all, so
+  // leaving and returning to the Versions tab always re-showed the skeleton.
+  // Also prefetched in parallel as soon as the worker opens (see the `detail:`
+  // config below), so it is often already warm by the time this tab mounts.
+  const versionsQuery = useWorkerVersionsQuery(w.id);
+  const versions = versionsQuery.data ?? (versionsQuery.isError ? [] : null);
   // #1249: store both version files AND current files so the modal can show a
   // proper line-level diff (VersionDiffPanel) instead of a raw file view.
   const [diff, setDiff] = useState<{
@@ -721,22 +643,6 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
   const [restoreId, setRestoreId] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
   const editable = can("edit", w);
-
-  useEffect(() => {
-    let alive = true;
-    api.workers
-      .listVersions(w.id)
-      .then((v) => alive && setVersions(v))
-      .catch(() => alive && setVersions([]));
-    // Safety timeout: stop the skeleton after 10 s if the API proxy hangs.
-    const timeout = setTimeout(() => {
-      if (alive) setVersions((prev) => prev ?? []);
-    }, 10_000);
-    return () => {
-      alive = false;
-      clearTimeout(timeout);
-    };
-  }, [w.id]);
 
   if (versions === null) return <Loading />;
   if (versions.length === 0) {
@@ -772,7 +678,7 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
     try {
       applyDetail(await api.workers.rollback(w.id, id));
       toast.success(`Restored to ${id.slice(0, 7)}`);
-      setVersions(await api.workers.listVersions(w.id));
+      await queryClient.invalidateQueries({ queryKey: qk.workerVersions(w.id) });
       setRestoreId(null);
       setDiff(null);
     } catch {
@@ -2575,6 +2481,22 @@ export default function WorkersCollection({
     [router, workspaceHref],
   );
 
+  // Parallel-warm the Runs + Versions tabs the instant a worker opens,
+  // instead of waiting for the user to click those tabs. These fetches are
+  // independent of each other and of the worker-detail fetch that
+  // SelectedWorkerSummaryRefresh/WorkerDetailActions/OverviewTab kick off, so
+  // firing all of them together turns what used to be a serial "open worker
+  // -> wait -> click Runs -> wait -> click Versions -> wait" waterfall into
+  // one parallel burst. Fire-and-forget + cache-first: prefetchQuery is a
+  // no-op if the entry is already fresh or in flight (same pattern as
+  // web/lib/query/prefetch.ts's route prefetching).
+  const selectedWorkerId = searchParams.get("sel");
+  useEffect(() => {
+    if (!selectedWorkerId) return;
+    void queryClient.prefetchQuery(workerRunsQueryOptions(selectedWorkerId, WORKER_RUNS_LIMIT));
+    void queryClient.prefetchQuery(workerVersionsQueryOptions(selectedWorkerId));
+  }, [selectedWorkerId, queryClient]);
+
   useEffect(() => {
     if (!urlWorkspaceId || urlWorkspaceId === persistedWorkspaceId) return;
     setWorkers([]);
@@ -2661,8 +2583,11 @@ export default function WorkersCollection({
     // detail opens with no toast. A genuine miss (null/throw) keeps the toast.
     resolveMissing: async (id) => {
       try {
-        const d = await api.workers.get(id);
-        cacheWorkerDetail(d, d.workspace_id); // warm the detail-pane cache too
+        // fetchQuery (not a bare api call) so the result lands in the SAME
+        // query cache entry useWorkerDetail reads; the detail pane that opens
+        // right after this resolves gets an instant cache hit instead of
+        // re-fetching the same worker a second time.
+        const d = await queryClient.fetchQuery(workerDetailQueryOptions(id));
         return detailToSummary(d);
       } catch {
         return null;
@@ -2832,7 +2757,7 @@ export default function WorkersCollection({
       const stage = workerStageKey(w);
       const actions = (
         <>
-          <SelectedWorkerSummaryRefresh workerId={w.id} onLoaded={refreshWorkerSummary} />
+          <SelectedWorkerSummaryRefresh workerId={w.id} workspaceId={w.workspace_id} onLoaded={refreshWorkerSummary} />
           <span className={stage === "live" ? "c-pill run" : "c-pill idle"}>
             <span className="dot" aria-hidden="true" />
             {stage === "live" ? "Live" : "Draft"}

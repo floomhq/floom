@@ -25,7 +25,13 @@ describe("P1 UI copy regressions", () => {
 
     expect(workers).not.toMatch(/knowledge packs?/i);
     expect(privacy).not.toMatch(/brain packs?|knowledge packs?/i);
-    expect(workers).toContain("Could not load worker details.");
+    // The actual rendered error copy (DetailError); the old assertion here
+    // checked a `logError(...)` call string from useWorkerDetail's hand-rolled
+    // retry logic, which was removed when useWorkerDetail was rewritten on top
+    // of TanStack Query (perf fix: cache-first worker-detail pane); the
+    // library owns retry/error state now, so that internal log message no
+    // longer exists. What the user actually SEES on a failed load still does.
+    expect(workers).toContain("Could not load details. Check your connection and try again.");
     expect(privacy).toContain("Conversations and Library folders");
   });
 

@@ -9,9 +9,11 @@ import type {
   ContextSummary,
   SystemOverview,
   WorkerSummary,
+  WorkerDetail,
   ConnectionItem,
   SecretItem,
   RunSummary,
+  VersionSummary,
   WorkspaceMember,
 } from "@/lib/types";
 
@@ -56,6 +58,14 @@ export const qk = {
     return ["workspace", "members", workspaceScope()] as const;
   },
   runs: (params?: Record<string, unknown>) => ["runs", scopedParams(params)] as const,
+  // Per-worker detail-pane surfaces. workspaceId defaults to the active
+  // workspace, but callers viewing a specific worker (e.g. a cross-workspace
+  // admin list) pass its OWN workspace_id explicitly so the cache never mixes
+  // detail from one workspace into another ("identities never bleed").
+  workerDetail: (id: string, workspaceId?: string | null) =>
+    ["worker-detail", id, workspaceId || workspaceScope()] as const,
+  workerRuns: (workerId: string, limit = 20) => ["worker-runs", workerId, limit] as const,
+  workerVersions: (workerId: string) => ["worker-versions", workerId] as const,
 };
 
 // Each hook is cache-first (see QueryProvider defaults: staleTime 30s,
@@ -180,5 +190,61 @@ export function useRuns(params?: Parameters<typeof api.runs.list>[0], initialDat
     queryKey: qk.runs(params as Record<string, unknown>),
     queryFn: () => api.runs.list(params),
     initialData,
+  });
+}
+
+// ---- worker-detail pane: detail / runs / versions ----
+//
+// The worker-detail split pane (app/workers/WorkersCollection.tsx) used to
+// hand-roll its own Map-based caches with a 250ms "freshness" window, so every
+// re-open of the SAME worker within a session re-fetched the (expensive: 6-8s
+// warm on Cloud, per api.workers.get's shape=run comment) full detail payload
+// and blocked on a fresh spinner. These queryOptions/hooks route the same
+// fetches through the shared cache-first TanStack Query client (30s staleTime,
+// refetchOnMount:false, see QueryProvider) so a revisit within a session
+// renders instantly from cache, concurrent consumers of the same worker id
+// share (dedupe) one in-flight request instead of firing N, and the detail /
+// runs / versions fetches for a newly-opened worker run in PARALLEL instead of
+// a serial "click tab -> wait" waterfall.
+
+export function workerDetailQueryOptions(id: string, workspaceId?: string | null) {
+  return {
+    queryKey: qk.workerDetail(id, workspaceId),
+    queryFn: () => api.workers.get(id),
+  };
+}
+
+export function useWorkerDetailQuery(id: string, workspaceId?: string | null) {
+  return useQuery<WorkerDetail>({
+    ...workerDetailQueryOptions(id, workspaceId),
+    enabled: Boolean(id),
+  });
+}
+
+export function workerRunsQueryOptions(workerId: string, limit = 20) {
+  return {
+    queryKey: qk.workerRuns(workerId, limit),
+    queryFn: () => api.runs.list({ worker_id: workerId, limit }),
+  };
+}
+
+export function useWorkerRunsQuery(workerId: string, limit = 20) {
+  return useQuery<RunSummary[]>({
+    ...workerRunsQueryOptions(workerId, limit),
+    enabled: Boolean(workerId),
+  });
+}
+
+export function workerVersionsQueryOptions(workerId: string) {
+  return {
+    queryKey: qk.workerVersions(workerId),
+    queryFn: () => api.workers.listVersions(workerId),
+  };
+}
+
+export function useWorkerVersionsQuery(workerId: string) {
+  return useQuery<VersionSummary[]>({
+    ...workerVersionsQueryOptions(workerId),
+    enabled: Boolean(workerId),
   });
 }
