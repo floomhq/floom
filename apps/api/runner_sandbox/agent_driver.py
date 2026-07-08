@@ -1118,6 +1118,17 @@ class AgentDriver(SandboxDriver):
         user_id: str | None = None,
     ) -> str:
         prompt_parts: list[str] = []
+        # Agents have no clock: without this line a model falls back to its
+        # training-data sense of "now" and date-sensitive workers (daily
+        # digests, "last 24 hours" research) silently operate a year in the
+        # past — web-searching for the date does not reliably fix it (observed
+        # live 2026-07-08: a briefing worker dated its output August 2025 even
+        # after being instructed to establish the date from search results).
+        now = datetime.now(timezone.utc)
+        prompt_parts.append(
+            f"Current date and time: {now.strftime('%A, %B %d, %Y, %H:%M')} UTC. "
+            "Trust this over any internal sense of what year it is."
+        )
         if config.runtime.system_prompt:
             prompt_parts.append(config.runtime.system_prompt.strip())
         output_contract = self._output_contract_block(config)
