@@ -2425,12 +2425,12 @@ const WORKERS_EMPTY_TEMPLATES_URL = `${getPublicSiteOrigin()}/templates`;
 function WorkersEmptyQuickStart() {
   return (
     <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-6 text-center">
-      {/* PRIMARY — start from a template */}
+      {/* PRIMARY: start from a template */}
       <div className="flex flex-col items-center gap-3">
         <div>
           <div className="text-sm font-medium text-ink">Start from a template</div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Pick a ready-made worker and add it to your workspace — it runs in one click.
+            Pick a ready-made worker and add it to your workspace. It runs in one click.
           </p>
         </div>
         <Link
