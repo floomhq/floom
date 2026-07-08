@@ -52,6 +52,13 @@ const ALL_SUPPORTED_APPS: SupportedConnectionApp[] = [
   { slug: "github", displayName: "GitHub", icon: "github" },
   { slug: "hubspot", displayName: "HubSpot", icon: "hubspot" },
   { slug: "salesforce", displayName: "Salesforce", icon: "salesforce" },
+  // DocuSign has the same Composio auth posture as Salesforce above: Composio
+  // has no default managed OAuth app for it (each customer supplies their own
+  // Integration Key), so a first Connect attempt falls back to the existing
+  // api_key_only flow (see /connections/redirect). Listing it here just gives
+  // it a real display name + a place in the catalog instead of an unnamed
+  // generic entry; the OAuth posture itself is unchanged.
+  { slug: "docusign", displayName: "DocuSign", icon: "docusign" },
   // Restored: backend composio_client.py still supports these
   { slug: "linkedin", displayName: "LinkedIn", icon: "linkedin" },
   { slug: "apollo", displayName: "Apollo", icon: "apollo" },
