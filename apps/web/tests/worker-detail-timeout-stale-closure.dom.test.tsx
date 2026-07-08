@@ -4,21 +4,26 @@ import { QueryProvider } from "@/components/providers/QueryProvider";
 
 // Regression test for the stale-closure P0 bug in useWorkerDetail:
 //
-//   The 25 s safety timeout closed over the INITIAL `detail` state value
-//   (=== undefined). After api.workers.get() resolved successfully and set
-//   `detail` to the loaded WorkerDetail, the timeout still fired and checked
-//   `detail === undefined` — but this used the captured initial value, not
-//   the current state. So it always evaluated to true and called
-//   setDetail(null), flipping a successfully-loaded detail panel to
-//   "Could not load details" after 25 seconds.
+//   The OLD hand-rolled useWorkerDetail had a 25 s safety timeout that closed
+//   over the INITIAL `detail` state value (=== undefined). After
+//   api.workers.get() resolved successfully and set `detail` to the loaded
+//   WorkerDetail, the timeout still fired and checked `detail === undefined`,
+//   but this used the captured initial value, not the current state. So it
+//   always evaluated to true and called setDetail(null), flipping a
+//   successfully-loaded detail panel to "Could not load details" after 25
+//   seconds. The fix (at the time) was a `settled` flag set in both the
+//   success and failure paths, checked before the timeout callback fires.
 //
-//   Fix: a `settled` flag is set to true in both the success and failure
-//   paths; the timeout callback bails out if `settled` is already true.
-//
-//   This test MUST FAIL on the unfixed code and PASS after the fix.
+//   useWorkerDetail was later rewritten on top of TanStack Query (perf fix:
+//   cache-first worker-detail pane, see lib/query/hooks.ts
+//   useWorkerDetailQuery), which owns its own request lifecycle and has no
+//   hand-rolled safety timeout, so this whole bug CLASS is structurally gone,
+//   not just this instance of it. This test is kept as a regression guard: a
+//   detail fetch that resolves after some delay must render and STAY
+//   rendered, never flip back to an error state on its own after the fact.
 //   Key: the mock API is controlled so the detail resolves AFTER the component
-//   already mounted (ensuring the timeout is active), and then we advance fake
-//   timers to verify the timeout does not overwrite the loaded detail.
+//   already mounted, and then we advance fake timers well past the old 25 s
+//   window to confirm nothing overwrites the loaded detail.
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
