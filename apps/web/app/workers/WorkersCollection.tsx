@@ -103,7 +103,7 @@ import {
   toggleContext,
 } from "@/lib/worker-manifest";
 import { can, isViewOnly, canLeaveFeedback, visibilityLabel, FEEDBACK_BACKEND_AVAILABLE } from "@/lib/permissions";
-import { isCloudDeploy } from "@/lib/api-base";
+import { isCloudDeploy, getPublicSiteOrigin } from "@/lib/api-base";
 import {
   isSystemWorker,
   workerStatusPill,
@@ -2406,52 +2406,87 @@ function WorkerDetailActions({
 
 // ---- Workers empty-state quick start -----------------------------------------
 
+// Two real ways a signed-in user gets a first worker running. Worker creation
+// does NOT happen in the dashboard: you either start from a ready-made template
+// (the gallery's "Add to workspace" lands a running worker in one click) or set
+// up Floom in your coding agent (Claude Code, Codex, Cursor, …) via MCP and ask
+// it to build one. The prompt examples are what you'd say to THAT coding agent.
 const WORKER_PROMPT_EXAMPLES = [
   "Create a Floom worker that summarizes my latest 5 Gmail emails every hour and sends the summary to Slack.",
   "Create a Floom worker that checks new Linear issues every morning and posts a priority digest to Slack.",
   "Create a Floom worker that watches a Google Sheet for new rows and drafts follow-up emails.",
 ];
 
+// Template gallery — the primary web activation path. Built from the public site
+// origin so a self-hosted instance points at its own gallery and managed Cloud
+// points at floom.dev/templates.
+const WORKERS_EMPTY_TEMPLATES_URL = `${getPublicSiteOrigin()}/templates`;
+
 function WorkersEmptyQuickStart() {
   return (
-    <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-4 text-center">
-      <div>
-        <div className="text-sm font-medium text-ink">Quick start</div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Go to your coding agent, install the Floom MCP server, and ask it to create workers like these:
-        </p>
-      </div>
-
-      <div className="grid w-full gap-2 text-left">
-        {WORKER_PROMPT_EXAMPLES.map((example) => (
-          <div
-            key={example}
-            className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-[12px] leading-5 text-ink [border:var(--bd-card)]"
-          >
-            {example}
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-1.5 font-mono text-[12px] leading-5 text-muted-foreground">
-        <div>npx -y @floomhq/floom mcp install</div>
-      </div>
-
-      <div className="flex flex-wrap justify-center gap-2">
+    <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-6 text-center">
+      {/* PRIMARY: start from a template */}
+      <div className="flex flex-col items-center gap-3">
+        <div>
+          <div className="text-sm font-medium text-ink">Start from a template</div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Pick a ready-made worker and add it to your workspace. It runs in one click.
+          </p>
+        </div>
         <Link
           className="c-addbtn"
-          href="/connections/mcp?from_install=workers-empty"
+          href={WORKERS_EMPTY_TEMPLATES_URL}
         >
-          Install MCP
+          Browse templates
         </Link>
-        <Link
-          className="c-vpill"
-          href="https://floom.dev/v3/docs/worker-yml"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Worker guide
-        </Link>
+      </div>
+
+      <div className="flex w-full items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="h-px flex-1 bg-[var(--bg-3)]" />
+        or
+        <span className="h-px flex-1 bg-[var(--bg-3)]" />
+      </div>
+
+      {/* SECONDARY — build one from your coding agent (MCP native path) */}
+      <div className="flex w-full flex-col items-center gap-4">
+        <div>
+          <div className="text-sm font-medium text-ink">Build one from your coding agent</div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Install the Floom MCP server in Claude Code, Codex, or Cursor, then ask it to create workers like these:
+          </p>
+        </div>
+
+        <div className="grid w-full gap-2 text-left">
+          {WORKER_PROMPT_EXAMPLES.map((example) => (
+            <div
+              key={example}
+              className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-[12px] leading-5 text-ink [border:var(--bd-card)]"
+            >
+              {example}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-1.5 font-mono text-[12px] leading-5 text-muted-foreground">
+          <div>npx -y @floomhq/floom mcp install</div>
+        </div>
+
+        <div className="flex flex-wrap justify-center gap-2">
+          <Link
+            className="c-vpill"
+            href="/connections/mcp?from_install=workers-empty"
+          >
+            Install MCP
+          </Link>
+          <Link
+            className="c-vpill"
+            href="https://floom.dev/v3/docs/worker-yml"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Worker guide
+          </Link>
+        </div>
       </div>
     </div>
   );

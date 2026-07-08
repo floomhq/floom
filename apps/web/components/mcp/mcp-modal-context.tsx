@@ -2,8 +2,8 @@
 
 // Global MCP-install modal context.
 //
-// The "MCP" sidebar item and the home's "Find an MCP server" / "See what Emily
-// can connect" affordances all open the SAME popup modal. Mounting the modal
+// The "MCP" sidebar item and the home's "Set up in your coding agent"
+// affordance all open the SAME popup modal. Mounting the modal
 // once at the AppShell level (over everything) and exposing open/close via
 // context keeps it a true overlay — not a per-page mount — and avoids
 // prop-drilling the opener through the sidebar + home.

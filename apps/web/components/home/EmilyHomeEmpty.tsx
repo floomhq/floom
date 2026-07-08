@@ -11,8 +11,11 @@
 //
 // Two layouts, gated by the workers fetch (resolveWorkersGate, NEVER on error/
 // loading):
-//   - First-worker (zero real workers): "Let's hire your first worker" hero +
-//     create pills + "Find an MCP server".
+//   - First-worker (zero real workers): "Get your first worker running" hero +
+//     the two real activation paths (PRIMARY "Browse templates" → the template
+//     gallery; SECONDARY "Set up in your coding agent" → the Floom MCP install)
+//     + helper pills that seed the composer (the assistant guides, it does not
+//     build the worker in-dashboard).
 //   - Active: greeting + "{done} done this week · {N} need attention" pulse
 //     (the pulse degrades to just the greeting if the overview failed to load),
 //     then active/fix pills.
@@ -26,6 +29,7 @@ import type {
   OverviewSparklineBucket,
 } from "@/lib/types";
 import { api } from "@/lib/api";
+import { getPublicSiteOrigin } from "@/lib/api-base";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { InlineToolToken } from "@/components/InlineToolToken";
 import { tokenisePrompt } from "@/lib/prompt-detect";
@@ -305,15 +309,25 @@ function Pill({
   );
 }
 
+// The template gallery: the primary web activation path. Pick a ready-made
+// worker and "Add to workspace" lands it running in one click. Built from the
+// public site origin so a self-hosted instance (NEXT_PUBLIC_SITE_ORIGIN) points
+// at its own gallery, and managed Cloud points at floom.dev/templates.
+const TEMPLATES_URL = `${getPublicSiteOrigin()}/templates`;
+
+// First-run pills seed the REAL composer with questions the assistant can
+// actually answer — it HELPS you choose a template or set up your coding agent,
+// it does NOT build the worker in the dashboard. (Worker creation runs in your
+// coding agent via the Floom MCP server, or you start from a template.)
 const CREATE_PILLS = [
-  "Create a Linear triage worker",
-  "Daily GitHub PR digest",
-  "Daily Slack standup reminder",
+  "Which template fits my team?",
+  "How do I run a template?",
+  "What can Floom connect to?",
 ] as const;
 
 const ACTIVE_PILLS = [
   "What ran overnight?",
-  "Create a Linear triage worker",
+  "How do I add another worker?",
   "Show me this week's runs",
 ] as const;
 
@@ -389,11 +403,11 @@ export function EmilyHomeEmpty({
       {showCreatePrompts ? (
         <div className="flex flex-col items-center pb-[22px]">
           <div className="text-center text-[21px] font-semibold tracking-[-0.02em] text-ink">
-            {isFirstWorker ? "Let's hire your first worker" : "What should this worker do?"}
+            {isFirstWorker ? "Get your first worker running" : "Add another worker"}
           </div>
-          <div className="mt-[7px] max-w-[360px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
-            Describe what you want automated. {assistantName} builds it, connects the
-            tools, and runs it.
+          <div className="mt-[7px] max-w-[400px] text-center text-[13.5px] leading-[1.5] text-[var(--text-muted)]">
+            Start from a ready-made template, or set up Floom in your coding agent
+            to build your own. {assistantName} can help you choose.
           </div>
         </div>
       ) : (
@@ -435,34 +449,50 @@ export function EmilyHomeEmpty({
         </>
       )}
 
-      {/* pills (BELOW the hero, ABOVE the real composer the host renders next) */}
+      {/* Two real activation paths (BELOW the hero, ABOVE the real composer the
+          host renders next). PRIMARY = start from a template (the gallery's
+          "Add to workspace" lands a running worker in one click). SECONDARY =
+          set up Floom in a coding agent (Claude Code, Codex, Cursor, …) via the
+          Floom MCP server. The assistant is a helper for both, not a builder. */}
       {showCreatePrompts ? (
         <>
-          <div className="flex flex-wrap justify-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
+            {/* PRIMARY: template gallery */}
+            <a
+              href={TEMPLATES_URL}
+              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--accent)] px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect width="7" height="7" x="3" y="3" rx="1" />
+                <rect width="7" height="7" x="14" y="3" rx="1" />
+                <rect width="7" height="7" x="14" y="14" rx="1" />
+                <rect width="7" height="7" x="3" y="14" rx="1" />
+              </svg>
+              Browse templates
+            </a>
+            {/* SECONDARY: coding-agent / MCP native path */}
+            <button
+              type="button"
+              onClick={onPickMcp}
+              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-4 py-2 text-[13px] font-medium text-[var(--ink-soft)] transition-colors hover:bg-[var(--bg-3)] hover:text-ink"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" x2="20" y1="19" y2="19" />
+              </svg>
+              Set up in your coding agent
+            </button>
+          </div>
+          {/* Helper prompts — seed the REAL composer with questions the assistant
+              can answer (choose a template, connect a tool). It guides; it does
+              not build the worker here. */}
+          <div className="mt-[18px] flex flex-wrap justify-center gap-2">
             {CREATE_PILLS.map((p) => (
               <Pill key={p} onClick={() => onSeed(p)}>
                 <PromptTokens text={p} />
               </Pill>
             ))}
-            <Pill accent onClick={onPickMcp}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
-              Find an MCP server
-            </Pill>
           </div>
-          <button
-            type="button"
-            onClick={onPickMcp}
-            className="mt-[18px] inline-flex items-center gap-1.5 rounded-[var(--radius-button)] px-1 py-0.5 text-[12px] font-medium text-[var(--ink-mute)] transition-colors hover:text-ink"
-          >
-            See what {assistantName} can connect
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 12h14" />
-              <path d="m12 5 7 7-7 7" />
-            </svg>
-          </button>
         </>
       ) : (
         <div className="flex flex-wrap justify-center gap-2">
