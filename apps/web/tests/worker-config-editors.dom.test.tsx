@@ -108,6 +108,39 @@ describe("WorkerBrainEditor", () => {
     expect(screen.getByRole("button", { name: "Remove memory-morning-brief" })).toBeInTheDocument();
   });
 
+  it("groups packs sharing a name prefix into a collapsible tree node in the attach picker", async () => {
+    // brain_packs has no parent/path column — packs sharing a "<prefix>-*"
+    // lead segment (e.g. two workers' own "memory-<id>" folders) should
+    // collapse into one expandable group instead of listing every folder
+    // flat (#attach-folder-tree).
+    const user = userEvent.setup();
+    render(
+      <WorkerBrainEditor
+        contexts={[]}
+        availablePacks={[
+          { name: "memory-morning-brief" },
+          { name: "memory-inbox-cleaner" },
+          { name: "company-facts" },
+        ]}
+        editable
+        onChange={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Attach a folder/ }));
+
+    // The two "memory-*" packs collapse into one group row; the lone
+    // "company-facts" pack (no shared prefix) still renders as a flat option.
+    expect(screen.getByRole("option", { name: "company-facts" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "memory-morning-brief" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "memory-inbox-cleaner" })).not.toBeInTheDocument();
+    const groupToggle = screen.getByRole("button", { name: /memory/i });
+    expect(groupToggle).toBeInTheDocument();
+
+    await user.click(groupToggle);
+    expect(screen.getByRole("option", { name: "memory-morning-brief" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "memory-inbox-cleaner" })).toBeInTheDocument();
+  });
+
   it("hides the memory CTA in read-only mode", () => {
     render(
       <WorkerBrainEditor
