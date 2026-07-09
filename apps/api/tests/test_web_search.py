@@ -53,12 +53,57 @@ def test_search_uses_serper_when_key_set(monkeypatch):
     assert kwargs["json"]["q"] == "hello"
 
 
+def test_serper_results_only_expose_title_url_snippet(monkeypatch):
+    monkeypatch.setenv("SERPER_API_KEY", "k")
+    fake = MagicMock()
+    fake.raise_for_status.return_value = None
+    fake.json.return_value = {
+        "organic": [
+            {
+                "title": "T1",
+                "link": "http://a",
+                "snippet": "s1",
+                "body": "<html>full body</html>",
+                "raw_html": "<html>raw</html>",
+            }
+        ]
+        * 20
+    }
+
+    with patch("requests.post", return_value=fake):
+        out = web_search.search("hello", max_results=999)
+
+    assert len(out) == 10
+    assert all(set(item) == {"title", "url", "snippet"} for item in out)
+
+
 def test_search_uses_ddg_when_no_key(monkeypatch):
     monkeypatch.delenv("SERPER_API_KEY", raising=False)
     inst = _ddgs_mock([{"title": "D1", "href": "http://x", "body": "b1"}])
     with patch("ddgs.DDGS", return_value=inst):
         out = web_search.search("hi", max_results=3)
     assert out == [{"title": "D1", "url": "http://x", "snippet": "b1"}]
+
+
+def test_ddg_results_only_expose_title_url_snippet(monkeypatch):
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    inst = _ddgs_mock(
+        [
+            {
+                "title": "D1",
+                "href": "http://x",
+                "body": "b1",
+                "html": "<html>full body</html>",
+                "content": "full body",
+            }
+        ]
+    )
+
+    with patch("ddgs.DDGS", return_value=inst):
+        out = web_search.search("hi", max_results=3)
+
+    assert out == [{"title": "D1", "url": "http://x", "snippet": "b1"}]
+    assert all(set(item) == {"title", "url", "snippet"} for item in out)
 
 
 def test_search_caps_max_results(monkeypatch):
