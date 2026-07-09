@@ -45,6 +45,8 @@ from .base import SandboxDriver
 from .cancellation import cancel_flag_db_read_errors_total, run_cancel_requested
 from .e2b_upload import upload_tree_tarball
 from .memory_context import memory_context_name, memory_enabled
+from .tool_output_bounds import TOOL_RESULT_MAX_CHARS as _TOOL_RESULT_MAX_CHARS
+from .tool_output_bounds import bounded_tool_output_json
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
 
@@ -342,6 +344,10 @@ def _scrub(value: str, secrets: Dict[str, str]) -> str:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, default=str)
+
+
+def _tool_output_json(value: Any) -> str:
+    return bounded_tool_output_json(value)
 
 
 def _looks_like_relative_path_value(value: Any) -> bool:
@@ -1500,9 +1506,9 @@ class AgentDriver(SandboxDriver):
                 try:
                     args = json.loads(raw_args or "{}")
                     if not isinstance(args, dict):
-                        return _json_dumps({"ok": False, "error": "Tool arguments must be an object"})
+                        return _tool_output_json({"ok": False, "error": "Tool arguments must be an object"})
                 except json.JSONDecodeError as exc:
-                    return _json_dumps({"ok": False, "error": f"Invalid JSON arguments: {exc}"})
+                    return _tool_output_json({"ok": False, "error": f"Invalid JSON arguments: {exc}"})
                 # request_approval needs async polling — dispatch directly here
                 if tool_name == "request_approval":
                     result = await self._request_approval_async(
@@ -1513,7 +1519,7 @@ class AgentDriver(SandboxDriver):
                         log_fn=state.log_fn,
                         timeout_seconds=state.timeout_seconds,
                     )
-                    return _json_dumps(result)
+                    return _tool_output_json(result)
                 result = self._handle_tool(
                     name=tool_name,
                     args=args,
@@ -1536,7 +1542,7 @@ class AgentDriver(SandboxDriver):
                 )
                 if tool_name == "finish_with_outputs" and result.get("ok"):
                     state.finished = True
-                return _json_dumps(result)
+                return _tool_output_json(result)
 
             sdk_tools.append(
                 FunctionTool(
