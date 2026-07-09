@@ -52,6 +52,7 @@ from models import (
     declared_composio_connections,
 )
 from .memory_context import ensure_memory_context_pack
+from .tool_output_bounds import bounded_mcp_tool_result
 
 logger = logging.getLogger("floom.runner_sandbox.capabilities")
 
@@ -319,7 +320,7 @@ def make_mcp_server(
                     f"MCP connection {connection.label} has unsafe stdio cwd"
                 )
             params["cwd"] = cwd
-        return MCPServerStdio(params=params, **common)
+        return _with_bounded_mcp_tool_output(MCPServerStdio(params=params, **common))
 
     # Defense in depth: re-validate the URL at dial time. DNS can rebind between
     # registration and the actual run, so a previously-safe hostname could now
@@ -334,8 +335,25 @@ def make_mcp_server(
     if headers:
         params["headers"] = headers
     if transport == "sse":
-        return MCPServerSse(params=params, **common)
-    return MCPServerStreamableHttp(params=params, **common)
+        return _with_bounded_mcp_tool_output(MCPServerSse(params=params, **common))
+    return _with_bounded_mcp_tool_output(MCPServerStreamableHttp(params=params, **common))
+
+
+def _with_bounded_mcp_tool_output(server: Any) -> Any:
+    if not hasattr(server, "call_tool"):
+        return server
+    original_call_tool = server.call_tool
+
+    async def _call_tool_bounded(
+        tool_name: str,
+        arguments: dict[str, Any] | None,
+        meta: dict[str, Any] | None = None,
+    ) -> Any:
+        result = await original_call_tool(tool_name, arguments, meta=meta)
+        return bounded_mcp_tool_result(result)
+
+    server.call_tool = _call_tool_bounded
+    return server
 
 
 async def connect_mcp_servers(
