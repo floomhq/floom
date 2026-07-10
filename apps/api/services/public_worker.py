@@ -291,6 +291,8 @@ def _public_worker_share_from_worker(
     worker_dir = _SHARE_WORKERS_DIR / str(worker.get("id") or "")
     raw_files = _read_worker_files(worker_dir)
     if not raw_files:
+        raw_files = _worker_files_from_repo_bundle(worker, repos)
+    if not raw_files:
         raw_files = _worker_files_from_manifest(worker)
     share_files = [
         {"path": f.path, "content": f.content or "", "binary": f.binary}
@@ -323,6 +325,29 @@ def _public_worker_share_from_worker(
         "is_public": is_public,
         "permalink_redirect_url": permalink_redirect_url,
     }
+
+
+def _worker_files_from_repo_bundle(
+    worker: Dict[str, Any],
+    repos: "Repositories" | None,
+):
+    workers_repo = getattr(repos, "workers", None) if repos is not None else None
+    resolver = getattr(workers_repo, "resolve_worker_files_for_worker", None)
+    if not callable(resolver):
+        return []
+    try:
+        files = resolver(worker)
+    except Exception:
+        return []
+    if not isinstance(files, dict) or not files:
+        return []
+    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    if not isinstance(manifest, dict):
+        manifest = {}
+    enriched = dict(worker)
+    enriched["manifest"] = {**manifest, "_files": files}
+    enriched["manifest_json"] = enriched["manifest"]
+    return _worker_files_from_manifest(enriched)
 
 
 _HANDLE_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
