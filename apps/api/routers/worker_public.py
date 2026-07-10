@@ -22,9 +22,12 @@ is purged in lockstep with main by the worker/context test fixtures.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -74,10 +77,89 @@ from services.worker_registry_ops import _register_worker_from_files
 
 worker_public_router = APIRouter()
 
+_IMPORT_SOURCE_VERSION = "1"
+
 
 class _PublicWorkerRunRequest(BaseModel):
     inputs: Dict[str, Any] = Field(default_factory=dict)
     token: str = Field(..., min_length=10)
+
+
+def _worker_manifest_dict(worker: Dict[str, Any]) -> Dict[str, Any]:
+    raw = worker.get("manifest_json")
+    if raw is None:
+        raw = worker.get("manifest")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw or "{}")
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
+def _find_existing_import(
+    marker: Dict[str, str],
+    *,
+    auth: AuthContext,
+    repos: Repositories,
+) -> str | None:
+    try:
+        workers = repos.workers.list(user_id=auth.user_id, role=auth.role)
+    except Exception:
+        return None
+    for worker in workers:
+        owner_id = str(worker.get("owner_id") or "").strip()
+        if owner_id and owner_id != auth.user_id:
+            continue
+        manifest = _worker_manifest_dict(worker)
+        source = manifest.get("import_source")
+        if isinstance(source, dict) and source == marker:
+            worker_id = str(worker.get("id") or "").strip()
+            if worker_id:
+                return worker_id
+    return None
+
+
+def _stamp_import_source(draft_files: List[DraftFile], marker: Dict[str, str]) -> None:
+    worker_yml = next((f for f in draft_files if f.path == "worker.yml"), None)
+    if worker_yml is None:
+        return
+    raw = yaml.safe_load(worker_yml.content or "{}")
+    if not isinstance(raw, dict):
+        return
+    raw["import_source"] = marker
+    worker_yml.content = yaml.safe_dump(raw, sort_keys=False)
+
+
+def _share_import_marker(token: str) -> Dict[str, str]:
+    return {
+        "version": _IMPORT_SOURCE_VERSION,
+        "kind": "share",
+        "token_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+    }
+
+
+def _permalink_import_marker(
+    *,
+    handle: str,
+    worker_slug: str,
+    source_workspace_id: str,
+    source_worker_id: str,
+) -> Dict[str, str]:
+    normalized_handle = _slugify_handle(str(handle or "").lstrip("@"))
+    normalized_slug = _slugify_handle(str(worker_slug or ""))
+    return {
+        "version": _IMPORT_SOURCE_VERSION,
+        "kind": "permalink",
+        "handle": normalized_handle,
+        "worker_slug": normalized_slug,
+        "source_workspace_id": source_workspace_id,
+        "source_worker_id": source_worker_id,
+    }
 
 
 def _load_standalone_worker_share(
@@ -308,6 +390,11 @@ def import_worker_from_share(
     draft_files = [DraftFile(path=f["path"], content=f.get("content") or "") for f in share_files if f.get("path")]
     if not any(f.path == "worker.yml" for f in draft_files):
         raise HTTPException(status_code=409, detail="Worker share is missing worker.yml")
+    marker = _share_import_marker(body.token)
+    existing_id = _find_existing_import(marker, auth=auth, repos=repos)
+    if existing_id:
+        return {"worker_id": existing_id, "url": f"/workers/{existing_id}"}
+    _stamp_import_source(draft_files, marker)
     new_id = _register_worker_from_files(draft_files, user_id=auth.user_id, repos=repos, dedupe_id=True)
     return {"worker_id": new_id, "url": f"/workers/{new_id}"}
 
@@ -338,6 +425,15 @@ def import_worker_from_permalink(
     worker = getter(workspace_id=workspace_id, public_slug=normalized_slug) if callable(getter) else None
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    marker = _permalink_import_marker(
+        handle=body.handle,
+        worker_slug=body.worker_slug,
+        source_workspace_id=workspace_id,
+        source_worker_id=str(worker.get("id") or ""),
+    )
+    existing_id = _find_existing_import(marker, auth=auth, repos=repos)
+    if existing_id:
+        return {"worker_id": existing_id, "url": f"/workers/{existing_id}"}
     payload = _public_worker_share_from_worker(worker, repos)
     share_files = payload.get("files") or []
     if not share_files:
@@ -345,6 +441,7 @@ def import_worker_from_permalink(
     draft_files = [DraftFile(path=f["path"], content=f.get("content") or "") for f in share_files if f.get("path")]
     if not any(f.path == "worker.yml" for f in draft_files):
         raise HTTPException(status_code=409, detail="Worker share is missing worker.yml")
+    _stamp_import_source(draft_files, marker)
     new_id = _register_worker_from_files(draft_files, user_id=auth.user_id, repos=repos, dedupe_id=True)
     return {"worker_id": new_id, "url": f"/workers/{new_id}"}
 

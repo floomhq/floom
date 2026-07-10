@@ -1679,6 +1679,7 @@ class WorkerContract(BaseModel):
     license: Optional[str] = None
     homepage: Optional[str] = None
     repository: Optional[str] = None
+    import_source: Optional[Dict[str, str]] = None
     exec: WorkerContractExec
     capabilities: WorkerContractCapabilities = Field(default_factory=WorkerContractCapabilities)
     # Single trigger (legacy, backward compat). New manifests should use `triggers`.
