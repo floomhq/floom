@@ -257,9 +257,11 @@ function DoneOutput({ run }: { run: RunDetail }) {
 interface RunPanelProps {
   /** null = idle; non-null = attach stream */
   runId: string | null;
+  /** true while the run POST is in flight and no server run id exists yet */
+  submitting?: boolean;
 }
 
-export function RunPanel({ runId }: RunPanelProps) {
+export function RunPanel({ runId, submitting = false }: RunPanelProps) {
   const { parts, fallbackRun, connected, error, finishedPart, streamUnavailable, refresh } =
     useRunStream(runId);
 
@@ -304,6 +306,14 @@ export function RunPanel({ runId }: RunPanelProps) {
       cancelled = true;
     };
   }, [finishedPart, runId]);
+
+  if (!runId && submitting) {
+    return (
+      <div className="space-y-3">
+        <Task title="Run submitted" status="running" detail="Preparing inputs, connections, and worker context..." />
+      </div>
+    );
+  }
 
   // Idle
   if (!runId) {

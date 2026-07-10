@@ -441,7 +441,7 @@ export default function RunWorkerPage() {
         {/* RIGHT PANE */}
         <main className="flex-1 min-w-0 overflow-y-auto">
           <div className="p-5">
-            <RunPanel runId={activeRunId} />
+            <RunPanel runId={activeRunId} submitting={running} />
           </div>
         </main>
       </div>
