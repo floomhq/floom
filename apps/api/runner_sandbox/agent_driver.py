@@ -46,6 +46,7 @@ from .cancellation import cancel_flag_db_read_errors_total, run_cancel_requested
 from .e2b_upload import upload_tree_tarball
 from .memory_context import memory_context_name, memory_enabled
 from .tool_output_bounds import TOOL_RESULT_MAX_CHARS as _TOOL_RESULT_MAX_CHARS
+from .tool_output_bounds import bound_text
 from .tool_output_bounds import bounded_tool_output_json
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
@@ -329,9 +330,7 @@ def _safe_path_under_any(roots: list[Path], path: str, default_root: Path) -> Pa
 
 
 def _truncate(value: str, cap: int) -> str:
-    if len(value) <= cap:
-        return value
-    return value[:cap] + f"\n<truncated {len(value) - cap} chars>"
+    return bound_text(value, cap)
 
 
 def _scrub(value: str, secrets: Dict[str, str]) -> str:

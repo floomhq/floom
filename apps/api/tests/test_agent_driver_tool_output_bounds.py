@@ -13,9 +13,16 @@ from models import WorkerConfig, WorkerLimits, WorkerOutput, WorkerRuntime, Work
 from runner_sandbox.agent_driver import (  # noqa: E402
     AgentDriver,
     _AgentRunState,
+    _STDOUT_CAP,
     _TOOL_RESULT_MAX_CHARS,
+    _truncate,
 )
-from runner_sandbox.tool_output_bounds import bounded_mcp_tool_result  # noqa: E402
+from runner_sandbox.tool_output_bounds import (  # noqa: E402
+    TOOL_RESULT_MAX_ARRAY_ITEMS,
+    TOOL_RESULT_MAX_STRING_CHARS,
+    bounded_mcp_tool_result,
+    bounded_tool_output_json,
+)
 
 
 def _config() -> WorkerConfig:
@@ -84,8 +91,12 @@ def test_large_read_file_tool_output_is_bounded_before_sdk_context(tmp_path):
     assert len(raw_output) <= _TOOL_RESULT_MAX_CHARS
     assert decoded["ok"] is True
     assert decoded["content"].startswith("NEWS ITEM ")
-    assert "[output truncated" in decoded["content"]
-    assert decoded["_floom_tool_output"]["truncated"] is True
+    assert decoded["content"].endswith("x" * (TOOL_RESULT_MAX_STRING_CHARS // 2))
+    assert f"of {len(large_text)} chars" in decoded["content"]
+    assert "kept first" in decoded["content"]
+    assert "and last" in decoded["content"]
+    assert "rerun with a narrower query/filter" in decoded["content"]
+    assert decoded["_tool_output_bounds"][0]["path"] == "$.content"
 
 
 def test_finish_with_outputs_tool_result_does_not_echo_full_output_content(tmp_path):
@@ -118,5 +129,73 @@ def test_mcp_text_tool_result_is_bounded_before_sdk_context():
 
     assert len(text) < len(large_text)
     assert text.startswith("ARTICLE ")
-    assert "[output truncated" in text
+    assert text.endswith("z" * (TOOL_RESULT_MAX_STRING_CHARS // 2))
+    assert f"of {len(large_text)} chars" in text
     assert "z" * _TOOL_RESULT_MAX_CHARS not in text
+    assert bounded.structuredContent["_tool_output_bounds"][0]["path"] == "$.content[0].text"
+
+
+def test_long_string_bounds_keep_head_tail_and_recovery_marker():
+    large_text = "HEAD-" + ("m" * (TOOL_RESULT_MAX_STRING_CHARS * 2)) + "-TAIL"
+    raw_output = bounded_tool_output_json({"ok": True, "content": large_text})
+    decoded = json.loads(raw_output)
+
+    assert len(raw_output) <= _TOOL_RESULT_MAX_CHARS
+    assert decoded["content"].startswith("HEAD-")
+    assert decoded["content"].endswith("-TAIL")
+    assert f"of {len(large_text)} chars" in decoded["content"]
+    assert (
+        f"kept first {TOOL_RESULT_MAX_STRING_CHARS // 2} "
+        f"and last {TOOL_RESULT_MAX_STRING_CHARS // 2}"
+    ) in decoded["content"]
+    assert "rerun with a narrower query/filter or a larger output budget if available" in decoded["content"]
+
+
+def test_array_truncation_keeps_item_types_and_external_metadata():
+    messages = [{"id": i, "body": f"message-{i}"} for i in range(TOOL_RESULT_MAX_ARRAY_ITEMS + 7)]
+    raw_output = bounded_tool_output_json({"ok": True, "messages": messages})
+    decoded = json.loads(raw_output)
+
+    assert len(decoded["messages"]) == TOOL_RESULT_MAX_ARRAY_ITEMS
+    assert all(set(item) == {"id", "body"} for item in decoded["messages"])
+    bounds = decoded["_tool_output_bounds"]
+    assert bounds == [
+        {
+            "path": "$.messages",
+            "kept": TOOL_RESULT_MAX_ARRAY_ITEMS,
+            "total": len(messages),
+            "hint": "rerun with limit/page/filter",
+        }
+    ]
+
+
+def test_top_level_array_is_wrapped_with_external_metadata():
+    values = list(range(TOOL_RESULT_MAX_ARRAY_ITEMS + 3))
+    raw_output = bounded_tool_output_json(values)
+    decoded = json.loads(raw_output)
+
+    assert decoded["result"] == values[:TOOL_RESULT_MAX_ARRAY_ITEMS]
+    assert decoded["_tool_output_bounds"][0]["path"] == "$"
+    assert decoded["_tool_output_bounds"][0]["kept"] == TOOL_RESULT_MAX_ARRAY_ITEMS
+    assert decoded["_tool_output_bounds"][0]["total"] == len(values)
+
+
+def test_nested_dict_array_truncation_records_nested_path():
+    payload = {"ok": True, "payload": {"messages": list(range(TOOL_RESULT_MAX_ARRAY_ITEMS + 5))}}
+    raw_output = bounded_tool_output_json(payload)
+    decoded = json.loads(raw_output)
+
+    assert decoded["payload"]["messages"] == list(range(TOOL_RESULT_MAX_ARRAY_ITEMS))
+    assert decoded["_tool_output_bounds"][0]["path"] == "$.payload.messages"
+    assert decoded["_tool_output_bounds"][0]["total"] == TOOL_RESULT_MAX_ARRAY_ITEMS + 5
+
+
+def test_command_stdout_truncation_uses_recoverable_head_tail_marker():
+    stdout = "OUT-" + ("s" * (_STDOUT_CAP * 2)) + "-DONE"
+    bounded = _truncate(stdout, _STDOUT_CAP)
+
+    assert bounded.startswith("OUT-")
+    assert bounded.endswith("-DONE")
+    assert f"of {len(stdout)} chars" in bounded
+    assert f"kept first {_STDOUT_CAP // 2} and last {_STDOUT_CAP // 2}" in bounded
+    assert "rerun with a narrower query/filter or a larger output budget if available" in bounded
