@@ -173,6 +173,72 @@ def test_worker_standalone_share_wraps_public_worker_projection():
         assert "owner_id" not in public.text
 
 
+def test_worker_standalone_share_resolves_repository_backed_files():
+    with tempfile.TemporaryDirectory(prefix="workeros-share-storage-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        worker = {
+            "id": "storage-worker",
+            "owner_id": "local-user",
+            "name": "Storage Worker",
+            "description": "Does useful work.",
+            "trigger_type": "manual",
+            "runner": "e2b",
+            "config": {
+                "id": "storage-worker",
+                "name": "Storage Worker",
+                "trigger": {"type": "manual"},
+                "runtime": {"type": "skill", "entrypoint": "SKILL.md"},
+                "connections": [],
+                "inputs": [],
+                "outputs": [],
+            },
+            "manifest": {
+                "id": "storage-worker",
+                "name": "Storage Worker",
+                "runtime": {"type": "skill", "entrypoint": "SKILL.md"},
+                "_files_in_storage": True,
+            },
+        }
+
+        class WorkersRepo:
+            def get(self, *, user_id: str, worker_id: str):
+                return worker if worker_id == "storage-worker" else None
+
+            def get_any(self, *, worker_id: str):
+                return worker if worker_id == "storage-worker" else None
+
+            def list(self, user_id: str):
+                return [worker]
+
+            def resolve_worker_files_for_worker(self, source_worker):
+                assert source_worker["id"] == "storage-worker"
+                return {
+                    "worker.yml": "id: storage-worker\nname: Storage Worker\n",
+                    "SKILL.md": "# Storage Worker\n",
+                }
+
+        class RunsRepo:
+            def list_for_worker(self, **kwargs):
+                return []
+
+        class Repos:
+            workers = WorkersRepo()
+            runs = RunsRepo()
+
+        main.app.dependency_overrides[main.get_repos] = lambda: Repos()
+        try:
+            link = client.post("/workers/storage-worker/share-link", headers=_headers())
+            assert link.status_code == 200, link.text
+            public = client.get(f"/s/{link.json()['token']}")
+        finally:
+            main.app.dependency_overrides.clear()
+
+        assert public.status_code == 200, public.text
+        body = public.json()
+        assert [f["path"] for f in body["files"]] == ["worker.yml", "SKILL.md"]
+        assert body["files"][0]["content"] == "id: storage-worker\nname: Storage Worker\n"
+
+
 def test_worker_standalone_share_derives_connections_from_manifest_and_secrets():
     """Template bundles declare tools in the manifest contract + bot-token secrets,
     not always in the materialized config.connections. The public share card must
