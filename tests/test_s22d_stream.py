@@ -4,6 +4,8 @@ import importlib
 import json
 import os
 import sys
+import threading
+import time
 import types
 from pathlib import Path
 
@@ -308,3 +310,33 @@ def test_stream_resume_via_last_event_id(monkeypatch, tmp_path):
 
     assert ids == [1, 2]
     assert [part["type"] for part in parts] == ["text", "finish"]
+
+
+def test_stream_polls_persisted_logs_without_in_memory_part_buffer(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_RUN_PART_LOG_POLL_INTERVAL", "0.05")
+    main = _load_api(monkeypatch, tmp_path)
+    run_id = _insert_run(main, "run_cross_process")
+    run_service = importlib.import_module("run_service")
+    main._run_part_buffers.clear()
+
+    def complete_from_worker_process():
+        time.sleep(0.1)
+        run_service.add_log(
+            run_id,
+            "Model call 1 started",
+            user_id="local-user",
+        )
+        time.sleep(0.1)
+        main.update_run_status(run_id, main.RunStatus.COMPLETED.value, output={})
+
+    thread = threading.Thread(target=complete_from_worker_process)
+    thread.start()
+    try:
+        _ids, parts = _parts_from_stream(TestClient(main.app), run_id)
+    finally:
+        thread.join(timeout=2)
+
+    assert parts[0]["type"] == "log"
+    assert parts[0]["level"] == "info"
+    assert parts[0]["message"] == "Model call 1 started"
+    assert parts[-1] == {"type": "finish", "status": "completed"}

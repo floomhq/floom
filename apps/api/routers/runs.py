@@ -114,6 +114,21 @@ logger = logging.getLogger("floom.api")
 runs_router = APIRouter()
 
 
+def _run_part_log_poll_interval_seconds() -> float:
+    try:
+        return max(0.05, float(os.environ.get("WORKEROS_RUN_PART_LOG_POLL_INTERVAL", "2.0")))
+    except (TypeError, ValueError):
+        return 2.0
+
+
+def _run_part_log_key(part: Dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(part.get("timestamp") or ""),
+        str(part.get("level") or ""),
+        str(part.get("message") or ""),
+    )
+
+
 def _safe_run_output_payload(run_row: Dict[str, Any], *, user_id: str, repos: Repositories) -> Dict[str, Any]:
     try:
         output_payload = json.loads(run_row.get("output_json") or "{}")
@@ -1362,6 +1377,25 @@ async def stream_run_parts(
     async def event_generator():
         try:
             snapshot = _run_part_snapshot(run_id)
+            next_outgoing_id = 0
+            emitted_log_keys: set[tuple[str, str, str]] = set()
+
+            def _next_sse(part: Dict[str, Any]) -> str:
+                nonlocal next_outgoing_id
+                payload = _format_run_part_sse(next_outgoing_id, part)
+                next_outgoing_id += 1
+                return payload
+
+            def _replayed_log_parts() -> List[Dict[str, Any]]:
+                parts: List[Dict[str, Any]] = []
+                for log_part in _log_replay_parts(repos, effective_user_id, run_id):
+                    key = _run_part_log_key(log_part)
+                    if key in emitted_log_keys:
+                        continue
+                    emitted_log_keys.add(key)
+                    parts.append(log_part)
+                return parts
+
             if snapshot is None:
                 final_part = _finish_part_from_run_row(run_row)
                 if final_part is not None:
@@ -1369,38 +1403,57 @@ async def stream_run_parts(
                     # TTL, or a fresh server process). Replay persisted log rows so
                     # the client reconstructs the transcript instead of receiving a
                     # bare finish event.
-                    event_id = 0
                     for log_part in _log_replay_parts(repos, effective_user_id, run_id):
-                        if event_id > last_seen:
-                            yield _format_run_part_sse(event_id, log_part)
-                        event_id += 1
-                    if event_id > last_seen:
-                        yield _format_run_part_sse(event_id, final_part)
+                        if next_outgoing_id > last_seen:
+                            yield _next_sse(log_part)
+                        else:
+                            next_outgoing_id += 1
+                        emitted_log_keys.add(_run_part_log_key(log_part))
+                    if next_outgoing_id > last_seen:
+                        yield _next_sse(final_part)
                     return
                 snapshot = {"parts": [], "finished": False}
 
             for event_id, part in snapshot["parts"]:
                 if event_id > last_seen:
-                    yield _format_run_part_sse(event_id, part)
+                    yield _next_sse(part)
+                else:
+                    next_outgoing_id += 1
 
             if snapshot["finished"]:
                 return
 
+            for log_part in _replayed_log_parts():
+                if next_outgoing_id > last_seen:
+                    yield _next_sse(log_part)
+                else:
+                    next_outgoing_id += 1
+
             q: asyncio.Queue = asyncio.Queue(maxsize=512)
             loop = asyncio.get_running_loop()
             _run_part_register(run_id, q, loop)
+            poll_interval = _run_part_log_poll_interval_seconds()
             try:
                 while True:
                     if await request.is_disconnected():
                         break
 
                     try:
-                        event_id, part = await asyncio.wait_for(q.get(), timeout=5.0)
+                        _event_id, part = await asyncio.wait_for(q.get(), timeout=poll_interval)
                     except asyncio.TimeoutError:
+                        for log_part in _replayed_log_parts():
+                            yield _next_sse(log_part)
+                        latest_row = _get_run_by_explicit_id(run_id, user_id=effective_user_id, repos=repos)
+                        latest_status = (latest_row or {}).get("status")
+                        if latest_row and latest_status in _TERMINAL_STATUSES:
+                            final_part = _finish_part_from_run_row(latest_row)
+                            if final_part is not None:
+                                yield _next_sse(final_part)
+                            break
                         yield ": keepalive\n\n"
                         continue
 
-                    yield _format_run_part_sse(event_id, part)
+                    yield _next_sse(part)
                     if _run_part_is_finish(part):
                         break
             finally:

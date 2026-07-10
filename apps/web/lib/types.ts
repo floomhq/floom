@@ -208,6 +208,7 @@ export interface TranscriptRow {
 
 export type RunPart =
   | { type: "text"; text: string }
+  | { type: "log"; level?: string; message: string; timestamp?: string }
   | { type: "tool-call"; toolName: string; args: unknown; callId: string }
   | { type: "tool-result"; callId: string; result: unknown; isError: boolean }
   | { type: "reasoning"; text: string }

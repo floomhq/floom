@@ -19,7 +19,7 @@ import { Tool } from "@/components/ai-elements/tool";
 import { StackTrace } from "@/components/ai-elements/stack-trace";
 import { useRunStream } from "@/lib/useRunStream";
 import { api } from "@/lib/api";
-import { humanizeRunError } from "@/lib/run-format";
+import { humanizeLogMessage, humanizeRunError } from "@/lib/run-format";
 import { sanitizeOutputText } from "@/lib/strip-citations";
 import type { RunDetail, RunPart } from "@/lib/types";
 
@@ -148,6 +148,16 @@ function LiveTranscript({
                 {sanitizeOutputText(part.text)}
               </p>
             </div>
+          );
+        }
+        if (part.type === "log") {
+          const level = part.level || "info";
+          return (
+            <Task
+              key={`log-${part.timestamp || index}-${index}`}
+              title={humanizeLogMessage(level, part.message)}
+              status={level === "error" || level === "critical" ? "failed" : "running"}
+            />
           );
         }
         if (part.type === "step-start") {
