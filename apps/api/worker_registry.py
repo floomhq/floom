@@ -72,6 +72,54 @@ def _load_worker_manifest(folder: Path) -> tuple[WorkerConfig, WorkerContract]:
     return config, contract
 
 
+def _worker_record_from_folder(folder: Path) -> Dict[str, Any]:
+    try:
+        config, contract = _load_worker_manifest(folder)
+        return {
+            "id": folder.name,
+            "name": config.name,
+            "description": config.description,
+            "long_description": contract.long_description,
+            "use_cases": contract.use_cases,
+            "example_input": contract.example_input,
+            "example_output": contract.example_output,
+            "how_it_works": contract.how_it_works,
+            "is_example": contract.is_example,
+            "archived": contract.archived,
+            "archive_reason": contract.archive_reason,
+            "stage": contract.stage,
+            "tags": contract.tags or [],
+            "folder": contract.folder,
+            "config": config.model_dump(),
+            "manifest": contract.model_dump(mode="json", exclude_none=True),
+            "status": "healthy",
+            "trigger_type": config.trigger.type,
+            "runner": config.runtime.runner,
+        }
+    except Exception as exc:
+        logger.warning("Failed to load worker %s: %s", folder.name, exc)
+        return {
+            "id": folder.name,
+            "name": folder.name,
+            "description": f"Failed to load: {exc}",
+            "config": {},
+            "status": "error",
+            "trigger_type": "manual",
+            "runner": "e2b",
+        }
+
+
+def discover_worker(worker_id: str) -> Optional[Dict[str, Any]]:
+    """Load one worker folder by id without scanning the whole registry."""
+    try:
+        folder = _safe_path(worker_id)
+    except ValueError:
+        return None
+    if not folder.is_dir() or not (folder / "worker.yml").is_file():
+        return None
+    return _worker_record_from_folder(folder)
+
+
 def discover_workers(use_cache: bool = False) -> List[Dict[str, Any]]:
     """Scan WORKERS_DIR for valid worker folders.
 
@@ -103,40 +151,7 @@ def discover_workers(use_cache: bool = False) -> List[Dict[str, Any]]:
         if not config_path.is_file():
             continue
 
-        try:
-            config, contract = _load_worker_manifest(folder)
-            workers.append({
-                "id": folder.name,
-                "name": config.name,
-                "description": config.description,
-                "long_description": contract.long_description,
-                "use_cases": contract.use_cases,
-                "example_input": contract.example_input,
-                "example_output": contract.example_output,
-                "how_it_works": contract.how_it_works,
-                "is_example": contract.is_example,
-                "archived": contract.archived,
-                "archive_reason": contract.archive_reason,
-                "stage": contract.stage,
-                "tags": contract.tags or [],
-                "folder": contract.folder,
-                "config": config.model_dump(),
-                "manifest": contract.model_dump(mode="json", exclude_none=True),
-                "status": "healthy",
-                "trigger_type": config.trigger.type,
-                "runner": config.runtime.runner,
-            })
-        except Exception as exc:
-            logger.warning("Failed to load worker %s: %s", folder.name, exc)
-            workers.append({
-                "id": folder.name,
-                "name": folder.name,
-                "description": f"Failed to load: {exc}",
-                "config": {},
-                "status": "error",
-                "trigger_type": "manual",
-                "runner": "e2b",
-            })
+        workers.append(_worker_record_from_folder(folder))
 
     _worker_cache = workers
     return workers

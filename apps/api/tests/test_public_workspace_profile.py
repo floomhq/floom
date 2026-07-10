@@ -13,9 +13,12 @@ def _boot(tmp_path: Path):
     os.environ["WORKEROS_DB"] = str(tmp_path / "workeros.db")
     os.environ["FLOOM_DB"] = str(tmp_path / "workeros.db")
     os.environ["FLOOM_CONTEXTS_DIR"] = str(tmp_path / "contexts")
+    os.environ["FLOOM_WORKERS_DIR"] = str(tmp_path / "workers")
     os.environ["WORKEROS_DEPLOY"] = "local"
     os.environ["WORKEROS_USER_ID"] = "local-user"
     os.environ["FLOOM_SECRET"] = "workspace-profile-test-secret"
+    for module_name in ("worker_registry", "services.worker_registry_ops"):
+        sys.modules.pop(module_name, None)
     import contexts
     import db
     import main
@@ -226,6 +229,93 @@ def test_import_from_permalink_refuses_private_worker():
         )
         assert resp.status_code == 404
         assert "private-worker" not in resp.text
+
+
+def test_register_worker_from_files_persists_only_new_worker():
+    with tempfile.TemporaryDirectory(prefix="floom-register-one-", ignore_cleanup_errors=True) as td:
+        main, _client = _boot(Path(td))
+        from models import DraftFile
+        from services.worker_registry_ops import _register_worker_from_files
+        from worker_registry import WORKERS_DIR
+
+        stale_dir = WORKERS_DIR / "stale-import"
+        stale_dir.mkdir(parents=True)
+        stale_dir.joinpath("worker.yml").write_text(
+            """
+schema_version: "0.3"
+name: stale-import
+title: Stale Import
+description: Old import directory
+version: 0.1.0
+exec:
+  entry: run.py
+  runtime: python311
+  runner: e2b
+  command: python run.py
+trigger:
+  type: manual
+""".strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+        created_id = _register_worker_from_files(
+            [
+                DraftFile(
+                    path="worker.yml",
+                    content="""
+schema_version: "0.3"
+name: fresh-import
+title: Fresh Import
+description: New import directory
+version: 0.1.0
+exec:
+  entry: run.py
+  runtime: python311
+  runner: e2b
+  command: python run.py
+trigger:
+  type: manual
+""".strip()
+                    + "\n",
+                )
+            ],
+            user_id="local-user",
+            repos=main.get_repositories(),
+            dedupe_id=True,
+        )
+
+        rows = main.get_repositories().workers.list(user_id="local-user")
+        assert created_id == "fresh-import"
+        assert [row["id"] for row in rows] == ["fresh-import"]
+
+
+def test_import_from_permalink_is_idempotent_for_same_workspace_and_source():
+    with tempfile.TemporaryDirectory(prefix="floom-permalink-import-idem-", ignore_cleanup_errors=True) as td:
+        main, client = _boot(Path(td))
+        _seed_public_and_private(main)
+
+        first = client.post(
+            "/workers/import-from-permalink",
+            headers=_auth_headers(),
+            json={"handle": "fede-secretary", "worker_slug": "gmail-inbox-cleaner"},
+        )
+        assert first.status_code == 200, first.text
+
+        second = client.post(
+            "/workers/import-from-permalink",
+            headers=_auth_headers(),
+            json={"handle": "@fede-secretary", "worker_slug": "gmail-inbox-cleaner"},
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["worker_id"] == first.json()["worker_id"]
+
+        imported = []
+        for row in main.get_repositories().workers.list(user_id="local-user"):
+            manifest = row.get("manifest_json") or row.get("manifest") or {}
+            if isinstance(manifest, dict) and manifest.get("import_source", {}).get("kind") == "permalink":
+                imported.append(row)
+        assert [row["id"] for row in imported] == [first.json()["worker_id"]]
 
 
 # --- One URL per worker forever: ?share=<token> unguessable-key access -----

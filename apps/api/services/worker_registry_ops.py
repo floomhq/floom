@@ -594,7 +594,7 @@ def _register_worker_from_files(
     unchanged.
     """
     from db import get_db
-    from worker_registry import discover_workers, invalidate_worker_cache
+    from worker_registry import discover_worker, invalidate_worker_cache
     from worker_registry import WORKERS_DIR
 
     draft_files = _validate_draft_file_bundle(files)
@@ -642,10 +642,15 @@ def _register_worker_from_files(
         raise HTTPException(status_code=400, detail=f"Failed to write files: {exc}") from exc
 
     invalidate_worker_cache()
-    workers = discover_workers()
+    worker = discover_worker(worker_id)
+    if worker is None:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        invalidate_worker_cache()
+        raise HTTPException(status_code=400, detail=f"Failed to load worker {worker_id!r}")
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers, user_id=user_id)
+            _persist_discovered_workers(conn, [worker], user_id=user_id, raise_on_skip=True)
         except (sqlite3.IntegrityError, RuntimeError) as exc:
             import shutil
             shutil.rmtree(target_dir, ignore_errors=True)
