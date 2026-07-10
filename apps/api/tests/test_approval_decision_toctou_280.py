@@ -213,7 +213,7 @@ def test_concurrent_approve_and_reject_one_wins_no_double_action(_stub_side_effe
 
     statuses = _fire_concurrent([
         ("/runs/run_ar/approve", {}),
-        ("/runs/run_ar/reject", {"reason": "race"}),
+        ("/runs/run_ar/reject", {}),
     ])
 
     assert sorted(statuses) == [200, 409], statuses
