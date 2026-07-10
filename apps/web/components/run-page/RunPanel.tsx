@@ -83,7 +83,7 @@ function LiveTranscript({
   if (parts.length === 0 && isActive) {
     return (
       <div className="space-y-3">
-        <Task title="Starting" status="pending" detail="Waiting for the first step..." />
+        <Task title="Run submitted" status="running" detail="Preparing inputs, connections, and worker context..." />
       </div>
     );
   }
