@@ -744,6 +744,7 @@ class AgentDriver(SandboxDriver):
                 )
 
                 log_fn(f"Agent SDK run {run_number}", "debug")
+                log_fn(f"Model call {run_number} started", "info")
                 self._emit_part(run_id, {"type": "step-start", "stepNumber": run_number})
                 transcript.append({"type": "step-start", "stepNumber": run_number})
 
@@ -771,6 +772,7 @@ class AgentDriver(SandboxDriver):
                         total_tokens=total_tokens,
                         max_total_tokens=max_total_tokens,
                         ai_ctx=ai_ctx,
+                        log_fn=log_fn,
                     )
                 except Exception as exc:
                     if exc.__class__.__name__ == "MaxTurnsExceeded":
@@ -903,10 +905,12 @@ class AgentDriver(SandboxDriver):
         total_tokens: int,
         max_total_tokens: int,
         ai_ctx: Any = None,
+        log_fn: Callable[[str, str], None] | None = None,
     ) -> Dict[str, Any]:
         emitted_text_delta = False
         cancelled = False
         token_cap_exceeded = False
+        tool_names_by_call_id: dict[str, str] = {}
 
         async for event in result.stream_events():
             if self._cancel_requested(run_id):
@@ -940,6 +944,18 @@ class AgentDriver(SandboxDriver):
             self._emit_ai_span(ai_ctx, part)
             transcript.append(part)
             self._emit_part(run_id, part)
+            if log_fn is not None:
+                part_type = part.get("type")
+                if part_type == "tool-call":
+                    tool_name = str(part.get("toolName") or "tool")
+                    call_id = str(part.get("callId") or "")
+                    if call_id:
+                        tool_names_by_call_id[call_id] = tool_name
+                    log_fn(f"Tool call: {tool_name}", "info")
+                elif part_type == "tool-result":
+                    call_id = str(part.get("callId") or "")
+                    tool_name = tool_names_by_call_id.get(call_id, "tool")
+                    log_fn(f"Tool finished: {tool_name}", "info")
 
         usage_total = self._usage_tokens_from_result(result)
         if usage_total and total_tokens < usage_total:

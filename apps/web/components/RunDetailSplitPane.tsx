@@ -579,6 +579,16 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
             </div>
           );
         }
+        if (part.type === "log") {
+          const level = part.level || "info";
+          return (
+            <Task
+              key={`log-${part.timestamp || index}-${index}`}
+              title={humanizeLogMessage(level, part.message)}
+              status={level === "error" || level === "critical" ? "failed" : "running"}
+            />
+          );
+        }
         if (part.type === "step-start") {
           return (
             <Task
@@ -1210,6 +1220,12 @@ function buildTimeline(run: RunDetail, parts: RunPart[]): TimelineItem[] {
   for (const part of parts) {
     if (part.type === "step-start") {
       rows.push({ label: `Step ${part.stepNumber}`, duration: "start", status: run.status });
+    } else if (part.type === "log") {
+      rows.push({
+        label: humanizeLogMessage(part.level || "info", part.message),
+        duration: part.timestamp ? formatTime(part.timestamp) : "log",
+        status: part.level === "error" || part.level === "critical" ? "failed" : run.status,
+      });
     } else if (part.type === "tool-call") {
       rows.push({ label: getToolCardTitle(part.toolName, "completed"), detail: part.callId, duration: "tool", status: run.status });
     } else if (part.type === "text") {
@@ -1274,7 +1290,14 @@ function latestStatus(run: RunDetail, parts: RunPart[]): string {
 }
 
 function hasReadableTranscript(parts: RunPart[]): boolean {
-  return parts.some((part) => part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || part.type === "step-start");
+  return parts.some(
+    (part) =>
+      part.type === "text" ||
+      part.type === "reasoning" ||
+      part.type === "tool-call" ||
+      part.type === "step-start" ||
+      part.type === "log",
+  );
 }
 
 function partsFromRun(run: RunDetail): RunPart[] {
