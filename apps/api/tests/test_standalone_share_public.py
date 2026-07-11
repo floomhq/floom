@@ -196,7 +196,6 @@ def test_worker_standalone_share_resolves_repository_backed_files():
                 "id": "storage-worker",
                 "name": "Storage Worker",
                 "runtime": {"type": "skill", "entrypoint": "SKILL.md"},
-                "_files_in_storage": True,
             },
         }
 
