@@ -215,6 +215,8 @@ def test_worker_standalone_share_resolves_repository_backed_files():
                 return {
                     "worker.yml": "id: storage-worker\nname: Storage Worker\n",
                     "SKILL.md": "# Storage Worker\n",
+                    "requirements.txt": "\n",
+                    "run.py": "print('from stored bundle')\n",
                 }
 
         class RunsRepo:
@@ -224,6 +226,13 @@ def test_worker_standalone_share_resolves_repository_backed_files():
         class Repos:
             workers = WorkersRepo()
             runs = RunsRepo()
+
+        from worker_registry import WORKERS_DIR
+
+        stale_dir = WORKERS_DIR / "storage-worker"
+        stale_dir.mkdir(parents=True, exist_ok=True)
+        (stale_dir / "worker.yml").write_text("id: storage-worker\nname: stale\n", encoding="utf-8")
+        (stale_dir / "run.py").write_text("print('stale disk')\n", encoding="utf-8")
 
         main.app.dependency_overrides[main.get_repos] = lambda: Repos()
         try:
@@ -235,8 +244,14 @@ def test_worker_standalone_share_resolves_repository_backed_files():
 
         assert public.status_code == 200, public.text
         body = public.json()
-        assert [f["path"] for f in body["files"]] == ["worker.yml", "SKILL.md"]
+        assert [f["path"] for f in body["files"]] == [
+            "worker.yml",
+            "SKILL.md",
+            "requirements.txt",
+            "run.py",
+        ]
         assert body["files"][0]["content"] == "id: storage-worker\nname: Storage Worker\n"
+        assert body["files"][3]["content"] == "print('from stored bundle')\n"
 
 
 def test_worker_standalone_share_derives_connections_from_manifest_and_secrets():
