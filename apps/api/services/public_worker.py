@@ -294,7 +294,9 @@ def _public_worker_share_from_worker(
     repo_files = _worker_files_from_repo_bundle(worker, repos)
     manifest = worker.get("manifest") or worker.get("manifest_json") or {}
     storage_backed = isinstance(manifest, dict) and bool(manifest.get("_files_in_storage"))
-    if repo_files and (storage_backed or not raw_files):
+    raw_paths = {str(getattr(f, "path", "") or "") for f in raw_files}
+    repo_paths = {str(getattr(f, "path", "") or "") for f in repo_files}
+    if repo_files and (storage_backed or not raw_files or len(repo_paths) > len(raw_paths)):
         raw_files = repo_files
     if not raw_files:
         raw_files = _worker_files_from_manifest(worker)
