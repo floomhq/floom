@@ -19,6 +19,7 @@ import hmac
 import re
 import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from fastapi import HTTPException, Request
@@ -290,8 +291,11 @@ def _public_worker_share_from_worker(
     from worker_registry import WORKERS_DIR as _SHARE_WORKERS_DIR
     worker_dir = _SHARE_WORKERS_DIR / str(worker.get("id") or "")
     raw_files = _read_worker_files(worker_dir)
-    if not raw_files:
-        raw_files = _worker_files_from_repo_bundle(worker, repos)
+    repo_files = _worker_files_from_repo_bundle(worker, repos)
+    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    storage_backed = isinstance(manifest, dict) and bool(manifest.get("_files_in_storage"))
+    if repo_files and (storage_backed or not raw_files):
+        raw_files = repo_files
     if not raw_files:
         raw_files = _worker_files_from_manifest(worker)
     share_files = [
@@ -341,13 +345,11 @@ def _worker_files_from_repo_bundle(
         return []
     if not isinstance(files, dict) or not files:
         return []
-    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
-    if not isinstance(manifest, dict):
-        manifest = {}
-    enriched = dict(worker)
-    enriched["manifest"] = {**manifest, "_files": files}
-    enriched["manifest_json"] = enriched["manifest"]
-    return _worker_files_from_manifest(enriched)
+    return [
+        SimpleNamespace(path=path, content=content, binary=False)
+        for path, content in files.items()
+        if isinstance(path, str) and path and isinstance(content, str)
+    ]
 
 
 _HANDLE_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
