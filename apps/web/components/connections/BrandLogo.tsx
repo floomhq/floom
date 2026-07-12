@@ -82,6 +82,7 @@ export const KNOWN_BRAND_SLUGS = new Set([
   "apify",
   "apollo",
   "stripe",
+  "docusign",
 ]);
 
 export function normalizeBrandSlug(slug: string): string {

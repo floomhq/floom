@@ -232,6 +232,7 @@ from services.run_notifications import (
     _run_email_html,
     _send_email_notification,
     _fire_alert_webhooks,
+    notify_pending_approval_via_email,
     _dispatch_terminal_run_alerts,
 )
 from services.db_retry import call_with_deadlock_retry
@@ -1072,6 +1073,8 @@ def create_run(
     status: str | None = None,
     user_id: str | None = None,
     trigger_ref: str | None = None,
+    retry_of_run_id: str | None = None,
+    retry_attempt: int = 0,
     repos: Repositories | None = None,
 ) -> str:
     repos_obj = _repos(repos)
@@ -1158,6 +1161,8 @@ def create_run(
                 input_json=effective_inputs,
                 created_at=_now_iso(),
                 trigger_ref=trigger_ref,
+                retry_of_run_id=retry_of_run_id,
+                retry_attempt=retry_attempt,
             )
             last_exc = None
             break
@@ -3174,6 +3179,18 @@ def _pause_run_for_required_approval(
         )
     except Exception:
         logger.warning("Slack approval notify failed for run %s", run_id, exc_info=True)
+    try:
+        notify_pending_approval_via_email(
+            owner_id=owner_id,
+            run_id=run_id,
+            worker_id=worker_id,
+            worker_name=worker_name_for_notify,
+            label=label,
+            approval_id=approval_id,
+            repos=repos_obj,
+        )
+    except Exception:
+        logger.warning("Email approval notify failed for run %s", run_id, exc_info=True)
 
 
 def execute_run(
@@ -3722,15 +3739,15 @@ def execute_run(
                 risk_level=decision_required.get("risk_level") or decision_required.get("risk"),
             )
             log_fn(f"Run awaiting approval: {label}")
+            _worker_name_for_notify = worker_id
+            try:
+                _w_row = repos_obj.workers.get_any(worker_id=worker_id)
+                _worker_name_for_notify = (_w_row or {}).get("name") or worker_id
+            except Exception:
+                pass
             # Fan-out: notify the run owner over WhatsApp if they have an active binding.
             try:
                 from channels.common import notify_pending_approval_via_whatsapp
-                _worker_name_for_notify = worker_id
-                try:
-                    _w_row = repos_obj.workers.get_any(worker_id=worker_id)
-                    _worker_name_for_notify = (_w_row or {}).get("name") or worker_id
-                except Exception:
-                    pass
                 notify_pending_approval_via_whatsapp(
                     owner_id=owner_id,
                     run_id=run_id,
@@ -3752,6 +3769,18 @@ def execute_run(
                 )
             except Exception:
                 logger.warning("Slack approval notify failed for run %s", run_id, exc_info=True)
+            try:
+                notify_pending_approval_via_email(
+                    owner_id=owner_id,
+                    run_id=run_id,
+                    worker_id=worker_id,
+                    worker_name=_worker_name_for_notify,
+                    label=label,
+                    approval_id=approval_id,
+                    repos=repos_obj,
+                )
+            except Exception:
+                logger.warning("Email approval notify failed for run %s", run_id, exc_info=True)
             return
 
         # Output-schema enforcement — the SINGLE convergence point for ALL

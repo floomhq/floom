@@ -186,6 +186,73 @@ def test_text_body_includes_summary(monkeypatch):
     assert "Trigger: schedule" in text
 
 
+def test_send_email_prefers_workeros_email_from(monkeypatch):
+    """WORKEROS_EMAIL_FROM is the cloud sender source of truth."""
+    m = _mod()
+    captured = {}
+
+    class _FakeResend:
+        api_key = None
+
+        class Emails:
+            @staticmethod
+            def send(payload):
+                captured["payload"] = payload
+
+    monkeypatch.setenv("RESEND_API_KEY", "test_key")
+    monkeypatch.setenv("WORKEROS_EMAIL_FROM", "Floom <noreply@auth.floom.dev>")
+    monkeypatch.setenv("NOTIFY_FROM_EMAIL", "Floom <old@example.com>")
+
+    import unittest.mock as mock
+    with mock.patch.dict("sys.modules", {"resend": _FakeResend}):
+        m._send_email_notification(
+            to_addrs=["user@example.com"],
+            worker_name="Demo",
+            run_id="run_1",
+            worker_id="wk_1",
+            status="completed",
+            error=None,
+        )
+
+    assert captured["payload"]["from"] == "Floom <noreply@auth.floom.dev>"
+
+
+def test_send_email_pending_approval_uses_review_cta(monkeypatch):
+    """Pending approval emails carry the approval review URL, not only the run URL."""
+    m = _mod()
+    captured = {}
+
+    class _FakeResend:
+        api_key = None
+
+        class Emails:
+            @staticmethod
+            def send(payload):
+                captured["payload"] = payload
+
+    monkeypatch.setenv("RESEND_API_KEY", "test_key")
+
+    import unittest.mock as mock
+    with mock.patch.dict("sys.modules", {"resend": _FakeResend}):
+        m._send_email_notification(
+            to_addrs=["reviewer@example.com"],
+            worker_name="Proposal Worker",
+            run_id="run_approval",
+            worker_id="wk_approval",
+            status="pending_approval",
+            error=None,
+            approval_url="https://floom.dev/app/approvals/review?id=apr_1&token=t",
+            approval_label="Review proposal",
+        )
+
+    payload = captured["payload"]
+    assert payload["subject"] == "Approval needed: Proposal Worker"
+    assert "Review approval" in payload["html"]
+    assert "https://floom.dev/app/approvals/review?id=apr_1&amp;token=t" in payload["html"]
+    assert "Approval: Review proposal" in payload["text"]
+    assert "https://floom.dev/app/approvals/review?id=apr_1&token=t" in payload["text"]
+
+
 def test_text_body_truncates_long_summary(monkeypatch):
     """Plain-text body truncates summary at 1000 chars and appends suffix."""
     m = _mod()

@@ -222,6 +222,49 @@ class Test418ApprovalGate(unittest.TestCase):
         self.assertEqual(apr_row["status"], "rejected")
         self.assertIsNone(apr_row["follow_up_run_id"])
 
+    def test_rejection_with_comment_queues_feedback_retry(self):
+        worker = _create_worker(approvals_required=True)
+        run_id = run_service.create_run(worker["id"], {"topic": "proposal"})
+        side_effects: list = []
+        decisions: list = []
+        wakeups: list = []
+
+        with (
+            patch.object(run_service, "get_sandbox_driver", return_value=_RecordingDriver(side_effects, decisions)),
+            patch.object(run_service, "start_run", side_effect=lambda *args, **kwargs: wakeups.append((args, kwargs))),
+        ):
+            run_service.execute_run(run_id, worker["id"], {"topic": "proposal"})
+            r = client.post(f"/runs/{run_id}/reject", json={"reason": "Make it shorter"})
+            self.assertEqual(r.status_code, 200, r.text)
+            retry_run_id = r.json()["run_id"]
+
+        self.assertNotEqual(retry_run_id, run_id)
+        self.assertEqual(side_effects, [], "reject feedback retry must not execute the approved side effect")
+        self.assertEqual(decisions, ["proposed"])
+        self.assertEqual(len(wakeups), 1)
+
+        from db import get_db
+        with get_db() as conn:
+            retry_row = conn.execute(
+                "SELECT status, trigger_source, input_json, retry_of_run_id, retry_attempt FROM runs WHERE id = ?",
+                (retry_run_id,),
+            ).fetchone()
+            apr_row = conn.execute(
+                "SELECT status, follow_up_run_id FROM approvals WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+
+        self.assertEqual(retry_row["status"], "queued")
+        self.assertEqual(retry_row["trigger_source"], "approval_feedback")
+        self.assertEqual(retry_row["retry_of_run_id"], run_id)
+        self.assertEqual(retry_row["retry_attempt"], 1)
+        retry_inputs = json.loads(retry_row["input_json"])
+        self.assertEqual(retry_inputs["topic"], "proposal")
+        self.assertEqual(retry_inputs["_workeros_review_feedback"]["decision"], "rejected")
+        self.assertEqual(retry_inputs["_workeros_review_feedback"]["comment"], "Make it shorter")
+        self.assertEqual(apr_row["status"], "rejected")
+        self.assertIsNone(apr_row["follow_up_run_id"])
+
     # -- (d) no-approval-required path unaffected: one run, fires once, no inject --
     def test_no_approval_path_unaffected(self):
         worker = _create_worker(approvals_required=False)

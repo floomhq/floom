@@ -390,6 +390,37 @@ class RejectRequest(BaseModel):
     scope: Literal["asset", "global"] = "asset"
 
 
+def _review_feedback_input(
+    *,
+    reason: str | None,
+    annotations_json: str | None,
+    decision: Literal["rejected", "approved_with_edits"],
+    approval_id: str,
+    run_id: str,
+) -> Dict[str, Any] | None:
+    reason_text = (reason or "").strip()
+    annotations: Dict[str, Any] | None = None
+    if annotations_json:
+        try:
+            parsed = json.loads(annotations_json)
+            if isinstance(parsed, dict) and parsed:
+                annotations = parsed
+        except Exception:
+            annotations = None
+    if not reason_text and not annotations:
+        return None
+    feedback: Dict[str, Any] = {
+        "decision": decision,
+        "approval_id": approval_id,
+        "run_id": run_id,
+    }
+    if reason_text:
+        feedback["comment"] = reason_text
+    if annotations:
+        feedback["annotations"] = annotations
+    return feedback
+
+
 def _safe_workspace_id(value: str | None) -> str | None:
     text = (value or "").strip()
     if not text:
@@ -1576,8 +1607,9 @@ def reject_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
-    """Reject a PENDING_APPROVAL run. No follow-up run is spawned."""
+    """Reject a PENDING_APPROVAL run and retry with feedback when provided."""
     from db import now_iso
+    from run_service import create_run, start_run
     run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if run_row is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -1656,19 +1688,59 @@ def reject_run(
         status=RunStatus.REJECTED.value,
     )
 
-    _sse_publish(run_id, {
+    retry_run_id: str | None = None
+    feedback = _review_feedback_input(
+        reason=body.reason,
+        annotations_json=annotations_json,
+        decision="rejected",
+        approval_id=str(approval_row.get("id") or ""),
+        run_id=run_id,
+    )
+    if feedback is not None:
+        original_inputs: Dict[str, Any] = {}
+        raw_decision_input = approval_row.get("decision_input_json")
+        if raw_decision_input:
+            try:
+                parsed_inputs = json.loads(raw_decision_input)
+                if isinstance(parsed_inputs, dict):
+                    original_inputs = parsed_inputs
+            except Exception:
+                original_inputs = {}
+        retry_inputs = {
+            **original_inputs,
+            "_workeros_review_feedback": feedback,
+        }
+        worker_id = str(run_data.get("worker_id") or "")
+        try:
+            retry_run_id = create_run(
+                worker_id,
+                retry_inputs,
+                trigger_source="approval_feedback",
+                user_id=auth.user_id,
+                retry_of_run_id=run_id,
+                retry_attempt=1,
+                repos=repos,
+            )
+            start_run(retry_run_id, worker_id, retry_inputs, user_id=auth.user_id, repos=repos)
+        except Exception as exc:
+            logger.warning("Failed to spawn approval feedback retry for run %s: %s", run_id, exc, exc_info=True)
+
+    event: Dict[str, Any] = {
         "type": "approval_decided",
         "run_id": run_id,
         "decision": "rejected",
         "reason": body.reason,
-    })
+    }
+    if retry_run_id is not None:
+        event["retry_run_id"] = retry_run_id
+    _sse_publish(run_id, event)
 
     # Emit a terminal status event so live SSE consumers (the run page) observe
     # the original run leaving pending_approval. The frontend tracks
     # `type:"status"` events; without this it never sees the resolution.
     _publish_approval_terminal_status(run_id, "rejected", auth.user_id, repos)
 
-    return ActionResponse(status="rejected", run_id=run_id)
+    return ActionResponse(status="rejected", run_id=retry_run_id or run_id)
 
 
 # ---------------------------------------------------------------------------

@@ -254,6 +254,9 @@ def _run_email_html(
     output_summary: str | None = None,
     duration_label: str | None = None,
     trigger_source: str | None = None,
+    cta_url: str | None = None,
+    cta_label: str = "View full run",
+    intro_text: str | None = None,
 ) -> str:
     """Branded run-notification email. Branding is env-configurable for self-hosters:
     WORKEROS_BRAND_NAME (default "Floom"), WORKERS_FRONTEND_URL (header/footer link),
@@ -273,6 +276,8 @@ def _run_email_html(
     run_url = f"{frontend_url}/runs/{run_id}"
     manage_alerts_url = unsubscribe_header_url or f"{frontend_url}/workers/{worker_id}"
     safe_run_url = escape(run_url, quote=True)
+    safe_cta_url = escape((cta_url or run_url), quote=True)
+    safe_cta_label = escape(cta_label)
     brand_mark = (
         f'<img src="{safe_logo_url}" width="120" height="42" alt="{safe_brand}" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;">'
         if logo_url
@@ -284,9 +289,12 @@ def _run_email_html(
         else ""
     )
     footer_unsubscribe = f' &middot; <a href="{escape(manage_alerts_url, quote=True)}" style="color:#3563CC;text-decoration:underline;">Manage alerts</a>'
-    is_failed = status_label.lower() == "failed"
-    status_color = "#E5533D" if is_failed else "#2F8F5B"
-    headline = "needs attention" if is_failed else "finished successfully"
+    status_key = status_label.lower()
+    is_failed = status_key == "failed"
+    is_approval = status_key in {"pending approval", "needs approval"}
+    status_color = "#E5533D" if is_failed else "#9A6700" if is_approval else "#2F8F5B"
+    headline = "needs attention" if is_failed else "needs your approval" if is_approval else "finished successfully"
+    body_intro = intro_text or "Floom finished a worker run in your workspace. The details are below, and the full run log is ready in the dashboard."
     rows = [
         ("Worker", f"{worker_name} <span style=\"color:#62697A;\">({worker_id})</span>"),
         ("Run ID", f"<span style=\"font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;\">{run_id}</span>"),
@@ -332,9 +340,9 @@ def _run_email_html(
 <a href="{safe_frontend_url}" style="text-decoration:none;display:inline-block;margin:0 0 26px;">{brand_mark}</a>
 <p style="margin:0 0 10px;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#62697A;">Worker run</p>
 <h1 style="margin:0 0 18px;font-size:24px;line-height:1.25;font-weight:650;color:#16171A;">{worker_name} {headline}</h1>
-<p style="font-size:15px;line-height:1.6;margin:0 0 22px;color:#16171A;">Floom finished a worker run in your workspace. The details are below, and the full run log is ready in the dashboard.</p>
+<p style="font-size:15px;line-height:1.6;margin:0 0 22px;color:#16171A;">{escape(body_intro)}</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{row_html}</table>
-{summary_block}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px;"><tr><td style="border-radius:8px;background:#111317;"><a href="{safe_run_url}" style="display:inline-block;background:#111317;color:#FFFFFF;text-decoration:none;padding:13px 18px;border-radius:8px;font-size:14px;font-weight:700;line-height:1;">View full run</a></td></tr></table>
+{summary_block}<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px;"><tr><td style="border-radius:8px;background:#111317;"><a href="{safe_cta_url}" style="display:inline-block;background:#111317;color:#FFFFFF;text-decoration:none;padding:13px 18px;border-radius:8px;font-size:14px;font-weight:700;line-height:1;">{safe_cta_label}</a></td></tr></table>
 <p style="font-size:13px;line-height:1.55;margin:16px 0 0;color:#62697A;">You are receiving this because email alerts are enabled for this {safe_brand} workspace.</p>
 </td></tr>
 <tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#62697A;">
@@ -369,6 +377,8 @@ def _send_email_notification(
     output_summary: str | None = None,
     duration_ms: int | None = None,
     trigger_source: str | None = None,
+    approval_url: str | None = None,
+    approval_label: str | None = None,
 ) -> None:
     """Send a run-notification email via Resend (RESEND_API_KEY env var required)."""
     api_key = os.environ.get("RESEND_API_KEY", "").strip()
@@ -378,9 +388,18 @@ def _send_email_notification(
     if not to_addrs:
         return
 
-    from_addr = _normalize_floom_sender(os.environ.get("NOTIFY_FROM_EMAIL", FLOOM_NOTIFICATIONS_FROM))
-    status_label = "failed" if status == "failed" else "completed"
-    subject = (subject_template or "Worker {worker_name} {status}").format(
+    from_addr = _normalize_floom_sender(
+        os.environ.get("WORKEROS_EMAIL_FROM")
+        or os.environ.get("NOTIFY_FROM_EMAIL", FLOOM_NOTIFICATIONS_FROM)
+    )
+    if status == RunStatus.FAILED.value:
+        status_label = "failed"
+    elif status == RunStatus.PENDING_APPROVAL.value:
+        status_label = "needs approval"
+    else:
+        status_label = "completed"
+    default_subject = "Approval needed: {worker_name}" if status == RunStatus.PENDING_APPROVAL.value else "Worker {worker_name} {status}"
+    subject = (subject_template or default_subject).format(
         worker_name=worker_name, status=status_label, run_id=run_id
     )
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -401,6 +420,13 @@ def _send_email_notification(
         output_summary=output_summary,
         duration_label=duration_label,
         trigger_source=trigger_source,
+        cta_url=approval_url,
+        cta_label="Review approval" if approval_url else "View full run",
+        intro_text=(
+            f"{approval_label or 'This worker run'} needs your approval before Floom continues."
+            if approval_url
+            else None
+        ),
     )
 
     text_lines = [
@@ -420,6 +446,8 @@ def _send_email_notification(
         truncated = stripped[:1000]
         suffix = " … (view full run)" if len(stripped) > 1000 else ""
         text_lines += ["", "Output summary:", truncated + suffix]
+    if approval_url:
+        text_lines += ["", f"Approval: {approval_label or 'Review approval'}", approval_url]
 
     try:
         import resend
@@ -583,6 +611,98 @@ def _fire_alert_webhooks(
                 duration_ms=_run_duration_ms,
                 trigger_source=_run_trigger_source,
             )
+
+
+def _email_recipients_from_alert_row(row: dict[str, Any]) -> list[str]:
+    email_to_raw = (row.get("email_to") or "").strip()
+    if not email_to_raw:
+        return []
+    try:
+        parsed = json.loads(email_to_raw)
+    except Exception:
+        parsed = [e.strip() for e in email_to_raw.split(",") if e.strip()]
+    if not isinstance(parsed, list):
+        return []
+    return [str(e).strip() for e in parsed if str(e).strip()]
+
+
+def notify_pending_approval_via_email(
+    *,
+    owner_id: str,
+    run_id: str,
+    worker_id: str,
+    worker_name: str,
+    label: str,
+    approval_id: str,
+    repos: "Repositories",
+) -> None:
+    """Email configured worker alert recipients when a run needs approval."""
+    try:
+        from core.approval_signing import try_approval_review_url
+
+        approval_url = try_approval_review_url({
+            "id": approval_id,
+            "run_id": run_id,
+            "owner_id": owner_id,
+        })
+    except Exception:
+        logger.debug("approval email link mint failed for run %s", run_id, exc_info=True)
+        approval_url = None
+    if not approval_url:
+        logger.debug("approval email skipped for run %s because no signed review URL is available", run_id)
+        return
+
+    try:
+        alert_rows = repos.alerts.list(worker_id=worker_id)
+    except Exception:
+        logger.debug("approval email alert lookup failed for run %s", run_id, exc_info=True)
+        return
+
+    try:
+        worker_row = repos.workers.get_any(worker_id=worker_id)
+        workspace_id = (worker_row or {}).get("workspace_id")
+    except Exception:
+        workspace_id = None
+
+    allowed = None
+
+    def _approval_email_allowed() -> bool:
+        nonlocal allowed
+        if allowed is None:
+            try:
+                from services.alert_throttle import should_send_failure_alert
+
+                allowed = should_send_failure_alert(
+                    repos=repos,
+                    workspace_id=workspace_id,
+                    worker_id=worker_id,
+                    signature=f"approval_required:{approval_id}",
+                )
+            except Exception:
+                logger.debug("approval email throttle gate errored; allowing send", exc_info=True)
+                allowed = True
+        return bool(allowed)
+
+    for row in alert_rows:
+        recipients = _email_recipients_from_alert_row(row)
+        if not recipients:
+            continue
+        events = {e.strip() for e in (row.get("events") or "").split(",") if e.strip()}
+        if not events.intersection({"all", "completed", "approval_required", "pending_approval"}):
+            continue
+        if not _approval_email_allowed():
+            logger.info("Suppressing throttled approval email for worker %s run %s", worker_id, run_id)
+            continue
+        _send_email_notification(
+            to_addrs=recipients,
+            worker_name=worker_name,
+            run_id=run_id,
+            worker_id=worker_id,
+            status=RunStatus.PENDING_APPROVAL.value,
+            error=None,
+            approval_url=approval_url,
+            approval_label=label,
+        )
 
 
 def _dispatch_terminal_run_alerts(

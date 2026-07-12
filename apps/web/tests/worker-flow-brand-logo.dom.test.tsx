@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { IconSprite } from "@/components/IconSprite";
 import { WorkerFlow } from "@/components/WorkerFlow";
 
 describe("WorkerFlow connection chips", () => {
@@ -45,5 +46,22 @@ describe("WorkerFlow connection chips", () => {
     expect(chip).toBeTruthy();
     expect(chip?.getAttribute("style")).toContain("color-mix");
     expect(container.querySelector('use[href="#brand-linear"]')).toBeTruthy();
+  });
+
+  it("renders DocuSign as an engine-owned brand logo", () => {
+    const { container } = render(
+      <WorkerFlow
+        workerName="Contract Sender"
+        connections={["docusign"]}
+      />,
+    );
+
+    expect(container.querySelector('use[href="#brand-docusign"]')).toBeTruthy();
+    expect(screen.queryByText("docusign")).not.toBeInTheDocument();
+  });
+
+  it("defines the DocuSign sprite symbol used by worker and approval cards", () => {
+    const { container } = render(<IconSprite />);
+    expect(container.querySelector('symbol#brand-docusign')).toBeTruthy();
   });
 });

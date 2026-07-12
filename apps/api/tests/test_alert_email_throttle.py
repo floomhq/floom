@@ -248,6 +248,70 @@ def _repos_with_email_alert():
     )
 
 
+def test_pending_approval_email_uses_configured_recipient_and_link(monkeypatch):
+    rn = _rn()
+    monkeypatch.setenv("WORKEROS_APPROVAL_SIGNING_SECRET", "approval-email-secret")
+    monkeypatch.setenv("WORKEROS_PUBLIC_URL", "https://floom.dev/app")
+    repos = SimpleNamespace(
+        alerts=SimpleNamespace(
+            list=lambda *, worker_id: [
+                {"email_to": '["reviewer@example.com"]', "events": "completed,failed", "url": ""}
+            ]
+        ),
+        workers=SimpleNamespace(get_any=lambda *, worker_id: {"name": "Proposal Worker", "workspace_id": "ws1"}),
+        alert_throttle=_FakeThrottleRepo(),
+    )
+    calls: list = []
+
+    with patch("services.run_notifications._send_email_notification", side_effect=lambda **kw: calls.append(kw)):
+        rn.notify_pending_approval_via_email(
+            owner_id="owner_1",
+            run_id="run_approval",
+            worker_id="wk_approval",
+            worker_name="Proposal Worker",
+            label="Approve proposal",
+            approval_id="apr_approval",
+            repos=repos,
+        )
+
+    assert len(calls) == 1
+    assert calls[0]["to_addrs"] == ["reviewer@example.com"]
+    assert calls[0]["status"] == "pending_approval"
+    assert calls[0]["approval_label"] == "Approve proposal"
+    assert calls[0]["approval_url"].startswith("https://floom.dev/app/approvals/review?id=apr_approval&token=")
+    assert len(repos.alert_throttle.rows) == 1
+
+
+def test_pending_approval_email_respects_throttle(monkeypatch):
+    rn = _rn()
+    monkeypatch.setenv("WORKEROS_APPROVAL_SIGNING_SECRET", "approval-email-secret")
+    monkeypatch.setenv("WORKEROS_PUBLIC_URL", "https://floom.dev/app")
+    repos = SimpleNamespace(
+        alerts=SimpleNamespace(
+            list=lambda *, worker_id: [
+                {"email_to": '["reviewer@example.com"]', "events": "approval_required", "url": ""}
+            ]
+        ),
+        workers=SimpleNamespace(get_any=lambda *, worker_id: {"name": "Proposal Worker", "workspace_id": "ws1"}),
+        alert_throttle=_FakeThrottleRepo(),
+    )
+    calls: list = []
+
+    with patch("services.run_notifications._send_email_notification", side_effect=lambda **kw: calls.append(kw)):
+        for _ in range(2):
+            rn.notify_pending_approval_via_email(
+                owner_id="owner_1",
+                run_id="run_approval",
+                worker_id="wk_approval",
+                worker_name="Proposal Worker",
+                label="Approve proposal",
+                approval_id="apr_approval",
+                repos=repos,
+            )
+
+    assert len(calls) == 1
+
+
 def test_fire_alert_webhooks_suppresses_failure_email_when_gate_false():
     rn = _rn()
     repos = _repos_with_email_alert()
