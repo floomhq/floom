@@ -594,7 +594,7 @@ def _register_worker_from_files(
     unchanged.
     """
     from db import get_db
-    from worker_registry import discover_worker, invalidate_worker_cache
+    from worker_registry import invalidate_worker_cache
     from worker_registry import WORKERS_DIR
 
     draft_files = _validate_draft_file_bundle(files)
@@ -642,20 +642,20 @@ def _register_worker_from_files(
         raise HTTPException(status_code=400, detail=f"Failed to write files: {exc}") from exc
 
     invalidate_worker_cache()
-    worker = discover_worker(worker_id)
-    if worker is None:
+    try:
+        worker = _discovered_worker_from_dir(worker_id, target_dir)
+        with get_db() as conn:
+            _persist_discovered_workers(
+                conn,
+                [worker],
+                user_id=user_id,
+                raise_on_skip=True,
+            )
+    except Exception as exc:
         import shutil
         shutil.rmtree(target_dir, ignore_errors=True)
         invalidate_worker_cache()
-        raise HTTPException(status_code=400, detail=f"Failed to load worker {worker_id!r}")
-    with get_db() as conn:
-        try:
-            _persist_discovered_workers(conn, [worker], user_id=user_id, raise_on_skip=True)
-        except (sqlite3.IntegrityError, RuntimeError) as exc:
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            invalidate_worker_cache()
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     # Single-worker registration (PUT /files branch + worker-author hook): embed
     # the portable bundle through the canonical repo so it lands in the cloud's
@@ -679,6 +679,34 @@ def _register_worker_from_files(
         ) from exc
 
     return worker_id
+
+
+def _discovered_worker_from_dir(worker_id: str, worker_dir: Path) -> Dict[str, Any]:
+    """Load exactly one worker directory into the discover_workers row shape."""
+    from worker_registry import _load_worker_manifest
+
+    config, contract = _load_worker_manifest(worker_dir)
+    return {
+        "id": worker_id,
+        "name": config.name,
+        "description": config.description,
+        "long_description": contract.long_description,
+        "use_cases": contract.use_cases,
+        "example_input": contract.example_input,
+        "example_output": contract.example_output,
+        "how_it_works": contract.how_it_works,
+        "is_example": contract.is_example,
+        "archived": contract.archived,
+        "archive_reason": contract.archive_reason,
+        "stage": contract.stage,
+        "tags": contract.tags or [],
+        "folder": contract.folder,
+        "config": config.model_dump(),
+        "manifest": contract.model_dump(mode="json", exclude_none=True),
+        "status": "healthy",
+        "trigger_type": config.trigger.type,
+        "runner": config.runtime.runner,
+    }
 
 
 def _purge_partial_worker(

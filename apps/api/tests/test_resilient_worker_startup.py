@@ -159,6 +159,34 @@ def test_raise_on_skip_propagates_for_single_worker_save(main_env, monkeypatch):
             )
 
 
+def test_single_worker_registration_does_not_persist_foreign_worker_dirs(main_env):
+    """#1138: import/save of one worker must not ingest another worker directory.
+
+    In hosted cloud, concurrent authoring can write a different tenant's worker
+    directory into the shared worker root at the same time a public-template
+    import calls the shared registration helper. The helper must persist only the
+    bundle being imported, never every discoverable directory in WORKERS_DIR.
+    """
+    main, db, workers_dir = main_env
+    _write_worker(workers_dir, "foreign-tenant-worker-4")
+
+    ops = importlib.import_module("services.worker_registry_ops")
+    created_id = ops._register_worker_from_files(
+        [
+            main.DraftFile(path="worker.yml", content=_worker_yml("imported-template")),
+            main.DraftFile(path="run.py", content="print('imported')\n"),
+        ],
+        user_id="importer-user",
+        repos=db.get_repositories(),
+        dedupe_id=True,
+    )
+
+    repos = db.get_repositories()
+    assert created_id == "imported-template"
+    assert repos.workers.get_recipe(worker_id="imported-template") is not None
+    assert repos.workers.get_recipe(worker_id="foreign-tenant-worker-4") is None
+
+
 def test_real_fk_violation_is_skipped_not_fatal(main_env, monkeypatch):
     """End-to-end: a real dangling skill_version_id FK is skipped, not raised.
 
