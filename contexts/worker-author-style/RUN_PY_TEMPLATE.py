@@ -18,10 +18,15 @@
 #      Connections (Composio) are in `connections.json` when present. Call
 #      Composio through the Floom proxy, never by shelling out to the CLI.
 #   3. The worker writes its output file(s) under `out/` (mkdir it).
-#   4. The worker writes `result.json` IN THE WORKING DIRECTORY (NOT under out/),
+#   4. Worker memory is enabled by default and mounted at
+#      `context/memory-<worker-name>/`. Read `MEMORY.md` or the memory folder at
+#      the start of the run, and write concise durable learnings/state back
+#      before returning success. Do not store secrets, transient logs, or large
+#      raw payloads there.
+#   5. The worker writes `result.json` IN THE WORKING DIRECTORY (NOT under out/),
 #      with the EXACT schema below, on BOTH the success and the error path, then
 #      exits 0.
-#   5. The module ends with `if __name__ == "__main__": main()`.
+#   6. The module ends with `if __name__ == "__main__": main()`.
 #
 # result.json schema (written to ./result.json on success AND error):
 #   {
@@ -148,16 +153,26 @@ def main():
     # 1) Read inputs.json (always present).
     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
 
-    # 2a) SCALAR input -> use the literal value directly (do NOT open it).
+    # 2a) Worker memory (enabled by default) -> read it before doing the task.
+    #     Replace "memory-<worker-name>" with this worker's memory context name
+    #     from worker.yml, usually memory- + the worker slug.
+    #     memory_path = Path("context/memory-<worker-name>/MEMORY.md")
+    #     memory_text = (
+    #         memory_path.read_text(encoding="utf-8", errors="replace")
+    #         if memory_path.exists()
+    #         else ""
+    #     )
+    #
+    # 2b) SCALAR input -> use the literal value directly (do NOT open it).
     #     some_text = (inputs.get("text") or "").strip()
     #
-    # 2b) FILE input -> the value IS the relative path (e.g. "inputs/csv_file").
+    # 2c) FILE input -> the value IS the relative path (e.g. "inputs/csv_file").
     #     open() it directly; never os.path.join("inputs", value).
     #     csv_path = inputs["csv_file"]            # already "inputs/csv_file"
     #     with open(csv_path, "r", encoding="utf-8", errors="replace") as fh:
     #         raw = fh.read()
     #
-    # 2c) Secret (declared in exec.secrets) -> via the helper (no dotenv needed).
+    # 2d) Secret (declared in exec.secrets) -> via the helper (no dotenv needed).
     #     secret = _load_secrets()
     #     api_key = secret("OPENAI_API_KEY")
 
@@ -169,12 +184,18 @@ def main():
     # 3) Do the work.
     result_value = "replace with the real output"
 
-    # 4a) SCALAR output (kind: "scalar") -> put the LITERAL VALUE inline. NO out/
+    # 4a) If the run found a durable preference, correction, checkpoint, or
+    #     reusable fact, write it back to memory before returning success.
+    #     memory_path.parent.mkdir(parents=True, exist_ok=True)
+    #     updated_memory = memory_text.rstrip() + "\n\n- Reusable learning: ...\n"
+    #     memory_path.write_text(updated_memory.lstrip(), encoding="utf-8")
+    #
+    # 4b) SCALAR output (kind: "scalar") -> put the LITERAL VALUE inline. NO out/
     #     file, NO artifact. This is the common case (reverse/sort/sum/title-case
     #     a string or number). Match the declared output name from worker.yml.
     _write_result("success", outputs={"result": result_value})
 
-    # 4b) FILE output (kind: "file") -> write the file under out/ and put its
+    # 4c) FILE output (kind: "file") -> write the file under out/ and put its
     #     RELATIVE PATH in outputs PLUS a matching artifact. Use THIS branch ONLY
     #     when the output is declared kind: "file":
     #     os.makedirs("out", exist_ok=True)

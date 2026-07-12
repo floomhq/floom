@@ -89,6 +89,11 @@ Pick the right mode for the task:
 
 - Start with the worker title as an H1
 - Explain what inputs are received
+- Add a short memory step when memory is enabled, which is the default:
+  read `context/memory-<worker-name>/MEMORY.md` or list `context/memory-<worker-name>/`
+  at the start, then call `remember_learning({"learning": "...", "source": "..."})`
+  for durable preferences, corrections, checkpoints, or reusable facts before
+  `finish_with_outputs`
 - List the task steps as numbered items
 - End with "Call `finish_with_outputs({...})` when done" — never leave the agent without knowing how to signal completion
 - Keep it under 500 words
@@ -118,6 +123,18 @@ copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
 (load it via `read_context`); mirror `workers/csv_enricher/run.py`. Follow it exactly:
 
 - Read inputs from `inputs.json`: `inputs = json.load(open("inputs.json"))`.
+- **Worker memory** is enabled by default and mounted as a writeable context,
+  usually `context/memory-<worker-name>/MEMORY.md`. Read it near the start of
+  `main()` and write concise durable learnings/state back before returning
+  success. Do not store secrets, transient logs, one-off outputs, or large raw
+  payloads there. Example:
+  ```python
+  memory_path = Path("context/memory-my-worker/MEMORY.md")
+  memory_text = memory_path.read_text(encoding="utf-8", errors="replace") if memory_path.exists() else ""
+  # ... do the work using memory_text as prior context ...
+  memory_path.parent.mkdir(parents=True, exist_ok=True)
+  memory_path.write_text(memory_text.rstrip() + "\n\n- Reusable learning: ...\n", encoding="utf-8")
+  ```
 - **Scalar inputs** are the LITERAL value inline — use them directly, never `open()` them.
 - **File inputs**: the value IS already the relative path (e.g. `inputs/<name>`).
   `open(inputs["x"])` it directly. NEVER `os.path.join("inputs", inputs["x"])` —

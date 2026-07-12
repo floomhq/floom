@@ -914,6 +914,69 @@ def test_writeable_context_round_trip_persists_sandbox_edits(tmp_path, monkeypat
     assert (target / "state.json").read_text() == '{"after": true}\n'
 
 
+def test_writeable_context_writeback_syncs_refresh_hook(tmp_path, monkeypatch):
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    target = contexts_root / "history"
+    target.mkdir(parents=True)
+    (target / "state.json").write_bytes(b'{"before": true}\n')
+
+    class _RoundTripCommands:
+        def __init__(self, files):
+            self.files = files
+
+        def run(self, command, **_kwargs):
+            tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
+            buffer = BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w") as archive:
+                info = tarfile.TarInfo("state.json")
+                content = b'{"after": true}\n'
+                info.size = len(content)
+                archive.addfile(info, BytesIO(content))
+            self.files.write(tar_path, buffer.getvalue())
+            return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+    sync_calls = []
+
+    def _sync_hook(scope, name, source_dir, summary):
+        sync_calls.append((scope, name, source_dir, summary))
+
+    sandbox = FakeFullSandbox()
+    sandbox.files.dirs.add("/home/user/worker/context/history")
+    sandbox.commands = _RoundTripCommands(sandbox.files)
+    config = WorkerConfig(
+        id="context-sync-test",
+        name="Context Sync Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+        contexts=[{"name": "history", "writeable": True}],
+        outputs=[],
+    )
+
+    contexts_module.set_context_refresh_hook(_sync_hook)
+    try:
+        E2BSandboxDriver()._persist_writeable_contexts(
+            sandbox=sandbox,
+            workdir="/home/user/worker",
+            run_id="run_context_sync",
+            config=config,
+            log_fn=lambda *_args, **_kwargs: None,
+        )
+    finally:
+        contexts_module.set_context_refresh_hook(None)
+
+    assert (target / "state.json").read_text() == '{"after": true}\n'
+    assert sync_calls == [
+        (
+            None,
+            "history",
+            target,
+            {"source": "e2b_writeback", "run_id": "run_context_sync"},
+        )
+    ]
+
+
 def test_overlay_writeback_preserves_concurrent_external_context_files(tmp_path, monkeypatch):
     contexts_root = tmp_path / "contexts"
     monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
