@@ -14,7 +14,9 @@ from runner_sandbox.agent_driver import (  # noqa: E402
     AgentDriver,
     _AgentRunState,
     _STDOUT_CAP,
+    _TOOL_CONTEXT_MAX_CHARS,
     _TOOL_RESULT_MAX_CHARS,
+    _agent_tool_context_budget_chars,
     _truncate,
 )
 from runner_sandbox.tool_output_bounds import (  # noqa: E402
@@ -119,6 +121,20 @@ def test_many_large_tool_outputs_hit_cumulative_context_budget(tmp_path):
     assert decoded["ok"] is True
     assert "cumulative tool-output context budget" in decoded["preview"]
     assert decoded["_tool_output_bounds"][0]["hint"].startswith("rerun with fewer fetch/read calls")
+
+
+def test_agent_tool_context_budget_leaves_room_for_replayed_turns():
+    assert _agent_tool_context_budget_chars(30_000) == 15_000
+    assert _agent_tool_context_budget_chars(1_000_000) == _TOOL_CONTEXT_MAX_CHARS
+
+
+def test_log_tool_schema_caps_progress_message_size(tmp_path):
+    config = _config()
+    state = _state(tmp_path, config)
+
+    log_tool = next(tool for tool in AgentDriver()._sdk_tools(config, state) if tool.name == "log")
+
+    assert log_tool.params_json_schema["properties"]["message"]["maxLength"] == 2000
 
 
 def test_finish_with_outputs_tool_result_does_not_echo_full_output_content(tmp_path):
