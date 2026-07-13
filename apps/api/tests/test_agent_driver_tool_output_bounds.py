@@ -16,6 +16,7 @@ from runner_sandbox.agent_driver import (  # noqa: E402
     _STDOUT_CAP,
     _TOOL_CONTEXT_MAX_CHARS,
     _TOOL_RESULT_MAX_CHARS,
+    _agent_call_max_tokens,
     _agent_tool_context_budget_chars,
     _truncate,
 )
@@ -124,8 +125,15 @@ def test_many_large_tool_outputs_hit_cumulative_context_budget(tmp_path):
 
 
 def test_agent_tool_context_budget_leaves_room_for_replayed_turns():
-    assert _agent_tool_context_budget_chars(30_000) == 15_000
-    assert _agent_tool_context_budget_chars(1_000_000) == _TOOL_CONTEXT_MAX_CHARS
+    assert _agent_tool_context_budget_chars(30_000) == 3_750
+    assert _agent_tool_context_budget_chars(1_000_000) == 125_000
+    assert _agent_tool_context_budget_chars(2_000_000) == _TOOL_CONTEXT_MAX_CHARS
+
+
+def test_agent_call_max_tokens_uses_remaining_run_budget():
+    assert _agent_call_max_tokens("gpt-5-mini", 1_000_000, 30_000) == 10_000
+    assert _agent_call_max_tokens("gpt-5-mini", 8_000, 30_000) == 8_000
+    assert _agent_call_max_tokens("gpt-5-mini", 8_000, 900) == 512
 
 
 def test_log_tool_schema_caps_progress_message_size(tmp_path):
@@ -135,6 +143,15 @@ def test_log_tool_schema_caps_progress_message_size(tmp_path):
     log_tool = next(tool for tool in AgentDriver()._sdk_tools(config, state) if tool.name == "log")
 
     assert log_tool.params_json_schema["properties"]["message"]["maxLength"] == 2000
+
+
+def test_output_tool_schemas_cap_string_arguments(tmp_path):
+    config = _config()
+    state = _state(tmp_path, config)
+    tools = {tool.name: tool for tool in AgentDriver()._sdk_tools(config, state)}
+
+    assert tools["write_output"].params_json_schema["properties"]["content"]["maxLength"] == 12000
+    assert tools["finish_with_outputs"].params_json_schema["properties"]["summary"]["maxLength"] == 12000
 
 
 def test_finish_with_outputs_tool_result_does_not_echo_full_output_content(tmp_path):

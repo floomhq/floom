@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 import runner_sandbox.agent_driver as agent_module
 from models import WorkerConfig
 from runner_sandbox.agent_driver import AgentDriver
+from runner_sandbox.tool_output_bounds import TOOL_RESULT_MAX_STRING_CHARS
 from agent_driver_sdk_fakes import ScriptedAgentDriverMixin
 
 
@@ -115,7 +116,10 @@ def test_finish_with_outputs_tool_schema(tmp_path):
 
     assert schema["type"] == "object"
     assert set(schema["properties"]) == {"brief", "metadata"}
-    assert schema["properties"]["brief"] == {"type": "string"}
+    assert schema["properties"]["brief"] == {
+        "type": "string",
+        "maxLength": TOOL_RESULT_MAX_STRING_CHARS,
+    }
     assert schema["properties"]["metadata"]["type"] == "object"
     assert schema["properties"]["metadata"]["required"] == ["title"]
     assert schema["required"] == ["brief"]

@@ -49,6 +49,7 @@ from .memory_context import memory_context_name, memory_enabled
 from .tool_output_bounds import TOOL_CONTEXT_MAX_CHARS as _TOOL_CONTEXT_MAX_CHARS
 from .tool_output_bounds import TOOL_CONTEXT_MIN_RESULT_CHARS as _TOOL_CONTEXT_MIN_RESULT_CHARS
 from .tool_output_bounds import TOOL_RESULT_MAX_CHARS as _TOOL_RESULT_MAX_CHARS
+from .tool_output_bounds import TOOL_RESULT_MAX_STRING_CHARS
 from .tool_output_bounds import ToolOutputContextBudget
 from .tool_output_bounds import bound_text
 from .tool_output_bounds import bounded_mcp_tool_result_with_budget
@@ -170,8 +171,18 @@ def _agent_effective_max_tokens(model: str, requested: int) -> Optional[int]:
 def _agent_tool_context_budget_chars(max_total_tokens: int) -> int:
     """Tool outputs are replayed on each turn, so keep them below total token cap."""
 
-    per_run_cap = max(_TOOL_CONTEXT_MIN_RESULT_CHARS * 4, int(max_total_tokens) // 2)
+    per_run_cap = max(_TOOL_CONTEXT_MIN_RESULT_CHARS, int(max_total_tokens) // 8)
     return min(_TOOL_CONTEXT_MAX_CHARS, per_run_cap)
+
+
+def _agent_call_max_tokens(model: str, requested: int, remaining_total_tokens: int) -> Optional[int]:
+    """Clamp one model response so a single turn cannot spend the whole run cap."""
+
+    provider_cap = _agent_effective_max_tokens(model, requested)
+    remaining_cap = max(512, int(remaining_total_tokens) // 3)
+    if provider_cap is None:
+        return remaining_cap
+    return min(provider_cap, remaining_cap)
 
 
 def _resolve_max_output_tokens(limits: "Any") -> int:
@@ -743,9 +754,10 @@ class AgentDriver(SandboxDriver):
                 _agent_model = _llm.agent_model(resolved_model)
                 # Clamp output tokens to the provider's hard limit (caps above):
                 # Bedrock -> 64k, OpenAI -> forward only when <=16k else None.
-                _agent_max_tokens = _agent_effective_max_tokens(
+                _agent_max_tokens = _agent_call_max_tokens(
                     _agent_model,
                     _resolve_max_output_tokens(limits),
+                    max_total_tokens - total_tokens,
                 )
                 agent = Agent(
                     name=worker_id,
@@ -1299,7 +1311,7 @@ class AgentDriver(SandboxDriver):
     def _output_value_schema(self, output: Any) -> Dict[str, Any]:
         output_type = output.type
         if output_type in {"markdown", "text", "csv", "file"}:
-            return {"type": "string"}
+            return {"type": "string", "maxLength": TOOL_RESULT_MAX_STRING_CHARS}
         if output_type == "json":
             schema: Dict[str, Any] = {
                 "type": "object",
@@ -1313,7 +1325,10 @@ class AgentDriver(SandboxDriver):
             return {"type": "number"}
         if output_type == "boolean":
             return {"type": "boolean"}
-        return {"type": ["string", "object", "array", "number", "boolean"]}
+        return {
+            "type": ["string", "object", "array", "number", "boolean"],
+            "maxLength": TOOL_RESULT_MAX_STRING_CHARS,
+        }
 
     def _tool_schemas(self, config: WorkerConfig) -> list[Dict[str, Any]]:
         """Build tool schemas exposed to the agent.
@@ -1399,7 +1414,10 @@ class AgentDriver(SandboxDriver):
                         "type": "object",
                         "properties": {
                             "name": output_name_schema,
-                            "content": {"type": ["string", "object", "array", "number", "boolean"]},
+                            "content": {
+                                "type": ["string", "object", "array", "number", "boolean"],
+                                "maxLength": TOOL_RESULT_MAX_STRING_CHARS,
+                            },
                         },
                         "required": ["name", "content"],
                     },
