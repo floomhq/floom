@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -36,6 +37,14 @@ TOOL_RESULT_MAX_ARRAY_ITEMS = _positive_int_from_env(
     50,
 )
 TOOL_RESULT_MAX_DEPTH = 10
+TOOL_CONTEXT_MAX_CHARS = max(
+    TOOL_RESULT_MAX_CHARS,
+    _positive_int_from_env("WORKEROS_AGENT_TOOL_CONTEXT_MAX_CHARS", 131072),
+)
+TOOL_CONTEXT_MIN_RESULT_CHARS = max(
+    512,
+    _positive_int_from_env("WORKEROS_AGENT_TOOL_CONTEXT_MIN_RESULT_CHARS", 2048),
+)
 TOOL_RESULT_HEAD_PERCENT = min(
     90,
     max(10, _positive_int_from_env("WORKEROS_AGENT_TOOL_RESULT_HEAD_PERCENT", 50)),
@@ -43,6 +52,7 @@ TOOL_RESULT_HEAD_PERCENT = min(
 
 RECOVERY_HINT = "rerun with a narrower query/filter or a larger output budget if available"
 ARRAY_RECOVERY_HINT = "rerun with limit/page/filter"
+CUMULATIVE_RECOVERY_HINT = "rerun with fewer fetch/read calls, narrower queries, or write intermediate data to outputs"
 
 
 def _path_child(path: str, key: Any) -> str:
@@ -204,15 +214,89 @@ def bounded_tool_output_json(value: Any) -> str:
     return encoded
 
 
+@dataclass
+class ToolOutputContextBudget:
+    """Soft cumulative cap for tool output text handed back to the Agents SDK."""
+
+    max_chars: int = TOOL_CONTEXT_MAX_CHARS
+    used_chars: int = 0
+
+    @property
+    def remaining_chars(self) -> int:
+        return max(0, int(self.max_chars) - int(self.used_chars))
+
+    def reserve_json(self, serialized: str, *, ok: bool = True, path: str = "$") -> str:
+        if len(serialized) <= self.remaining_chars:
+            self.used_chars += len(serialized)
+            return serialized
+        bounded = self._cumulative_fallback(serialized, ok=ok, path=path)
+        self.used_chars += len(bounded)
+        return bounded
+
+    def _cumulative_fallback(self, serialized: str, *, ok: bool, path: str) -> str:
+        room = self.remaining_chars
+        target = min(
+            TOOL_RESULT_MAX_CHARS,
+            max(TOOL_CONTEXT_MIN_RESULT_CHARS, room),
+        )
+        metadata = {
+            "path": path,
+            "kept": 0,
+            "total": len(serialized),
+            "context_budget_chars": int(self.max_chars),
+            "context_used_chars": int(self.used_chars),
+            "hint": CUMULATIVE_RECOVERY_HINT,
+        }
+        if room <= TOOL_CONTEXT_MIN_RESULT_CHARS:
+            return json.dumps(
+                {
+                    "ok": ok,
+                    "_tool_output_bounds": [metadata],
+                    "preview": (
+                        "Tool output omitted because this run reached the cumulative "
+                        "tool-output context budget."
+                    ),
+                },
+                default=str,
+            )
+
+        preview_budget = max(64, target - 1024)
+        preview = bound_text(serialized, preview_budget)
+        metadata["kept"] = preview_budget
+        metadata["returned_chars"] = len(preview)
+        fallback = {
+            "ok": ok,
+            "_tool_output_bounds": [metadata],
+            "preview": preview,
+        }
+        encoded = json.dumps(fallback, default=str)
+        while len(encoded) > target and preview_budget > 64:
+            overflow = len(encoded) - target
+            preview_budget = max(64, preview_budget - overflow - 64)
+            fallback["_tool_output_bounds"][0]["kept"] = preview_budget
+            fallback["preview"] = bound_text(serialized, preview_budget)
+            fallback["_tool_output_bounds"][0]["returned_chars"] = len(fallback["preview"])
+            encoded = json.dumps(fallback, default=str)
+        return encoded
+
+
+def bounded_tool_output_json_with_budget(value: Any, budget: ToolOutputContextBudget | None) -> str:
+    serialized = bounded_tool_output_json(value)
+    if budget is None:
+        return serialized
+    ok = bool(value.get("ok")) if isinstance(value, dict) and "ok" in value else True
+    return budget.reserve_json(serialized, ok=ok, path="$")
+
+
 def bounded_mcp_tool_result(result: Any) -> Any:
     """Return an MCP CallToolResult with large text and structured fields capped."""
 
     metadata: list[dict[str, Any]] = []
-    content = getattr(result, "content", None)
+    content = result.get("content") if isinstance(result, dict) else getattr(result, "content", None)
     if isinstance(content, list):
         bounded_content = []
         for index, item in enumerate(content[:TOOL_RESULT_MAX_ARRAY_ITEMS]):
-            text = getattr(item, "text", None)
+            text = item.get("text") if isinstance(item, dict) else getattr(item, "text", None)
             if isinstance(text, str):
                 bounded_text = bound_text(text, TOOL_RESULT_MAX_STRING_CHARS)
                 if bounded_text != text:
@@ -247,7 +331,7 @@ def bounded_mcp_tool_result(result: Any) -> Any:
     else:
         bounded_content = content
 
-    structured = getattr(result, "structuredContent", None)
+    structured = result.get("structuredContent") if isinstance(result, dict) else getattr(result, "structuredContent", None)
     bounded_structured = structured
     if structured is not None:
         bounded_structured, structured_metadata = _bounded_value(structured, path="$.structuredContent")
@@ -260,6 +344,12 @@ def bounded_mcp_tool_result(result: Any) -> Any:
 
     if not metadata:
         return result
+    if isinstance(result, dict):
+        bounded_result = dict(result)
+        bounded_result["content"] = bounded_content
+        if bounded_structured is not None:
+            bounded_result["structuredContent"] = bounded_structured
+        return bounded_result
     if hasattr(result, "model_copy"):
         return result.model_copy(
             update={
@@ -268,3 +358,68 @@ def bounded_mcp_tool_result(result: Any) -> Any:
             }
         )
     return result
+
+
+def _mcp_result_size(result: Any) -> int:
+    try:
+        if hasattr(result, "model_dump"):
+            return len(json.dumps(result.model_dump(mode="json"), default=str))
+        return len(json.dumps(result, default=str))
+    except Exception:
+        total = 0
+        content = result.get("content") if isinstance(result, dict) else getattr(result, "content", None)
+        if isinstance(content, list):
+            for item in content:
+                text = item.get("text") if isinstance(item, dict) else getattr(item, "text", None)
+                if isinstance(text, str):
+                    total += len(text)
+        return total
+
+
+def bounded_mcp_tool_result_with_budget(result: Any, budget: ToolOutputContextBudget | None) -> Any:
+    bounded = bounded_mcp_tool_result(result)
+    if budget is None:
+        return bounded
+    size = _mcp_result_size(bounded)
+    if size <= budget.remaining_chars:
+        budget.used_chars += size
+        return bounded
+
+    warning = (
+        "Tool output omitted because this run reached the cumulative tool-output "
+        f"context budget of {budget.max_chars} chars. {CUMULATIVE_RECOVERY_HINT}."
+    )
+    budget.used_chars += len(warning)
+    content = bounded.get("content") if isinstance(bounded, dict) else getattr(bounded, "content", None)
+    if isinstance(content, list) and content:
+        first = content[0]
+        if isinstance(first, dict):
+            replacement = dict(first)
+            replacement["text"] = warning
+            new_content = [replacement]
+        elif hasattr(first, "model_copy"):
+            new_content = [first.model_copy(update={"text": warning})]
+        else:
+            new_content = content
+    else:
+        new_content = [{"type": "text", "text": warning}]
+    structured = {
+        "_tool_output_bounds": [
+            {
+                "path": "$",
+                "kept": 0,
+                "total": size,
+                "context_budget_chars": int(budget.max_chars),
+                "context_used_chars": int(budget.used_chars),
+                "hint": CUMULATIVE_RECOVERY_HINT,
+            }
+        ]
+    }
+    if isinstance(bounded, dict):
+        updated = dict(bounded)
+        updated["content"] = new_content
+        updated["structuredContent"] = structured
+        return updated
+    if hasattr(bounded, "model_copy"):
+        return bounded.model_copy(update={"content": new_content, "structuredContent": structured})
+    return bounded

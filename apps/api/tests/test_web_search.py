@@ -15,6 +15,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 import web_search  # noqa: E402
+from runner_sandbox.tool_output_bounds import TOOL_RESULT_MAX_CHARS, ToolOutputContextBudget  # noqa: E402
 
 
 def _ddgs_mock(text_results):
@@ -128,6 +129,32 @@ def test_tool_invoke_returns_results():
     body = json.loads(out)
     assert body["ok"] is True
     assert body["results"][0]["url"] == "u"
+
+
+def test_tool_invoke_bounds_large_result_payload():
+    tool = web_search.web_search_tool()
+    large_snippet = "NEWS " + ("x" * 100_000)
+    with patch("web_search.search", return_value=[{"title": "T", "url": "u", "snippet": large_snippet}]):
+        out = asyncio.run(tool.on_invoke_tool(None, json.dumps({"query": "x"})))
+    body = json.loads(out)
+
+    assert len(out) <= TOOL_RESULT_MAX_CHARS
+    assert body["ok"] is True
+    assert body["results"][0]["snippet"].startswith("NEWS ")
+    assert "kept first" in body["results"][0]["snippet"]
+    assert body["_tool_output_bounds"][0]["path"] == "$.results[0].snippet"
+
+
+def test_tool_invoke_uses_cumulative_budget():
+    budget = ToolOutputContextBudget(max_chars=2048)
+    tool = web_search.web_search_tool(budget=budget)
+    large_snippet = "NEWS " + ("x" * 100_000)
+    with patch("web_search.search", return_value=[{"title": "T", "url": "u", "snippet": large_snippet}]):
+        out = asyncio.run(tool.on_invoke_tool(None, json.dumps({"query": "x"})))
+    body = json.loads(out)
+
+    assert "cumulative tool-output context budget" in body["preview"]
+    assert body["_tool_output_bounds"][0]["hint"].startswith("rerun with fewer fetch/read calls")
 
 
 def test_tool_invoke_requires_query():

@@ -20,7 +20,9 @@ from runner_sandbox.agent_driver import (  # noqa: E402
 from runner_sandbox.tool_output_bounds import (  # noqa: E402
     TOOL_RESULT_MAX_ARRAY_ITEMS,
     TOOL_RESULT_MAX_STRING_CHARS,
+    ToolOutputContextBudget,
     bounded_mcp_tool_result,
+    bounded_mcp_tool_result_with_budget,
     bounded_tool_output_json,
 )
 
@@ -99,6 +101,26 @@ def test_large_read_file_tool_output_is_bounded_before_sdk_context(tmp_path):
     assert decoded["_tool_output_bounds"][0]["path"] == "$.content"
 
 
+def test_many_large_tool_outputs_hit_cumulative_context_budget(tmp_path):
+    config = _config()
+    state = _state(tmp_path, config)
+    state.tool_output_budget = ToolOutputContextBudget(max_chars=13_000)
+    large_text = "ARTICLE " + ("x" * (_TOOL_RESULT_MAX_CHARS * 3))
+    (state.bundle_dir / "article-1.html").write_text(large_text, encoding="utf-8")
+    (state.bundle_dir / "article-2.html").write_text(large_text, encoding="utf-8")
+
+    read_file_tool = next(tool for tool in AgentDriver()._sdk_tools(config, state) if tool.name == "read_file")
+    first_output = asyncio.run(read_file_tool.on_invoke_tool(None, json.dumps({"path": "article-1.html"})))
+    second_output = asyncio.run(read_file_tool.on_invoke_tool(None, json.dumps({"path": "article-2.html"})))
+    decoded = json.loads(second_output)
+
+    assert len(first_output) <= _TOOL_RESULT_MAX_CHARS
+    assert len(second_output) <= 4096
+    assert decoded["ok"] is True
+    assert "cumulative tool-output context budget" in decoded["preview"]
+    assert decoded["_tool_output_bounds"][0]["hint"].startswith("rerun with fewer fetch/read calls")
+
+
 def test_finish_with_outputs_tool_result_does_not_echo_full_output_content(tmp_path):
     config = _config()
     state = _state(tmp_path, config)
@@ -133,6 +155,40 @@ def test_mcp_text_tool_result_is_bounded_before_sdk_context():
     assert f"of {len(large_text)} chars" in text
     assert "z" * _TOOL_RESULT_MAX_CHARS not in text
     assert bounded.structuredContent["_tool_output_bounds"][0]["path"] == "$.content[0].text"
+
+
+def test_mcp_tool_results_share_cumulative_context_budget():
+    from mcp.types import CallToolResult, TextContent
+
+    budget = ToolOutputContextBudget(max_chars=2048)
+    large_text = "ARTICLE " + ("z" * (_TOOL_RESULT_MAX_CHARS * 2))
+    result = CallToolResult(
+        content=[
+            TextContent(type="text", text=large_text),
+        ],
+        isError=False,
+    )
+
+    bounded = bounded_mcp_tool_result_with_budget(result, budget)
+
+    assert "cumulative tool-output context budget" in bounded.content[0].text
+    assert bounded.structuredContent["_tool_output_bounds"][0]["hint"].startswith("rerun with fewer fetch/read calls")
+
+
+def test_plain_dict_mcp_tool_result_is_bounded():
+    large_text = "ARTICLE " + ("d" * (_TOOL_RESULT_MAX_CHARS * 2))
+    bounded = bounded_mcp_tool_result(
+        {
+            "content": [{"type": "text", "text": large_text}],
+            "isError": False,
+        }
+    )
+
+    text = bounded["content"][0]["text"]
+    assert len(text) < len(large_text)
+    assert text.startswith("ARTICLE ")
+    assert text.endswith("d" * (TOOL_RESULT_MAX_STRING_CHARS // 2))
+    assert bounded["structuredContent"]["_tool_output_bounds"][0]["path"] == "$.content[0].text"
 
 
 def test_long_string_bounds_keep_head_tail_and_recovery_marker():
