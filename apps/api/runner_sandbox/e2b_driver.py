@@ -872,6 +872,10 @@ _TRANSIENT_E2B_TRANSPORT_MARKERS = (
     "writeerror",
     "httpcore",
     "h2.exceptions",
+    "streamidtoolowerror",
+    "stream id too low",
+    "deque mutated during iteration",
+    "json could not be generated",
 )
 
 
@@ -1967,7 +1971,18 @@ class E2BSandboxDriver(SandboxDriver):
                         worker_id, run_id, inputs, secrets, log_fn, trace_id,
                         effective_timeout_seconds, config, connection_ids or {}, user_id,
                     )
-                except E2BTransportDroppedError as exc:
+                except E2BKeyExhaustedError:
+                    raise
+                except Exception as exc:
+                    if isinstance(exc, E2BTransportDroppedError):
+                        transport_exc = exc
+                    elif _is_transient_e2b_transport_error(exc):
+                        transport_exc = E2BTransportDroppedError(
+                            exc,
+                            phase="sandbox_attempt",
+                        )
+                    else:
+                        raise
                     if run_cancel_requested(run_id):
                         logger.info("E2B sandbox terminated by user cancel for run %s", run_id)
                         log_fn("[e2b] Sandbox terminated - run cancelled by user", "info")
@@ -1976,10 +1991,13 @@ class E2BSandboxDriver(SandboxDriver):
                             error="Cancelled by user",
                             error_code="user_cancel",
                         )
-                    detail = _sanitize_sandbox_exception_detail(str(exc)) or exc.__class__.__name__
+                    detail = (
+                        _sanitize_sandbox_exception_detail(str(transport_exc))
+                        or transport_exc.__class__.__name__
+                    )
                     logger.warning(
                         "E2B %s transport dropped for worker %s run %s on attempt %s/%s: %s",
-                        exc.phase,
+                        transport_exc.phase,
                         worker_id,
                         run_id,
                         attempt,
