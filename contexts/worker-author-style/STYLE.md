@@ -56,15 +56,17 @@ Use existing folders where possible:
 ## Worker memory
 
 Worker memory is enabled by default. The runtime mounts it as a writeable local
-context, usually `context/memory-<worker-name>/`, with `MEMORY.md` created on
-first use.
+context, usually `context/memory-<worker-id>/` unless worker.yml sets
+`memory.context`, with `MEMORY.md` created on first use.
 
 - Generated workers must read `context/<memory-context>/MEMORY.md` or the
   memory folder at the start of each run and treat a missing file as empty.
-- Generated workers must write durable learnings, user preferences, corrections,
-  checkpoints, or reusable state back to the memory folder before finishing.
+- Generated workers must write new durable learnings, user preferences,
+  corrections, checkpoints, or reusable state back to the memory folder before
+  finishing only when the run discovers something worth preserving. Leave memory
+  unchanged when there is no durable update.
 - Keep memory concise and durable. Do not store one-off outputs, large raw
-  payloads, transient logs, or secrets.
+  payloads, transient logs, duplicate notes, or secrets.
 
 ## Input field conventions
 

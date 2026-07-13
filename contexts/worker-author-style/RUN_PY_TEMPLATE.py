@@ -19,10 +19,11 @@
 #      Composio through the Floom proxy, never by shelling out to the CLI.
 #   3. The worker writes its output file(s) under `out/` (mkdir it).
 #   4. Worker memory is enabled by default and mounted at
-#      `context/memory-<worker-name>/`. Read `MEMORY.md` or the memory folder at
-#      the start of the run, and write concise durable learnings/state back
-#      before returning success. Do not store secrets, transient logs, or large
-#      raw payloads there.
+#      `context/memory-<worker-id>/` unless worker.yml sets memory.context.
+#      Read `MEMORY.md` or the memory folder at the start of the run. Write
+#      back only new durable learnings/state before returning success; leave it
+#      unchanged when there is nothing reusable. Do not store secrets, transient
+#      logs, duplicate notes, or large raw payloads there.
 #   5. The worker writes `result.json` IN THE WORKING DIRECTORY (NOT under out/),
 #      with the EXACT schema below, on BOTH the success and the error path, then
 #      exits 0.
@@ -154,9 +155,9 @@ def main():
     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
 
     # 2a) Worker memory (enabled by default) -> read it before doing the task.
-    #     Replace "memory-<worker-name>" with this worker's memory context name
-    #     from worker.yml, usually memory- + the worker slug.
-    #     memory_path = Path("context/memory-<worker-name>/MEMORY.md")
+    #     Replace "memory-<worker-id>" with this worker's memory context name
+    #     from worker.yml, usually memory- + the worker id/slug.
+    #     memory_path = Path("context/memory-<worker-id>/MEMORY.md")
     #     memory_text = (
     #         memory_path.read_text(encoding="utf-8", errors="replace")
     #         if memory_path.exists()
@@ -184,8 +185,9 @@ def main():
     # 3) Do the work.
     result_value = "replace with the real output"
 
-    # 4a) If the run found a durable preference, correction, checkpoint, or
+    # 4a) If the run found a new durable preference, correction, checkpoint, or
     #     reusable fact, write it back to memory before returning success.
+    #     Do not write one-off run details or duplicate an existing entry.
     #     memory_path.parent.mkdir(parents=True, exist_ok=True)
     #     updated_memory = memory_text.rstrip() + "\n\n- Reusable learning: ...\n"
     #     memory_path.write_text(updated_memory.lstrip(), encoding="utf-8")

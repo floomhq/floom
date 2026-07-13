@@ -90,10 +90,11 @@ Pick the right mode for the task:
 - Start with the worker title as an H1
 - Explain what inputs are received
 - Add a short memory step when memory is enabled, which is the default:
-  read `context/memory-<worker-name>/MEMORY.md` or list `context/memory-<worker-name>/`
-  at the start, then call `remember_learning({"learning": "...", "source": "..."})`
-  for durable preferences, corrections, checkpoints, or reusable facts before
-  `finish_with_outputs`
+  read `context/memory-<worker-id>/MEMORY.md` or list the configured memory
+  context at the start, then call
+  `remember_learning({"learning": "...", "source": "..."})` before
+  `finish_with_outputs` only for new durable preferences, corrections,
+  checkpoints, or reusable facts
 - List the task steps as numbered items
 - End with "Call `finish_with_outputs({...})` when done" — never leave the agent without knowing how to signal completion
 - Keep it under 500 words
@@ -124,10 +125,11 @@ copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
 
 - Read inputs from `inputs.json`: `inputs = json.load(open("inputs.json"))`.
 - **Worker memory** is enabled by default and mounted as a writeable context,
-  usually `context/memory-<worker-name>/MEMORY.md`. Read it near the start of
-  `main()` and write concise durable learnings/state back before returning
-  success. Do not store secrets, transient logs, one-off outputs, or large raw
-  payloads there. Example:
+  usually `context/memory-<worker-id>/MEMORY.md` unless worker.yml sets
+  `memory.context`. Read it near the start of `main()` and write concise
+  durable learnings/state back before returning success only when there is a new
+  reusable update. Do not store secrets, transient logs, one-off outputs,
+  duplicate notes, or large raw payloads there. Example:
   ```python
   memory_path = Path("context/memory-my-worker/MEMORY.md")
   memory_text = memory_path.read_text(encoding="utf-8", errors="replace") if memory_path.exists() else ""

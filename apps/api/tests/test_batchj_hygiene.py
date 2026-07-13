@@ -556,8 +556,12 @@ def test_worker_author_templates_teach_memory_usage() -> None:
 
     assert "Worker memory is enabled by default" in style
     assert "Generated workers must read `context/<memory-context>/MEMORY.md`" in style
-    assert "Generated workers must write durable learnings" in style
-    assert 'Path("context/memory-<worker-name>/MEMORY.md")' in run_template
+    assert "Generated workers must write new durable learnings" in style
+    assert "Leave memory" in style
+    assert "unchanged when there is no durable update" in style
+    assert 'Path("context/memory-<worker-id>/MEMORY.md")' in run_template
+    assert "Do not write one-off run details or duplicate an existing entry" in run_template
     assert "memory_path.write_text" in run_template
-    assert "read `context/memory-<worker-name>/MEMORY.md`" in skill_template
+    assert "read `context/memory-<worker-id>/MEMORY.md`" in skill_template
+    assert "only for new durable preferences" in skill_template
     assert "remember_learning" in skill_template
