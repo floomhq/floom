@@ -544,3 +544,24 @@ def test_template_teaches_scalar_vs_file_output_contract() -> None:
     assert "OUTPUT CONTRACT" in template
     assert "scalar output leaked a path string" in template
     assert 'outputs={"reversed": "olleh"}' in template
+
+
+def test_worker_author_templates_teach_memory_usage() -> None:
+    from pathlib import Path
+
+    root = Path(main.__file__).resolve().parents[2]
+    style = (root / "contexts" / "worker-author-style" / "STYLE.md").read_text()
+    run_template = (root / "contexts" / "worker-author-style" / "RUN_PY_TEMPLATE.py").read_text()
+    skill_template = (root / "workers" / "worker-author" / "SKILL.md").read_text()
+
+    assert "Worker memory is enabled by default" in style
+    assert "Generated workers must read `context/<memory-context>/MEMORY.md`" in style
+    assert "Generated workers must write new durable learnings" in style
+    assert "Leave memory" in style
+    assert "unchanged when there is no durable update" in style
+    assert 'Path("context/memory-<worker-id>/MEMORY.md")' in run_template
+    assert "Do not write one-off run details or duplicate an existing entry" in run_template
+    assert "memory_path.write_text" in run_template
+    assert "read `context/memory-<worker-id>/MEMORY.md`" in skill_template
+    assert "only for new durable preferences" in skill_template
+    assert "remember_learning" in skill_template

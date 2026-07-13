@@ -27,6 +27,7 @@ from contexts import (
     context_scope_for_user,
     iter_context_files,
     normalize_context_mount,
+    sync_refreshed_context_pack,
     use_context_scope,
 )
 from models import (
@@ -1102,7 +1103,7 @@ class AgentDriver(SandboxDriver):
         if not config or not config.contexts:
             return
 
-        with use_context_scope(context_scope_for_user(user_id)):
+        with use_context_scope(context_scope_for_user(user_id)) as context_scope:
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
@@ -1141,6 +1142,18 @@ class AgentDriver(SandboxDriver):
                         rel = existing.relative_to(dest_root).as_posix()
                         if rel not in staged_rels:
                             existing.unlink(missing_ok=True)
+                    try:
+                        sync_refreshed_context_pack(
+                            context_scope,
+                            name,
+                            dest_root,
+                            {"source": "agent_writeback"},
+                        )
+                    except Exception as sync_exc:
+                        log_fn(
+                            f"[agent] Failed to sync writeable context {name!r} after writeback: {sync_exc}",
+                            "warning",
+                        )
                     log_fn(f"[agent] Persisted writeable context {name!r}", "info")
                 except Exception as exc:
                     log_fn(f"[agent] Failed to persist writeable context {name!r}: {exc}", "warning")

@@ -286,6 +286,10 @@ def test_agent_writeback_persists_writeable_context(monkeypatch, tmp_path):
     driver = AgentDriver()
     logs: list = []
     log_fn = lambda msg, level="info": logs.append((level, msg))
+    sync_calls = []
+
+    def _sync_hook(scope, name, source_dir, summary):
+        sync_calls.append((scope, name, source_dir, summary))
 
     # Stage the packs into a per-run context root, then simulate an agent edit
     # (the agent can mutate staged files via run_command), then write back.
@@ -298,15 +302,27 @@ def test_agent_writeback_persists_writeable_context(monkeypatch, tmp_path):
     (context_root / "notes" / "new.md").write_text("brand new\n", encoding="utf-8")
     (context_root / "readonly" / "fixed.md").write_text("HACKED\n", encoding="utf-8")
 
-    driver._persist_writeable_contexts(
-        config=config, context_root=context_root, user_id="local-user", log_fn=log_fn
-    )
+    contexts.set_context_refresh_hook(_sync_hook)
+    try:
+        driver._persist_writeable_contexts(
+            config=config, context_root=context_root, user_id="local-user", log_fn=log_fn
+        )
+    finally:
+        contexts.set_context_refresh_hook(None)
 
     # Writeable pack edits persisted (edit + new file).
     assert (contexts.context_dir("notes") / "memo.md").read_text() == "v1-edited\n"
     assert (contexts.context_dir("notes") / "new.md").read_text() == "brand new\n"
     # Read-only pack untouched on disk.
     assert (contexts.context_dir("readonly") / "fixed.md").read_text() == "locked\n"
+    assert sync_calls == [
+        (
+            None,
+            "notes",
+            contexts.context_dir("notes"),
+            {"source": "agent_writeback"},
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------

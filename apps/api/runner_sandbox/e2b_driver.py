@@ -2704,7 +2704,7 @@ class E2BSandboxDriver(SandboxDriver):
         if not config or not config.contexts:
             return
 
-        with use_context_scope(context_scope_for_user(user_id)):
+        with use_context_scope(context_scope_for_user(user_id)) as context_scope:
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
@@ -2756,7 +2756,20 @@ class E2BSandboxDriver(SandboxDriver):
                     continue
                 try:
                     raw_tar = sandbox.files.read(tar_path, format="bytes", request_timeout=120)
-                    _extract_context_tar(bytes(raw_tar), _contexts_module.context_dir(name))
+                    target_dir = _contexts_module.context_dir(name)
+                    _extract_context_tar(bytes(raw_tar), target_dir)
+                    try:
+                        _contexts_module.sync_refreshed_context_pack(
+                            context_scope,
+                            name,
+                            target_dir,
+                            {"source": "e2b_writeback", "run_id": run_id},
+                        )
+                    except Exception as sync_exc:
+                        log_fn(
+                            f"[e2b] Failed to sync writeable context {name!r} after writeback: {sync_exc}",
+                            "warning",
+                        )
                     log_fn(f"[e2b] Persisted writeable context {name!r}", "info")
                 except Exception as exc:
                     log_fn(f"[e2b] Failed to persist writeable context {name!r}: {exc}", "warning")
