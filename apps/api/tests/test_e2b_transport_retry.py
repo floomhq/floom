@@ -20,6 +20,8 @@ from runner_sandbox.e2b_driver import (
 def test_transient_transport_classifier_matches_observed_errors():
     assert _is_transient_e2b_transport_error(RuntimeError("Server disconnected")) is True
     assert _is_transient_e2b_transport_error(RuntimeError("[Errno 32] Broken pipe")) is True
+    assert _is_transient_e2b_transport_error(RuntimeError("StreamIDTooLowError: 2383 is lower than 2383")) is True
+    assert _is_transient_e2b_transport_error(RuntimeError("deque mutated during iteration")) is True
 
     class ConnectionTerminated(Exception):
         def __str__(self) -> str:
@@ -68,6 +70,32 @@ def test_transport_drop_retries_with_fresh_sandbox_before_failing_run(monkeypatc
     assert result.status == "success"
     assert result.outputs == {"ok": True}
     assert any("retrying sandbox attempt 2/3" in msg for msg, _level in logs)
+
+
+def test_raw_transient_sdk_exception_retries_before_sandbox_error(monkeypatch):
+    monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_MAX_ATTEMPTS", "3")
+    monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_RETRY_BASE_SECONDS", "0")
+    monkeypatch.setattr(e2b_driver, "run_cancel_requested", lambda _run_id: False)
+
+    driver = _RetryDriver(
+        [
+            RuntimeError("StreamIDTooLowError: 2383 is lower than 2383"),
+            WorkerResult(status="success", outputs={"retried": True}),
+        ]
+    )
+
+    result = driver.run(
+        worker_id="worker-a",
+        run_id="run-a",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_args, **_kwargs: None,
+        trace_id="trace-a",
+    )
+
+    assert driver.calls == 2
+    assert result.status == "success"
+    assert result.outputs == {"retried": True}
 
 
 def test_transport_retry_exhaustion_has_distinct_terminal_code(monkeypatch):
