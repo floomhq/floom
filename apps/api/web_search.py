@@ -67,21 +67,23 @@ def search(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> List[Dict[str,
     return _ddg_search(query, n)
 
 
-def web_search_tool(max_results: int = DEFAULT_MAX_RESULTS) -> Any:
+def web_search_tool(max_results: int = DEFAULT_MAX_RESULTS, budget: Any = None) -> Any:
     """Build the Agents SDK ``FunctionTool`` for web search (works on every provider)."""
     from agents import FunctionTool
 
     async def _invoke(_ctx: Any, raw_args: str) -> str:
+        from runner_sandbox.tool_output_bounds import bounded_tool_output_json_with_budget
+
         # Never raise: tool errors are returned as output so the agent can recover.
         try:
             args = json.loads(raw_args or "{}")
             query = (args.get("query") or "").strip()
             if not query:
-                return json.dumps({"ok": False, "error": "query is required"})
+                return bounded_tool_output_json_with_budget({"ok": False, "error": "query is required"}, budget)
             results = search(query, max_results=args.get("max_results") or max_results)
-            return json.dumps({"ok": True, "results": results})
+            return bounded_tool_output_json_with_budget({"ok": True, "results": results}, budget)
         except Exception as exc:  # noqa: BLE001 - surface as tool output, never crash the run
-            return json.dumps({"ok": False, "error": str(exc)})
+            return bounded_tool_output_json_with_budget({"ok": False, "error": str(exc)}, budget)
 
     return FunctionTool(
         name="web_search",

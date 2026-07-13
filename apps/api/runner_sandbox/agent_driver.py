@@ -17,7 +17,7 @@ import subprocess
 import threading
 import time as _time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -46,9 +46,13 @@ from .base import SandboxDriver
 from .cancellation import cancel_flag_db_read_errors_total, run_cancel_requested
 from .e2b_upload import upload_tree_tarball
 from .memory_context import memory_context_name, memory_enabled
+from .tool_output_bounds import TOOL_CONTEXT_MAX_CHARS as _TOOL_CONTEXT_MAX_CHARS
 from .tool_output_bounds import TOOL_RESULT_MAX_CHARS as _TOOL_RESULT_MAX_CHARS
+from .tool_output_bounds import ToolOutputContextBudget
 from .tool_output_bounds import bound_text
+from .tool_output_bounds import bounded_mcp_tool_result_with_budget
 from .tool_output_bounds import bounded_tool_output_json
+from .tool_output_bounds import bounded_tool_output_json_with_budget
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
 
@@ -380,6 +384,7 @@ class _AgentRunState:
     connection_ids: Dict[str, str]
     user_id: str | None = None
     finished: bool = False
+    tool_output_budget: ToolOutputContextBudget = field(default_factory=ToolOutputContextBudget)
 
 
 # Backwards-compatible alias: the shared capability module now owns this error
@@ -691,6 +696,12 @@ class AgentDriver(SandboxDriver):
         run_number = 1
         last_result: Any = None
         mcp_servers: list[Any] = []
+        state.tool_output_budget = ToolOutputContextBudget(
+            max_chars=min(
+                _TOOL_CONTEXT_MAX_CHARS,
+                max(_TOOL_RESULT_MAX_CHARS, max_total_tokens * 2),
+            )
+        )
 
         # PostHog LLM Observability (Track A): one trace per run, captured
         # host-side (this loop runs in the API process; provider creds never
@@ -706,6 +717,8 @@ class AgentDriver(SandboxDriver):
 
         try:
             mcp_servers = await self._connect_mcp_servers(config, secrets, log_fn)
+            for server in mcp_servers:
+                self._wrap_mcp_server_context_budget(server, state.tool_output_budget)
             while True:
                 if self._cancel_requested(run_id):
                     log_fn("Cancel requested; stopping agent loop", "info")
@@ -1515,6 +1528,22 @@ class AgentDriver(SandboxDriver):
     def _mcp_connections(self, config: WorkerConfig) -> list[Any]:
         return agent_capabilities.mcp_connections(config)
 
+    def _wrap_mcp_server_context_budget(self, server: Any, budget: ToolOutputContextBudget) -> Any:
+        if not hasattr(server, "call_tool"):
+            return server
+        original_call_tool = server.call_tool
+
+        async def _call_tool_budgeted(
+            tool_name: str,
+            arguments: dict[str, Any] | None,
+            meta: dict[str, Any] | None = None,
+        ) -> Any:
+            result = await original_call_tool(tool_name, arguments, meta=meta)
+            return bounded_mcp_tool_result_with_budget(result, budget)
+
+        server.call_tool = _call_tool_budgeted
+        return server
+
     def _sdk_tools(self, config: WorkerConfig, state: _AgentRunState) -> list[Any]:
         from agents import FunctionTool
         from web_search import web_search_tool
@@ -1523,7 +1552,7 @@ class AgentDriver(SandboxDriver):
         for tool in self._tool_schemas(config):
             tool_type = tool.get("type")
             if tool_type == "web_search":
-                sdk_tools.append(web_search_tool())
+                sdk_tools.append(web_search_tool(budget=state.tool_output_budget))
                 continue
             if tool_type != "function":
                 continue
@@ -1547,7 +1576,7 @@ class AgentDriver(SandboxDriver):
                         log_fn=state.log_fn,
                         timeout_seconds=state.timeout_seconds,
                     )
-                    return _tool_output_json(result)
+                    return bounded_tool_output_json_with_budget(result, state.tool_output_budget)
                 result = self._handle_tool(
                     name=tool_name,
                     args=args,
@@ -1570,7 +1599,7 @@ class AgentDriver(SandboxDriver):
                 )
                 if tool_name == "finish_with_outputs" and result.get("ok"):
                     state.finished = True
-                return _tool_output_json(result)
+                return bounded_tool_output_json_with_budget(result, state.tool_output_budget)
 
             sdk_tools.append(
                 FunctionTool(
