@@ -79,6 +79,8 @@ _OOM_MARKERS = (
 )
 _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
+_sandbox_create_pace_lock = threading.Lock()
+_last_sandbox_create_at = 0.0
 
 
 @dataclass
@@ -221,6 +223,16 @@ _DEFAULT_E2B_DENY_OUT = (
 
 class E2BKeyExhaustedError(RuntimeError):
     """Raised when every configured E2B key is quota/rate-limit exhausted."""
+
+
+class E2BTransportDroppedError(RuntimeError):
+    """Raised when the E2B command/create transport drops before a worker result."""
+
+    def __init__(self, exc: Exception, *, phase: str):
+        self.original = exc
+        self.phase = phase
+        detail = _sanitize_sandbox_exception_detail(str(exc).strip() or exc.__class__.__name__)
+        super().__init__(detail or exc.__class__.__name__)
 
 
 _WORKER_AUTHOR_ID = "worker-author"
@@ -847,6 +859,79 @@ def _exception_text(exc: Exception) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
+_TRANSIENT_E2B_TRANSPORT_MARKERS = (
+    "server disconnected",
+    "connectionterminated",
+    "connection terminated",
+    "broken pipe",
+    "errno 32",
+    "connection reset",
+    "connection aborted",
+    "remoteprotocolerror",
+    "readerror",
+    "writeerror",
+    "httpcore",
+    "h2.exceptions",
+)
+
+
+def _is_transient_e2b_transport_error(exc: Exception) -> bool:
+    text = _exception_text(exc).lower()
+    if any(marker in text for marker in _TRANSIENT_E2B_TRANSPORT_MARKERS):
+        return True
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if isinstance(cause, Exception) and cause is not exc:
+        return _is_transient_e2b_transport_error(cause)
+    return False
+
+
+def _e2b_transport_max_attempts() -> int:
+    try:
+        return max(1, int(os.environ.get("WORKEROS_E2B_TRANSPORT_MAX_ATTEMPTS", "3")))
+    except ValueError:
+        return 3
+
+
+def _e2b_transport_retry_base_delay_seconds() -> float:
+    try:
+        return max(0.0, float(os.environ.get("WORKEROS_E2B_TRANSPORT_RETRY_BASE_SECONDS", "2")))
+    except ValueError:
+        return 2.0
+
+
+def _e2b_transport_retry_delay_seconds(attempt: int) -> float:
+    base = _e2b_transport_retry_base_delay_seconds()
+    return min(base * (2 ** max(0, attempt - 1)), 30.0)
+
+
+def _e2b_create_min_interval_seconds() -> float:
+    try:
+        return max(0.0, float(os.environ.get("WORKEROS_E2B_CREATE_MIN_INTERVAL_SECONDS", "1.0")))
+    except ValueError:
+        return 1.0
+
+
+def _pace_sandbox_create(log_fn: Callable[[str, str], None]) -> None:
+    """Process-local pacing for E2B create calls.
+
+    E2B documents sandbox creation as a rate-limited operation separate from
+    concurrent sandbox count. The queue already caps concurrent runs; this keeps
+    cron-edge bursts from calling Sandbox.create at the exact same instant.
+    """
+    global _last_sandbox_create_at
+    min_interval = _e2b_create_min_interval_seconds()
+    if min_interval <= 0:
+        return
+    with _sandbox_create_pace_lock:
+        now = time.monotonic()
+        wait_seconds = (_last_sandbox_create_at + min_interval) - now
+        if wait_seconds > 0:
+            log_fn(f"[e2b] Pacing sandbox create for {wait_seconds:.2f}s", "debug")
+            time.sleep(wait_seconds)
+            now = time.monotonic()
+        _last_sandbox_create_at = now
+
+
 def _coerce_output_text(value: Any) -> str:
     if value is None:
         return ""
@@ -1043,22 +1128,40 @@ def _create_sandbox_with_key_fallback(
 ) -> Any:
     last_quota_error: Exception | None = None
     total = len(api_keys)
+    max_transport_attempts = _e2b_transport_max_attempts()
 
     for index, api_key in enumerate(api_keys, start=1):
-        try:
-            create_kwargs: dict[str, Any] = {
-                "api_key": api_key,
-                "timeout": timeout,
-                "envs": envs,
-                "network": network,
-            }
-            if template:
-                create_kwargs["template"] = template
-            return sandbox_cls.create(**create_kwargs)
-        except Exception as exc:
-            if not _is_e2b_quota_or_rate_limit_error(exc):
+        for attempt in range(1, max_transport_attempts + 1):
+            try:
+                create_kwargs: dict[str, Any] = {
+                    "api_key": api_key,
+                    "timeout": timeout,
+                    "envs": envs,
+                    "network": network,
+                }
+                if template:
+                    create_kwargs["template"] = template
+                _pace_sandbox_create(log_fn)
+                return sandbox_cls.create(**create_kwargs)
+            except Exception as exc:
+                if _is_e2b_quota_or_rate_limit_error(exc):
+                    last_quota_error = exc
+                    break
+                if _is_transient_e2b_transport_error(exc):
+                    if attempt >= max_transport_attempts:
+                        raise E2BTransportDroppedError(exc, phase="sandbox_create") from exc
+                    delay = _e2b_transport_retry_delay_seconds(attempt)
+                    log_fn(
+                        "[e2b] Sandbox create transport dropped; "
+                        f"retrying create attempt {attempt + 1}/{max_transport_attempts} "
+                        f"in {delay:.1f}s",
+                        "warning",
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
                 raise
-            last_quota_error = exc
+        if last_quota_error is not None:
             if index < total:
                 log_fn(
                     f"[e2b] E2B key {index}/{total} hit a quota/billing/rate limit; "
@@ -1857,10 +1960,52 @@ class E2BSandboxDriver(SandboxDriver):
                 "warning",
             )
         try:
-            return self._run_in_sandbox(
-                worker_id, run_id, inputs, secrets, log_fn, trace_id,
-                effective_timeout_seconds, config, connection_ids or {}, user_id,
-            )
+            max_transport_attempts = _e2b_transport_max_attempts()
+            for attempt in range(1, max_transport_attempts + 1):
+                try:
+                    return self._run_in_sandbox(
+                        worker_id, run_id, inputs, secrets, log_fn, trace_id,
+                        effective_timeout_seconds, config, connection_ids or {}, user_id,
+                    )
+                except E2BTransportDroppedError as exc:
+                    if run_cancel_requested(run_id):
+                        logger.info("E2B sandbox terminated by user cancel for run %s", run_id)
+                        log_fn("[e2b] Sandbox terminated - run cancelled by user", "info")
+                        return WorkerResult(
+                            status="cancelled",
+                            error="Cancelled by user",
+                            error_code="user_cancel",
+                        )
+                    detail = _sanitize_sandbox_exception_detail(str(exc)) or exc.__class__.__name__
+                    logger.warning(
+                        "E2B %s transport dropped for worker %s run %s on attempt %s/%s: %s",
+                        exc.phase,
+                        worker_id,
+                        run_id,
+                        attempt,
+                        max_transport_attempts,
+                        detail,
+                    )
+                    if attempt >= max_transport_attempts:
+                        return WorkerResult(
+                            status="error",
+                            error=(
+                                "E2B sandbox transport disconnected before the worker produced "
+                                f"a result after {max_transport_attempts} attempt(s): {detail}"
+                            ),
+                            error_code="sandbox_transport_retry_exhausted",
+                            retryable=False,
+                        )
+                    delay = _e2b_transport_retry_delay_seconds(attempt)
+                    log_fn(
+                        "[e2b] Sandbox transport disconnected before result; "
+                        f"retrying sandbox attempt {attempt + 1}/{max_transport_attempts} "
+                        f"in {delay:.1f}s",
+                        "warning",
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
         except E2BKeyExhaustedError as exc:
             logger.warning(
                 "E2B sandbox quota exhausted for worker %s run %s: %s",
@@ -2383,6 +2528,56 @@ class E2BSandboxDriver(SandboxDriver):
                 _cmd_envs["WORKEROS_RUN_TOKEN"] = _worker_call_token
                 _cmd_envs["WORKEROS_CALL_DEPTH"] = str(_self_depth)  # #994
             perf.mark("command_env")
+            result_path = f"{workdir}/result.json"
+
+            def _finish_from_result_data(result_data: Dict[str, Any]) -> WorkerResult:
+                nonlocal keep_warm
+                outputs = result_data.get("outputs", {})
+                result_status = result_data.get("status", "success")
+                result_error, result_error_code = _worker_result_failure_fields(result_data)
+                result_artifacts = result_data.get("artifacts", [])
+                if not isinstance(result_artifacts, list):
+                    result_artifacts = []
+                collected_artifacts = self._collect_sandbox_artifacts(
+                    sandbox=sandbox,
+                    workdir=workdir,
+                    run_id=run_id,
+                    result_artifacts=result_artifacts,
+                    config=config,
+                    outputs=outputs,
+                    log_fn=log_fn,
+                )
+                artifacts = _merge_artifacts(result_artifacts, collected_artifacts)
+                if result_status not in ("error", "failed"):
+                    self._persist_writeable_contexts(
+                        sandbox=sandbox,
+                        workdir=workdir,
+                        run_id=run_id,
+                        config=config,
+                        log_fn=log_fn,
+                        user_id=user_id,
+                        mounted_contexts=mounted_contexts,
+                        writeable_contexts=writeable_contexts,
+                    )
+                    keep_warm = bool(warm_key) and _cleanup_run_state(
+                        sandbox,
+                        workdir,
+                        log_fn=log_fn,
+                    )
+
+                log_fn("[e2b] Run completed successfully", "info")
+                decision_required = result_data.get("decision_required")
+                if not isinstance(decision_required, dict):
+                    decision_required = None
+                return WorkerResult(
+                    status=result_status,
+                    outputs=outputs,
+                    artifacts=artifacts,
+                    error=result_error,
+                    error_code=result_error_code,
+                    decision_required=decision_required,
+                )
+
             perf.log(log_fn, "e2b.before_worker_command")
             try:
                 proc = sandbox.commands.run(
@@ -2403,12 +2598,30 @@ class E2BSandboxDriver(SandboxDriver):
                     _emit_command_output(exc_stderr, "warning", "[e2b] stderr: ", log_fn)
                 exc_exit_code = _exception_exit_code(exc)
                 if exc_exit_code is None:
+                    result_data, parse_error = _read_result_json(
+                        sandbox,
+                        result_path,
+                        log_fn,
+                        worker_stdout="".join(streamed_stdout) or exc_stdout,
+                        worker_stderr="".join(streamed_stderr) or exc_stderr,
+                    )
+                    if result_data is not None:
+                        log_fn(
+                            "[e2b] Worker result.json was present after a command transport drop; "
+                            "using the worker result without retrying",
+                            "warning",
+                        )
+                        return _finish_from_result_data(result_data)
+                    if parse_error is not None and getattr(parse_error, "error_code", None) != "missing_result":
+                        return parse_error
                     diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
                     log_fn(
                         "[e2b] Sandbox command transport failed before an exit code; "
                         f"memory diagnostics: {diagnostics}",
                         "warning",
                     )
+                    if _is_transient_e2b_transport_error(exc):
+                        raise E2BTransportDroppedError(exc, phase="worker_command") from exc
                     raise
                 if _looks_like_sandbox_oom(exc_exit_code, exc_stdout, exc_stderr):
                     diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
@@ -2510,7 +2723,6 @@ class E2BSandboxDriver(SandboxDriver):
             # Read + parse result.json. Distinct, actionable errors for each
             # failure mode (missing file / oversized / invalid JSON / not-a-dict
             # / non-dict outputs) - see _read_result_json (audit P1).
-            result_path = f"{workdir}/result.json"
             result_data, parse_error = _read_result_json(
                 sandbox,
                 result_path,
@@ -2538,47 +2750,7 @@ class E2BSandboxDriver(SandboxDriver):
                     parse_error.error = _append_memory_diagnostics(parse_error.error or "", diagnostics)
                 return parse_error
 
-            outputs = result_data.get("outputs", {})
-            result_status = result_data.get("status", "success")
-            result_error, result_error_code = _worker_result_failure_fields(result_data)
-            result_artifacts = result_data.get("artifacts", [])
-            if not isinstance(result_artifacts, list):
-                result_artifacts = []
-            collected_artifacts = self._collect_sandbox_artifacts(
-                sandbox=sandbox,
-                workdir=workdir,
-                run_id=run_id,
-                result_artifacts=result_artifacts,
-                config=config,
-                outputs=outputs,
-                log_fn=log_fn,
-            )
-            artifacts = _merge_artifacts(result_artifacts, collected_artifacts)
-            if result_status not in ("error", "failed"):
-                self._persist_writeable_contexts(
-                    sandbox=sandbox,
-                    workdir=workdir,
-                    run_id=run_id,
-                    config=config,
-                    log_fn=log_fn,
-                    user_id=user_id,
-                    mounted_contexts=mounted_contexts,
-                    writeable_contexts=writeable_contexts,
-                )
-                keep_warm = bool(warm_key) and _cleanup_run_state(sandbox, workdir, log_fn=log_fn)
-
-            log_fn("[e2b] Run completed successfully", "info")
-            decision_required = result_data.get("decision_required")
-            if not isinstance(decision_required, dict):
-                decision_required = None
-            return WorkerResult(
-                status=result_status,
-                outputs=outputs,
-                artifacts=artifacts,
-                error=result_error,
-                error_code=result_error_code,
-                decision_required=decision_required,
-            )
+            return _finish_from_result_data(result_data)
 
         finally:
             _unregister_sandbox(run_id, sandbox)

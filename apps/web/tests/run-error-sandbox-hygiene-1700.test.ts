@@ -22,6 +22,14 @@ describe("humanizeRunError sandbox hygiene (#1700)", () => {
     expect(humanizeRunError("sandbox_error: anything raw")).toBe(SANDBOX_HEADLINE);
   });
 
+  it("collapses exhausted sandbox transport retries to the calm headline", () => {
+    expect(
+      humanizeRunError(
+        "sandbox_transport_retry_exhausted: E2B sandbox transport disconnected before the worker produced a result after 3 attempt(s): Server disconnected",
+      ),
+    ).toBe(SANDBOX_HEADLINE);
+  });
+
   it("strips a bare library repr from a codeless passthrough error", () => {
     expect(humanizeRunError("Connection dropped: <ConnectionTerminated error_code:1>")).toBe(
       "Connection dropped: ConnectionTerminated",
