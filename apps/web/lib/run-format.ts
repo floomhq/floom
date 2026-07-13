@@ -95,6 +95,7 @@ const ERROR_CODE_LABELS: Record<string, string> = {
   execution_failed: "Execution failed",
   sandbox_error: "Sandbox error",
   e2b_sandbox_error: "Sandbox error",
+  sandbox_transport_retry_exhausted: "Sandbox error",
 };
 
 // Calm headline for the sandbox-error code, mirroring the backend
@@ -149,7 +150,7 @@ export function humanizeRunError(error: string | null | undefined): string {
     const rest = codeMatch[2].trim();
     // Sandbox errors carry raw transport-layer detail (h2 reprs, template ids).
     // Never surface the detail; collapse to the calm headline (#1700).
-    if (code === "e2b_sandbox_error" || code === "sandbox_error") {
+    if (code === "e2b_sandbox_error" || code === "sandbox_error" || code === "sandbox_transport_retry_exhausted") {
       return SANDBOX_HEADLINE;
     }
     const label = ERROR_CODE_LABELS[code];

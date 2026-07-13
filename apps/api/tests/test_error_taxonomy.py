@@ -118,6 +118,7 @@ def test_worker_error_fallback_constant():
 def test_new_codes_have_real_categories():
     assert run_metrics.classify_failure(error_code="worker_error") == "crash"
     assert run_metrics.classify_failure(error_code="e2b_sandbox_error") == "crash"
+    assert run_metrics.classify_failure(error_code="sandbox_transport_retry_exhausted") == "crash"
     assert run_metrics.classify_failure(error_code="sandbox_crash") == "crash"
     assert run_metrics.classify_failure(error_code="upstream_http_4xx") == "network"
     assert run_metrics.classify_failure(error_code="upstream_http_5xx") == "network"

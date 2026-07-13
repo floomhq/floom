@@ -108,6 +108,7 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "mcp_connect_failed": _CONNECTION_HEADLINE,
     # Sandbox / timeout / resource.
     "e2b_sandbox_error": _SANDBOX_HEADLINE,
+    "sandbox_transport_retry_exhausted": _SANDBOX_HEADLINE,
     "timeout": _TIMEOUT_HEADLINE,
     "sandbox_oom": "This worker ran out of memory and was stopped. Try simplifying the input.",
     "token_cap_exceeded": "This worker reached its output limit and was stopped. Try simplifying the task.",
