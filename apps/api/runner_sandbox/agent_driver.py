@@ -47,6 +47,7 @@ from .cancellation import cancel_flag_db_read_errors_total, run_cancel_requested
 from .e2b_upload import upload_tree_tarball
 from .memory_context import memory_context_name, memory_enabled
 from .tool_output_bounds import TOOL_CONTEXT_MAX_CHARS as _TOOL_CONTEXT_MAX_CHARS
+from .tool_output_bounds import TOOL_CONTEXT_MIN_RESULT_CHARS as _TOOL_CONTEXT_MIN_RESULT_CHARS
 from .tool_output_bounds import TOOL_RESULT_MAX_CHARS as _TOOL_RESULT_MAX_CHARS
 from .tool_output_bounds import ToolOutputContextBudget
 from .tool_output_bounds import bound_text
@@ -164,6 +165,13 @@ def _agent_effective_max_tokens(model: str, requested: int) -> Optional[int]:
     if "bedrock" in str(model or "").lower():
         return min(requested, _BEDROCK_MAX_OUTPUT_CAP)
     return requested if requested <= _OPENAI_MAX_OUTPUT_CAP else None
+
+
+def _agent_tool_context_budget_chars(max_total_tokens: int) -> int:
+    """Tool outputs are replayed on each turn, so keep them below total token cap."""
+
+    per_run_cap = max(_TOOL_CONTEXT_MIN_RESULT_CHARS * 4, int(max_total_tokens) // 2)
+    return min(_TOOL_CONTEXT_MAX_CHARS, per_run_cap)
 
 
 def _resolve_max_output_tokens(limits: "Any") -> int:
@@ -697,10 +705,7 @@ class AgentDriver(SandboxDriver):
         last_result: Any = None
         mcp_servers: list[Any] = []
         state.tool_output_budget = ToolOutputContextBudget(
-            max_chars=min(
-                _TOOL_CONTEXT_MAX_CHARS,
-                max(_TOOL_RESULT_MAX_CHARS, max_total_tokens * 2),
-            )
+            max_chars=_agent_tool_context_budget_chars(max_total_tokens)
         )
 
         # PostHog LLM Observability (Track A): one trace per run, captured
@@ -1475,11 +1480,11 @@ class AgentDriver(SandboxDriver):
                 "type": "function",
                 "function": {
                     "name": "log",
-                    "description": "Emit a structured log message.",
+                    "description": "Emit a short structured progress log message.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "message": {"type": "string"},
+                            "message": {"type": "string", "maxLength": 2000},
                             "level": {"type": "string", "enum": ["debug", "info", "warning", "error"]},
                         },
                         "required": ["message"],
