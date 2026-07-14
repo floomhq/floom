@@ -3,35 +3,44 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC = readFileSync(join(__dirname, "../app/workers/WorkersCollection.tsx"), "utf8");
+const EMPTY_STATE_SRC = SRC.slice(
+  SRC.indexOf("const WORKERS_EMPTY_ONBOARD_PROMPT"),
+  SRC.indexOf("export type WorkersExtraView"),
+);
 
 describe("workers empty state quick start", () => {
-  it("leads with the template gallery as the primary activation path", () => {
+  it("keeps the first-worker title and one-line help", () => {
     expect(SRC).toContain("Create your first worker");
-    // PRIMARY: start from a template (the gallery's Add-to-workspace path).
-    expect(SRC).toContain("Start from a template");
-    expect(SRC).toContain("Browse templates");
-    expect(SRC).toContain("/templates`");
-    expect(SRC).toContain("getPublicSiteOrigin");
+    expect(SRC).toContain(
+      "Workers are YAML-defined automations with code, tools, secrets, memory, and run history.",
+    );
   });
 
-  it("keeps the coding-agent / MCP path as the secondary quickstart", () => {
-    expect(SRC).toContain("Build one from your coding agent");
-    expect(SRC).toContain("Install the Floom MCP server in Claude Code, Codex, or Cursor");
-    expect(SRC).toContain("npx -y @floomhq/floom mcp install");
-    expect(SRC).not.toContain("npm install -g @floomhq/floom");
-    expect(SRC).not.toContain("floom login");
-    expect(SRC).toContain("/connections/mcp?from_install=workers-empty");
-    expect(SRC).not.toContain("github.com/floomhq/floom/blob/main/apps/mcp/README.md");
-    expect(SRC).toContain("Install MCP");
-    expect(SRC).toContain("https://floom.dev/v3/docs/worker-yml");
-    expect(SRC).not.toContain("github.com/floomhq/floom/blob/main/docs/AUTHORING.md");
+  it("presents one copyable onboarding prompt as the hero action", () => {
+    expect(EMPTY_STATE_SRC).toContain("Get started, paste this into Claude Code or Cursor:");
+    expect(EMPTY_STATE_SRC).toContain(
+      "Read https://floom.dev/onboard and walk me through setting up Floom.",
+    );
+    expect(EMPTY_STATE_SRC).toContain("navigator.clipboard.writeText(WORKERS_EMPTY_ONBOARD_PROMPT)");
+    expect(EMPTY_STATE_SRC).toContain('aria-label={copied ? "Copied" : "Copy prompt"}');
+    expect(EMPTY_STATE_SRC).toContain('copied ? "Copied" : "Copy prompt"');
   });
 
-  it("shows concrete worker prompt examples instead of the old empty copy", () => {
-    expect(SRC).toContain("summarizes my latest 5 Gmail emails every hour");
-    expect(SRC).toContain("checks new Linear issues every morning");
-    expect(SRC).toContain("watches a Google Sheet for new rows");
-    expect(SRC).not.toContain("Dashboard worker creation is temporarily unavailable");
+  it("removes every competing empty-state action and example", () => {
+    expect(SRC).not.toContain("WORKER_PROMPT_EXAMPLES");
+    expect(SRC).not.toContain("summarizes my latest 5 Gmail emails");
+    expect(EMPTY_STATE_SRC).not.toContain("npx -y @floomhq/floom mcp install");
+    expect(EMPTY_STATE_SRC).not.toContain("Install MCP");
+    expect(EMPTY_STATE_SRC).not.toContain("Worker guide");
+    expect(EMPTY_STATE_SRC).not.toContain("Emily");
+    expect(EMPTY_STATE_SRC).not.toContain("Start from a template");
+    expect(EMPTY_STATE_SRC).not.toContain("Build one from your coding agent");
+  });
+
+  it("keeps one quiet templates link on the public-site origin", () => {
+    expect(SRC).toContain("`${getPublicSiteOrigin()}/templates`");
+    expect(EMPTY_STATE_SRC).toContain("or browse templates");
+    expect(EMPTY_STATE_SRC).toContain("href={WORKERS_EMPTY_TEMPLATES_URL}");
   });
 
   it("keeps filtered-empty search results separate from first-worker onboarding", () => {
@@ -40,9 +49,12 @@ describe("workers empty state quick start", () => {
     expect(SRC).toContain("Clear the search or filters to see your workers.");
   });
 
-  it("keeps the quick start visually aligned with collection empty states", () => {
+  it("uses one full-width borderless cool-gray mono block", () => {
     expect(SRC).toContain("max-w-[620px] flex-col items-center");
-    expect(SRC).not.toContain("rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] p-4");
-    expect(SRC).toContain('className="c-vpill"');
+    expect(EMPTY_STATE_SRC).toContain("w-full items-center justify-between");
+    expect(EMPTY_STATE_SRC).toContain("border-0 bg-[#F3F4F6]");
+    expect(EMPTY_STATE_SRC).toContain("font-mono");
+    expect(EMPTY_STATE_SRC).not.toContain("[border:");
+    expect(EMPTY_STATE_SRC).not.toContain("c-vpill");
   });
 });
