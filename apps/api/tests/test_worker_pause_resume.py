@@ -110,6 +110,34 @@ def test_pause_clears_next_run_at(client_and_main):
     assert row["next_run_at"] is None
 
 
+def test_resume_clears_auto_pause_manifest_and_worker_yml(client_and_main):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    from services.run_pause_policy import _persist_worker_paused_flag
+
+    _persist_worker_paused_flag(
+        "pausable",
+        repos=repos,
+        user_id="local-user",
+    )
+    paused = repos.workers.get(user_id="local-user", worker_id="pausable")
+    assert paused["enabled"] is False
+    assert paused["manifest"]["paused"] is True
+    assert paused["manifest"]["enabled"] is False
+
+    resumed = client.post("/workers/pausable/resume")
+
+    assert resumed.status_code == 200, resumed.text
+    stored = repos.workers.get(user_id="local-user", worker_id="pausable")
+    assert stored["enabled"] is True
+    assert stored["manifest"]["paused"] is False
+    assert stored["manifest"]["enabled"] is True
+    assert "archive_reason" not in stored["manifest"]
+    worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
+    content = worker_yml.read_text(encoding="utf-8")
+    assert "paused: false" in content
+
+
 def test_pause_unknown_worker_404(client_and_main):
     client, _ = client_and_main
     assert client.post("/workers/does-not-exist/pause").status_code == 404

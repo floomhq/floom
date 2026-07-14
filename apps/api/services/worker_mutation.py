@@ -31,6 +31,39 @@ from services.worker_serialize import _build_worker_detail
 
 logger = logging.getLogger("floom.api")
 
+_AUTO_PAUSE_ARCHIVE_REASON = (
+    "Paused automatically after repeated scheduled setup failures."
+)
+
+
+def _persist_worker_resumed_flag(worker_id: str) -> None:
+    """Clear durable pause flags in worker.yml after an explicit resume."""
+    from worker_registry import WORKERS_DIR
+
+    worker_yml = WORKERS_DIR / worker_id / "worker.yml"
+    if not worker_yml.exists():
+        return
+    try:
+        raw = worker_yml.read_text(encoding="utf-8")
+        updated = re.sub(
+            r"(?m)^(paused:\s*)(true|false)\s*$",
+            r"\1false",
+            raw,
+        )
+        updated = re.sub(
+            r"(?m)^(enabled:\s*)(true|false)\s*$",
+            r"\1true",
+            updated,
+        )
+        if updated != raw:
+            worker_yml.write_text(updated, encoding="utf-8")
+    except Exception:
+        logger.warning(
+            "Failed to persist resumed flag for %s",
+            worker_id,
+            exc_info=True,
+        )
+
 def _require_worker_write_workspace_context(request: Request) -> None:
     from auth.local_workspaces import requested_local_workspace_id
     require_explicit = os.environ.get("WORKEROS_REQUIRE_WORKSPACE_HEADER_FOR_WRITES") == "1"
@@ -90,9 +123,19 @@ def _set_worker_enabled(
     # through the row owner instead of the acting admin to avoid an authorized
     # no-op that returns a stale enabled=false detail.
     owner_id = str(worker.get("owner_id") or auth.user_id)
+    if enabled:
+        manifest = dict(worker.get("manifest") or {})
+        if manifest.get("paused") is True or manifest.get("enabled") is False:
+            manifest["paused"] = False
+            manifest["enabled"] = True
+            if manifest.get("archive_reason") == _AUTO_PAUSE_ARCHIVE_REASON:
+                manifest.pop("archive_reason", None)
+            update_fields["manifest_json"] = manifest
     updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
     if updated is None:
         raise HTTPException(status_code=404, detail="Worker not found")
+    if enabled:
+        _persist_worker_resumed_flag(worker_id)
     # Re-reconcile triggers so resume re-enqueues and pause tears down.
     try:
         triggers = (worker.get("config") or {}).get("triggers") or worker.get("triggers_json") or []
