@@ -1250,6 +1250,7 @@ class WorkerConfig(BaseModel):
     # shared provider-quota budget (WORKEROS_MAX_CONCURRENT_LLM_RUNS) instead of
     # letting them stack and 429 the shared provider. Default false = no gating.
     llm_intensive: bool = False
+    scheduled_setup_resumed_at: Optional[str] = None
     trigger: WorkerTrigger
     runtime: WorkerRuntime
     inputs: List[WorkerInput] = []
@@ -1666,6 +1667,10 @@ class WorkerContract(BaseModel):
     # `enabled`). Without this field WorkerContract.model_dump() would drop it
     # and a re-discover would silently RE-ENABLE the broken worker (P0-1).
     paused: bool = False
+    # Durable boundary for the automatic scheduled setup-failure streak. This
+    # is a first-class contract field so worker discovery and re-persistence do
+    # not drop it after an explicit resume.
+    scheduled_setup_resumed_at: Optional[str] = None
     folder: Optional[str] = None
     version: str
     entrypoint: Optional[str] = "SKILL.md"
@@ -1998,6 +2003,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         name=contract.title,
         description=contract.description,
         model=contract.model,
+        scheduled_setup_resumed_at=contract.scheduled_setup_resumed_at,
         trigger=WorkerTrigger(
             type=contract.trigger.type,
             cron=contract.trigger.cron,
@@ -2110,6 +2116,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         name=_slug_from_worker_id(config.id),
         title=config.name,
         description=config.description or config.name,
+        scheduled_setup_resumed_at=config.scheduled_setup_resumed_at,
         version=version,
         entrypoint="SKILL.md",
         targets=["generic"],

@@ -35,7 +35,7 @@ logger = logging.getLogger("floom.api")
 _AUTO_PAUSE_ARCHIVE_REASON = (
     "Paused automatically after repeated scheduled setup failures."
 )
-SCHEDULE_SETUP_RESUMED_AT_FIELD = "_floom_scheduled_setup_resumed_at"
+SCHEDULE_SETUP_RESUMED_AT_FIELD = "scheduled_setup_resumed_at"
 
 _YAML_TRUE_VALUES = {"true", "yes", "on", "1", "t", "y"}
 _YAML_FALSE_VALUES = {"false", "no", "off", "0", "f", "n"}

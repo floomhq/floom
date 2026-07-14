@@ -150,7 +150,7 @@ def test_resume_requires_three_fresh_terminal_failures(monkeypatch, tmp_path):
     for index, row in enumerate(repos.runs.rows, start=1):
         row["created_at"] = f"2026-07-14T10:0{index}:00+00:00"
     repos.workers.worker["manifest"][
-        "_floom_scheduled_setup_resumed_at"
+        "scheduled_setup_resumed_at"
     ] = "2026-07-14T10:03:30+00:00"
 
     repos.runs.rows.insert(
