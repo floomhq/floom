@@ -31,6 +31,116 @@ from services.worker_serialize import _build_worker_detail
 
 logger = logging.getLogger("floom.api")
 
+_AUTO_PAUSE_ARCHIVE_REASON = (
+    "Paused automatically after repeated scheduled setup failures."
+)
+
+_YAML_TRUE_VALUES = {"true", "yes", "on", "1", "t", "y"}
+_YAML_FALSE_VALUES = {"false", "no", "off", "0", "f", "n"}
+
+
+def _flag_matches(value: object, expected: bool) -> bool:
+    if isinstance(value, bool):
+        return value is expected
+    normalized = str(value if value is not None else "").strip().lower()
+    return normalized in (_YAML_TRUE_VALUES if expected else _YAML_FALSE_VALUES)
+
+
+def _resumed_worker_yml(raw: str) -> str | None:
+    """Return worker YAML with durable pause flags cleared."""
+    import yaml
+
+    try:
+        manifest = yaml.safe_load(raw)
+        if not isinstance(manifest, dict):
+            return None
+        paused = _flag_matches(manifest.get("paused"), True)
+        disabled = _flag_matches(manifest.get("enabled"), False)
+        if not paused and not disabled:
+            return raw
+        if paused:
+            manifest.pop("paused", None)
+        if disabled:
+            manifest["enabled"] = True
+        return yaml.safe_dump(
+            manifest,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+        )
+    except Exception:
+        return None
+
+
+def _persist_worker_resumed_flag(worker_id: str) -> tuple[Path, str, str] | None:
+    """Clear durable pause flags and return the path, old YAML, and new YAML."""
+    from worker_registry import WORKERS_DIR
+
+    worker_dir = (WORKERS_DIR / worker_id).resolve()
+    worker_yml = (worker_dir / "worker.yml").resolve()
+    try:
+        worker_yml.relative_to(worker_dir)
+    except ValueError:
+        return None
+    if not worker_yml.exists():
+        return None
+    try:
+        raw = worker_yml.read_text(encoding="utf-8")
+        updated = _resumed_worker_yml(raw)
+        if updated is None:
+            return None
+        if updated != raw:
+            worker_yml.write_text(updated, encoding="utf-8")
+        return worker_yml, raw, updated
+    except Exception:
+        logger.warning(
+            "Failed to persist resumed flag for %s",
+            worker_id,
+            exc_info=True,
+        )
+        raise
+
+
+def _restore_worker_yml(worker_yml: Path, raw: str) -> None:
+    """Best-effort rollback when the canonical repository update fails."""
+    try:
+        worker_yml.write_text(raw, encoding="utf-8")
+    except Exception:
+        logger.error(
+            "Failed to roll back resumed worker.yml at %s",
+            worker_yml,
+            exc_info=True,
+        )
+
+
+def _restore_worker_repository_state(
+    *,
+    repos: Repositories,
+    owner_id: str,
+    worker_id: str,
+    worker: Dict[str, Any],
+) -> None:
+    """Best-effort rollback for a repository that partially applied an update."""
+    rollback_fields: Dict[str, Any] = {
+        "enabled": bool(worker.get("enabled")),
+        "next_run_at": worker.get("next_run_at"),
+    }
+    manifest = worker.get("manifest")
+    if isinstance(manifest, dict):
+        rollback_fields["manifest_json"] = dict(manifest)
+    try:
+        repos.workers.update(
+            user_id=owner_id,
+            worker_id=worker_id,
+            **rollback_fields,
+        )
+    except Exception:
+        logger.error(
+            "Failed to roll back worker repository state for %s",
+            worker_id,
+            exc_info=True,
+        )
+
 def _require_worker_write_workspace_context(request: Request) -> None:
     from auth.local_workspaces import requested_local_workspace_id
     require_explicit = os.environ.get("WORKEROS_REQUIRE_WORKSPACE_HEADER_FOR_WRITES") == "1"
@@ -90,8 +200,46 @@ def _set_worker_enabled(
     # through the row owner instead of the acting admin to avoid an authorized
     # no-op that returns a stale enabled=false detail.
     owner_id = str(worker.get("owner_id") or auth.user_id)
-    updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
+    resumed_worker_yml: tuple[Path, str, str] | None = None
+    if enabled:
+        manifest = dict(worker.get("manifest") or {})
+        resumed_worker_yml = _persist_worker_resumed_flag(worker_id)
+        if _flag_matches(manifest.get("paused"), True) or _flag_matches(
+            manifest.get("enabled"), False
+        ):
+            manifest["paused"] = False
+            manifest["enabled"] = True
+            if manifest.get("archive_reason") == _AUTO_PAUSE_ARCHIVE_REASON:
+                manifest.pop("archive_reason", None)
+            files = manifest.get("_files")
+            if isinstance(files, dict):
+                embedded_worker_yml = files.get("worker.yml")
+                resumed_embedded_yml = (
+                    _resumed_worker_yml(embedded_worker_yml)
+                    if isinstance(embedded_worker_yml, str)
+                    else None
+                )
+                if resumed_embedded_yml is not None:
+                    manifest["_files"] = {
+                        **files,
+                        "worker.yml": resumed_embedded_yml,
+                    }
+            update_fields["manifest_json"] = manifest
+    try:
+        updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
+    except Exception:
+        _restore_worker_repository_state(
+            repos=repos,
+            owner_id=owner_id,
+            worker_id=worker_id,
+            worker=worker,
+        )
+        if resumed_worker_yml is not None:
+            _restore_worker_yml(resumed_worker_yml[0], resumed_worker_yml[1])
+        raise
     if updated is None:
+        if resumed_worker_yml is not None:
+            _restore_worker_yml(resumed_worker_yml[0], resumed_worker_yml[1])
         raise HTTPException(status_code=404, detail="Worker not found")
     # Re-reconcile triggers so resume re-enqueues and pause tears down.
     try:

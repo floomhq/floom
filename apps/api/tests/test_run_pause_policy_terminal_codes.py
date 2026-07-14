@@ -73,11 +73,40 @@ def test_missing_secret_pauses_once_after_configured_threshold(monkeypatch, tmp_
     monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
     monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
     repos = _Repos(["missing_secret", "missing_secret", "missing_secret"])
+    worker_yml = (
+        'schema_version: "0.3"\n'
+        "name: worker-1\n"
+        "paused: yes\n"
+        "paused: no\n"
+        "enabled: no\n"
+        "enabled: yes\n"
+        "...\n"
+    )
+    worker_dir = tmp_path / "worker-1"
+    worker_dir.mkdir()
+    (worker_dir / "worker.yml").write_text(worker_yml, encoding="utf-8")
+    repos.workers.worker["manifest"]["_files"] = {"worker.yml": worker_yml}
 
     assert _apply(repos, "missing_secret") is True
     assert repos.workers.worker["enabled"] is False
     assert repos.workers.worker["manifest"]["paused"] is True
     assert repos.workers.worker["manifest"]["enabled"] is False
+    import yaml
+
+    disk_manifest = yaml.safe_load((worker_dir / "worker.yml").read_text(encoding="utf-8"))
+    embedded_manifest = yaml.safe_load(
+        repos.workers.worker["manifest"]["_files"]["worker.yml"]
+    )
+    assert disk_manifest["paused"] is True
+    assert disk_manifest["enabled"] is False
+    assert embedded_manifest["paused"] is True
+    assert embedded_manifest["enabled"] is False
+    assert (worker_dir / "worker.yml").read_text(encoding="utf-8").count(
+        "paused:"
+    ) == 1
+    assert (worker_dir / "worker.yml").read_text(encoding="utf-8").count(
+        "enabled:"
+    ) == 1
     assert len(repos.workers.updates) == 1
 
     assert _apply(repos, "missing_secret") is False
@@ -114,6 +143,23 @@ def test_transient_failures_never_pause(monkeypatch, tmp_path):
         assert _apply(repos, error_code) is False
         assert repos.workers.worker["enabled"] is True
         assert repos.workers.updates == []
+
+
+def test_state_yaml_rewrites_canonicalize_indented_root_and_document_end():
+    import yaml
+
+    from services.worker_mutation import _resumed_worker_yml
+
+    raw = "  name: worker-1\n  enabled: true\n...\n"
+    paused = run_pause_policy._paused_worker_yml(raw)
+    paused_manifest = yaml.safe_load(paused)
+    assert paused_manifest["paused"] is True
+    assert paused_manifest["enabled"] is False
+
+    resumed = _resumed_worker_yml(paused)
+    resumed_manifest = yaml.safe_load(resumed)
+    assert "paused" not in resumed_manifest
+    assert resumed_manifest["enabled"] is True
 
 
 def test_failed_agent_result_invokes_pause_policy_after_status_persist(monkeypatch):

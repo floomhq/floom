@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import Optional
 
 from db.factory import Repositories
@@ -28,6 +27,27 @@ _SCHEDULER_MISSED_ERROR_CODES = {
     "schedule_missed",
     "scheduler_missed",
 }
+
+
+def _paused_worker_yml(raw: str) -> str | None:
+    """Return worker YAML with durable auto-pause flags set."""
+    import yaml
+
+    try:
+        manifest = yaml.safe_load(raw)
+        if not isinstance(manifest, dict):
+            return None
+        manifest["paused"] = True
+        if "enabled" in manifest:
+            manifest["enabled"] = False
+        return yaml.safe_dump(
+            manifest,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+        )
+    except Exception:
+        return None
 
 
 def _persist_worker_paused_flag(
@@ -49,6 +69,14 @@ def _persist_worker_paused_flag(
             or archive_reason
             or "Paused automatically after repeated scheduled setup failures."
         )
+        files = manifest.get("_files")
+        if isinstance(files, dict) and isinstance(files.get("worker.yml"), str):
+            paused_embedded_yml = _paused_worker_yml(files["worker.yml"])
+            if paused_embedded_yml is not None:
+                manifest["_files"] = {
+                    **files,
+                    "worker.yml": paused_embedded_yml,
+                }
         repos.workers.update(
             user_id=user_id,
             worker_id=worker_id,
@@ -68,16 +96,8 @@ def _persist_worker_paused_flag(
         return
     try:
         raw = worker_yml.read_text(encoding="utf-8")
-        updated = raw
-        if re.search(r"(?m)^paused:\s*(true|false)\s*$", updated):
-            updated = re.sub(r"(?m)^(paused:\s*)(true|false)\s*$", r"\1true", updated)
-        else:
-            if not updated.endswith("\n"):
-                updated += "\n"
-            updated += "paused: true\n"
-        if re.search(r"(?m)^enabled:\s*(true|false)\s*$", updated):
-            updated = re.sub(r"(?m)^(enabled:\s*)(true|false)\s*$", r"\1false", updated)
-        if updated != raw:
+        updated = _paused_worker_yml(raw)
+        if updated is not None and updated != raw:
             worker_yml.write_text(updated, encoding="utf-8")
     except Exception as exc:
         logger.warning("Failed to persist auto-pause flag for %s: %s", worker_id, exc)
