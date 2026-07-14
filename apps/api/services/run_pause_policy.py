@@ -147,10 +147,10 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
                 resume_boundary = resume_boundary.replace(tzinfo=timezone.utc)
         except ValueError:
             logger.warning(
-                "Invalid scheduled setup resume boundary for worker %s",
+                "Ignoring invalid scheduled setup resume boundary for worker %s",
                 worker_id,
             )
-            return False
+            resume_boundary = None
 
     rows, _ = repos.runs.list(
         user_id=user_id,
