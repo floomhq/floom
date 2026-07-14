@@ -9,6 +9,7 @@ Run: cd apps/api && python -m pytest tests/test_worker_pause_resume.py -q
 from __future__ import annotations
 
 import importlib
+import shutil
 import sys
 from pathlib import Path
 
@@ -186,6 +187,40 @@ def test_resume_rolls_back_worker_yml_when_repository_update_fails(
     stored = repos.workers.get(user_id="local-user", worker_id="pausable")
     assert stored["enabled"] is False
     assert stored["manifest"]["paused"] is True
+
+
+def test_resume_clears_embedded_worker_yml_without_local_bundle(client_and_main):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    from services.run_pause_policy import _persist_worker_paused_flag
+
+    _persist_worker_paused_flag(
+        "pausable",
+        repos=repos,
+        user_id="local-user",
+    )
+    paused = repos.workers.get(user_id="local-user", worker_id="pausable")
+    worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
+    paused_yml = worker_yml.read_text(encoding="utf-8")
+    paused_manifest = dict(paused["manifest"])
+    paused_manifest["_files"] = {
+        "worker.yml": paused_yml,
+        "run.py": "print('hi')\n",
+    }
+    repos.workers.update(
+        user_id="local-user",
+        worker_id="pausable",
+        manifest_json=paused_manifest,
+    )
+    shutil.rmtree(worker_yml.parent)
+
+    resumed = client.post("/workers/pausable/resume")
+
+    assert resumed.status_code == 200, resumed.text
+    stored = repos.workers.get(user_id="local-user", worker_id="pausable")
+    assert stored["enabled"] is True
+    assert stored["manifest"]["paused"] is False
+    assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
 
 
 def test_pause_unknown_worker_404(client_and_main):

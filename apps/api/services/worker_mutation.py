@@ -36,10 +36,29 @@ _AUTO_PAUSE_ARCHIVE_REASON = (
 )
 
 
-def _persist_worker_resumed_flag(worker_id: str) -> tuple[Path, str, str] | None:
-    """Clear durable pause flags and return the path, old YAML, and new YAML."""
+def _resumed_worker_yml(raw: str) -> str | None:
+    """Return worker YAML with durable pause flags cleared."""
     import yaml
 
+    try:
+        manifest = yaml.safe_load(raw)
+        if not isinstance(manifest, dict):
+            return None
+        manifest.pop("paused", None)
+        if "enabled" in manifest:
+            manifest["enabled"] = True
+        return yaml.safe_dump(
+            manifest,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+        )
+    except Exception:
+        return None
+
+
+def _persist_worker_resumed_flag(worker_id: str) -> tuple[Path, str, str] | None:
+    """Clear durable pause flags and return the path, old YAML, and new YAML."""
     from worker_registry import WORKERS_DIR
 
     worker_dir = (WORKERS_DIR / worker_id).resolve()
@@ -52,18 +71,9 @@ def _persist_worker_resumed_flag(worker_id: str) -> tuple[Path, str, str] | None
         return None
     try:
         raw = worker_yml.read_text(encoding="utf-8")
-        manifest = yaml.safe_load(raw)
-        if not isinstance(manifest, dict):
+        updated = _resumed_worker_yml(raw)
+        if updated is None:
             return None
-        manifest.pop("paused", None)
-        if "enabled" in manifest:
-            manifest["enabled"] = True
-        updated = yaml.safe_dump(
-            manifest,
-            sort_keys=False,
-            default_flow_style=False,
-            allow_unicode=True,
-        )
         if updated != raw:
             worker_yml.write_text(updated, encoding="utf-8")
         return worker_yml, raw, updated
@@ -156,11 +166,20 @@ def _set_worker_enabled(
             if manifest.get("archive_reason") == _AUTO_PAUSE_ARCHIVE_REASON:
                 manifest.pop("archive_reason", None)
             files = manifest.get("_files")
-            if isinstance(files, dict) and resumed_worker_yml is not None:
-                manifest["_files"] = {
-                    **files,
-                    "worker.yml": resumed_worker_yml[2],
-                }
+            if isinstance(files, dict):
+                embedded_worker_yml = files.get("worker.yml")
+                resumed_embedded_yml = (
+                    resumed_worker_yml[2]
+                    if resumed_worker_yml is not None
+                    else _resumed_worker_yml(embedded_worker_yml)
+                    if isinstance(embedded_worker_yml, str)
+                    else None
+                )
+                if resumed_embedded_yml is not None:
+                    manifest["_files"] = {
+                        **files,
+                        "worker.yml": resumed_embedded_yml,
+                    }
             update_fields["manifest_json"] = manifest
     try:
         updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
