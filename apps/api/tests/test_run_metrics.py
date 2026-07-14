@@ -103,6 +103,10 @@ class TestClassifyFailure:
     def test_timeout_by_code(self):
         assert classify_failure(error_code="timeout") == "timeout"
 
+    def test_scheduler_missed_code_preserves_legacy_alias(self):
+        assert classify_failure(error_code="scheduler_missed") == "crash"
+        assert classify_failure(error_code="schedule_missed") == "crash"
+
     def test_timeout_by_message(self):
         assert classify_failure(error="Agent run exceeded timeout of 300s") == "timeout"
 

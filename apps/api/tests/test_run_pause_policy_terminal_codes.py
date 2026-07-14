@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
+import run_service
+from models import WorkerConfig, WorkerResult, WorkerRuntime, WorkerTrigger
 from services import run_pause_policy
 
 
@@ -111,3 +114,82 @@ def test_transient_failures_never_pause(monkeypatch, tmp_path):
         assert _apply(repos, error_code) is False
         assert repos.workers.worker["enabled"] is True
         assert repos.workers.updates == []
+
+
+def test_failed_agent_result_invokes_pause_policy_after_status_persist(monkeypatch):
+    config = WorkerConfig(
+        id="model-gap-worker",
+        name="Model gap worker",
+        trigger=WorkerTrigger(type="schedule", cron="0 * * * *"),
+        runtime=WorkerRuntime(type="python", runner="e2b", mode="pure-script"),
+        inputs=[],
+        outputs=[],
+        secrets=[],
+        connections=[],
+    )
+    events = []
+
+    class _RunsForExecution:
+        def get_any(self, *, run_id):
+            return {"id": run_id, "status": "running", "trigger_source": "schedule"}
+
+    repos = SimpleNamespace(
+        runs=_RunsForExecution(),
+        workers=SimpleNamespace(get_any=lambda **_kwargs: {"name": "Model gap worker"}),
+    )
+
+    class _Driver:
+        def run(self, **_kwargs):
+            return WorkerResult(
+                status="error",
+                error="The platform AI model is not configured.",
+                error_code="llm_model_not_configured",
+                retryable=False,
+            )
+
+    monkeypatch.setattr(
+        run_service,
+        "_load_worker_recipe",
+        lambda *_args, **_kwargs: (None, config, {"enabled": True}),
+    )
+    monkeypatch.setattr(run_service, "_worker_owner_id", lambda *_args, **_kwargs: "owner-1")
+    monkeypatch.setattr(run_service, "_is_engine_approved_execution_run", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(run_service, "add_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run_service, "publish_run_part", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run_service, "_publish_sse", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run_service, "_mark_active_run_stage", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run_service, "get_secrets_for_worker", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *_args, **_kwargs: _Driver())
+    monkeypatch.setattr(
+        run_service,
+        "update_run_status",
+        lambda run_id, status, **kwargs: events.append(
+            ("status", status, kwargs.get("error_code"))
+        ),
+    )
+    monkeypatch.setattr(
+        run_service,
+        "_maybe_pause_scheduled_worker_after_setup_failure",
+        lambda **kwargs: events.append(
+            ("pause", kwargs["run_id"], kwargs["error_code"])
+        )
+        or True,
+    )
+    monkeypatch.setattr(
+        run_service,
+        "_schedule_retry_for_failed_run",
+        lambda **_kwargs: False,
+    )
+
+    run_service.execute_run(
+        "run-model-gap",
+        "model-gap-worker",
+        {},
+        user_id="owner-1",
+        repos=repos,
+    )
+
+    assert events[:2] == [
+        ("status", "failed", "llm_model_not_configured"),
+        ("pause", "run-model-gap", "llm_model_not_configured"),
+    ]
