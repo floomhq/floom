@@ -109,7 +109,13 @@ def test_missing_secret_pauses_once_after_configured_threshold(monkeypatch, tmp_
     ) == 1
     assert len(repos.workers.updates) == 1
 
-    assert _apply(repos, "missing_secret") is False
+    assert run_pause_policy._maybe_pause_scheduled_worker_after_setup_failure(
+        worker_id="worker-1",
+        run_id="run-4",
+        user_id="owner-1",
+        error_code="missing_secret",
+        repos=repos,
+    ) is False
     assert len(repos.workers.updates) == 1
 
 
@@ -134,6 +140,76 @@ def test_missing_connection_is_terminal(monkeypatch, tmp_path):
     repos = _Repos(["missing_connection", "missing_connection", "missing_connection"])
 
     assert _apply(repos, "missing_connection") is True
+    assert repos.workers.worker["enabled"] is False
+
+
+def test_resume_requires_three_fresh_terminal_failures(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
+    monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
+    repos = _Repos(["missing_secret", "missing_secret", "missing_secret"])
+    for index, row in enumerate(repos.runs.rows, start=1):
+        row["created_at"] = f"2026-07-14T10:0{index}:00+00:00"
+    repos.workers.worker["manifest"][
+        "scheduled_setup_resumed_at"
+    ] = "2026-07-14T10:03:30+00:00"
+
+    repos.runs.rows.insert(
+        0,
+        {
+            "id": "run-4",
+            "worker_id": "worker-1",
+            "trigger_source": "schedule",
+            "status": "failed",
+            "error_code": "missing_secret",
+            "created_at": "2026-07-14T10:04:00+00:00",
+        },
+    )
+    assert _apply(repos, "missing_secret") is False
+    repos.runs.rows.insert(
+        0,
+        {
+            "id": "run-5",
+            "worker_id": "worker-1",
+            "trigger_source": "schedule",
+            "status": "failed",
+            "error_code": "missing_secret",
+            "created_at": "2026-07-14T10:05:00+00:00",
+        },
+    )
+    assert run_pause_policy._maybe_pause_scheduled_worker_after_setup_failure(
+        worker_id="worker-1",
+        run_id="run-5",
+        user_id="owner-1",
+        error_code="missing_secret",
+        repos=repos,
+    ) is False
+    repos.runs.rows.insert(
+        0,
+        {
+            "id": "run-6",
+            "worker_id": "worker-1",
+            "trigger_source": "schedule",
+            "status": "failed",
+            "error_code": "missing_secret",
+            "created_at": "2026-07-14T10:06:00+00:00",
+        },
+    )
+    assert run_pause_policy._maybe_pause_scheduled_worker_after_setup_failure(
+        worker_id="worker-1",
+        run_id="run-6",
+        user_id="owner-1",
+        error_code="missing_secret",
+        repos=repos,
+    ) is True
+
+
+def test_invalid_resume_boundary_does_not_disable_pause_policy(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
+    monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
+    repos = _Repos(["missing_secret", "missing_secret", "missing_secret"])
+    repos.workers.worker["manifest"]["scheduled_setup_resumed_at"] = "invalid"
+
+    assert _apply(repos, "missing_secret") is True
     assert repos.workers.worker["enabled"] is False
 
 

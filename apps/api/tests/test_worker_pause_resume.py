@@ -192,10 +192,22 @@ def test_resume_clears_auto_pause_manifest_and_worker_yml(client_and_main):
     assert stored["enabled"] is True
     assert stored["manifest"]["paused"] is False
     assert stored["manifest"]["enabled"] is True
+    assert stored["manifest"]["scheduled_setup_resumed_at"]
     assert "archive_reason" not in stored["manifest"]
     content = worker_yml.read_text(encoding="utf-8")
     assert "paused:" not in content
     assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
+    assert "scheduled_setup_resumed_at:" in content
+    assert "scheduled_setup_resumed_at:" in stored["manifest"]["_files"]["worker.yml"]
+    main.invalidate_worker_cache()
+    discovered = next(
+        worker for worker in main.discover_workers() if worker["id"] == "pausable"
+    )
+    assert discovered["manifest"]["scheduled_setup_resumed_at"]
+    with main.get_db() as conn:
+        main._persist_discovered_workers(conn, [discovered], user_id="local-user")
+    persisted = repos.workers.get(user_id="local-user", worker_id="pausable")
+    assert persisted["manifest"]["scheduled_setup_resumed_at"]
 
 
 def test_resume_rolls_back_worker_yml_when_repository_update_fails(

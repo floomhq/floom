@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
 from db.factory import Repositories
@@ -126,22 +127,59 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
     if not current or current.get("trigger_source") != "schedule":
         return False
 
+    worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
+    manifest = dict((worker or {}).get("manifest") or {})
+    if not worker or worker.get("enabled") is False or manifest.get("paused") is True:
+        return False
+
+    resume_boundary: datetime | None = None
+    from services.worker_mutation import SCHEDULE_SETUP_RESUMED_AT_FIELD
+
+    raw_resume_boundary = str(
+        manifest.get(SCHEDULE_SETUP_RESUMED_AT_FIELD) or ""
+    ).strip()
+    if raw_resume_boundary:
+        try:
+            resume_boundary = datetime.fromisoformat(
+                raw_resume_boundary.replace("Z", "+00:00")
+            )
+            if resume_boundary.tzinfo is None:
+                resume_boundary = resume_boundary.replace(tzinfo=timezone.utc)
+        except ValueError:
+            logger.warning(
+                "Ignoring invalid scheduled setup resume boundary for worker %s",
+                worker_id,
+            )
+            resume_boundary = None
+
     rows, _ = repos.runs.list(
         user_id=user_id,
         worker_id=worker_id,
         limit=threshold * 2,
         offset=0,
     )
-    attempts = [
-        row
-        for row in rows
+    attempts = []
+    for row in rows:
+        if resume_boundary is not None:
+            try:
+                created_at = datetime.fromisoformat(
+                    str(row.get("created_at") or "").replace("Z", "+00:00")
+                )
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            if created_at <= resume_boundary:
+                continue
         if not (
             str(row.get("trigger_source") or "").strip().lower()
             in _SCHEDULER_MISSED_ERROR_CODES
             and str(row.get("error_code") or "").strip().lower()
             in _SCHEDULER_MISSED_ERROR_CODES
-        )
-    ][:threshold]
+        ):
+            attempts.append(row)
+        if len(attempts) == threshold:
+            break
     if len(attempts) < threshold:
         return False
     for row in attempts:
@@ -151,11 +189,6 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
             return False
         if str(row.get("error_code") or "").strip().lower() != normalized_error_code:
             return False
-
-    worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
-    manifest = dict((worker or {}).get("manifest") or {})
-    if not worker or worker.get("enabled") is False or manifest.get("paused") is True:
-        return False
 
     _persist_worker_paused_flag(worker_id, repos=repos, user_id=user_id)
     logger.warning(
