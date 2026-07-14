@@ -262,11 +262,12 @@ def test_resume_clears_legacy_duplicate_pause_flags(client_and_main):
     assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
 
 
-def test_resume_clears_quoted_truthy_pause_flag(client_and_main):
+@pytest.mark.parametrize("pause_value", ['"true"', "y", "t"])
+def test_resume_clears_coerced_truthy_pause_flag(client_and_main, pause_value):
     client, main = client_and_main
     repos = main.get_repositories()
     worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
-    quoted_yml = worker_yml.read_text(encoding="utf-8") + 'paused: "true"\n'
+    quoted_yml = worker_yml.read_text(encoding="utf-8") + f"paused: {pause_value}\n"
     worker_yml.write_text(quoted_yml, encoding="utf-8")
     worker = repos.workers.get(user_id="local-user", worker_id="pausable")
     manifest = dict(worker["manifest"])

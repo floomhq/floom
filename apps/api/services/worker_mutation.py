@@ -35,8 +35,8 @@ _AUTO_PAUSE_ARCHIVE_REASON = (
     "Paused automatically after repeated scheduled setup failures."
 )
 
-_YAML_TRUE_VALUES = {"true", "yes", "on", "1"}
-_YAML_FALSE_VALUES = {"false", "no", "off", "0"}
+_YAML_TRUE_VALUES = {"true", "yes", "on", "1", "t", "y"}
+_YAML_FALSE_VALUES = {"false", "no", "off", "0", "f", "n"}
 
 
 def _flag_matches(value: object, expected: bool) -> bool:
