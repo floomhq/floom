@@ -75,10 +75,9 @@ def _resumed_worker_yml(raw: str) -> str | None:
                 )
         if disabled:
             updated, count = re.subn(
-                r"(?mi)^(enabled\s*:\s*)(?:true|false|yes|no|on|off)(\s*(?:#.*)?)$",
-                r"\1true\2",
+                r"(?mi)^enabled\s*:[^\n]*(?:\n|$)",
+                "",
                 updated,
-                count=1,
             )
             if count == 0:
                 manifest.pop("paused", None)
@@ -89,6 +88,9 @@ def _resumed_worker_yml(raw: str) -> str | None:
                     default_flow_style=False,
                     allow_unicode=True,
                 )
+            if not updated.endswith("\n"):
+                updated += "\n"
+            updated += "enabled: true\n"
         return updated
     except Exception:
         return None

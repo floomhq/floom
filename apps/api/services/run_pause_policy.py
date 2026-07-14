@@ -41,10 +41,9 @@ def _paused_worker_yml(raw: str) -> str | None:
         updated = raw
         if "paused" in manifest:
             updated, count = re.subn(
-                r"(?mi)^(paused\s*:\s*)(?:true|false|yes|no|on|off)(\s*(?:#.*)?)$",
-                r"\1true\2",
+                r"(?mi)^paused\s*:[^\n]*(?:\n|$)",
+                "",
                 updated,
-                count=1,
             )
             if count == 0:
                 manifest["paused"] = True
@@ -56,16 +55,14 @@ def _paused_worker_yml(raw: str) -> str | None:
                     default_flow_style=False,
                     allow_unicode=True,
                 )
-        else:
-            if not updated.endswith("\n"):
-                updated += "\n"
-            updated += "paused: true\n"
+        if not updated.endswith("\n"):
+            updated += "\n"
+        updated += "paused: true\n"
         if "enabled" in manifest:
             updated, count = re.subn(
-                r"(?mi)^(enabled\s*:\s*)(?:true|false|yes|no|on|off)(\s*(?:#.*)?)$",
-                r"\1false\2",
+                r"(?mi)^enabled\s*:[^\n]*(?:\n|$)",
+                "",
                 updated,
-                count=1,
             )
             if count == 0:
                 manifest["paused"] = True
@@ -76,6 +73,9 @@ def _paused_worker_yml(raw: str) -> str | None:
                     default_flow_style=False,
                     allow_unicode=True,
                 )
+            if not updated.endswith("\n"):
+                updated += "\n"
+            updated += "enabled: false\n"
         return updated
     except Exception:
         return None

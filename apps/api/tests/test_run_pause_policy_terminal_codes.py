@@ -76,6 +76,9 @@ def test_missing_secret_pauses_once_after_configured_threshold(monkeypatch, tmp_
     worker_yml = (
         'schema_version: "0.3"\n'
         "name: worker-1\n"
+        "paused: yes\n"
+        "paused: no\n"
+        "enabled: no\n"
         "enabled: yes\n"
     )
     worker_dir = tmp_path / "worker-1"
@@ -97,6 +100,12 @@ def test_missing_secret_pauses_once_after_configured_threshold(monkeypatch, tmp_
     assert disk_manifest["enabled"] is False
     assert embedded_manifest["paused"] is True
     assert embedded_manifest["enabled"] is False
+    assert (worker_dir / "worker.yml").read_text(encoding="utf-8").count(
+        "paused:"
+    ) == 1
+    assert (worker_dir / "worker.yml").read_text(encoding="utf-8").count(
+        "enabled:"
+    ) == 1
     assert len(repos.workers.updates) == 1
 
     assert _apply(repos, "missing_secret") is False
