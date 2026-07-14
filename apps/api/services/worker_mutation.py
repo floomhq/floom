@@ -131,11 +131,10 @@ def _set_worker_enabled(
             if manifest.get("archive_reason") == _AUTO_PAUSE_ARCHIVE_REASON:
                 manifest.pop("archive_reason", None)
             update_fields["manifest_json"] = manifest
+        _persist_worker_resumed_flag(worker_id)
     updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
     if updated is None:
         raise HTTPException(status_code=404, detail="Worker not found")
-    if enabled:
-        _persist_worker_resumed_flag(worker_id)
     # Re-reconcile triggers so resume re-enqueues and pause tears down.
     try:
         triggers = (worker.get("config") or {}).get("triggers") or worker.get("triggers_json") or []
