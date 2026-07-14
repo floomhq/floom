@@ -136,6 +136,34 @@ def _restore_worker_yml(worker_yml: Path, raw: str) -> None:
             exc_info=True,
         )
 
+
+def _restore_worker_repository_state(
+    *,
+    repos: Repositories,
+    owner_id: str,
+    worker_id: str,
+    worker: Dict[str, Any],
+) -> None:
+    """Best-effort rollback for a repository that partially applied an update."""
+    rollback_fields: Dict[str, Any] = {
+        "enabled": bool(worker.get("enabled")),
+    }
+    manifest = worker.get("manifest")
+    if isinstance(manifest, dict):
+        rollback_fields["manifest_json"] = dict(manifest)
+    try:
+        repos.workers.update(
+            user_id=owner_id,
+            worker_id=worker_id,
+            **rollback_fields,
+        )
+    except Exception:
+        logger.error(
+            "Failed to roll back worker repository state for %s",
+            worker_id,
+            exc_info=True,
+        )
+
 def _require_worker_write_workspace_context(request: Request) -> None:
     from auth.local_workspaces import requested_local_workspace_id
     require_explicit = os.environ.get("WORKEROS_REQUIRE_WORKSPACE_HEADER_FOR_WRITES") == "1"
@@ -223,6 +251,12 @@ def _set_worker_enabled(
     try:
         updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
     except Exception:
+        _restore_worker_repository_state(
+            repos=repos,
+            owner_id=owner_id,
+            worker_id=worker_id,
+            worker=worker,
+        )
         if resumed_worker_yml is not None:
             _restore_worker_yml(resumed_worker_yml[0], resumed_worker_yml[1])
         raise

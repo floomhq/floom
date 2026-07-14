@@ -187,6 +187,11 @@ def test_resume_rolls_back_worker_yml_when_repository_update_fails(
 
     def fail_update(*, user_id, worker_id, **fields):
         if fields.get("enabled") is True:
+            original_update(
+                user_id=user_id,
+                worker_id=worker_id,
+                manifest_json=fields["manifest_json"],
+            )
             raise RuntimeError("repository unavailable")
         return original_update(user_id=user_id, worker_id=worker_id, **fields)
 
@@ -199,6 +204,7 @@ def test_resume_rolls_back_worker_yml_when_repository_update_fails(
     stored = repos.workers.get(user_id="local-user", worker_id="pausable")
     assert stored["enabled"] is False
     assert stored["manifest"]["paused"] is True
+    assert stored["manifest"]["enabled"] is False
 
 
 def test_resume_fails_closed_when_worker_yml_cannot_be_written(
