@@ -46,18 +46,6 @@ def _flag_matches(value: object, expected: bool) -> bool:
     return normalized in (_YAML_TRUE_VALUES if expected else _YAML_FALSE_VALUES)
 
 
-def _append_yaml_state_field(raw: str, field: str) -> str:
-    """Append a top-level field before an optional YAML document-end marker."""
-    document_end = re.search(r"(?m)^\.\.\.\s*(?:#.*)?(?:\n|$)", raw)
-    if document_end is None:
-        prefix, suffix = raw, ""
-    else:
-        prefix, suffix = raw[: document_end.start()], raw[document_end.start() :]
-    if prefix and not prefix.endswith("\n"):
-        prefix += "\n"
-    return f"{prefix}{field}\n{suffix}"
-
-
 def _resumed_worker_yml(raw: str) -> str | None:
     """Return worker YAML with durable pause flags cleared."""
     import yaml
@@ -70,38 +58,16 @@ def _resumed_worker_yml(raw: str) -> str | None:
         disabled = _flag_matches(manifest.get("enabled"), False)
         if not paused and not disabled:
             return raw
-        updated = raw
         if paused:
-            updated, count = re.subn(
-                r"(?mi)^paused\s*:[^\n]*(?:\n|$)",
-                "",
-                updated,
-            )
-            if count == 0:
-                manifest.pop("paused", None)
-                return yaml.safe_dump(
-                    manifest,
-                    sort_keys=False,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                )
+            manifest.pop("paused", None)
         if disabled:
-            updated, count = re.subn(
-                r"(?mi)^enabled\s*:[^\n]*(?:\n|$)",
-                "",
-                updated,
-            )
-            if count == 0:
-                manifest.pop("paused", None)
-                manifest["enabled"] = True
-                return yaml.safe_dump(
-                    manifest,
-                    sort_keys=False,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                )
-            updated = _append_yaml_state_field(updated, "enabled: true")
-        return updated
+            manifest["enabled"] = True
+        return yaml.safe_dump(
+            manifest,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+        )
     except Exception:
         return None
 

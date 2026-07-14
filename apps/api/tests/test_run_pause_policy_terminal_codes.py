@@ -145,6 +145,23 @@ def test_transient_failures_never_pause(monkeypatch, tmp_path):
         assert repos.workers.updates == []
 
 
+def test_state_yaml_rewrites_canonicalize_indented_root_and_document_end():
+    import yaml
+
+    from services.worker_mutation import _resumed_worker_yml
+
+    raw = "  name: worker-1\n  enabled: true\n...\n"
+    paused = run_pause_policy._paused_worker_yml(raw)
+    paused_manifest = yaml.safe_load(paused)
+    assert paused_manifest["paused"] is True
+    assert paused_manifest["enabled"] is False
+
+    resumed = _resumed_worker_yml(paused)
+    resumed_manifest = yaml.safe_load(resumed)
+    assert "paused" not in resumed_manifest
+    assert resumed_manifest["enabled"] is True
+
+
 def test_failed_agent_result_invokes_pause_policy_after_status_persist(monkeypatch):
     config = WorkerConfig(
         id="model-gap-worker",

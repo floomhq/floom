@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import Optional
 
 from db.factory import Repositories
@@ -30,18 +29,6 @@ _SCHEDULER_MISSED_ERROR_CODES = {
 }
 
 
-def _append_yaml_state_field(raw: str, field: str) -> str:
-    """Append a top-level field before an optional YAML document-end marker."""
-    document_end = re.search(r"(?m)^\.\.\.\s*(?:#.*)?(?:\n|$)", raw)
-    if document_end is None:
-        prefix, suffix = raw, ""
-    else:
-        prefix, suffix = raw[: document_end.start()], raw[document_end.start() :]
-    if prefix and not prefix.endswith("\n"):
-        prefix += "\n"
-    return f"{prefix}{field}\n{suffix}"
-
-
 def _paused_worker_yml(raw: str) -> str | None:
     """Return worker YAML with durable auto-pause flags set."""
     import yaml
@@ -50,41 +37,15 @@ def _paused_worker_yml(raw: str) -> str | None:
         manifest = yaml.safe_load(raw)
         if not isinstance(manifest, dict):
             return None
-        updated = raw
-        if "paused" in manifest:
-            updated, count = re.subn(
-                r"(?mi)^paused\s*:[^\n]*(?:\n|$)",
-                "",
-                updated,
-            )
-            if count == 0:
-                manifest["paused"] = True
-                if "enabled" in manifest:
-                    manifest["enabled"] = False
-                return yaml.safe_dump(
-                    manifest,
-                    sort_keys=False,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                )
-        updated = _append_yaml_state_field(updated, "paused: true")
+        manifest["paused"] = True
         if "enabled" in manifest:
-            updated, count = re.subn(
-                r"(?mi)^enabled\s*:[^\n]*(?:\n|$)",
-                "",
-                updated,
-            )
-            if count == 0:
-                manifest["paused"] = True
-                manifest["enabled"] = False
-                return yaml.safe_dump(
-                    manifest,
-                    sort_keys=False,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                )
-            updated = _append_yaml_state_field(updated, "enabled: false")
-        return updated
+            manifest["enabled"] = False
+        return yaml.safe_dump(
+            manifest,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+        )
     except Exception:
         return None
 

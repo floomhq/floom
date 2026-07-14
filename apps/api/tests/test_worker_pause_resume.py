@@ -379,11 +379,14 @@ def test_resume_preserves_canonical_embedded_bundle_when_disk_differs(client_and
     )
     paused = repos.workers.get(user_id="local-user", worker_id="pausable")
     worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
-    disk_yml = worker_yml.read_text(encoding="utf-8") + "# stale disk copy\n"
+    disk_yml = worker_yml.read_text(encoding="utf-8").replace(
+        "A worker we can pause and resume",
+        "STALE DISK DESCRIPTION",
+    )
     worker_yml.write_text(disk_yml, encoding="utf-8")
     canonical_yml = disk_yml.replace(
-        "# stale disk copy",
-        "# canonical portable bundle",
+        "STALE DISK DESCRIPTION",
+        "CANONICAL PORTABLE DESCRIPTION",
     )
     paused_manifest = dict(paused["manifest"])
     paused_manifest["_files"] = {
@@ -401,8 +404,8 @@ def test_resume_preserves_canonical_embedded_bundle_when_disk_differs(client_and
     assert resumed.status_code == 200, resumed.text
     stored = repos.workers.get(user_id="local-user", worker_id="pausable")
     embedded = stored["manifest"]["_files"]["worker.yml"]
-    assert "# canonical portable bundle" in embedded
-    assert "# stale disk copy" not in embedded
+    assert "CANONICAL PORTABLE DESCRIPTION" in embedded
+    assert "STALE DISK DESCRIPTION" not in embedded
     assert "paused:" not in embedded
 
 
