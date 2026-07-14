@@ -201,6 +201,37 @@ def test_resume_rolls_back_worker_yml_when_repository_update_fails(
     assert stored["manifest"]["paused"] is True
 
 
+def test_resume_fails_closed_when_worker_yml_cannot_be_written(
+    client_and_main,
+    monkeypatch,
+):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    from services.run_pause_policy import _persist_worker_paused_flag
+
+    _persist_worker_paused_flag(
+        "pausable",
+        repos=repos,
+        user_id="local-user",
+    )
+    worker_yml = (main.WORKERS_DIR / "pausable" / "worker.yml").resolve()
+    original_write_text = Path.write_text
+
+    def fail_worker_yml_write(path, *args, **kwargs):
+        if path.resolve() == worker_yml:
+            raise PermissionError("read-only worker bundle")
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_worker_yml_write)
+
+    with pytest.raises(PermissionError, match="read-only worker bundle"):
+        client.post("/workers/pausable/resume")
+
+    stored = repos.workers.get(user_id="local-user", worker_id="pausable")
+    assert stored["enabled"] is False
+    assert stored["manifest"]["paused"] is True
+
+
 def test_resume_clears_embedded_worker_yml_without_local_bundle(client_and_main):
     client, main = client_and_main
     repos = main.get_repositories()

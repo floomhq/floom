@@ -109,7 +109,7 @@ def _persist_worker_resumed_flag(worker_id: str) -> tuple[Path, str, str] | None
             worker_id,
             exc_info=True,
         )
-        return None
+        raise
 
 
 def _restore_worker_yml(worker_yml: Path, raw: str) -> None:
