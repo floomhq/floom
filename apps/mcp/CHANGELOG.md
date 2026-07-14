@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added a `composio-proxy` Gmail worker template and documented the run-scoped Composio proxy contract in JSON and human-readable `workers contract` output.
+- Added an init-to-validate regression test covering every golden worker template.
+- Added guidance for globally installing the CLI for repeated automation calls, plus a soft `doctor` hint when running through `npx`.
+
+### Fixed
+
+- Added three validated `use_cases` to every golden template so `floom init` consistently models the worker contract.
+
 ## 5.1.11 (2026-07-06)
 
 ### Agent-first onboarding
