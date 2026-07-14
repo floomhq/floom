@@ -279,6 +279,32 @@ export class FloomApiClient {
     return new Uint8Array(await response.arrayBuffer());
   }
 
+  async requestText(method: string, path: string, options: RequestOptions = {}): Promise<string> {
+    const auth = options.auth ?? true;
+    const headers: Record<string, string> = {
+      accept: "text/plain, application/json, text/*",
+      ...(options.headers || {}),
+    };
+    if (auth) {
+      Object.assign(headers, await this.authHeaders());
+    }
+    const response = await fetchFloom(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path), options.query), {
+      method,
+      headers,
+    });
+    if (!response.ok) {
+      const parsed = await parseResponse(response);
+      const detail = responseDetail(parsed);
+      throw new FloomApiError(
+        `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
+        response.status,
+        parsed,
+        response.headers,
+      );
+    }
+    return response.text();
+  }
+
   async uploadFile(inputName: string, filePath: string): Promise<string> {
     if (!this.credentials) {
       throw new Error(`Not logged in. Run ${getCommandName()} login first.`);

@@ -236,6 +236,13 @@ from services.run_notifications import (
     _dispatch_terminal_run_alerts,
 )
 from services.db_retry import call_with_deadlock_retry
+from services.retry_classification import (
+    PERMANENT_RETRY_CATEGORIES as _PERMANENT_RETRY_CATEGORIES,
+    PERMANENT_RETRY_ERROR_CODES as _PERMANENT_RETRY_ERROR_CODES,
+    TRANSIENT_RETRY_CATEGORIES as _TRANSIENT_RETRY_CATEGORIES,
+    TRANSIENT_RETRY_ERROR_CODES as _TRANSIENT_RETRY_ERROR_CODES,
+    is_infra_retry_error_code as _is_infra_retry_error_code,
+)
 UNKNOWN_RUN_ERROR_CODE = "unknown_error"
 UNKNOWN_RUN_ERROR_MESSAGE = (
     "Run failed before the engine captured a specific failure reason. "
@@ -441,59 +448,6 @@ def _schedule_retry(
 
     t = threading.Thread(target=_do_retry, daemon=True, name=f"retry-{original_run_id}")
     t.start()
-
-
-_PERMANENT_RETRY_ERROR_CODES = {
-    "cancelled",
-    "cancelled_before_start",
-    "cancelled_queued",
-    "invalid_outputs_shape",
-    "invalid_worker",
-    "llm_auth_error",
-    "llm_model_not_configured",
-    "llm_quota_exceeded",
-    "missing_connection",
-    "missing_required_input",
-    "missing_secret",
-    "output_token_limit",
-    "output_too_large",
-    "quality_gate_failed",
-    "schema_violation",
-    "spend_cap_exceeded",
-    "token_cap_exceeded",
-    "user_cancel",
-    "worker_deleted",
-    "worker_disabled",
-    "worker_not_found",
-}
-
-_TRANSIENT_RETRY_ERROR_CODES = {
-    "agent_runtime_error",
-    "context_mount_failed",
-    "e2b_quota_exhausted",
-    "e2b_sandbox_error",
-    "llm_provider_error",
-    "llm_rate_limited",
-    "interrupted_by_restart",
-    "mcp_connect_failed",
-    "orphaned",
-    "run_abandoned_server_restart",
-    "run_claimed_without_dispatch",
-    "timeout",
-}
-
-_PERMANENT_RETRY_CATEGORIES = {
-    "auth",
-    "cancelled",
-    "config",
-    "quality",
-    "validation",
-}
-
-_TRANSIENT_RETRY_CATEGORIES = {
-    "network",
-    "timeout",
-}
 
 
 @dataclass(frozen=True)
@@ -2129,10 +2083,6 @@ def _dispatch_orphan_timeout_seconds() -> int:
         return max(30, int(raw))
     except ValueError:
         return 120
-
-
-def _is_infra_retry_error_code(error_code: str | None) -> bool:
-    return (error_code or "").strip().lower() in _TRANSIENT_RETRY_ERROR_CODES
 
 
 def _retryable_driver_max_attempts(error_code: str | None) -> int:

@@ -29,6 +29,7 @@ from fastapi import HTTPException
 from core.urls import _frontend_base_url
 from services.public_view import _sanitize_operator_text
 from services.run_serialize import _make_run_summary
+from services.retry_classification import is_infra_retry_error_code
 from services.secrets_env import _available_secret_names_for_user
 from services.worker_access import (
     _normalize_trigger_type,
@@ -307,6 +308,7 @@ def _resolve_worker_status(
     available_secret_names: Iterable[str],
     last_run_status: Optional[RunStatus],
     has_run: bool,
+    last_run_error_code: Optional[str] = None,
 ) -> WorkerStatus:
     """Single source of truth for an operator-facing worker status.
 
@@ -315,7 +317,7 @@ def _resolve_worker_status(
     same worker. The full honesty downgrade ladder, in order:
 
     1. MISSING_SECRET — a required secret is not configured.
-    2. NEEDS_ATTENTION — the most recent run FAILED.
+    2. NEEDS_ATTENTION — the most recent run FAILED for a non-infra reason.
     3. NEEDS_ATTENTION — the worker is durably disabled (``enabled is False``,
        e.g. smoke-gated on creation). A disabled worker is broken, not healthy.
     4. READY — the worker has never run, so "healthy" (which implies a
@@ -348,6 +350,7 @@ def _resolve_worker_status(
         not is_archived
         and status == WorkerStatus.HEALTHY
         and last_run_status == RunStatus.FAILED
+        and not is_infra_retry_error_code(last_run_error_code)
     ):
         status = WorkerStatus.NEEDS_ATTENTION
 
@@ -659,6 +662,7 @@ def _build_worker_detail(
             available_secret_names=available_secret_names,
             last_run_status=None,
             has_run=False,
+            last_run_error_code=None,
         )
         _det_missing_secrets = []
         _det_missing_connections = []
@@ -671,6 +675,10 @@ def _build_worker_detail(
             available_secret_names=available_secret_names,
             last_run_status=recent_runs[0].status if recent_runs else None,
             has_run=bool(recent_runs),
+            # list_for_worker is newest-first. A successful retry therefore
+            # clears health naturally; while queued, its transient parent is
+            # exempt from the failed-run downgrade above.
+            last_run_error_code=recent_runs[0].error_code if recent_runs else None,
         )
         # #556: compute specific missing items.
         _det_req_secrets = _worker_required_secret_names(worker) if config else []

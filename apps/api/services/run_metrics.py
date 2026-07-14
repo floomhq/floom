@@ -62,6 +62,7 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "tool_iteration_cap_exceeded": "timeout",
     # process / sandbox crashes
     "agent_runtime_error": "crash",
+    "agent_runtime_disconnected": "network",
     "run_execution_exception": "crash",
     "execution_error": "crash",
     "executor_thread_pre_sandbox_exception": "crash",

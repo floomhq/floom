@@ -16,13 +16,17 @@ type ContextSummary = {
 };
 
 type ContextFile = {
-  path?: string;
+  path: string;
   content?: string;
   is_binary?: boolean;
   mime_type?: string;
   size?: number;
   download_url?: string;
   note?: string;
+};
+
+type ContextDetail = ContextSummary & {
+  files?: ContextFile[];
 };
 
 function encodePath(path: string): string {
@@ -110,16 +114,23 @@ export async function contextsReadCommand(
   options: { json?: boolean },
 ): Promise<number> {
   try {
+    const safeName = requireValue(name, "context name");
+    const safePath = requireValue(path, "file path");
     const { client } = await createAuthenticatedClient();
-    const file = (await client.requestJson("GET", filePath(
-      requireValue(name, "context name"),
-      requireValue(path, "file path"),
-    ))) as ContextFile;
+    const detail = (await client.requestJson("GET", contextPath(safeName))) as ContextDetail;
+    const file = detail.files?.find((item) => item.path === safePath);
+    if (!file) {
+      log.err(`Context file ${safeName}/${safePath} was not found.`);
+      return 1;
+    }
+    const content = file.is_binary
+      ? undefined
+      : await client.requestText("GET", filePath(safeName, safePath));
     if (options.json) {
-      printJson(file);
-    } else if (typeof file.content === "string" && !file.is_binary) {
-      process.stdout.write(file.content);
-      if (!file.content.endsWith("\n")) process.stdout.write("\n");
+      printJson(content === undefined ? file : { ...file, content });
+    } else if (content !== undefined) {
+      process.stdout.write(content);
+      if (!content.endsWith("\n")) process.stdout.write("\n");
     } else {
       log.info(file.note || "Binary file.");
       if (file.download_url) log.kv("Download", file.download_url);
