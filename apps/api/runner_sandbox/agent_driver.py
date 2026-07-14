@@ -288,6 +288,48 @@ def _classify_llm_provider_error(exc: BaseException | str) -> str | None:
     return None
 
 
+_AGENT_TRANSPORT_ERROR_NAMES = {
+    "ConnectError",
+    "ConnectionError",
+    "NetworkError",
+    "ReadError",
+    "RemoteProtocolError",
+    "TransportError",
+    "WriteError",
+}
+_AGENT_TRANSPORT_DISCONNECT_MARKERS = (
+    "server disconnected",
+    "connection reset",
+    "connection aborted",
+    "connection terminated",
+    "remoteprotocolerror",
+)
+
+
+def _is_agent_transport_disconnect(exc: BaseException) -> bool:
+    """Recognize HTTP transport drops across httpx/httpcore/runtime wrappers."""
+
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        module = current.__class__.__module__.lower()
+        name = current.__class__.__name__
+        message = str(current).lower()
+        if any(marker in message for marker in _AGENT_TRANSPORT_DISCONNECT_MARKERS):
+            return True
+        if name in _AGENT_TRANSPORT_ERROR_NAMES and (
+            module.startswith("httpx")
+            or module.startswith("httpcore")
+            or module.startswith("openai")
+            or module.startswith("litellm")
+        ):
+            return True
+        cause = current.__cause__ or current.__context__
+        current = cause if isinstance(cause, BaseException) else None
+    return False
+
+
 def _llm_error_message(error_code: str, model: str | None = None) -> str:
     if error_code == "llm_auth_error":
         return "The configured AI provider credentials were rejected. Update the platform model credentials and retry."
@@ -460,6 +502,21 @@ class AgentDriver(SandboxDriver):
                     ),
                     error_code="output_token_limit",
                     retryable=False,
+                )
+            if _is_agent_transport_disconnect(exc):
+                redacted = _redact_provider_message(exc_str, secrets)
+                logger.warning(
+                    "Agent runtime transport disconnected for worker %s run %s: %s",
+                    worker_id,
+                    run_id,
+                    redacted,
+                )
+                log_fn(f"Agent runtime transport disconnected: {redacted}", "error")
+                return WorkerResult(
+                    status="error",
+                    error="The agent runtime transport disconnected. The run can be retried.",
+                    error_code="agent_runtime_disconnected",
+                    retryable=True,
                 )
             llm_error_code = _classify_llm_provider_error(exc)
             if llm_error_code:
@@ -1697,6 +1754,7 @@ class AgentDriver(SandboxDriver):
                     timeout_seconds=timeout_seconds,
                     user_id=user_id,
                     run_id=run_id,
+                    log_fn=log_fn,
                 )
             if name == "remember_learning":
                 return self._remember_learning(args, context_dir, config)
@@ -1909,6 +1967,7 @@ class AgentDriver(SandboxDriver):
         timeout_seconds: int,
         user_id: str | None = None,
         run_id: str | None = None,
+        log_fn: Callable[[str, str], None] | None = None,
     ) -> Dict[str, Any]:
         cmd = str(args.get("cmd") or "")
         if not cmd:
@@ -1988,6 +2047,9 @@ class AgentDriver(SandboxDriver):
                 input_dir=input_dir,
                 output_dir=output_dir,
                 secrets=secrets,
+                config=config,
+                user_id=user_id,
+                log_fn=log_fn,
             )
         # #1000: the local-subprocess path (runner != e2b) runs on the API
         # HOST, so it is a shell-injection surface (unlike E2B, where
@@ -2041,25 +2103,87 @@ class AgentDriver(SandboxDriver):
         input_dir: Path,
         output_dir: Path,
         secrets: Dict[str, str],
+        config: WorkerConfig,
+        user_id: str | None = None,
+        log_fn: Callable[[str, str], None] | None = None,
     ) -> Dict[str, Any]:
         api_key = os.environ.get("E2B_API_KEY")
         if not api_key:
             return {"ok": False, "error": "E2B_API_KEY is not configured"}
 
         from e2b import Sandbox
-        from runner_sandbox.e2b_driver import _e2b_network_policy
-
-        sandbox = Sandbox.create(
-            api_key=api_key,
-            timeout=max(timeout + 60, 180),
-            network=_e2b_network_policy(None, api_url=os.environ.get("WORKEROS_API_URL")),
+        from runner_sandbox.e2b_driver import (
+            _WarmSandboxEntry,
+            _e2b_network_policy,
+            _e2b_template_for_run,
+            _warm_pool_enabled,
+            _warm_pool_key,
+            _warm_pool_lease,
+            _warm_pool_return,
         )
+
+        pool_log = log_fn or (
+            lambda message, level="info": logger.log(
+                logging.WARNING if level in {"warning", "error"} else logging.DEBUG,
+                message,
+            )
+        )
+        sandbox_template: str | None = None
+        warm_key: str | None = None
+        if _warm_pool_enabled():
+            sandbox_template, _bundle_baked = _e2b_template_for_run(
+                bundle_dir,
+                config,
+                log_fn=pool_log,
+            )
+            base_key, key_error = _warm_pool_key(
+                worker_id=str(getattr(config, "id", None) or bundle_dir.name),
+                user_id=user_id,
+                worker_dir=bundle_dir,
+                config=config,
+                inputs={},
+                secrets=secrets,
+                sandbox_template=sandbox_template,
+            )
+            if key_error:
+                return {"ok": False, "error": key_error}
+            if base_key:
+                # Agent command sandboxes have a different directory lifecycle
+                # from script-driver sandboxes, so they must not share entries.
+                warm_key = f"agent-command:{base_key}"
+
+        warm_entry = _warm_pool_lease(warm_key or "", log_fn=pool_log) if warm_key else None
+        if warm_entry is not None:
+            sandbox = warm_entry.sandbox
+        else:
+            network_config = config if warm_key else None
+            create_kwargs: Dict[str, Any] = {
+                "api_key": api_key,
+                "timeout": max(timeout + 60, 180),
+                "network": _e2b_network_policy(
+                    network_config,
+                    api_url=os.environ.get("WORKEROS_API_URL"),
+                ),
+            }
+            if sandbox_template and warm_key:
+                create_kwargs["template"] = sandbox_template
+            sandbox = Sandbox.create(**create_kwargs)
+        keep_warm = False
+        remote_bundle = "/home/user/worker"
+        remote_inputs = "/home/user/inputs"
+        remote_outputs = "/home/user/outputs"
         try:
-            remote_bundle = "/home/user/worker"
-            remote_inputs = "/home/user/inputs"
-            remote_outputs = "/home/user/outputs"
-            for remote_dir in (remote_bundle, remote_inputs, remote_outputs):
-                sandbox.files.make_dir(remote_dir)
+            if warm_entry is not None:
+                if not self._reset_agent_command_sandbox(
+                    sandbox,
+                    remote_bundle,
+                    remote_inputs,
+                    remote_outputs,
+                ):
+                    raise RuntimeError("Warm agent command sandbox cleanup failed")
+            else:
+                for remote_dir in (remote_bundle, remote_inputs, remote_outputs):
+                    sandbox.files.make_dir(remote_dir)
             self._upload_tree(sandbox, bundle_dir, remote_bundle)
             self._upload_tree(sandbox, input_dir, remote_inputs)
             self._upload_tree(sandbox, output_dir, remote_outputs)
@@ -2078,17 +2202,55 @@ class AgentDriver(SandboxDriver):
                 envs=env,
                 timeout=float(timeout),
             )
-            return {
+            response = {
                 "ok": proc.exit_code == 0,
                 "exit_code": proc.exit_code,
                 "stdout": _truncate(_scrub(proc.stdout or "", secrets), _STDOUT_CAP),
                 "stderr": _truncate(_scrub(proc.stderr or "", secrets), _STDERR_CAP),
             }
+            keep_warm = bool(warm_key) and self._reset_agent_command_sandbox(
+                sandbox,
+                remote_bundle,
+                remote_inputs,
+                remote_outputs,
+            )
+            return response
         finally:
-            try:
-                sandbox.kill()
-            except Exception as exc:
-                logger.debug("E2B sandbox already gone (kill suppressed): %s", exc)
+            pooled = False
+            if keep_warm and warm_key:
+                entry = warm_entry or _WarmSandboxEntry(
+                    key=warm_key,
+                    sandbox=sandbox,
+                    workdir=remote_bundle,
+                    mounted_contexts=set(),
+                )
+                pooled = _warm_pool_return(entry, log_fn=pool_log)
+            if not pooled:
+                try:
+                    sandbox.kill()
+                except Exception as exc:
+                    logger.debug("E2B sandbox already gone (kill suppressed): %s", exc)
+
+    def _reset_agent_command_sandbox(
+        self,
+        sandbox: Any,
+        remote_bundle: str,
+        remote_inputs: str,
+        remote_outputs: str,
+    ) -> bool:
+        """Clear per-call files before an agent command sandbox is pooled."""
+
+        command = " && ".join(
+            f"mkdir -p {self._shell_quote(path)} && "
+            f"find {self._shell_quote(path)} -mindepth 1 -delete"
+            for path in (remote_bundle, remote_inputs, remote_outputs)
+        )
+        try:
+            result = sandbox.commands.run(command, timeout=30, request_timeout=45)
+        except Exception:
+            logger.debug("Agent command sandbox cleanup failed", exc_info=True)
+            return False
+        return getattr(result, "exit_code", 1) == 0
 
     def _upload_tree(self, sandbox: Any, local_root: Path, remote_root: str) -> None:
         if not local_root.exists():

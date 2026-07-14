@@ -37,6 +37,7 @@ from services.public_view import (
     _operator_error_message,
 )
 from services.secrets_env import _available_secret_names_for_user
+from services.retry_classification import is_infra_retry_error_code
 from services.worker_access import (
     _available_connection_slugs_for_user,
     _list_operator_workers,
@@ -579,6 +580,10 @@ def system_overview(
             continue
         failure_count = int(latest_failure.get("failure_count") or 0)
         if worker_id in _consecutive_failure_worker_ids:
+            continue
+        # One retryable infrastructure blip is not a worker-health problem.
+        # Multiple failures still surface so genuine clusters remain visible.
+        if failure_count == 1 and is_infra_retry_error_code(latest_failure.get("error_code")):
             continue
         last_failed_at = latest_failure.get("started_at") or latest_failure.get("completed_at") or latest_failure.get("created_at")
         cause = _overview_failure_cause(latest_failure)

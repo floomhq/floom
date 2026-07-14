@@ -282,6 +282,7 @@ def list_workers(
             available_secret_names=available_secret_names,
             last_run_status=last_run.status if last_run else None,
             has_run=last_run is not None,
+            last_run_error_code=last_run.error_code if last_run else None,
         )
 
         triggers = _build_triggers_list(w)
