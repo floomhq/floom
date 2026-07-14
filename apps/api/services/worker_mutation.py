@@ -36,8 +36,8 @@ _AUTO_PAUSE_ARCHIVE_REASON = (
 )
 
 
-def _persist_worker_resumed_flag(worker_id: str) -> str | None:
-    """Clear durable pause flags in worker.yml and return the resumed YAML."""
+def _persist_worker_resumed_flag(worker_id: str) -> tuple[Path, str, str] | None:
+    """Clear durable pause flags and return the path, old YAML, and new YAML."""
     import yaml
 
     from worker_registry import WORKERS_DIR
@@ -66,7 +66,7 @@ def _persist_worker_resumed_flag(worker_id: str) -> str | None:
         )
         if updated != raw:
             worker_yml.write_text(updated, encoding="utf-8")
-        return updated
+        return worker_yml, raw, updated
     except Exception:
         logger.warning(
             "Failed to persist resumed flag for %s",
@@ -74,6 +74,18 @@ def _persist_worker_resumed_flag(worker_id: str) -> str | None:
             exc_info=True,
         )
         return None
+
+
+def _restore_worker_yml(worker_yml: Path, raw: str) -> None:
+    """Best-effort rollback when the canonical repository update fails."""
+    try:
+        worker_yml.write_text(raw, encoding="utf-8")
+    except Exception:
+        logger.error(
+            "Failed to roll back resumed worker.yml at %s",
+            worker_yml,
+            exc_info=True,
+        )
 
 def _require_worker_write_workspace_context(request: Request) -> None:
     from auth.local_workspaces import requested_local_workspace_id
@@ -134,6 +146,7 @@ def _set_worker_enabled(
     # through the row owner instead of the acting admin to avoid an authorized
     # no-op that returns a stale enabled=false detail.
     owner_id = str(worker.get("owner_id") or auth.user_id)
+    resumed_worker_yml: tuple[Path, str, str] | None = None
     if enabled:
         manifest = dict(worker.get("manifest") or {})
         resumed_worker_yml = _persist_worker_resumed_flag(worker_id)
@@ -146,11 +159,18 @@ def _set_worker_enabled(
             if isinstance(files, dict) and resumed_worker_yml is not None:
                 manifest["_files"] = {
                     **files,
-                    "worker.yml": resumed_worker_yml,
+                    "worker.yml": resumed_worker_yml[2],
                 }
             update_fields["manifest_json"] = manifest
-    updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
+    try:
+        updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
+    except Exception:
+        if resumed_worker_yml is not None:
+            _restore_worker_yml(resumed_worker_yml[0], resumed_worker_yml[1])
+        raise
     if updated is None:
+        if resumed_worker_yml is not None:
+            _restore_worker_yml(resumed_worker_yml[0], resumed_worker_yml[1])
         raise HTTPException(status_code=404, detail="Worker not found")
     # Re-reconcile triggers so resume re-enqueues and pause tears down.
     try:

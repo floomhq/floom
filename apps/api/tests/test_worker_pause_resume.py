@@ -155,6 +155,39 @@ def test_resume_clears_auto_pause_manifest_and_worker_yml(client_and_main):
     assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
 
 
+def test_resume_rolls_back_worker_yml_when_repository_update_fails(
+    client_and_main,
+    monkeypatch,
+):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    from services.run_pause_policy import _persist_worker_paused_flag
+
+    _persist_worker_paused_flag(
+        "pausable",
+        repos=repos,
+        user_id="local-user",
+    )
+    worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
+    paused_yml = worker_yml.read_text(encoding="utf-8")
+    original_update = repos.workers.update
+
+    def fail_update(*, user_id, worker_id, **fields):
+        if fields.get("enabled") is True:
+            raise RuntimeError("repository unavailable")
+        return original_update(user_id=user_id, worker_id=worker_id, **fields)
+
+    monkeypatch.setattr(repos.workers, "update", fail_update)
+
+    with pytest.raises(RuntimeError, match="repository unavailable"):
+        client.post("/workers/pausable/resume")
+
+    assert worker_yml.read_text(encoding="utf-8") == paused_yml
+    stored = repos.workers.get(user_id="local-user", worker_id="pausable")
+    assert stored["enabled"] is False
+    assert stored["manifest"]["paused"] is True
+
+
 def test_pause_unknown_worker_404(client_and_main):
     client, _ = client_and_main
     assert client.post("/workers/does-not-exist/pause").status_code == 404
