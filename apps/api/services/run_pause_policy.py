@@ -30,6 +30,57 @@ _SCHEDULER_MISSED_ERROR_CODES = {
 }
 
 
+def _paused_worker_yml(raw: str) -> str | None:
+    """Return worker YAML with durable auto-pause flags set."""
+    import yaml
+
+    try:
+        manifest = yaml.safe_load(raw)
+        if not isinstance(manifest, dict):
+            return None
+        updated = raw
+        if "paused" in manifest:
+            updated, count = re.subn(
+                r"(?mi)^(paused\s*:\s*)(?:true|false|yes|no|on|off)(\s*(?:#.*)?)$",
+                r"\1true\2",
+                updated,
+                count=1,
+            )
+            if count == 0:
+                manifest["paused"] = True
+                if "enabled" in manifest:
+                    manifest["enabled"] = False
+                return yaml.safe_dump(
+                    manifest,
+                    sort_keys=False,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                )
+        else:
+            if not updated.endswith("\n"):
+                updated += "\n"
+            updated += "paused: true\n"
+        if "enabled" in manifest:
+            updated, count = re.subn(
+                r"(?mi)^(enabled\s*:\s*)(?:true|false|yes|no|on|off)(\s*(?:#.*)?)$",
+                r"\1false\2",
+                updated,
+                count=1,
+            )
+            if count == 0:
+                manifest["paused"] = True
+                manifest["enabled"] = False
+                return yaml.safe_dump(
+                    manifest,
+                    sort_keys=False,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                )
+        return updated
+    except Exception:
+        return None
+
+
 def _persist_worker_paused_flag(
     worker_id: str,
     *,
@@ -49,6 +100,14 @@ def _persist_worker_paused_flag(
             or archive_reason
             or "Paused automatically after repeated scheduled setup failures."
         )
+        files = manifest.get("_files")
+        if isinstance(files, dict) and isinstance(files.get("worker.yml"), str):
+            paused_embedded_yml = _paused_worker_yml(files["worker.yml"])
+            if paused_embedded_yml is not None:
+                manifest["_files"] = {
+                    **files,
+                    "worker.yml": paused_embedded_yml,
+                }
         repos.workers.update(
             user_id=user_id,
             worker_id=worker_id,
@@ -68,16 +127,8 @@ def _persist_worker_paused_flag(
         return
     try:
         raw = worker_yml.read_text(encoding="utf-8")
-        updated = raw
-        if re.search(r"(?m)^paused:\s*(true|false)\s*$", updated):
-            updated = re.sub(r"(?m)^(paused:\s*)(true|false)\s*$", r"\1true", updated)
-        else:
-            if not updated.endswith("\n"):
-                updated += "\n"
-            updated += "paused: true\n"
-        if re.search(r"(?m)^enabled:\s*(true|false)\s*$", updated):
-            updated = re.sub(r"(?m)^(enabled:\s*)(true|false)\s*$", r"\1false", updated)
-        if updated != raw:
+        updated = _paused_worker_yml(raw)
+        if updated is not None and updated != raw:
             worker_yml.write_text(updated, encoding="utf-8")
     except Exception as exc:
         logger.warning("Failed to persist auto-pause flag for %s: %s", worker_id, exc)

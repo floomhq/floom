@@ -46,15 +46,39 @@ def _resumed_worker_yml(raw: str) -> str | None:
             return None
         if manifest.get("paused") is not True and manifest.get("enabled") is not False:
             return raw
-        manifest.pop("paused", None)
+        updated = raw
+        if manifest.get("paused") is True:
+            updated, count = re.subn(
+                r"(?mi)^paused\s*:[^\n]*(?:\n|$)",
+                "",
+                updated,
+                count=1,
+            )
+            if count == 0:
+                manifest.pop("paused", None)
+                return yaml.safe_dump(
+                    manifest,
+                    sort_keys=False,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                )
         if manifest.get("enabled") is False:
-            manifest["enabled"] = True
-        return yaml.safe_dump(
-            manifest,
-            sort_keys=False,
-            default_flow_style=False,
-            allow_unicode=True,
-        )
+            updated, count = re.subn(
+                r"(?mi)^(enabled\s*:\s*)(?:true|false|yes|no|on|off)(\s*(?:#.*)?)$",
+                r"\1true\2",
+                updated,
+                count=1,
+            )
+            if count == 0:
+                manifest.pop("paused", None)
+                manifest["enabled"] = True
+                return yaml.safe_dump(
+                    manifest,
+                    sort_keys=False,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                )
+        return updated
     except Exception:
         return None
 
@@ -171,9 +195,7 @@ def _set_worker_enabled(
             if isinstance(files, dict):
                 embedded_worker_yml = files.get("worker.yml")
                 resumed_embedded_yml = (
-                    resumed_worker_yml[2]
-                    if resumed_worker_yml is not None
-                    else _resumed_worker_yml(embedded_worker_yml)
+                    _resumed_worker_yml(embedded_worker_yml)
                     if isinstance(embedded_worker_yml, str)
                     else None
                 )

@@ -235,6 +235,45 @@ def test_resume_clears_embedded_worker_yml_without_local_bundle(client_and_main)
     assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
 
 
+def test_resume_preserves_canonical_embedded_bundle_when_disk_differs(client_and_main):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    from services.run_pause_policy import _persist_worker_paused_flag
+
+    _persist_worker_paused_flag(
+        "pausable",
+        repos=repos,
+        user_id="local-user",
+    )
+    paused = repos.workers.get(user_id="local-user", worker_id="pausable")
+    worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
+    disk_yml = worker_yml.read_text(encoding="utf-8") + "# stale disk copy\n"
+    worker_yml.write_text(disk_yml, encoding="utf-8")
+    canonical_yml = disk_yml.replace(
+        "# stale disk copy",
+        "# canonical portable bundle",
+    )
+    paused_manifest = dict(paused["manifest"])
+    paused_manifest["_files"] = {
+        "worker.yml": canonical_yml,
+        "run.py": "print('canonical')\n",
+    }
+    repos.workers.update(
+        user_id="local-user",
+        worker_id="pausable",
+        manifest_json=paused_manifest,
+    )
+
+    resumed = client.post("/workers/pausable/resume")
+
+    assert resumed.status_code == 200, resumed.text
+    stored = repos.workers.get(user_id="local-user", worker_id="pausable")
+    embedded = stored["manifest"]["_files"]["worker.yml"]
+    assert "# canonical portable bundle" in embedded
+    assert "# stale disk copy" not in embedded
+    assert "paused:" not in embedded
+
+
 def test_pause_unknown_worker_404(client_and_main):
     client, _ = client_and_main
     assert client.post("/workers/does-not-exist/pause").status_code == 404

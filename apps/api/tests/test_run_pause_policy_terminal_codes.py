@@ -73,11 +73,30 @@ def test_missing_secret_pauses_once_after_configured_threshold(monkeypatch, tmp_
     monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
     monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
     repos = _Repos(["missing_secret", "missing_secret", "missing_secret"])
+    worker_yml = (
+        'schema_version: "0.3"\n'
+        "name: worker-1\n"
+        "enabled: yes\n"
+    )
+    worker_dir = tmp_path / "worker-1"
+    worker_dir.mkdir()
+    (worker_dir / "worker.yml").write_text(worker_yml, encoding="utf-8")
+    repos.workers.worker["manifest"]["_files"] = {"worker.yml": worker_yml}
 
     assert _apply(repos, "missing_secret") is True
     assert repos.workers.worker["enabled"] is False
     assert repos.workers.worker["manifest"]["paused"] is True
     assert repos.workers.worker["manifest"]["enabled"] is False
+    import yaml
+
+    disk_manifest = yaml.safe_load((worker_dir / "worker.yml").read_text(encoding="utf-8"))
+    embedded_manifest = yaml.safe_load(
+        repos.workers.worker["manifest"]["_files"]["worker.yml"]
+    )
+    assert disk_manifest["paused"] is True
+    assert disk_manifest["enabled"] is False
+    assert embedded_manifest["paused"] is True
+    assert embedded_manifest["enabled"] is False
     assert len(repos.workers.updates) == 1
 
     assert _apply(repos, "missing_secret") is False
