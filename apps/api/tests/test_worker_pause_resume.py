@@ -271,7 +271,7 @@ def test_resume_clears_coerced_truthy_pause_flag(client_and_main, pause_value):
     worker_yml.write_text(quoted_yml, encoding="utf-8")
     worker = repos.workers.get(user_id="local-user", worker_id="pausable")
     manifest = dict(worker["manifest"])
-    manifest.update(paused=True, enabled=False)
+    manifest.update(paused="y", enabled="n")
     manifest["_files"] = {
         "worker.yml": quoted_yml,
         "run.py": "print('hi')\n",

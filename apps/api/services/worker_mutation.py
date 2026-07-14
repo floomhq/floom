@@ -197,7 +197,9 @@ def _set_worker_enabled(
     if enabled:
         manifest = dict(worker.get("manifest") or {})
         resumed_worker_yml = _persist_worker_resumed_flag(worker_id)
-        if manifest.get("paused") is True or manifest.get("enabled") is False:
+        if _flag_matches(manifest.get("paused"), True) or _flag_matches(
+            manifest.get("enabled"), False
+        ):
             manifest["paused"] = False
             manifest["enabled"] = True
             if manifest.get("archive_reason") == _AUTO_PAUSE_ARCHIVE_REASON:
