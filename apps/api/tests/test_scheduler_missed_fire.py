@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
@@ -146,6 +148,51 @@ def test_preflight_missing_secret_records_failed_schedule_run(monkeypatch):
     assert pause_calls[0]["run_id"] == skipped["run_id"]
     assert pause_calls[0]["error_code"] == "missing_secret"
     assert repos.workers.next_updates
+
+
+def test_preflight_missing_connection_uses_terminal_pause_policy(monkeypatch):
+    now = datetime(2026, 6, 24, 12, 20, tzinfo=timezone.utc)
+    repos = _Repos(_trigger_row((now - timedelta(seconds=30)).isoformat()))
+    pause_calls = []
+
+    monkeypatch.setenv("WORKEROS_SCHEDULE_MISSED_GRACE_SECONDS", "300")
+    monkeypatch.setattr(scheduler, "_worker_is_archived", lambda _worker_id: False)
+    monkeypatch.setattr(scheduler, "_owner_is_active", lambda _repos, _user_id: True)
+    monkeypatch.setattr(
+        scheduler,
+        "_effective_scheduled_inputs",
+        lambda _repos, _worker_id, **_kwargs: ({}, []),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_missing_secrets_for_scheduled_worker",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_missing_connections_for_scheduled_worker",
+        lambda *_args, **_kwargs: ["notion"],
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_maybe_pause_scheduled_worker_after_setup_failure",
+        lambda **kwargs: pause_calls.append(kwargs) or True,
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "create_run",
+        lambda *_args, **_kwargs: pytest.fail("preflight failure dispatched a run"),
+    )
+
+    assert scheduler._tick_trigger_rows(repos, now, now.isoformat()) == 1
+    assert len(repos.runs.created) == 1
+    failed = repos.runs.created[0]
+    assert failed["error_code"] == "missing_connection"
+    assert failed["trigger_source"] == "schedule"
+    assert "notion" in failed["error"]
+    assert len(pause_calls) == 1
+    assert pause_calls[0]["run_id"] == failed["run_id"]
+    assert pause_calls[0]["error_code"] == "missing_connection"
 
 
 def test_preflight_missing_secret_pauses_on_third_failure_once(monkeypatch, tmp_path):

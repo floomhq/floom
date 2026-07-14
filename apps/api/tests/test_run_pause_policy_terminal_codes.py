@@ -128,6 +128,15 @@ def test_llm_model_not_configured_is_terminal(monkeypatch, tmp_path):
     assert repos.workers.worker["enabled"] is False
 
 
+def test_missing_connection_is_terminal(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
+    monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
+    repos = _Repos(["missing_connection", "missing_connection", "missing_connection"])
+
+    assert _apply(repos, "missing_connection") is True
+    assert repos.workers.worker["enabled"] is False
+
+
 def test_transient_failures_never_pause(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
     monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
