@@ -35,6 +35,16 @@ _AUTO_PAUSE_ARCHIVE_REASON = (
     "Paused automatically after repeated scheduled setup failures."
 )
 
+_YAML_TRUE_VALUES = {"true", "yes", "on", "1"}
+_YAML_FALSE_VALUES = {"false", "no", "off", "0"}
+
+
+def _flag_matches(value: object, expected: bool) -> bool:
+    if isinstance(value, bool):
+        return value is expected
+    normalized = str(value or "").strip().lower()
+    return normalized in (_YAML_TRUE_VALUES if expected else _YAML_FALSE_VALUES)
+
 
 def _resumed_worker_yml(raw: str) -> str | None:
     """Return worker YAML with durable pause flags cleared."""
@@ -44,10 +54,12 @@ def _resumed_worker_yml(raw: str) -> str | None:
         manifest = yaml.safe_load(raw)
         if not isinstance(manifest, dict):
             return None
-        if manifest.get("paused") is not True and manifest.get("enabled") is not False:
+        paused = _flag_matches(manifest.get("paused"), True)
+        disabled = _flag_matches(manifest.get("enabled"), False)
+        if not paused and not disabled:
             return raw
         updated = raw
-        if manifest.get("paused") is True:
+        if paused:
             updated, count = re.subn(
                 r"(?mi)^paused\s*:[^\n]*(?:\n|$)",
                 "",
@@ -61,7 +73,7 @@ def _resumed_worker_yml(raw: str) -> str | None:
                     default_flow_style=False,
                     allow_unicode=True,
                 )
-        if manifest.get("enabled") is False:
+        if disabled:
             updated, count = re.subn(
                 r"(?mi)^(enabled\s*:\s*)(?:true|false|yes|no|on|off)(\s*(?:#.*)?)$",
                 r"\1true\2",

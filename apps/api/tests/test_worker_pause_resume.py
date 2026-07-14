@@ -262,6 +262,34 @@ def test_resume_clears_legacy_duplicate_pause_flags(client_and_main):
     assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
 
 
+def test_resume_clears_quoted_truthy_pause_flag(client_and_main):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
+    quoted_yml = worker_yml.read_text(encoding="utf-8") + 'paused: "true"\n'
+    worker_yml.write_text(quoted_yml, encoding="utf-8")
+    worker = repos.workers.get(user_id="local-user", worker_id="pausable")
+    manifest = dict(worker["manifest"])
+    manifest.update(paused=True, enabled=False)
+    manifest["_files"] = {
+        "worker.yml": quoted_yml,
+        "run.py": "print('hi')\n",
+    }
+    repos.workers.update(
+        user_id="local-user",
+        worker_id="pausable",
+        enabled=False,
+        manifest_json=manifest,
+    )
+
+    resumed = client.post("/workers/pausable/resume")
+
+    assert resumed.status_code == 200, resumed.text
+    assert "paused:" not in worker_yml.read_text(encoding="utf-8")
+    stored = repos.workers.get(user_id="local-user", worker_id="pausable")
+    assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
+
+
 def test_resume_clears_embedded_worker_yml_without_local_bundle(client_and_main):
     client, main = client_and_main
     repos = main.get_repositories()
