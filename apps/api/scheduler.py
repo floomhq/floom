@@ -155,7 +155,7 @@ POLL_INTERVAL_SECONDS = 60  # check every minute
 _stop_event: threading.Event = threading.Event()
 _scheduler_thread: threading.Thread | None = None
 _scheduler_lock = threading.Lock()
-SCHEDULE_MISSED_ERROR_CODE = "schedule_missed"
+SCHEDULE_MISSED_ERROR_CODE = "scheduler_missed"
 SCHEDULE_MISSED_ERROR = "Scheduled fire was missed or delayed by the scheduler."
 
 
@@ -631,10 +631,10 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             # fall back to worker-scalar path" branch even though trigger rows
             # ARE available — which re-processed the SAME broken worker via the
             # legacy loop with the identical `now_iso_str`, producing duplicate
-            # schedule_missed markers with identical timestamps — and (c) since
+            # scheduler_missed markers with identical timestamps — and (c) since
             # the crash happened before any next_run_at advancement, the
             # trigger was re-claimed and re-crashed every lease cycle (~180s)
-            # forever, spamming schedule_missed runs while the real worker
+            # forever, spamming scheduler_missed runs while the real worker
             # never got a diagnosable error and never actually dispatched.
             # Isolate each row: never let one worker's failure affect any
             # other trigger or fall back to the legacy path, always advance

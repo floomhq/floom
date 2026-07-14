@@ -73,7 +73,7 @@ def _trigger_row(next_run_at: str) -> dict:
     }
 
 
-def test_late_schedule_trigger_records_one_schedule_missed_marker(monkeypatch):
+def test_late_schedule_trigger_records_one_scheduler_missed_marker(monkeypatch):
     now = datetime(2026, 6, 24, 12, 20, tzinfo=timezone.utc)
     repos = _Repos(_trigger_row((now - timedelta(minutes=10)).isoformat()))
     normal_runs: list[dict] = []
@@ -103,10 +103,10 @@ def test_late_schedule_trigger_records_one_schedule_missed_marker(monkeypatch):
     assert considered == 1
     assert len(repos.runs.created) == 1
     missed = repos.runs.created[0]
-    assert missed["trigger_source"] == "schedule_missed"
+    assert missed["trigger_source"] == "scheduler_missed"
     assert missed["trigger_ref"] == "trigger-a"
     assert missed["status"] == "failed"
-    assert missed["error_code"] == "schedule_missed"
+    assert missed["error_code"] == "scheduler_missed"
     assert len(normal_runs) == 1
     assert started == ["run-normal"]
 
@@ -146,7 +146,7 @@ def test_one_broken_worker_config_does_not_abort_other_triggers_or_repeat_foreve
          trigger row after it in the same tick was silently skipped;
       2. never advance the broken trigger's `next_run_at`, so the very next
          lease cycle re-claimed it and crashed again identically forever,
-         spamming duplicate `schedule_missed` markers with no diagnosable
+         spamming duplicate `scheduler_missed` markers with no diagnosable
          cause and never dispatching a real run for ANY worker in that tick.
 
     This asserts: the broken worker gets one clearly-tagged failed run and
@@ -204,7 +204,7 @@ def test_one_broken_worker_config_does_not_abort_other_triggers_or_repeat_foreve
     assert started == ["run-normal"]
 
     # Exactly ONE failed run recorded for the broken worker's own processing
-    # error — not a "schedule_missed" spam duplicate, and not silently dropped.
+    # error — not a "scheduler_missed" spam duplicate, and not silently dropped.
     scheduler_errors = [
         r for r in repos.runs.created
         if r.get("worker_id") == "pentest-cron-gh" and r.get("error_code") == "scheduler_row_error"
