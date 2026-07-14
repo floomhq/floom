@@ -147,6 +147,7 @@ def _restore_worker_repository_state(
     """Best-effort rollback for a repository that partially applied an update."""
     rollback_fields: Dict[str, Any] = {
         "enabled": bool(worker.get("enabled")),
+        "next_run_at": worker.get("next_run_at"),
     }
     manifest = worker.get("manifest")
     if isinstance(manifest, dict):

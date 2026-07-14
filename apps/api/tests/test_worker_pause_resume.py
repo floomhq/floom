@@ -111,6 +111,36 @@ def test_pause_clears_next_run_at(client_and_main):
     assert row["next_run_at"] is None
 
 
+def test_pause_rolls_back_partial_repository_write(client_and_main, monkeypatch):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    next_run_at = "2099-01-01T00:00:00Z"
+    repos.workers.update(
+        user_id="local-user",
+        worker_id="pausable",
+        next_run_at=next_run_at,
+    )
+    original_update = repos.workers.update
+    failed = False
+
+    def fail_after_partial_update(*, user_id, worker_id, **fields):
+        nonlocal failed
+        if fields.get("enabled") is False and not failed:
+            failed = True
+            original_update(user_id=user_id, worker_id=worker_id, **fields)
+            raise RuntimeError("repository unavailable")
+        return original_update(user_id=user_id, worker_id=worker_id, **fields)
+
+    monkeypatch.setattr(repos.workers, "update", fail_after_partial_update)
+
+    with pytest.raises(RuntimeError, match="repository unavailable"):
+        client.post("/workers/pausable/pause")
+
+    stored = repos.workers.get(user_id="local-user", worker_id="pausable")
+    assert stored["enabled"] is True
+    assert stored["next_run_at"] == next_run_at
+
+
 def test_manual_pause_resume_preserves_unpaused_worker_yml(client_and_main):
     client, main = client_and_main
     worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
