@@ -52,7 +52,6 @@ def _resumed_worker_yml(raw: str) -> str | None:
                 r"(?mi)^paused\s*:[^\n]*(?:\n|$)",
                 "",
                 updated,
-                count=1,
             )
             if count == 0:
                 manifest.pop("paused", None)
