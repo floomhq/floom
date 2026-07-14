@@ -187,8 +187,18 @@ def test_preflight_missing_secret_pauses_on_third_failure_once(monkeypatch, tmp_
 
     repos = SimpleNamespace(runs=_PolicyRuns(), workers=_PolicyWorkers())
 
-    run_ids = [
+    run_ids = []
+    for index in range(1, 4):
         scheduler._create_synthetic_failed_schedule_run(
+            repos,
+            worker_id="worker-policy",
+            user_id="owner-policy",
+            now_iso=f"2026-07-14T10:0{index}:00+00:00",
+            error=scheduler.SCHEDULE_MISSED_ERROR,
+            error_code=scheduler.SCHEDULE_MISSED_ERROR_CODE,
+            trigger_source=scheduler.SCHEDULE_MISSED_ERROR_CODE,
+        )
+        run_id = scheduler._create_synthetic_failed_schedule_run(
             repos,
             worker_id="worker-policy",
             user_id="owner-policy",
@@ -196,14 +206,16 @@ def test_preflight_missing_secret_pauses_on_third_failure_once(monkeypatch, tmp_
             error="Missing secrets: TEST_API_KEY",
             error_code="missing_secret",
         )
-        for index in range(1, 4)
-    ]
+        run_ids.append(run_id)
 
     assert all(run_ids)
     assert [row["error_code"] for row in repos.runs.rows] == [
         "missing_secret",
+        "scheduler_missed",
         "missing_secret",
+        "scheduler_missed",
         "missing_secret",
+        "scheduler_missed",
     ]
     assert repos.workers.worker["enabled"] is False
     assert repos.workers.worker["manifest"]["paused"] is True

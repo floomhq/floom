@@ -24,6 +24,11 @@ _TERMINAL_SCHEDULE_SETUP_ERROR_CODES = {
     "missing_secret",
 }
 
+_SCHEDULER_MISSED_ERROR_CODES = {
+    "schedule_missed",
+    "scheduler_missed",
+}
+
 
 def _persist_worker_paused_flag(
     worker_id: str,
@@ -100,10 +105,25 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
     if not current or current.get("trigger_source") != "schedule":
         return False
 
-    rows, _ = repos.runs.list(user_id=user_id, worker_id=worker_id, limit=threshold, offset=0)
-    if len(rows) < threshold:
+    rows, _ = repos.runs.list(
+        user_id=user_id,
+        worker_id=worker_id,
+        limit=threshold * 2,
+        offset=0,
+    )
+    attempts = [
+        row
+        for row in rows
+        if not (
+            str(row.get("trigger_source") or "").strip().lower()
+            in _SCHEDULER_MISSED_ERROR_CODES
+            and str(row.get("error_code") or "").strip().lower()
+            in _SCHEDULER_MISSED_ERROR_CODES
+        )
+    ][:threshold]
+    if len(attempts) < threshold:
         return False
-    for row in rows:
+    for row in attempts:
         if row.get("trigger_source") != "schedule":
             return False
         if row.get("status") != RunStatus.FAILED.value:
