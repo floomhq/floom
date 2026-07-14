@@ -86,8 +86,16 @@ async function withStubServer(fn) {
         res.end(JSON.stringify({ name: "crm", files: [] }));
         return;
       }
+      if (req.method === "GET" && req.url === "/contexts/crm") {
+        res.end(JSON.stringify({
+          name: "crm",
+          files: [{ path: "facts.md", size: 6, mime_type: "text/markdown", is_binary: false }],
+        }));
+        return;
+      }
       if (req.method === "GET" && req.url === "/contexts/crm/files/facts.md") {
-        res.end(JSON.stringify({ path: "facts.md", content: "hello\n", is_binary: false }));
+        res.setHeader("content-type", "text/markdown");
+        res.end("hello\n");
         return;
       }
       if (req.method === "PUT" && req.url === "/contexts/crm/files/facts.md") {
