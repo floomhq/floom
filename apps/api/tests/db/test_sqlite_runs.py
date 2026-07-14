@@ -105,13 +105,13 @@ def test_run_create_persists_error_code_and_retry_metadata(repo_bundle):
         trigger_source="retry",
         runner="e2b",
         error="Scheduled fire was missed or delayed by the scheduler.",
-        error_code="schedule_missed",
+        error_code="scheduler_missed",
         retry_of_run_id="run-parent",
         retry_attempt=2,
     )
 
     row = repos.runs.get_any(run_id="run-retry-child")
-    assert row["error_code"] == "schedule_missed"
+    assert row["error_code"] == "scheduler_missed"
     assert row["retry_of_run_id"] == "run-parent"
     assert row["retry_attempt"] == 2
 

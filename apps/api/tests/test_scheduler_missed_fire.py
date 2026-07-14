@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -73,7 +74,7 @@ def _trigger_row(next_run_at: str) -> dict:
     }
 
 
-def test_late_schedule_trigger_records_one_schedule_missed_marker(monkeypatch):
+def test_late_schedule_trigger_records_one_scheduler_missed_marker(monkeypatch):
     now = datetime(2026, 6, 24, 12, 20, tzinfo=timezone.utc)
     repos = _Repos(_trigger_row((now - timedelta(minutes=10)).isoformat()))
     normal_runs: list[dict] = []
@@ -103,10 +104,10 @@ def test_late_schedule_trigger_records_one_schedule_missed_marker(monkeypatch):
     assert considered == 1
     assert len(repos.runs.created) == 1
     missed = repos.runs.created[0]
-    assert missed["trigger_source"] == "schedule_missed"
+    assert missed["trigger_source"] == "scheduler_missed"
     assert missed["trigger_ref"] == "trigger-a"
     assert missed["status"] == "failed"
-    assert missed["error_code"] == "schedule_missed"
+    assert missed["error_code"] == "scheduler_missed"
     assert len(normal_runs) == 1
     assert started == ["run-normal"]
 
@@ -122,6 +123,12 @@ def test_preflight_missing_secret_records_failed_schedule_run(monkeypatch):
     monkeypatch.setattr(scheduler, "_effective_scheduled_inputs", lambda _repos, _worker_id, **_kwargs: ({}, []))
     monkeypatch.setattr(scheduler, "_missing_secrets_for_scheduled_worker", lambda *_args, **_kwargs: ["API_KEY"])
     monkeypatch.setattr(scheduler, "_missing_connections_for_scheduled_worker", lambda *_args, **_kwargs: [])
+    pause_calls = []
+    monkeypatch.setattr(
+        scheduler,
+        "_maybe_pause_scheduled_worker_after_setup_failure",
+        lambda **kwargs: pause_calls.append(kwargs) or False,
+    )
     monkeypatch.setattr(scheduler, "create_run", lambda *args, **kwargs: normal_runs.append(kwargs))
 
     considered = scheduler._tick_trigger_rows(repos, now, now.isoformat())
@@ -135,7 +142,95 @@ def test_preflight_missing_secret_records_failed_schedule_run(monkeypatch):
     assert skipped["status"] == "failed"
     assert skipped["error_code"] == "missing_secret"
     assert "API_KEY" in skipped["error"]
+    assert len(pause_calls) == 1
+    assert pause_calls[0]["run_id"] == skipped["run_id"]
+    assert pause_calls[0]["error_code"] == "missing_secret"
     assert repos.workers.next_updates
+
+
+def test_preflight_missing_secret_pauses_on_third_failure_once(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
+    monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
+
+    class _PolicyRuns:
+        def __init__(self):
+            self.rows = []
+
+        def create(self, **fields):
+            self.rows.insert(0, {"id": fields["run_id"], **fields})
+
+        def get(self, *, user_id, run_id):
+            return next((row for row in self.rows if row["id"] == run_id), None)
+
+        def list(self, *, user_id, worker_id, limit, offset):
+            rows = [row for row in self.rows if row["worker_id"] == worker_id]
+            return rows[offset : offset + limit], len(rows)
+
+    class _PolicyWorkers:
+        def __init__(self):
+            self.worker = {
+                "id": "worker-policy",
+                "enabled": True,
+                "manifest": {"name": "Policy worker", "enabled": True},
+            }
+            self.updates = []
+
+        def get(self, *, user_id, worker_id):
+            return dict(self.worker)
+
+        def update(self, *, user_id, worker_id, **fields):
+            self.updates.append(dict(fields))
+            self.worker.update(fields)
+            if "manifest_json" in fields:
+                self.worker["manifest"] = dict(fields["manifest_json"])
+            return dict(self.worker)
+
+    repos = SimpleNamespace(runs=_PolicyRuns(), workers=_PolicyWorkers())
+
+    run_ids = []
+    for index in range(1, 4):
+        scheduler._create_synthetic_failed_schedule_run(
+            repos,
+            worker_id="worker-policy",
+            user_id="owner-policy",
+            now_iso=f"2026-07-14T10:0{index}:00+00:00",
+            error=scheduler.SCHEDULE_MISSED_ERROR,
+            error_code=scheduler.SCHEDULE_MISSED_ERROR_CODE,
+            trigger_source=scheduler.SCHEDULE_MISSED_ERROR_CODE,
+        )
+        run_id = scheduler._create_synthetic_failed_schedule_run(
+            repos,
+            worker_id="worker-policy",
+            user_id="owner-policy",
+            now_iso=f"2026-07-14T10:0{index}:00+00:00",
+            error="Missing secrets: TEST_API_KEY",
+            error_code="missing_secret",
+        )
+        run_ids.append(run_id)
+
+    assert all(run_ids)
+    assert [row["error_code"] for row in repos.runs.rows] == [
+        "missing_secret",
+        "scheduler_missed",
+        "missing_secret",
+        "scheduler_missed",
+        "missing_secret",
+        "scheduler_missed",
+    ]
+    assert repos.workers.worker["enabled"] is False
+    assert repos.workers.worker["manifest"]["paused"] is True
+    assert repos.workers.worker["manifest"]["enabled"] is False
+    assert len(repos.workers.updates) == 1
+
+    scheduler._create_synthetic_failed_schedule_run(
+        repos,
+        worker_id="worker-policy",
+        user_id="owner-policy",
+        now_iso="2026-07-14T10:04:00+00:00",
+        error="Missing secrets: TEST_API_KEY",
+        error_code="missing_secret",
+    )
+    assert len(repos.workers.updates) == 1
 
 
 def test_one_broken_worker_config_does_not_abort_other_triggers_or_repeat_forever(monkeypatch):
@@ -146,7 +241,7 @@ def test_one_broken_worker_config_does_not_abort_other_triggers_or_repeat_foreve
          trigger row after it in the same tick was silently skipped;
       2. never advance the broken trigger's `next_run_at`, so the very next
          lease cycle re-claimed it and crashed again identically forever,
-         spamming duplicate `schedule_missed` markers with no diagnosable
+         spamming duplicate `scheduler_missed` markers with no diagnosable
          cause and never dispatching a real run for ANY worker in that tick.
 
     This asserts: the broken worker gets one clearly-tagged failed run and
@@ -204,7 +299,7 @@ def test_one_broken_worker_config_does_not_abort_other_triggers_or_repeat_foreve
     assert started == ["run-normal"]
 
     # Exactly ONE failed run recorded for the broken worker's own processing
-    # error — not a "schedule_missed" spam duplicate, and not silently dropped.
+    # error — not a "scheduler_missed" spam duplicate, and not silently dropped.
     scheduler_errors = [
         r for r in repos.runs.created
         if r.get("worker_id") == "pentest-cron-gh" and r.get("error_code") == "scheduler_row_error"

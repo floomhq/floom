@@ -26,6 +26,7 @@ from croniter import croniter
 from db.factory import get_repositories
 from models import RunStatus
 from run_service import (
+    _maybe_pause_scheduled_worker_after_setup_failure,
     create_run,
     get_worker_config_for_run,
     get_worker_recipe_for_run,
@@ -155,7 +156,7 @@ POLL_INTERVAL_SECONDS = 60  # check every minute
 _stop_event: threading.Event = threading.Event()
 _scheduler_thread: threading.Thread | None = None
 _scheduler_lock = threading.Lock()
-SCHEDULE_MISSED_ERROR_CODE = "schedule_missed"
+SCHEDULE_MISSED_ERROR_CODE = "scheduler_missed"
 SCHEDULE_MISSED_ERROR = "Scheduled fire was missed or delayed by the scheduler."
 
 
@@ -227,13 +228,32 @@ def _create_synthetic_failed_schedule_run(
             duration_ms=0,
             created_at=now_iso,
         )
-        return run_id
     except Exception:
         logger.exception(
             "Failed to record synthetic scheduled failure for worker %s",
             worker_id,
         )
         return None
+
+    try:
+        paused = _maybe_pause_scheduled_worker_after_setup_failure(
+            worker_id=worker_id,
+            run_id=run_id,
+            user_id=user_id,
+            error_code=error_code,
+            repos=repos,
+        )
+        if paused:
+            logger.warning(
+                "Auto-paused scheduled worker %s after repeated terminal setup failures",
+                worker_id,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to apply scheduled setup-failure pause policy for worker %s",
+            worker_id,
+        )
+    return run_id
 
 
 def _record_schedule_missed_if_late(
@@ -631,10 +651,10 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             # fall back to worker-scalar path" branch even though trigger rows
             # ARE available — which re-processed the SAME broken worker via the
             # legacy loop with the identical `now_iso_str`, producing duplicate
-            # schedule_missed markers with identical timestamps — and (c) since
+            # scheduler_missed markers with identical timestamps — and (c) since
             # the crash happened before any next_run_at advancement, the
             # trigger was re-claimed and re-crashed every lease cycle (~180s)
-            # forever, spamming schedule_missed runs while the real worker
+            # forever, spamming scheduler_missed runs while the real worker
             # never got a diagnosable error and never actually dispatched.
             # Isolate each row: never let one worker's failure affect any
             # other trigger or fall back to the legacy path, always advance

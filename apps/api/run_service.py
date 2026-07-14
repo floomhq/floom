@@ -3597,6 +3597,23 @@ def execute_run(
                 user_id=owner_id,
                 repos=repos_obj,
             )
+            try:
+                if _maybe_pause_scheduled_worker_after_setup_failure(
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    user_id=owner_id,
+                    error_code=result_error_code,
+                    repos=repos_obj,
+                ):
+                    log_fn(
+                        "Paused scheduled worker after repeated terminal setup failures",
+                        level="warning",
+                    )
+            except Exception:
+                logger.exception(
+                    "Scheduled setup-failure pause policy failed for run %s",
+                    run_id,
+                )
             finish_status = "timeout" if (result.error_code or "").lower().find("timeout") >= 0 else "failed"
             publish_run_part(
                 run_id,
