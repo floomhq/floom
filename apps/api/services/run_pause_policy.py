@@ -30,6 +30,18 @@ _SCHEDULER_MISSED_ERROR_CODES = {
 }
 
 
+def _append_yaml_state_field(raw: str, field: str) -> str:
+    """Append a top-level field before an optional YAML document-end marker."""
+    document_end = re.search(r"(?m)^\.\.\.\s*(?:#.*)?(?:\n|$)", raw)
+    if document_end is None:
+        prefix, suffix = raw, ""
+    else:
+        prefix, suffix = raw[: document_end.start()], raw[document_end.start() :]
+    if prefix and not prefix.endswith("\n"):
+        prefix += "\n"
+    return f"{prefix}{field}\n{suffix}"
+
+
 def _paused_worker_yml(raw: str) -> str | None:
     """Return worker YAML with durable auto-pause flags set."""
     import yaml
@@ -55,9 +67,7 @@ def _paused_worker_yml(raw: str) -> str | None:
                     default_flow_style=False,
                     allow_unicode=True,
                 )
-        if not updated.endswith("\n"):
-            updated += "\n"
-        updated += "paused: true\n"
+        updated = _append_yaml_state_field(updated, "paused: true")
         if "enabled" in manifest:
             updated, count = re.subn(
                 r"(?mi)^enabled\s*:[^\n]*(?:\n|$)",
@@ -73,9 +83,7 @@ def _paused_worker_yml(raw: str) -> str | None:
                     default_flow_style=False,
                     allow_unicode=True,
                 )
-            if not updated.endswith("\n"):
-                updated += "\n"
-            updated += "enabled: false\n"
+            updated = _append_yaml_state_field(updated, "enabled: false")
         return updated
     except Exception:
         return None

@@ -80,6 +80,7 @@ def test_missing_secret_pauses_once_after_configured_threshold(monkeypatch, tmp_
         "paused: no\n"
         "enabled: no\n"
         "enabled: yes\n"
+        "...\n"
     )
     worker_dir = tmp_path / "worker-1"
     worker_dir.mkdir()
