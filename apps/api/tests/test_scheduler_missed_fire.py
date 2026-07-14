@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -145,6 +146,79 @@ def test_preflight_missing_secret_records_failed_schedule_run(monkeypatch):
     assert pause_calls[0]["run_id"] == skipped["run_id"]
     assert pause_calls[0]["error_code"] == "missing_secret"
     assert repos.workers.next_updates
+
+
+def test_preflight_missing_secret_pauses_on_third_failure_once(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
+    monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
+
+    class _PolicyRuns:
+        def __init__(self):
+            self.rows = []
+
+        def create(self, **fields):
+            self.rows.insert(0, {"id": fields["run_id"], **fields})
+
+        def get(self, *, user_id, run_id):
+            return next((row for row in self.rows if row["id"] == run_id), None)
+
+        def list(self, *, user_id, worker_id, limit, offset):
+            rows = [row for row in self.rows if row["worker_id"] == worker_id]
+            return rows[offset : offset + limit], len(rows)
+
+    class _PolicyWorkers:
+        def __init__(self):
+            self.worker = {
+                "id": "worker-policy",
+                "enabled": True,
+                "manifest": {"name": "Policy worker", "enabled": True},
+            }
+            self.updates = []
+
+        def get(self, *, user_id, worker_id):
+            return dict(self.worker)
+
+        def update(self, *, user_id, worker_id, **fields):
+            self.updates.append(dict(fields))
+            self.worker.update(fields)
+            if "manifest_json" in fields:
+                self.worker["manifest"] = dict(fields["manifest_json"])
+            return dict(self.worker)
+
+    repos = SimpleNamespace(runs=_PolicyRuns(), workers=_PolicyWorkers())
+
+    run_ids = [
+        scheduler._create_synthetic_failed_schedule_run(
+            repos,
+            worker_id="worker-policy",
+            user_id="owner-policy",
+            now_iso=f"2026-07-14T10:0{index}:00+00:00",
+            error="Missing secrets: TEST_API_KEY",
+            error_code="missing_secret",
+        )
+        for index in range(1, 4)
+    ]
+
+    assert all(run_ids)
+    assert [row["error_code"] for row in repos.runs.rows] == [
+        "missing_secret",
+        "missing_secret",
+        "missing_secret",
+    ]
+    assert repos.workers.worker["enabled"] is False
+    assert repos.workers.worker["manifest"]["paused"] is True
+    assert repos.workers.worker["manifest"]["enabled"] is False
+    assert len(repos.workers.updates) == 1
+
+    scheduler._create_synthetic_failed_schedule_run(
+        repos,
+        worker_id="worker-policy",
+        user_id="owner-policy",
+        now_iso="2026-07-14T10:04:00+00:00",
+        error="Missing secrets: TEST_API_KEY",
+        error_code="missing_secret",
+    )
+    assert len(repos.workers.updates) == 1
 
 
 def test_one_broken_worker_config_does_not_abort_other_triggers_or_repeat_forever(monkeypatch):

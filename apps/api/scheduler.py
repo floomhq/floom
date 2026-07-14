@@ -236,13 +236,18 @@ def _create_synthetic_failed_schedule_run(
         return None
 
     try:
-        _maybe_pause_scheduled_worker_after_setup_failure(
+        paused = _maybe_pause_scheduled_worker_after_setup_failure(
             worker_id=worker_id,
             run_id=run_id,
             user_id=user_id,
             error_code=error_code,
             repos=repos,
         )
+        if paused:
+            logger.warning(
+                "Auto-paused scheduled worker %s after repeated terminal setup failures",
+                worker_id,
+            )
     except Exception:
         logger.exception(
             "Failed to apply scheduled setup-failure pause policy for worker %s",
