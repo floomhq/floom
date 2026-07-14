@@ -111,6 +111,18 @@ def test_pause_clears_next_run_at(client_and_main):
     assert row["next_run_at"] is None
 
 
+def test_manual_pause_resume_preserves_unpaused_worker_yml(client_and_main):
+    client, main = client_and_main
+    worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
+    original = "# keep this operator comment\n" + worker_yml.read_text(encoding="utf-8")
+    worker_yml.write_text(original, encoding="utf-8")
+
+    assert client.post("/workers/pausable/pause").status_code == 200
+    assert client.post("/workers/pausable/resume").status_code == 200
+
+    assert worker_yml.read_text(encoding="utf-8") == original
+
+
 def test_resume_clears_auto_pause_manifest_and_worker_yml(client_and_main):
     client, main = client_and_main
     repos = main.get_repositories()

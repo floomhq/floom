@@ -44,8 +44,10 @@ def _resumed_worker_yml(raw: str) -> str | None:
         manifest = yaml.safe_load(raw)
         if not isinstance(manifest, dict):
             return None
+        if manifest.get("paused") is not True and manifest.get("enabled") is not False:
+            return raw
         manifest.pop("paused", None)
-        if "enabled" in manifest:
+        if manifest.get("enabled") is False:
             manifest["enabled"] = True
         return yaml.safe_dump(
             manifest,
