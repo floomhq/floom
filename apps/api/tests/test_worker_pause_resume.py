@@ -327,6 +327,12 @@ def test_resume_clears_coerced_truthy_pause_flag(client_and_main, pause_value):
     assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
 
 
+def test_resume_matches_numeric_false_enabled_flag():
+    from services.worker_mutation import _flag_matches
+
+    assert _flag_matches(0, False) is True
+
+
 def test_resume_clears_embedded_worker_yml_without_local_bundle(client_and_main):
     client, main = client_and_main
     repos = main.get_repositories()

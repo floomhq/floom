@@ -42,7 +42,7 @@ _YAML_FALSE_VALUES = {"false", "no", "off", "0", "f", "n"}
 def _flag_matches(value: object, expected: bool) -> bool:
     if isinstance(value, bool):
         return value is expected
-    normalized = str(value or "").strip().lower()
+    normalized = str(value if value is not None else "").strip().lower()
     return normalized in (_YAML_TRUE_VALUES if expected else _YAML_FALSE_VALUES)
 
 
