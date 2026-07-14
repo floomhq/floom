@@ -192,10 +192,13 @@ def test_resume_clears_auto_pause_manifest_and_worker_yml(client_and_main):
     assert stored["enabled"] is True
     assert stored["manifest"]["paused"] is False
     assert stored["manifest"]["enabled"] is True
+    assert stored["manifest"]["_floom_scheduled_setup_resumed_at"]
     assert "archive_reason" not in stored["manifest"]
     content = worker_yml.read_text(encoding="utf-8")
     assert "paused:" not in content
     assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
+    assert "_floom_scheduled_setup_resumed_at:" in content
+    assert "_floom_scheduled_setup_resumed_at:" in stored["manifest"]["_files"]["worker.yml"]
 
 
 def test_resume_rolls_back_worker_yml_when_repository_update_fails(

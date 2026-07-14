@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -34,6 +35,7 @@ logger = logging.getLogger("floom.api")
 _AUTO_PAUSE_ARCHIVE_REASON = (
     "Paused automatically after repeated scheduled setup failures."
 )
+SCHEDULE_SETUP_RESUMED_AT_FIELD = "_floom_scheduled_setup_resumed_at"
 
 _YAML_TRUE_VALUES = {"true", "yes", "on", "1", "t", "y"}
 _YAML_FALSE_VALUES = {"false", "no", "off", "0", "f", "n"}
@@ -46,7 +48,7 @@ def _flag_matches(value: object, expected: bool) -> bool:
     return normalized in (_YAML_TRUE_VALUES if expected else _YAML_FALSE_VALUES)
 
 
-def _resumed_worker_yml(raw: str) -> str | None:
+def _resumed_worker_yml(raw: str, *, resumed_at: str | None = None) -> str | None:
     """Return worker YAML with durable pause flags cleared."""
     import yaml
 
@@ -56,12 +58,14 @@ def _resumed_worker_yml(raw: str) -> str | None:
             return None
         paused = _flag_matches(manifest.get("paused"), True)
         disabled = _flag_matches(manifest.get("enabled"), False)
-        if not paused and not disabled:
+        if not paused and not disabled and resumed_at is None:
             return raw
         if paused:
             manifest.pop("paused", None)
         if disabled:
             manifest["enabled"] = True
+        if resumed_at is not None:
+            manifest[SCHEDULE_SETUP_RESUMED_AT_FIELD] = resumed_at
         return yaml.safe_dump(
             manifest,
             sort_keys=False,
@@ -72,7 +76,9 @@ def _resumed_worker_yml(raw: str) -> str | None:
         return None
 
 
-def _persist_worker_resumed_flag(worker_id: str) -> tuple[Path, str, str] | None:
+def _persist_worker_resumed_flag(
+    worker_id: str, *, resumed_at: str | None = None
+) -> tuple[Path, str, str] | None:
     """Clear durable pause flags and return the path, old YAML, and new YAML."""
     from worker_registry import WORKERS_DIR
 
@@ -86,7 +92,7 @@ def _persist_worker_resumed_flag(worker_id: str) -> tuple[Path, str, str] | None
         return None
     try:
         raw = worker_yml.read_text(encoding="utf-8")
-        updated = _resumed_worker_yml(raw)
+        updated = _resumed_worker_yml(raw, resumed_at=resumed_at)
         if updated is None:
             return None
         if updated != raw:
@@ -203,10 +209,19 @@ def _set_worker_enabled(
     resumed_worker_yml: tuple[Path, str, str] | None = None
     if enabled:
         manifest = dict(worker.get("manifest") or {})
-        resumed_worker_yml = _persist_worker_resumed_flag(worker_id)
-        if _flag_matches(manifest.get("paused"), True) or _flag_matches(
-            manifest.get("enabled"), False
-        ):
+        durable_setup_pause = _flag_matches(
+            manifest.get("paused"), True
+        ) or _flag_matches(manifest.get("enabled"), False)
+        resumed_at = (
+            datetime.now(timezone.utc).isoformat()
+            if durable_setup_pause
+            else None
+        )
+        resumed_worker_yml = _persist_worker_resumed_flag(
+            worker_id, resumed_at=resumed_at
+        )
+        if durable_setup_pause:
+            manifest[SCHEDULE_SETUP_RESUMED_AT_FIELD] = resumed_at
             manifest["paused"] = False
             manifest["enabled"] = True
             if manifest.get("archive_reason") == _AUTO_PAUSE_ARCHIVE_REASON:
@@ -215,7 +230,9 @@ def _set_worker_enabled(
             if isinstance(files, dict):
                 embedded_worker_yml = files.get("worker.yml")
                 resumed_embedded_yml = (
-                    _resumed_worker_yml(embedded_worker_yml)
+                    _resumed_worker_yml(
+                        embedded_worker_yml, resumed_at=resumed_at
+                    )
                     if isinstance(embedded_worker_yml, str)
                     else None
                 )
