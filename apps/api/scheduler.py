@@ -26,6 +26,7 @@ from croniter import croniter
 from db.factory import get_repositories
 from models import RunStatus
 from run_service import (
+    _maybe_pause_scheduled_worker_after_setup_failure,
     create_run,
     get_worker_config_for_run,
     get_worker_recipe_for_run,
@@ -227,13 +228,27 @@ def _create_synthetic_failed_schedule_run(
             duration_ms=0,
             created_at=now_iso,
         )
-        return run_id
     except Exception:
         logger.exception(
             "Failed to record synthetic scheduled failure for worker %s",
             worker_id,
         )
         return None
+
+    try:
+        _maybe_pause_scheduled_worker_after_setup_failure(
+            worker_id=worker_id,
+            run_id=run_id,
+            user_id=user_id,
+            error_code=error_code,
+            repos=repos,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to apply scheduled setup-failure pause policy for worker %s",
+            worker_id,
+        )
+    return run_id
 
 
 def _record_schedule_missed_if_late(

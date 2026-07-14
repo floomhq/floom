@@ -122,6 +122,12 @@ def test_preflight_missing_secret_records_failed_schedule_run(monkeypatch):
     monkeypatch.setattr(scheduler, "_effective_scheduled_inputs", lambda _repos, _worker_id, **_kwargs: ({}, []))
     monkeypatch.setattr(scheduler, "_missing_secrets_for_scheduled_worker", lambda *_args, **_kwargs: ["API_KEY"])
     monkeypatch.setattr(scheduler, "_missing_connections_for_scheduled_worker", lambda *_args, **_kwargs: [])
+    pause_calls = []
+    monkeypatch.setattr(
+        scheduler,
+        "_maybe_pause_scheduled_worker_after_setup_failure",
+        lambda **kwargs: pause_calls.append(kwargs) or False,
+    )
     monkeypatch.setattr(scheduler, "create_run", lambda *args, **kwargs: normal_runs.append(kwargs))
 
     considered = scheduler._tick_trigger_rows(repos, now, now.isoformat())
@@ -135,6 +141,9 @@ def test_preflight_missing_secret_records_failed_schedule_run(monkeypatch):
     assert skipped["status"] == "failed"
     assert skipped["error_code"] == "missing_secret"
     assert "API_KEY" in skipped["error"]
+    assert len(pause_calls) == 1
+    assert pause_calls[0]["run_id"] == skipped["run_id"]
+    assert pause_calls[0]["error_code"] == "missing_secret"
     assert repos.workers.next_updates
 
 

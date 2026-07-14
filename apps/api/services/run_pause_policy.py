@@ -19,6 +19,11 @@ from models import RunStatus
 
 logger = logging.getLogger("floom.run_service")
 
+_TERMINAL_SCHEDULE_SETUP_ERROR_CODES = {
+    "llm_model_not_configured",
+    "missing_secret",
+}
+
 
 def _persist_worker_paused_flag(
     worker_id: str,
@@ -83,7 +88,8 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
 ) -> bool:
     """Pause a scheduled worker after repeated deterministic setup failures."""
     from run_service import _schedule_missing_secret_pause_threshold
-    if error_code != "missing_secret" or not user_id:
+    normalized_error_code = str(error_code or "").strip().lower()
+    if normalized_error_code not in _TERMINAL_SCHEDULE_SETUP_ERROR_CODES or not user_id:
         return False
 
     threshold = _schedule_missing_secret_pause_threshold()
@@ -102,14 +108,20 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
             return False
         if row.get("status") != RunStatus.FAILED.value:
             return False
-        if row.get("error_code") != "missing_secret":
+        if str(row.get("error_code") or "").strip().lower() != normalized_error_code:
             return False
+
+    worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
+    manifest = dict((worker or {}).get("manifest") or {})
+    if not worker or worker.get("enabled") is False or manifest.get("paused") is True:
+        return False
 
     _persist_worker_paused_flag(worker_id, repos=repos, user_id=user_id)
     logger.warning(
-        "Auto-paused scheduled worker %s after %d consecutive missing-secret failures",
+        "Auto-paused scheduled worker %s after %d consecutive %s failures",
         worker_id,
         threshold,
+        normalized_error_code,
     )
     return True
 
