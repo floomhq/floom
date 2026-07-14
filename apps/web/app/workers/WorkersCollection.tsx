@@ -71,7 +71,9 @@ import {
   ArrowRight,
   Archive,
   Brain,
+  Check,
   ChevronDown,
+  Clipboard,
   CopyPlus,
   Edit3,
   Lock,
@@ -2312,88 +2314,45 @@ function WorkerDetailActions({
 
 // ---- Workers empty-state quick start -----------------------------------------
 
-// Two real ways a signed-in user gets a first worker running. Worker creation
-// does NOT happen in the dashboard: you either start from a ready-made template
-// (the gallery's "Add to workspace" lands a running worker in one click) or set
-// up Floom in your coding agent (Claude Code, Codex, Cursor, …) via MCP and ask
-// it to build one. The prompt examples are what you'd say to THAT coding agent.
-const WORKER_PROMPT_EXAMPLES = [
-  "Create a Floom worker that summarizes my latest 5 Gmail emails every hour and sends the summary to Slack.",
-  "Create a Floom worker that checks new Linear issues every morning and posts a priority digest to Slack.",
-  "Create a Floom worker that watches a Google Sheet for new rows and drafts follow-up emails.",
-];
-
-// Template gallery — the primary web activation path. Built from the public site
-// origin so a self-hosted instance points at its own gallery and managed Cloud
-// points at floom.dev/templates.
+const WORKERS_EMPTY_ONBOARD_PROMPT = "Read https://floom.dev/onboard and walk me through setting up Floom.";
 const WORKERS_EMPTY_TEMPLATES_URL = `${getPublicSiteOrigin()}/templates`;
 
-function WorkersEmptyQuickStart() {
+export function WorkersEmptyQuickStart() {
+  const [copied, setCopied] = useState(false);
+
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(WORKERS_EMPTY_ONBOARD_PROMPT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Could not copy prompt");
+    }
+  }
+
   return (
-    <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-6 text-center">
-      {/* PRIMARY: start from a template */}
-      <div className="flex flex-col items-center gap-3">
-        <div>
-          <div className="text-sm font-medium text-ink">Start from a template</div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Pick a ready-made worker and add it to your workspace. It runs in one click.
-          </p>
-        </div>
-        <Link
-          className="c-addbtn"
-          href={WORKERS_EMPTY_TEMPLATES_URL}
-        >
-          Browse templates
-        </Link>
-      </div>
-
-      <div className="flex w-full items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        <span className="h-px flex-1 bg-[var(--bg-3)]" />
-        or
-        <span className="h-px flex-1 bg-[var(--bg-3)]" />
-      </div>
-
-      {/* SECONDARY — build one from your coding agent (MCP native path) */}
-      <div className="flex w-full flex-col items-center gap-4">
-        <div>
-          <div className="text-sm font-medium text-ink">Build one from your coding agent</div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Install the Floom MCP server in Claude Code, Codex, or Cursor, then ask it to create workers like these:
-          </p>
-        </div>
-
-        <div className="grid w-full gap-2 text-left">
-          {WORKER_PROMPT_EXAMPLES.map((example) => (
-            <div
-              key={example}
-              className="rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2 font-mono text-[12px] leading-5 text-ink [border:var(--bd-card)]"
-            >
-              {example}
-            </div>
-          ))}
-        </div>
-
-        <div className="grid gap-1.5 font-mono text-[12px] leading-5 text-muted-foreground">
-          <div>npx -y @floomhq/floom mcp install</div>
-        </div>
-
-        <div className="flex flex-wrap justify-center gap-2">
-          <Link
-            className="c-vpill"
-            href="/connections/mcp?from_install=workers-empty"
-          >
-            Install MCP
-          </Link>
-          <Link
-            className="c-vpill"
-            href="https://floom.dev/v3/docs/worker-yml"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Worker guide
-          </Link>
-        </div>
-      </div>
+    <div className="mt-5 flex w-full max-w-[620px] flex-col items-center gap-3 text-center">
+      <p className="text-sm font-medium text-ink">
+        Get started, paste this into Claude Code or Cursor:
+      </p>
+      <button
+        type="button"
+        onClick={() => void copyPrompt()}
+        className="flex w-full items-center justify-between gap-4 rounded-[var(--radius-button)] border-0 bg-[#F3F4F6] px-4 py-3 text-left font-mono text-[12px] leading-5 text-[var(--ink)] transition-colors hover:bg-[#E9EBEF]"
+        aria-label={copied ? "Copied" : "Copy prompt"}
+      >
+        <span>{WORKERS_EMPTY_ONBOARD_PROMPT}</span>
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px]" aria-live="polite">
+          {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Clipboard className="size-3.5" aria-hidden="true" />}
+          {copied ? "Copied" : "Copy prompt"}
+        </span>
+      </button>
+      <Link
+        className="text-xs text-muted-foreground transition-colors hover:text-ink"
+        href={WORKERS_EMPTY_TEMPLATES_URL}
+      >
+        or browse templates
+      </Link>
     </div>
   );
 }
