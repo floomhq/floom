@@ -36,33 +36,44 @@ _AUTO_PAUSE_ARCHIVE_REASON = (
 )
 
 
-def _persist_worker_resumed_flag(worker_id: str) -> None:
-    """Clear durable pause flags in worker.yml after an explicit resume."""
+def _persist_worker_resumed_flag(worker_id: str) -> str | None:
+    """Clear durable pause flags in worker.yml and return the resumed YAML."""
+    import yaml
+
     from worker_registry import WORKERS_DIR
 
-    worker_yml = WORKERS_DIR / worker_id / "worker.yml"
+    worker_dir = (WORKERS_DIR / worker_id).resolve()
+    worker_yml = (worker_dir / "worker.yml").resolve()
+    try:
+        worker_yml.relative_to(worker_dir)
+    except ValueError:
+        return None
     if not worker_yml.exists():
-        return
+        return None
     try:
         raw = worker_yml.read_text(encoding="utf-8")
-        updated = re.sub(
-            r"(?m)^(paused:\s*)(true|false)\s*$",
-            r"\1false",
-            raw,
-        )
-        updated = re.sub(
-            r"(?m)^(enabled:\s*)(true|false)\s*$",
-            r"\1true",
-            updated,
+        manifest = yaml.safe_load(raw)
+        if not isinstance(manifest, dict):
+            return None
+        manifest.pop("paused", None)
+        if "enabled" in manifest:
+            manifest["enabled"] = True
+        updated = yaml.safe_dump(
+            manifest,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
         )
         if updated != raw:
             worker_yml.write_text(updated, encoding="utf-8")
+        return updated
     except Exception:
         logger.warning(
             "Failed to persist resumed flag for %s",
             worker_id,
             exc_info=True,
         )
+        return None
 
 def _require_worker_write_workspace_context(request: Request) -> None:
     from auth.local_workspaces import requested_local_workspace_id
@@ -125,13 +136,19 @@ def _set_worker_enabled(
     owner_id = str(worker.get("owner_id") or auth.user_id)
     if enabled:
         manifest = dict(worker.get("manifest") or {})
+        resumed_worker_yml = _persist_worker_resumed_flag(worker_id)
         if manifest.get("paused") is True or manifest.get("enabled") is False:
             manifest["paused"] = False
             manifest["enabled"] = True
             if manifest.get("archive_reason") == _AUTO_PAUSE_ARCHIVE_REASON:
                 manifest.pop("archive_reason", None)
+            files = manifest.get("_files")
+            if isinstance(files, dict) and resumed_worker_yml is not None:
+                manifest["_files"] = {
+                    **files,
+                    "worker.yml": resumed_worker_yml,
+                }
             update_fields["manifest_json"] = manifest
-        _persist_worker_resumed_flag(worker_id)
     updated = repos.workers.update(user_id=owner_id, worker_id=worker_id, **update_fields)
     if updated is None:
         raise HTTPException(status_code=404, detail="Worker not found")

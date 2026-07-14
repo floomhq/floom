@@ -124,6 +124,23 @@ def test_resume_clears_auto_pause_manifest_and_worker_yml(client_and_main):
     assert paused["enabled"] is False
     assert paused["manifest"]["paused"] is True
     assert paused["manifest"]["enabled"] is False
+    worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
+    paused_yml = worker_yml.read_text(encoding="utf-8").replace(
+        "paused: true",
+        "paused: yes",
+    )
+    worker_yml.write_text(paused_yml, encoding="utf-8")
+    paused_manifest = dict(paused["manifest"])
+    paused_manifest["_files"] = {
+        "worker.yml": paused_yml,
+        "run.py": "print('hi')\n",
+    }
+    repos.workers.update(
+        user_id="local-user",
+        worker_id="pausable",
+        enabled=False,
+        manifest_json=paused_manifest,
+    )
 
     resumed = client.post("/workers/pausable/resume")
 
@@ -133,9 +150,9 @@ def test_resume_clears_auto_pause_manifest_and_worker_yml(client_and_main):
     assert stored["manifest"]["paused"] is False
     assert stored["manifest"]["enabled"] is True
     assert "archive_reason" not in stored["manifest"]
-    worker_yml = main.WORKERS_DIR / "pausable" / "worker.yml"
     content = worker_yml.read_text(encoding="utf-8")
-    assert "paused: false" in content
+    assert "paused:" not in content
+    assert "paused:" not in stored["manifest"]["_files"]["worker.yml"]
 
 
 def test_pause_unknown_worker_404(client_and_main):
