@@ -469,3 +469,43 @@ async def _store_uploaded_blob(
         "media_type": media_type,
         "url": upload_url,
     }
+async def store_inline_upload(
+    request: Optional[Request],
+    *,
+    data: bytes,
+    filename: str,
+    uploaded_by: str,
+    max_size_mb: Optional[float] = None,
+    accepts: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Store inline (text/base64) content through the SAME pipeline as POST /uploads.
+
+    #2265: MCP callers have no browser form-data path, so any worker with a
+    ``type: file`` input was unrunnable over MCP. This helper adapts in-memory
+    content to the shared ``_store_uploaded_blob`` pipeline — the extension /
+    media-type allowlists, size caps, hourly quota, content addressing, and
+    ownership rows apply identically to inline uploads. No parallel storage
+    path is introduced.
+    """
+    import io
+
+    from fastapi import UploadFile
+
+    if request is None:
+        # Internal dispatchers (in-process MCP surfaces) carry no HTTP request;
+        # quota-account them under the shared anonymous key.
+        request = Request({
+            "type": "http",
+            "method": "POST",
+            "path": "/uploads",
+            "query_string": b"",
+            "headers": [(b"host", b"asgi")],
+        })
+    upload = UploadFile(io.BytesIO(data), size=len(data), filename=filename)
+    return await _store_uploaded_blob(
+        request,
+        upload,
+        uploaded_by,
+        max_size_mb=max_size_mb,
+        accepts=accepts,
+    )
