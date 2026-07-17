@@ -6488,6 +6488,9 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             "inputSchema": _mcp_json_schema({
                 "include_system": {"type": "boolean", "default": False},
                 "include_archived": {"type": "boolean", "default": False},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+                "offset": {"type": "integer", "minimum": 0, "default": 0},
+                "verbose": {"type": "boolean", "default": False},
             }),
         },
         {
@@ -7643,7 +7646,7 @@ async def _api_call(
 
 _MCP_DEFAULT_TOOLS: List[dict] = [
     # --- workers ---
-    {"name": "workers.list", "description": "List Floom workers.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workers.list", "description": "List Floom workers with a compact projection by default.", "inputSchema": {"type": "object", "properties": {"include_system": {"type": "boolean", "default": False}, "include_archived": {"type": "boolean", "default": False}, "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}, "offset": {"type": "integer", "minimum": 0, "default": 0}, "verbose": {"type": "boolean", "default": False}}}},
     {"name": "workers.get", "description": "Get a Floom worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py or run_ts. For agent/skill-mode workers supply skill_md.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "run_ts": {"type": "string", "description": "TypeScript source for run.ts."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Optional complete worker bundle files. Must include worker.yml when supplied."}}, "required": ["worker_yml"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
@@ -7849,8 +7852,22 @@ async def _mcp_dispatch(
 
     # --- workers ---
     if name == "workers.list":
-        data, s = await _api_call("GET", "/workers", request)
-        return _mcp_api_result(data, s)
+        verbose = bool(a.get("verbose", False))
+        data, s = await _api_call(
+            "GET",
+            "/workers",
+            request,
+            params={
+                "include_system": a.get("include_system", False),
+                "include_archived": a.get("include_archived", False),
+                "shape": "full" if verbose else "list",
+                "limit": a.get("limit", 50),
+                "offset": a.get("offset", 0),
+            },
+        )
+        if s >= 400:
+            return _mcp_api_result(data, s)
+        return _mcp_call_result(_mcp_worker_list_projection(data, verbose=verbose))
     if name == "workers.get":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}", request)
         return _mcp_api_result(data, s)
