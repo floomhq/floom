@@ -1346,7 +1346,6 @@ async def upload_approval_screenshot(
     if approval is None:
         raise HTTPException(status_code=404, detail="Approval not found")
     return await _store_uploaded_blob(
-        request,
         file,
         auth.user_id or "anonymous",
         allowed_media_prefixes=("image/",),
@@ -1369,7 +1368,6 @@ async def upload_public_approval_screenshot(
     approval = _load_public_approval(approval_id, token, repos)
     owner_id = str(approval.get("owner_id") or "")
     return await _store_uploaded_blob(
-        request,
         file,
         owner_id or "anonymous",
         allowed_media_prefixes=("image/",),

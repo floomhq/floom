@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, Request, UploadFile
+from fastapi import HTTPException, UploadFile
 
 from core.utils import _positive_int_env
 
@@ -144,18 +144,38 @@ def _format_bytes(value: int) -> str:
     return f"{value} bytes"
 
 
-def _upload_quota_key(request: Request) -> str:
-    secret = request.headers.get("x-floom-secret") or ""
-    if not secret:
+def resolve_upload_max_bytes(max_size_mb: Optional[float] = None) -> int:
+    configured_max_bytes = _upload_max_bytes()
+    if max_size_mb is None:
+        return configured_max_bytes
+    return min(int(max_size_mb * 1024 * 1024), configured_max_bytes)
+
+
+def _estimate_base64_decoded_size(raw: str) -> int:
+    padding = min(2, len(raw) - len(raw.rstrip("=")))
+    return max(0, (len(raw) * 3 // 4) - padding)
+
+
+def _reject_oversized_base64(raw: str, max_bytes: int) -> None:
+    max_encoded_length = 4 * ((max_bytes + 2) // 3)
+    if len(raw) > max_encoded_length or _estimate_base64_decoded_size(raw) > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Uploaded file exceeds {_format_bytes(max_bytes)} limit",
+        )
+
+
+def _upload_quota_key(uploaded_by: str) -> str:
+    if not uploaded_by or uploaded_by == "anonymous":
         return "anon"
-    return "s:" + hashlib.sha256(secret.encode()).hexdigest()[:16]
+    return "u:" + hashlib.sha256(uploaded_by.encode()).hexdigest()[:16]
 
 
-def _claim_upload_quota(request: Request, size: int) -> Optional[int]:
+def _claim_upload_quota(uploaded_by: str, size: int) -> Optional[int]:
     now = time.monotonic()
     cutoff = now - _UPLOAD_HOURLY_WINDOW_SECONDS
     cap = _upload_hourly_cap_bytes()
-    key = _upload_quota_key(request)
+    key = _upload_quota_key(uploaded_by)
     with _upload_quota_lock:
         dq = _upload_quota_store.setdefault(key, collections.deque())
         while dq and dq[0][0] <= cutoff:
@@ -313,7 +333,6 @@ def _delete_blob_file(file_id: str) -> None:
 
 
 async def _store_uploaded_blob(
-    request: Request,
     file: UploadFile,
     uploaded_by: str,
     *,
@@ -374,11 +393,7 @@ async def _store_uploaded_blob(
             detail=f"Upload media type {media_type!r} is not accepted",
         )
 
-    configured_max_bytes = _upload_max_bytes()
-    if max_size_mb is not None:
-        max_bytes = min(int(max_size_mb * 1024 * 1024), configured_max_bytes)
-    else:
-        max_bytes = configured_max_bytes
+    max_bytes = resolve_upload_max_bytes(max_size_mb)
 
     hasher = hashlib.sha256()
     size = 0
@@ -411,7 +426,7 @@ async def _store_uploaded_blob(
             tmp_upload.unlink(missing_ok=True)
         raise
 
-    exceeded_cap = _claim_upload_quota(request, size)
+    exceeded_cap = _claim_upload_quota(uploaded_by, size)
     if exceeded_cap is not None:
         if tmp_upload is not None:
             tmp_upload.unlink(missing_ok=True)
@@ -470,7 +485,6 @@ async def _store_uploaded_blob(
         "url": upload_url,
     }
 async def store_inline_upload(
-    request: Optional[Request],
     *,
     data: bytes,
     filename: str,
@@ -491,19 +505,8 @@ async def store_inline_upload(
 
     from fastapi import UploadFile
 
-    if request is None:
-        # Internal dispatchers (in-process MCP surfaces) carry no HTTP request;
-        # quota-account them under the shared anonymous key.
-        request = Request({
-            "type": "http",
-            "method": "POST",
-            "path": "/uploads",
-            "query_string": b"",
-            "headers": [(b"host", b"asgi")],
-        })
     upload = UploadFile(io.BytesIO(data), size=len(data), filename=filename)
     return await _store_uploaded_blob(
-        request,
         upload,
         uploaded_by,
         max_size_mb=max_size_mb,

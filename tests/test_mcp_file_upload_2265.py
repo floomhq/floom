@@ -76,11 +76,16 @@ trigger:
 """
 
 
-def _create_file_worker(client: TestClient, *, accepts: str = "text/plain") -> str:
+def _create_file_worker(
+    client: TestClient,
+    *,
+    accepts: str = "text/plain",
+    user_id: str = "user-a",
+) -> str:
     worker_id = f"t2265-{uuid.uuid4().hex[:8]}"
     created = client.post(
         "/workers",
-        headers=_headers("user-a"),
+        headers=_headers(user_id),
         json={
             "worker_yml": _file_worker_yml(worker_id, accepts=accepts),
             "run_py": (
@@ -93,10 +98,17 @@ def _create_file_worker(client: TestClient, *, accepts: str = "text/plain") -> s
     return worker_id
 
 
-def _serve(client: TestClient, name: str, arguments: dict, rpc_id: int = 1) -> dict:
+def _serve(
+    client: TestClient,
+    name: str,
+    arguments: dict,
+    rpc_id: int = 1,
+    *,
+    user_id: str = "user-a",
+) -> dict:
     resp = client.post(
         "/mcp-tools/serve",
-        headers=_headers("user-a"),
+        headers=_headers(user_id),
         json={
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -314,3 +326,110 @@ def test_security_contract_not_weakened(monkeypatch, tmp_path):
         },
     )
     assert resp.status_code == 400, resp.text
+
+
+def test_files_upload_rejects_unsafe_filenames_via_mcp(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    for rpc_id, filename in enumerate(("../../etc/passwd", "bad\x00name.txt"), start=1):
+        result = _serve(
+            client,
+            "files.upload",
+            {"filename": filename, "content": "x"},
+            rpc_id=rpc_id,
+        )
+        assert result.get("isError") is True, result
+
+
+def test_upload_quota_isolated_by_owner_and_workspace(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", "6")
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    first = _serve(
+        client,
+        "files.upload",
+        {"filename": "first.txt", "content": "1234"},
+        user_id="user-a",
+    )
+    assert first.get("isError") is False, first
+    over_cap = _serve(
+        client,
+        "files.upload",
+        {"filename": "second.txt", "content": "5678"},
+        rpc_id=2,
+        user_id="user-a",
+    )
+    assert over_cap.get("isError") is True, over_cap
+    assert "Upload hourly cap exceeded" in over_cap["content"][0]["text"]
+
+    for rpc_id, user_id in enumerate(("user-b", "user-a__ws_other"), start=3):
+        isolated = _serve(
+            client,
+            "files.upload",
+            {"filename": f"isolated-{rpc_id}.txt", "content": "1234"},
+            rpc_id=rpc_id,
+            user_id=user_id,
+        )
+        assert isolated.get("isError") is False, isolated
+
+
+def test_files_upload_ref_cannot_be_used_by_another_owner(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    worker_id = _create_file_worker(client, user_id="user-b")
+
+    upload = _serve(
+        client,
+        "files.upload",
+        {"filename": "private.txt", "content": "private"},
+        user_id="user-a",
+    )
+    assert upload.get("isError") is False, upload
+    sha256 = upload["structuredContent"]["sha256"]
+
+    run = _serve(
+        client,
+        "workers.run",
+        {"id": worker_id, "inputs": {"source_materials": sha256, "topic": "t"}},
+        rpc_id=2,
+        user_id="user-b",
+    )
+    assert run.get("isError") is True, run
+    assert run["structuredContent"]["status"] == 403
+    assert run["structuredContent"]["detail"]["detail"] == (
+        "Uploaded file not found: source_materials"
+    )
+
+
+def test_base64_size_cap_rejected_before_decode_on_both_api_paths(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_UPLOAD_MAX_BYTES", "32")
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    oversized = base64.b64encode(b"x" * 48).decode("ascii")
+
+    upload = _serve(
+        client,
+        "files.upload",
+        {"filename": "large.txt", "content_base64": oversized},
+    )
+    assert upload.get("isError") is True, upload
+    assert "exceeds 32 bytes limit" in upload["content"][0]["text"]
+
+    worker_id = _create_file_worker(client)
+    run = client.post(
+        f"/workers/{worker_id}/runs",
+        headers=_headers("user-a"),
+        json={
+            "inputs": {
+                "source_materials": {
+                    "content_base64": oversized,
+                    "filename": "large.txt",
+                },
+                "topic": "t",
+            }
+        },
+    )
+    assert run.status_code == 400, run.text
+    assert run.json()["detail"] == "Uploaded file exceeds 32 bytes limit"

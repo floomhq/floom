@@ -28,8 +28,31 @@ const TERMINAL_RUN_STATUSES = new Set([
 const RUN_STATUS_VALUES = ["queued", "running", "pending_approval", "completed", "failed", "cancelled"] as const;
 const TOOL_TEXT_PREVIEW_CHARS = 4096;
 const TOOL_LIST_PREVIEW_ITEMS = 25;
+// Mirrors the API's _DEFAULT_UPLOAD_MAX_BYTES as a defense-in-depth guard
+// before local base64 decoding. The API's configured limit remains authoritative.
+const CLIENT_SIDE_MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 
 type JsonObject = Record<string, unknown>;
+
+export function estimateBase64DecodedSize(raw: string): number {
+  const padding = raw.endsWith("==") ? 2 : raw.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor(raw.length * 3 / 4) - padding);
+}
+
+export function assertBase64WithinLimit(raw: string, maxBytes: number): void {
+  const maxEncodedLength = 4 * Math.ceil(maxBytes / 3);
+  if (raw.length > maxEncodedLength || estimateBase64DecodedSize(raw) > maxBytes) {
+    throw new Error(`Uploaded file exceeds ${maxBytes} byte limit.`);
+  }
+}
+
+export function decodeBase64Strict(raw: string): Buffer {
+  const canonicalBase64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+  if (!canonicalBase64.test(raw)) {
+    throw new Error("'content_base64' is not valid canonical base64.");
+  }
+  return Buffer.from(raw, "base64");
+}
 
 function truncateToolText(value: unknown, limit = TOOL_TEXT_PREVIEW_CHARS): JsonObject {
   const text = value == null ? "" : String(value);
@@ -402,9 +425,14 @@ async function uploadInlineFile(
   if ((content === undefined) === (contentBase64 === undefined)) {
     throw new Error("Provide exactly one of 'content' or 'content_base64'.");
   }
-  const bytes = content !== undefined
-    ? Buffer.from(content, "utf-8")
-    : Buffer.from(contentBase64 ?? "", "base64");
+  let bytes: Buffer;
+  if (content !== undefined) {
+    bytes = Buffer.from(content, "utf-8");
+  } else {
+    const raw = contentBase64 ?? "";
+    assertBase64WithinLimit(raw, CLIENT_SIDE_MAX_UPLOAD_BYTES);
+    bytes = decodeBase64Strict(raw);
+  }
   const form = new FormData();
   form.append("file", new File([new Uint8Array(bytes)], filename));
   const response = await fetch(buildUrl("/uploads"), {

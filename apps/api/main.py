@@ -2759,7 +2759,16 @@ def _resolve_inline_file_inputs(
                         status_code=400,
                         detail=f"File input '{inp.name}': 'content_base64' must be a string",
                     )
+                from services.uploads import (
+                    _reject_oversized_base64,
+                    resolve_upload_max_bytes,
+                )
+
                 try:
+                    _reject_oversized_base64(
+                        raw_b64,
+                        resolve_upload_max_bytes(getattr(inp, "max_size_mb", None)),
+                    )
                     content_bytes = base64.b64decode(raw_b64, validate=True)
                 except (ValueError, TypeError) as exc:
                     raise HTTPException(
@@ -2783,7 +2792,6 @@ def _resolve_inline_file_inputs(
         )
         stored = run_coro_sync(
             store_inline_upload(
-                request,
                 data=content_bytes,
                 filename=filename,
                 uploaded_by=uploaded_by,
@@ -4708,7 +4716,6 @@ async def upload_worker_inbox(
     uploader = auth.user_id or "anonymous"
     for file in files:
         stored = await _store_uploaded_blob(
-            request,
             file,
             uploader,
             accepts=accepted,
@@ -7010,7 +7017,11 @@ async def _mcp_call_files_upload(
     ``POST /uploads`` (services.uploads.store_inline_upload), so every
     allowlist, size cap, and quota applies unchanged.
     """
-    from services.uploads import store_inline_upload
+    from services.uploads import (
+        _reject_oversized_base64,
+        resolve_upload_max_bytes,
+        store_inline_upload,
+    )
 
     try:
         filename = _mcp_arg(arguments, "filename")
@@ -7028,12 +7039,14 @@ async def _mcp_call_files_upload(
         if not isinstance(content_b64, str):
             return _mcp_tool_error("'content_base64' must be a string")
         try:
+            _reject_oversized_base64(content_b64, resolve_upload_max_bytes())
             data = base64.b64decode(content_b64, validate=True)
+        except HTTPException as exc:
+            return _mcp_http_error_result(exc)
         except (ValueError, TypeError):
             return _mcp_tool_error("'content_base64' is not valid base64")
     try:
         stored = await store_inline_upload(
-            request,
             data=data,
             filename=filename,
             uploaded_by=auth.user_id or "anonymous",
