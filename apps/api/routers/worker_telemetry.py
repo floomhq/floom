@@ -134,6 +134,7 @@ def get_workspace_stats(
     repos: Repositories = Depends(get_repos),
 ) -> WorkspaceStats:
     """Aggregate health and run statistics across the entire workspace."""
+    worker_user_id = _worker_access_user_id(auth)
     # #2270: count the SAME worker set the dashboard grid / MCP workers_list
     # returns (list_operator_workers = single source of truth), not a bare
     # owner-scoped repo read. The old repos.workers.list(user_id) read counted
@@ -141,7 +142,7 @@ def get_workspace_stats(
     # granted workers, so system_stats.total_workers disagreed with
     # workers_list (13 vs 8).
     workers, hidden_workers = list_operator_workers(
-        user_id=_worker_access_user_id(auth),
+        user_id=worker_user_id,
         repos=repos,
         role=_worker_repo_role(auth),
     )
@@ -154,8 +155,13 @@ def get_workspace_stats(
             hidden_system_workers=hidden_workers,
         )
 
+    # worker_ids is already the role-scoped, authorized population. Trust that
+    # explicit set so admin telemetry includes other owners' visible workers.
     stats_map = repos.workers.stats_batch(
-        user_id=auth.user_id, worker_ids=worker_ids, days=7
+        user_id=worker_user_id,
+        worker_ids=worker_ids,
+        days=7,
+        scope_to_owner=False,
     )
 
     total_runs_7d = sum(s.runs_7d for s in stats_map.values())
@@ -180,7 +186,7 @@ def get_workspace_stats(
     # Duration + failure taxonomy across recent runs. duration_summary excludes
     # orphaned/never-closed runs so a single stuck run can't poison the headline.
     runs_rows, _ = repos.runs.list(
-        user_id=auth.user_id, limit=200
+        user_id=worker_user_id, worker_ids=worker_ids, limit=200
     )
     dur = duration_summary(runs_rows)
     failed_rows = [
