@@ -461,6 +461,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
     "schema_violation",
     "spend_cap_exceeded",
     "token_cap_exceeded",
+    "transient_network_retry_exhausted",
     "user_cancel",
     "worker_deleted",
     "worker_disabled",
@@ -480,6 +481,7 @@ _TRANSIENT_RETRY_ERROR_CODES = {
     "run_abandoned_server_restart",
     "run_claimed_without_dispatch",
     "timeout",
+    "transient_network_error",
 }
 
 _PERMANENT_RETRY_CATEGORIES = {
@@ -618,6 +620,55 @@ def _schedule_retry_for_failed_run(
         repos=repos,
     )
     return True
+
+
+_TRANSIENT_NETWORK_ERROR_CODE = "transient_network_error"
+_TRANSIENT_NETWORK_RETRY_EXHAUSTED_CODE = "transient_network_retry_exhausted"
+
+
+def _retry_run_exception(
+    *,
+    run_id: str,
+    worker_id: str,
+    inputs: Dict[str, Any],
+    owner_id: str | None,
+    config: Any,
+    error_code: str,
+    error: str,
+    repos: "Repositories",
+    log_fn,
+) -> str:
+    """Retry only known transient failures from the outer run boundary.
+
+    Unknown exceptions deliberately remain crash-class failures even when a
+    worker manifest broadly opts into retries. This exception boundary is too
+    broad to safely retry arbitrary application bugs.
+    """
+    if error_code != _TRANSIENT_NETWORK_ERROR_CODE:
+        return error_code
+
+    scheduled = _schedule_retry_for_failed_run(
+        run_id=run_id,
+        worker_id=worker_id,
+        inputs=inputs,
+        owner_id=owner_id,
+        config=config,
+        result_retryable=True,
+        result_error_code=error_code,
+        result_error=error,
+        repos=repos,
+        log_fn=log_fn,
+    )
+    if scheduled:
+        return error_code
+
+    current_run_row = repos.runs.get_any(run_id=run_id)
+    current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
+    retry_cfg = getattr(config, "retry", None) if config else None
+    max_attempts = retry_cfg.max_attempts if retry_cfg else _retryable_driver_max_attempts(error_code)
+    if current_attempt >= max_attempts - 1:
+        return _TRANSIENT_NETWORK_RETRY_EXHAUSTED_CODE
+    return error_code
 
 
 API_ENV_PATH = Path("/etc/floom/api.env")
@@ -1731,6 +1782,32 @@ def _http_status_from_exception(exc: BaseException) -> int | None:
     return None
 
 
+_TRANSIENT_TRANSPORT_DISCONNECT_MARKERS = (
+    "server disconnected",
+    "connectionterminated",
+    "connection terminated",
+    "connection reset by peer",
+    "broken pipe",
+    "remoteprotocolerror",
+    "goaway",
+)
+
+
+def _is_transient_transport_disconnect(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ConnectionError):
+            return True
+        text = f"{current.__class__.__name__} {current}".lower()
+        if any(marker in text for marker in _TRANSIENT_TRANSPORT_DISCONNECT_MARKERS):
+            return True
+        cause = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+        current = cause if isinstance(cause, BaseException) else None
+    return False
+
+
 def _classify_run_exception(exc: BaseException) -> str:
     """Map an uncaught run-execution exception to a meaningful error_code.
 
@@ -1743,6 +1820,8 @@ def _classify_run_exception(exc: BaseException) -> str:
     # Timeouts (asyncio.TimeoutError is an alias of TimeoutError on 3.11+).
     if isinstance(exc, TimeoutError):
         return "timeout"
+    if _is_transient_transport_disconnect(exc):
+        return _TRANSIENT_NETWORK_ERROR_CODE
     status = _http_status_from_exception(exc)
     if status is not None:
         if 400 <= status < 500:
@@ -4007,6 +4086,36 @@ def execute_run(
         # does not collapse into the opaque blanket bucket; falls back to
         # ``run_execution_exception`` when nothing more specific is knowable.
         crash_error_code = _classify_run_exception(exc)
+        try:
+            terminal_error_code = _retry_run_exception(
+                run_id=run_id,
+                worker_id=worker_id,
+                inputs=effective_inputs,
+                owner_id=owner_id,
+                config=config,
+                error_code=crash_error_code,
+                error=error_message,
+                repos=repos_obj,
+                log_fn=log_fn,
+            )
+            if terminal_error_code != crash_error_code:
+                crash_error_code = terminal_error_code
+                error_message = (
+                    "The network connection dropped repeatedly and automatic retry attempts were exhausted."
+                )
+        except Exception:
+            logger.exception("Failed to schedule retry for crashed run %s", run_id)
+        try:
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=error_message,
+                error_code=crash_error_code,
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+        except Exception:
+            logger.exception("Failed to mark run %s as failed after crash", run_id)
         # PostHog Error Tracking (Track A §A4): capture the real exception with
         # type + stack trace so crashes group into debuggable issues, beyond the
         # flat run_failed.error_category label. No-op + never raises when
@@ -4019,17 +4128,6 @@ def execute_run(
             trace_id=trace_id,
             error_code=crash_error_code,
         )
-        try:
-            update_run_status(
-                run_id,
-                RunStatus.FAILED.value,
-                error=error_message,
-                error_code=crash_error_code,
-                user_id=owner_id,
-                repos=repos_obj,
-            )
-        except Exception:
-            logger.exception("Failed to mark run %s as failed after crash", run_id)
         try:
             publish_run_part(
                 run_id,

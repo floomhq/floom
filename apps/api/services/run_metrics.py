@@ -108,6 +108,8 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     # network / external connectivity
     "mcp_connect_failed": "network",
     "llm_provider_error": "network",
+    "transient_network_error": "network",
+    "transient_network_retry_exhausted": "network",
     # upstream HTTP failures surfaced from the sandbox / run drivers
     "upstream_http_4xx": "network",
     "upstream_http_5xx": "network",
