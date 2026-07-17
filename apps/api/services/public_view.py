@@ -109,9 +109,18 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     # Sandbox / timeout / resource.
     "e2b_sandbox_error": _SANDBOX_HEADLINE,
     "sandbox_transport_retry_exhausted": _SANDBOX_HEADLINE,
+    "transient_network_error": "A temporary network connection dropped. Floom is retrying this run automatically.",
+    "transient_network_retry_exhausted": (
+        "The network connection dropped repeatedly and Floom could not complete the run after automatic retries. "
+        "Try again later."
+    ),
     "timeout": _TIMEOUT_HEADLINE,
     "sandbox_oom": "This worker ran out of memory and was stopped. Try simplifying the input.",
     "token_cap_exceeded": "This worker reached its output limit and was stopped. Try simplifying the task.",
+    "llm_provider_capacity": "Temporary model capacity issue on our side. Your worker will retry automatically.",
+    "llm_provider_capacity_retry_exhausted": (
+        "Model capacity is still unavailable on our side after automatic retries. Try again later."
+    ),
     "tool_iteration_cap_exceeded": "This worker took too many steps and was stopped. Try simplifying the task.",
     "tool_loop_exhausted": "This worker took too many steps and was stopped. Try simplifying the task.",
     "missing_e2b_key": _RUNTIME_HEADLINE,

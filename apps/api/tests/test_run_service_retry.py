@@ -37,6 +37,7 @@ def test_retryable_driver_failure_schedules_one_retry(monkeypatch):
 
     def _fake_schedule_retry(**kwargs):
         scheduled.append(kwargs)
+        return True
 
     monkeypatch.setattr(run_service, "_schedule_retry", _fake_schedule_retry)
 
@@ -304,58 +305,186 @@ def test_llm_setup_errors_do_not_retry_and_provider_error_retries(monkeypatch):
     assert scheduled[-1]["attempt"] == 1
 
 
+def test_llm_provider_capacity_uses_spaced_bounded_retries(monkeypatch):
+    scheduled: list[dict] = []
+    monkeypatch.delenv("WORKEROS_LLM_CAPACITY_RETRY_MAX_ATTEMPTS", raising=False)
+    monkeypatch.delenv("WORKEROS_LLM_CAPACITY_RETRY_BASE_SECONDS", raising=False)
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kwargs: scheduled.append(kwargs))
+
+    for retry_attempt, expected_delay in ((0, 1800), (1, 3600)):
+        did_schedule = run_service._schedule_retry_for_failed_run(
+            run_id=f"run-capacity-{retry_attempt}",
+            worker_id="worker-a",
+            inputs={},
+            owner_id="user-a",
+            config=None,
+            result_retryable=True,
+            result_error_code="llm_provider_capacity",
+            repos=_Repos(retry_attempt=retry_attempt),
+            log_fn=lambda *_args, **_kwargs: None,
+        )
+        assert did_schedule is True
+        assert scheduled[-1]["attempt"] == retry_attempt + 1
+        assert scheduled[-1]["delay_seconds"] == expected_delay
+
+    did_schedule = run_service._schedule_retry_for_failed_run(
+        run_id="run-capacity-exhausted",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        result_retryable=True,
+        result_error_code="llm_provider_capacity",
+        repos=_Repos(retry_attempt=2),
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+    assert did_schedule is False
+    assert len(scheduled) == 2
+
+
+def test_llm_provider_capacity_exhaustion_has_honest_terminal_failure(monkeypatch):
+    monkeypatch.delenv("WORKEROS_LLM_CAPACITY_RETRY_MAX_ATTEMPTS", raising=False)
+
+    error, error_code = run_service._terminal_retry_failure(
+        run_id="run-capacity-exhausted",
+        config=None,
+        error="Temporary model capacity issue on our side. Your worker will retry automatically.",
+        error_code="llm_provider_capacity",
+        repos=_Repos(retry_attempt=2),
+    )
+
+    assert error_code == "llm_provider_capacity_retry_exhausted"
+    assert error == "Model capacity is still unavailable on our side after automatic retries. Try again later."
+    assert run_service._classify_retry_failure(error_code=error_code).retryable is False
+    explicit_retry = run_service._classify_retry_failure(
+        error_code=error_code,
+        retry_cfg=_RetryConfig(on=[error_code]),
+    )
+    assert explicit_retry.retryable is False
+    assert explicit_retry.reason == "retry_exhausted"
+
+
 def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
-    created: list[str] = []
+    created: list[dict] = []
     started: list[str] = []
 
     class Runs:
-        def create(self, *, run_id: str, **_kwargs):
-            created.append(run_id)
+        row: dict | None = None
+
+        def get_any(self, *, run_id):
+            return self.row if self.row and self.row["run_id"] == run_id else None
+
+        def create(self, **kwargs):
+            created.append(kwargs)
+            self.row = kwargs
 
     class Repos:
         runs = Runs()
 
-    class ImmediateThread:
-        def __init__(self, *, target, **_kwargs):
-            self._target = target
-
-        def start(self):
-            self._target()
-
-    monkeypatch.setattr(run_service.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(run_service.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(run_service, "start_run", lambda run_id, *_args, **_kwargs: started.append(run_id))
 
-    # Hold the key as if another scheduler thread already claimed it.
-    retry_key = ("run-original", 1, "retry")
-    with run_service._scheduled_retry_lock:
-        run_service._scheduled_retry_keys.add(retry_key)
-    try:
-        run_service._schedule_retry(
-            original_run_id="run-original",
-            worker_id="worker-a",
-            inputs={},
-            attempt=1,
-            delay_seconds=0,
-            user_id="user-a",
-            repos=Repos(),
-        )
-    finally:
-        with run_service._scheduled_retry_lock:
-            run_service._scheduled_retry_keys.discard(retry_key)
-
-    assert created == []
-    assert started == []
-
-    run_service._schedule_retry(
+    repos = Repos()
+    assert run_service._schedule_retry(
         original_run_id="run-original",
         worker_id="worker-a",
         inputs={},
         attempt=1,
-        delay_seconds=0,
+        delay_seconds=1800,
         user_id="user-a",
-        repos=Repos(),
-    )
+        repos=repos,
+    ) is True
+
+    assert run_service._schedule_retry(
+        original_run_id="run-original",
+        worker_id="worker-a",
+        inputs={},
+        attempt=1,
+        delay_seconds=1800,
+        user_id="user-a",
+        repos=repos,
+    ) is True
 
     assert len(created) == 1
-    assert started == created
+    assert started == [created[0]["run_id"]]
+    assert created[0]["status"] == "queued"
+    assert created[0]["trigger_source"] == "retry"
+    assert created[0]["retry_of_run_id"] == "run-original"
+    assert created[0]["retry_attempt"] == 1
+    assert created[0]["trigger_ref"]
+
+
+def test_schedule_retry_reports_repository_insert_failure():
+    class Runs:
+        def get_any(self, *, run_id):
+            return None
+
+        def create(self, **_kwargs):
+            raise RuntimeError("repository unavailable")
+
+    class Repos:
+        runs = Runs()
+
+    assert run_service._schedule_retry(
+        original_run_id="run-original",
+        worker_id="worker-a",
+        inputs={},
+        attempt=1,
+        delay_seconds=60,
+        user_id="user-a",
+        repos=Repos(),
+    ) is False
+
+
+def test_failed_retry_persistence_is_not_reported_as_scheduled(monkeypatch):
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **_kwargs: False)
+
+    did_schedule = run_service._schedule_retry_for_failed_run(
+        run_id="run-original",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        result_retryable=True,
+        result_error_code="transient_network_error",
+        repos=_Repos(),
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+
+    assert did_schedule is False
+
+
+def test_concurrent_duplicate_insert_is_reported_only_when_matching_row_exists():
+    original_run_id = "run-original"
+    attempt = 1
+    retry_run_id = run_service._retry_run_id(original_run_id, attempt, "retry")
+
+    class Runs:
+        reads = 0
+
+        def get_any(self, *, run_id):
+            self.reads += 1
+            if self.reads == 1:
+                return None
+            return {
+                "run_id": run_id,
+                "retry_of_run_id": original_run_id,
+                "retry_attempt": attempt,
+                "trigger_source": "retry",
+            }
+
+        def create(self, **_kwargs):
+            raise RuntimeError("duplicate primary key")
+
+    class Repos:
+        runs = Runs()
+
+    assert run_service._schedule_retry(
+        original_run_id=original_run_id,
+        worker_id="worker-a",
+        inputs={},
+        attempt=attempt,
+        delay_seconds=60,
+        user_id="user-a",
+        repos=Repos(),
+    ) is True
+    assert retry_run_id == run_service._retry_run_id(original_run_id, attempt, "retry")

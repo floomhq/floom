@@ -256,8 +256,6 @@ WORKER_ERROR_CODE = "worker_error"
 # scope for the duration of execution — reconstructed from the persisted run
 # row, since there is no live context to copy. Default: no-op.
 _run_execution_context_provider: Optional[Callable[[str], "contextlib.AbstractContextManager[Any]"]] = None
-_scheduled_retry_keys: set[tuple[str, int, str]] = set()
-_scheduled_retry_lock = threading.Lock()
 
 
 def _cache_ttl_seconds(env_name: str, default: float) -> float:
@@ -382,6 +380,27 @@ def _run_execution_context(run_id: str) -> "contextlib.AbstractContextManager[An
 
 
 
+def _retry_run_id(original_run_id: str, attempt: int, trigger_source: str) -> str:
+    lineage = f"{original_run_id}\0{int(attempt)}\0{trigger_source}".encode("utf-8")
+    return f"run_{hashlib.sha256(lineage).hexdigest()[:12]}"
+
+
+def _matching_retry_row(
+    row: dict[str, Any] | None,
+    *,
+    original_run_id: str,
+    attempt: int,
+    trigger_source: str,
+) -> bool:
+    if not row:
+        return False
+    return (
+        str(row.get("retry_of_run_id") or "") == original_run_id
+        and int(row.get("retry_attempt") or 0) == int(attempt)
+        and str(row.get("trigger_source") or "") == trigger_source
+    )
+
+
 def _schedule_retry(
     *,
     original_run_id: str,
@@ -392,55 +411,73 @@ def _schedule_retry(
     user_id: str | None,
     repos: "Repositories",
     trigger_source: str = "retry",
-) -> None:
-    """Enqueue a retry run after *delay_seconds* in a daemon thread.
+) -> bool:
+    """Persist a retry run that becomes drainable after *delay_seconds*.
 
     trigger_source distinguishes the retry kind: "retry" for the worker retry
     policy, "restart_retry" for #1434 restart recovery (used to bound recovery to
-    one attempt per lineage regardless of retry_attempt persistence).
+    one attempt per lineage regardless of retry_attempt persistence). Delayed
+    retries are stored before returning so a process restart cannot lose them.
     """
-    retry_key = (original_run_id, int(attempt), trigger_source)
-    with _scheduled_retry_lock:
-        if retry_key in _scheduled_retry_keys:
+    retry_run_id = _retry_run_id(original_run_id, attempt, trigger_source)
+    try:
+        existing = repos.runs.get_any(run_id=retry_run_id)
+        if _matching_retry_row(
+            existing,
+            original_run_id=original_run_id,
+            attempt=attempt,
+            trigger_source=trigger_source,
+        ):
+            logger.info("Retry #%d for run %s is already persisted as %s", attempt, original_run_id, retry_run_id)
+            return True
+        if user_id:
+            not_before = None
+            if delay_seconds > 0:
+                not_before = (
+                    datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+                ).isoformat()
+            repos.runs.create(
+                user_id=user_id,
+                run_id=retry_run_id,
+                worker_id=worker_id,
+                status=RunStatus.QUEUED.value,
+                trigger_source=trigger_source,
+                trigger_ref=not_before,
+                input_json=inputs,
+                retry_of_run_id=original_run_id,
+                retry_attempt=attempt,
+            )
+            start_run(retry_run_id, worker_id, inputs, user_id=user_id, repos=repos)
             logger.info(
-                "Retry #%d for run %s (%s) is already scheduled; skipping duplicate",
+                "Retry #%d persisted as run %s for worker %s (original: %s, not_before: %s)",
                 attempt,
+                retry_run_id,
+                worker_id,
                 original_run_id,
-                trigger_source,
+                not_before or "immediate",
             )
-            return
-        _scheduled_retry_keys.add(retry_key)
-
-    def _do_retry() -> None:
-        if delay_seconds > 0:
-            time.sleep(delay_seconds)
+            return True
+        return False
+    except Exception as exc:
         try:
-            retry_run_id = f"run_{uuid.uuid4().hex[:12]}"
-            if user_id:
-                repos.runs.create(
-                    user_id=user_id,
-                    run_id=retry_run_id,
-                    worker_id=worker_id,
-                    trigger_source=trigger_source,
-                    retry_of_run_id=original_run_id,
-                    retry_attempt=attempt,
-                )
-                start_run(retry_run_id, worker_id, inputs, user_id=user_id, repos=repos)
-                logger.info(
-                    "Retry #%d enqueued as run %s for worker %s (original: %s)",
-                    attempt, retry_run_id, worker_id, original_run_id,
-                )
-        except Exception as exc:
-            logger.warning(
-                "Failed to schedule retry #%d for run %s: %s",
-                attempt, original_run_id, exc,
-            )
-        finally:
-            with _scheduled_retry_lock:
-                _scheduled_retry_keys.discard(retry_key)
-
-    t = threading.Thread(target=_do_retry, daemon=True, name=f"retry-{original_run_id}")
-    t.start()
+            existing = repos.runs.get_any(run_id=retry_run_id)
+        except Exception:
+            existing = None
+        if _matching_retry_row(
+            existing,
+            original_run_id=original_run_id,
+            attempt=attempt,
+            trigger_source=trigger_source,
+        ):
+            logger.info("Concurrent retry insert already persisted run %s", retry_run_id)
+            return True
+        logger.warning(
+            "Failed to persist retry #%d for run %s: %s",
+            attempt,
+            original_run_id,
+            exc,
+        )
+        return False
 
 
 _PERMANENT_RETRY_ERROR_CODES = {
@@ -452,6 +489,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
     "llm_auth_error",
     "llm_model_not_configured",
     "llm_quota_exceeded",
+    "llm_provider_capacity_retry_exhausted",
     "missing_connection",
     "missing_required_input",
     "missing_secret",
@@ -461,6 +499,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
     "schema_violation",
     "spend_cap_exceeded",
     "token_cap_exceeded",
+    "transient_network_retry_exhausted",
     "user_cancel",
     "worker_deleted",
     "worker_disabled",
@@ -473,6 +512,7 @@ _TRANSIENT_RETRY_ERROR_CODES = {
     "e2b_quota_exhausted",
     "e2b_sandbox_error",
     "llm_provider_error",
+    "llm_provider_capacity",
     "llm_rate_limited",
     "interrupted_by_restart",
     "mcp_connect_failed",
@@ -480,6 +520,12 @@ _TRANSIENT_RETRY_ERROR_CODES = {
     "run_abandoned_server_restart",
     "run_claimed_without_dispatch",
     "timeout",
+    "transient_network_error",
+}
+
+_RETRY_EXHAUSTED_ERROR_CODES = {
+    "llm_provider_capacity_retry_exhausted",
+    "transient_network_retry_exhausted",
 }
 
 _PERMANENT_RETRY_CATEGORIES = {
@@ -543,6 +589,8 @@ def _classify_retry_failure(
     from services import run_metrics
 
     category = run_metrics.classify_failure(error_code=code, error=error)
+    if code in _RETRY_EXHAUSTED_ERROR_CODES:
+        return _RetryDecision(False, True, category, "retry_exhausted")
     if _retry_config_exactly_allows_error(retry_cfg, code):
         return _RetryDecision(True, False, category, "manifest_exact_error")
     if code in _PERMANENT_RETRY_ERROR_CODES:
@@ -558,6 +606,73 @@ def _classify_retry_failure(
     if _retry_config_allows_all(retry_cfg):
         return _RetryDecision(True, False, category, "manifest_all")
     return _RetryDecision(False, False, category, "not_retryable")
+
+
+_LLM_PROVIDER_CAPACITY_ERROR_CODE = "llm_provider_capacity"
+_LLM_PROVIDER_CAPACITY_RETRY_EXHAUSTED_CODE = "llm_provider_capacity_retry_exhausted"
+_LLM_PROVIDER_CAPACITY_RETRY_EXHAUSTED_MESSAGE = (
+    "Model capacity is still unavailable on our side after automatic retries. Try again later."
+)
+
+
+def _llm_provider_capacity_max_attempts() -> int:
+    raw = os.environ.get("WORKEROS_LLM_CAPACITY_RETRY_MAX_ATTEMPTS", "")
+    if not raw:
+        return 3
+    try:
+        return min(4, max(1, int(raw)))
+    except ValueError:
+        return 3
+
+
+def _llm_provider_capacity_base_delay_seconds() -> int:
+    raw = os.environ.get("WORKEROS_LLM_CAPACITY_RETRY_BASE_SECONDS", "")
+    if not raw:
+        return 1800
+    try:
+        return min(3600, max(300, int(raw)))
+    except ValueError:
+        return 1800
+
+
+def _retry_attempt_budget(
+    *,
+    run_id: str,
+    config: Any,
+    error_code: str | None,
+    repos: "Repositories",
+) -> tuple[int, int]:
+    current_run_row = repos.runs.get_any(run_id=run_id)
+    current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
+    if error_code == _LLM_PROVIDER_CAPACITY_ERROR_CODE:
+        return current_attempt, _llm_provider_capacity_max_attempts()
+    retry_cfg = getattr(config, "retry", None) if config else None
+    max_attempts = retry_cfg.max_attempts if retry_cfg else _retryable_driver_max_attempts(error_code)
+    return current_attempt, max_attempts
+
+
+def _terminal_retry_failure(
+    *,
+    run_id: str,
+    config: Any,
+    error: str,
+    error_code: str,
+    repos: "Repositories",
+) -> tuple[str, str]:
+    if error_code != _LLM_PROVIDER_CAPACITY_ERROR_CODE:
+        return error, error_code
+    current_attempt, max_attempts = _retry_attempt_budget(
+        run_id=run_id,
+        config=config,
+        error_code=error_code,
+        repos=repos,
+    )
+    if current_attempt >= max_attempts - 1:
+        return (
+            _LLM_PROVIDER_CAPACITY_RETRY_EXHAUSTED_MESSAGE,
+            _LLM_PROVIDER_CAPACITY_RETRY_EXHAUSTED_CODE,
+        )
+    return error, error_code
 
 
 def _schedule_retry_for_failed_run(
@@ -592,15 +707,20 @@ def _schedule_retry_for_failed_run(
             )
         return False
 
-    current_run_row = repos.runs.get_any(run_id=run_id)
-    current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
-    max_attempts = retry_cfg.max_attempts if retry_cfg else _retryable_driver_max_attempts(result_error_code)
+    current_attempt, max_attempts = _retry_attempt_budget(
+        run_id=run_id,
+        config=config,
+        error_code=result_error_code,
+        repos=repos,
+    )
     if current_attempt >= max_attempts - 1:
         return False
 
     base_delay_seconds = retry_cfg.delay_seconds if retry_cfg else 60
+    if result_error_code == _LLM_PROVIDER_CAPACITY_ERROR_CODE:
+        base_delay_seconds = max(base_delay_seconds, _llm_provider_capacity_base_delay_seconds())
     delay_seconds = base_delay_seconds
-    if result_retryable:
+    if result_retryable or result_error_code == _LLM_PROVIDER_CAPACITY_ERROR_CODE:
         delay_seconds = min(base_delay_seconds * (2**current_attempt), 3600)
 
     label = "retryable failure" if decision.reason != "manifest_all" and not retry_cfg else "retry"
@@ -608,7 +728,7 @@ def _schedule_retry_for_failed_run(
         f"Scheduling {label} {current_attempt + 1}/{max_attempts - 1} in {delay_seconds}s",
         level="info",
     )
-    _schedule_retry(
+    persisted = _schedule_retry(
         original_run_id=run_id,
         worker_id=worker_id,
         inputs=inputs,
@@ -617,7 +737,62 @@ def _schedule_retry_for_failed_run(
         user_id=owner_id,
         repos=repos,
     )
-    return True
+    return persisted is not False
+
+
+_TRANSIENT_NETWORK_ERROR_CODE = "transient_network_error"
+_TRANSIENT_NETWORK_RETRY_EXHAUSTED_CODE = "transient_network_retry_exhausted"
+
+
+def _retry_run_exception(
+    *,
+    run_id: str,
+    worker_id: str,
+    inputs: Dict[str, Any],
+    owner_id: str | None,
+    config: Any,
+    error_code: str,
+    error: str,
+    execution_stage: str,
+    repos: "Repositories",
+    log_fn,
+) -> str:
+    """Retry only known transient failures from the outer run boundary.
+
+    Unknown exceptions deliberately remain crash-class failures even when a
+    worker manifest broadly opts into retries. This exception boundary is too
+    broad to safely retry arbitrary application bugs.
+    """
+    if (
+        error_code != _TRANSIENT_NETWORK_ERROR_CODE
+        or execution_stage != "driver_run"
+    ):
+        return error_code
+
+    scheduled = _schedule_retry_for_failed_run(
+        run_id=run_id,
+        worker_id=worker_id,
+        inputs=inputs,
+        owner_id=owner_id,
+        config=config,
+        result_retryable=True,
+        result_error_code=error_code,
+        result_error=error,
+        repos=repos,
+        log_fn=log_fn,
+    )
+    if scheduled:
+        return error_code
+
+    current_attempt, max_attempts = _retry_attempt_budget(
+        run_id=run_id,
+        config=config,
+        error_code=error_code,
+        repos=repos,
+    )
+    if current_attempt >= max_attempts - 1:
+        return _TRANSIENT_NETWORK_RETRY_EXHAUSTED_CODE
+    return error_code
 
 
 API_ENV_PATH = Path("/etc/floom/api.env")
@@ -1731,6 +1906,32 @@ def _http_status_from_exception(exc: BaseException) -> int | None:
     return None
 
 
+_TRANSIENT_TRANSPORT_DISCONNECT_MARKERS = (
+    "server disconnected",
+    "connectionterminated",
+    "connection terminated",
+    "connection reset by peer",
+    "broken pipe",
+    "remoteprotocolerror",
+    "goaway",
+)
+
+
+def _is_transient_transport_disconnect(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ConnectionError):
+            return True
+        text = f"{current.__class__.__name__} {current}".lower()
+        if any(marker in text for marker in _TRANSIENT_TRANSPORT_DISCONNECT_MARKERS):
+            return True
+        cause = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+        current = cause if isinstance(cause, BaseException) else None
+    return False
+
+
 def _classify_run_exception(exc: BaseException) -> str:
     """Map an uncaught run-execution exception to a meaningful error_code.
 
@@ -1743,6 +1944,8 @@ def _classify_run_exception(exc: BaseException) -> str:
     # Timeouts (asyncio.TimeoutError is an alias of TimeoutError on 3.11+).
     if isinstance(exc, TimeoutError):
         return "timeout"
+    if _is_transient_transport_disconnect(exc):
+        return _TRANSIENT_NETWORK_ERROR_CODE
     status = _http_status_from_exception(exc)
     if status is not None:
         if 400 <= status < 500:
@@ -2307,6 +2510,21 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
     if trigger_source.startswith("restart_retry"):
         return False
     attempt = int(run.get("retry_attempt") or 0)
+    next_attempt = attempt + 1
+    for retry_source in ("retry", "restart_retry"):
+        retry_id = _retry_run_id(run_id, next_attempt, retry_source)
+        try:
+            existing_retry = repos_obj.runs.get_any(run_id=retry_id)
+        except Exception:
+            existing_retry = None
+        if _matching_retry_row(
+            existing_retry,
+            original_run_id=run_id,
+            attempt=next_attempt,
+            trigger_source=retry_source,
+        ):
+            logger.info("Run %s already has persisted retry %s; skipping restart retry", run_id, retry_id)
+            return False
     inputs = run.get("input_json")
     if isinstance(inputs, str):
         try:
@@ -2316,16 +2534,18 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
     if not isinstance(inputs, dict):
         inputs = {}
     try:
-        _schedule_retry(
+        persisted = _schedule_retry(
             original_run_id=run_id,
             worker_id=worker_id,
             inputs=inputs,
-            attempt=attempt + 1,
+            attempt=next_attempt,
             delay_seconds=0,
             user_id=str(user_id),
             repos=repos_obj,
             trigger_source="restart_retry",
         )
+        if persisted is False:
+            return False
         repos_obj.runs.add_log(
             user_id=str(user_id),
             run_id=run_id,
@@ -3249,6 +3469,7 @@ def execute_run(
     )
     perf.mark("approval_inputs")
     run_secrets: Dict[str, str] = {}
+    execution_stage = "pre_driver"
 
     def log_fn(msg: str, level: str = "info") -> None:
         safe_msg = scrub_secrets(msg, run_secrets)
@@ -3471,7 +3692,8 @@ def execute_run(
         driver = get_sandbox_driver(runner, config=config)
         perf.mark("driver_lookup")
         perf.log(log_fn, "run_service.pre_sandbox")
-        _mark_active_run_stage(run_id, "driver_run")
+        execution_stage = "driver_run"
+        _mark_active_run_stage(run_id, execution_stage)
         with use_context_scope(context_scope_for_user(owner_id)):
             result = driver.run(
                 worker_id=worker_id,
@@ -3485,6 +3707,8 @@ def execute_run(
                 connection_ids=connection_ids,
                 user_id=owner_id,
             )
+            execution_stage = "driver_returned"
+            _mark_active_run_stage(run_id, execution_stage)
 
         if was_shutdown_cancelled(run_id):
             update_run_status(
@@ -3589,6 +3813,14 @@ def execute_run(
             if was_shutdown_cancelled(run_id):
                 result_error = INTERRUPTED_RUN_ERROR
                 result_error_code = INTERRUPTED_RUN_ERROR_CODE
+            if result_error_code == _LLM_PROVIDER_CAPACITY_ERROR_CODE:
+                result_error, result_error_code = _terminal_retry_failure(
+                    run_id=run_id,
+                    config=config,
+                    error=result_error or "Run failed",
+                    error_code=result_error_code,
+                    repos=repos_obj,
+                )
             update_run_status(
                 run_id,
                 RunStatus.FAILED.value,
@@ -4007,6 +4239,37 @@ def execute_run(
         # does not collapse into the opaque blanket bucket; falls back to
         # ``run_execution_exception`` when nothing more specific is knowable.
         crash_error_code = _classify_run_exception(exc)
+        try:
+            terminal_error_code = _retry_run_exception(
+                run_id=run_id,
+                worker_id=worker_id,
+                inputs=effective_inputs,
+                owner_id=owner_id,
+                config=config,
+                error_code=crash_error_code,
+                error=error_message,
+                execution_stage=execution_stage,
+                repos=repos_obj,
+                log_fn=log_fn,
+            )
+            if terminal_error_code != crash_error_code:
+                crash_error_code = terminal_error_code
+                error_message = (
+                    "The network connection dropped repeatedly and automatic retry attempts were exhausted."
+                )
+        except Exception:
+            logger.exception("Failed to schedule retry for crashed run %s", run_id)
+        try:
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=error_message,
+                error_code=crash_error_code,
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+        except Exception:
+            logger.exception("Failed to mark run %s as failed after crash", run_id)
         # PostHog Error Tracking (Track A §A4): capture the real exception with
         # type + stack trace so crashes group into debuggable issues, beyond the
         # flat run_failed.error_category label. No-op + never raises when
@@ -4019,17 +4282,6 @@ def execute_run(
             trace_id=trace_id,
             error_code=crash_error_code,
         )
-        try:
-            update_run_status(
-                run_id,
-                RunStatus.FAILED.value,
-                error=error_message,
-                error_code=crash_error_code,
-                user_id=owner_id,
-                repos=repos_obj,
-            )
-        except Exception:
-            logger.exception("Failed to mark run %s as failed after crash", run_id)
         try:
             publish_run_part(
                 run_id,

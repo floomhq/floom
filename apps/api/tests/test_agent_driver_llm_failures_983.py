@@ -12,6 +12,7 @@ from models import WorkerConfig, WorkerLimits, WorkerRuntime, WorkerTrigger  # n
 from runner_sandbox.agent_driver import (  # noqa: E402
     AgentDriver,
     _classify_llm_provider_error,
+    _llm_error_message,
     _resolve_agent_timeout_seconds,
     _resolve_max_tool_iterations,
     _resolve_max_total_tokens,
@@ -68,7 +69,11 @@ def test_provider_rate_limit_quota_and_generic_provider_errors_have_distinct_cod
     driver = AgentDriver()
     cases = [
         ("litellm.RateLimitError: 429", "llm_rate_limited", True),
-        ("openai.RateLimitError: exceeded your current quota", "llm_quota_exceeded", False),
+        (
+            "google.api_core.exceptions.ResourceExhausted: 429 billing account has exceeded its monthly spending cap",
+            "llm_provider_capacity",
+            True,
+        ),
         ("litellm.APIConnectionError: bedrock upstream connection failed", "llm_provider_error", True),
     ]
 
@@ -101,10 +106,27 @@ def test_llm_classifier_prefers_explicit_auth_over_quota_hint():
         )
         == "llm_auth_error"
     )
-    assert _classify_llm_provider_error("bedrock returned 403 quota exceeded") == "llm_quota_exceeded"
+    assert _classify_llm_provider_error("bedrock returned 403 quota exceeded") == "llm_provider_capacity"
     assert _classify_llm_provider_error("openai returned 429") == "llm_rate_limited"
     assert _classify_llm_provider_error("retry-after header present") == "llm_rate_limited"
     assert _classify_llm_provider_error("pydantic model validation failed") is None
+
+
+def test_shared_provider_insufficient_quota_is_platform_capacity():
+    raw = "RESOURCE_EXHAUSTED 429 insufficient_quota: billing account exceeded its monthly spending cap"
+
+    assert _classify_llm_provider_error(raw) == "llm_provider_capacity"
+    assert (
+        _llm_error_message("llm_provider_capacity")
+        == "Temporary model capacity issue on our side. Your worker will retry automatically."
+    )
+
+
+def test_per_user_provider_quota_keeps_user_budget_code():
+    raw = "openai.RateLimitError: 429 insufficient_quota"
+
+    assert _classify_llm_provider_error(raw, shared_credentials=False) == "llm_quota_exceeded"
+    assert "your AI provider" in _llm_error_message("llm_quota_exceeded")
 
 
 def test_agent_model_preflight_fails_missing_bedrock_env(monkeypatch):

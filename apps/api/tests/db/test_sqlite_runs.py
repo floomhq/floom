@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from models import RunStatus
@@ -114,6 +116,41 @@ def test_run_create_persists_error_code_and_retry_metadata(repo_bundle):
     assert row["error_code"] == "scheduler_missed"
     assert row["retry_of_run_id"] == "run-parent"
     assert row["retry_attempt"] == 2
+
+
+def test_queued_retry_is_not_claimable_before_trigger_ref(repo_bundle):
+    repos, _db, manifest = repo_bundle
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    now = datetime.now(timezone.utc)
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-retry-due",
+        worker_id="worker-a",
+        trigger_source="retry",
+        trigger_ref=(now - timedelta(minutes=1)).isoformat(),
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-retry-future",
+        worker_id="worker-a",
+        trigger_source="retry",
+        trigger_ref=(now + timedelta(hours=1)).isoformat(),
+    )
+
+    queued_ids = {row["run_id"] for row in repos.runs.get_queued(limit=50)}
+    assert "run-retry-due" in queued_ids
+    assert "run-retry-future" not in queued_ids
+    assert repos.runs.claim_queued(
+        user_id="user-a",
+        run_id="run-retry-future",
+        started_at=now.isoformat(),
+    ) is None
 
 
 def test_run_service_failed_status_update_synthesizes_error_fields(repo_bundle):
