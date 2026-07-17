@@ -123,6 +123,12 @@ class WorkspaceGitHubExportResponse(BaseModel):
     restored_from_bundle: bool = False
 
 
+class WorkspaceInfoResponse(BaseModel):
+    workspace_id: str
+    workspace_name: str
+    principal: Dict[str, Optional[str]]
+
+
 def _active_workspace_git_key(auth: AuthContext) -> str:
     import git_ops as _git_ops
 
@@ -774,7 +780,50 @@ async def import_workspace(
 async def get_workspace(auth: AuthContext = Depends(get_auth_context)) -> PlainTextResponse:
     """Return the current workspace.md content."""
     from chat_service import get_workspace_md
-    return PlainTextResponse(get_workspace_md(), media_type="text/markdown")
+    content = get_workspace_md()
+    return PlainTextResponse(content if content is not None else "", media_type="text/markdown")
+
+
+def _workspace_info_id(auth: AuthContext) -> str:
+    """Active workspace id for this request.
+
+    Reuses _active_workspace_git_key: the cloud-registered git_ops resolver
+    (per-request workspace contextvar) when present, else the OSS scoped
+    auth user id (``local-default`` for the single-workspace case).
+    """
+    return str(_active_workspace_git_key(auth))
+
+
+def _workspace_info_name(workspace_id: str, auth: AuthContext) -> str:
+    """Human-readable workspace name, falling back to the id.
+
+    Local/OSS: resolved from the local workspaces table. Cloud: the engine has
+    no workspace-name store, so the id (which IS the cloud workspace id) is
+    returned as-is.
+    """
+    from auth.local_workspaces import get_local_workspace, local_workspace_base_user_id
+
+    row = get_local_workspace(local_workspace_base_user_id(auth.user_id), workspace_id)
+    name = str((row or {}).get("name") or "").strip()
+    return name or workspace_id
+
+
+@workspace_router.get("/workspace/info", response_model=WorkspaceInfoResponse)
+def get_workspace_info(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceInfoResponse:
+    """Return only the active workspace identity and authenticated principal."""
+    workspace_id = _workspace_info_id(auth)
+    return WorkspaceInfoResponse(
+        workspace_id=workspace_id,
+        workspace_name=_workspace_info_name(workspace_id, auth),
+        principal={
+            "user_id": auth.user_id,
+            "email": auth.email,
+            "role": auth.role,
+        },
+    )
 
 
 @workspace_router.get("/workspace/base")
