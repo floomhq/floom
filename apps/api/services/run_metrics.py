@@ -118,6 +118,8 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "output_too_large": "resource",
     "output_token_limit": "resource",
     "token_cap_exceeded": "resource",
+    "llm_provider_capacity": "resource",
+    "llm_provider_capacity_retry_exhausted": "resource",
     "llm_quota_exceeded": "resource",
     "llm_rate_limited": "resource",
     "spend_cap_exceeded": "resource",

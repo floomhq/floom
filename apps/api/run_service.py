@@ -452,6 +452,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
     "llm_auth_error",
     "llm_model_not_configured",
     "llm_quota_exceeded",
+    "llm_provider_capacity_retry_exhausted",
     "missing_connection",
     "missing_required_input",
     "missing_secret",
@@ -474,6 +475,7 @@ _TRANSIENT_RETRY_ERROR_CODES = {
     "e2b_quota_exhausted",
     "e2b_sandbox_error",
     "llm_provider_error",
+    "llm_provider_capacity",
     "llm_rate_limited",
     "interrupted_by_restart",
     "mcp_connect_failed",
@@ -482,6 +484,11 @@ _TRANSIENT_RETRY_ERROR_CODES = {
     "run_claimed_without_dispatch",
     "timeout",
     "transient_network_error",
+}
+
+_RETRY_EXHAUSTED_ERROR_CODES = {
+    "llm_provider_capacity_retry_exhausted",
+    "transient_network_retry_exhausted",
 }
 
 _PERMANENT_RETRY_CATEGORIES = {
@@ -545,6 +552,8 @@ def _classify_retry_failure(
     from services import run_metrics
 
     category = run_metrics.classify_failure(error_code=code, error=error)
+    if code in _RETRY_EXHAUSTED_ERROR_CODES:
+        return _RetryDecision(False, True, category, "retry_exhausted")
     if _retry_config_exactly_allows_error(retry_cfg, code):
         return _RetryDecision(True, False, category, "manifest_exact_error")
     if code in _PERMANENT_RETRY_ERROR_CODES:
@@ -560,6 +569,73 @@ def _classify_retry_failure(
     if _retry_config_allows_all(retry_cfg):
         return _RetryDecision(True, False, category, "manifest_all")
     return _RetryDecision(False, False, category, "not_retryable")
+
+
+_LLM_PROVIDER_CAPACITY_ERROR_CODE = "llm_provider_capacity"
+_LLM_PROVIDER_CAPACITY_RETRY_EXHAUSTED_CODE = "llm_provider_capacity_retry_exhausted"
+_LLM_PROVIDER_CAPACITY_RETRY_EXHAUSTED_MESSAGE = (
+    "Model capacity is still unavailable on our side after automatic retries. Try again later."
+)
+
+
+def _llm_provider_capacity_max_attempts() -> int:
+    raw = os.environ.get("WORKEROS_LLM_CAPACITY_RETRY_MAX_ATTEMPTS", "")
+    if not raw:
+        return 3
+    try:
+        return min(4, max(1, int(raw)))
+    except ValueError:
+        return 3
+
+
+def _llm_provider_capacity_base_delay_seconds() -> int:
+    raw = os.environ.get("WORKEROS_LLM_CAPACITY_RETRY_BASE_SECONDS", "")
+    if not raw:
+        return 1800
+    try:
+        return min(3600, max(300, int(raw)))
+    except ValueError:
+        return 1800
+
+
+def _retry_attempt_budget(
+    *,
+    run_id: str,
+    config: Any,
+    error_code: str | None,
+    repos: "Repositories",
+) -> tuple[int, int]:
+    current_run_row = repos.runs.get_any(run_id=run_id)
+    current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
+    if error_code == _LLM_PROVIDER_CAPACITY_ERROR_CODE:
+        return current_attempt, _llm_provider_capacity_max_attempts()
+    retry_cfg = getattr(config, "retry", None) if config else None
+    max_attempts = retry_cfg.max_attempts if retry_cfg else _retryable_driver_max_attempts(error_code)
+    return current_attempt, max_attempts
+
+
+def _terminal_retry_failure(
+    *,
+    run_id: str,
+    config: Any,
+    error: str,
+    error_code: str,
+    repos: "Repositories",
+) -> tuple[str, str]:
+    if error_code != _LLM_PROVIDER_CAPACITY_ERROR_CODE:
+        return error, error_code
+    current_attempt, max_attempts = _retry_attempt_budget(
+        run_id=run_id,
+        config=config,
+        error_code=error_code,
+        repos=repos,
+    )
+    if current_attempt >= max_attempts - 1:
+        return (
+            _LLM_PROVIDER_CAPACITY_RETRY_EXHAUSTED_MESSAGE,
+            _LLM_PROVIDER_CAPACITY_RETRY_EXHAUSTED_CODE,
+        )
+    return error, error_code
 
 
 def _schedule_retry_for_failed_run(
@@ -594,15 +670,20 @@ def _schedule_retry_for_failed_run(
             )
         return False
 
-    current_run_row = repos.runs.get_any(run_id=run_id)
-    current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
-    max_attempts = retry_cfg.max_attempts if retry_cfg else _retryable_driver_max_attempts(result_error_code)
+    current_attempt, max_attempts = _retry_attempt_budget(
+        run_id=run_id,
+        config=config,
+        error_code=result_error_code,
+        repos=repos,
+    )
     if current_attempt >= max_attempts - 1:
         return False
 
     base_delay_seconds = retry_cfg.delay_seconds if retry_cfg else 60
+    if result_error_code == _LLM_PROVIDER_CAPACITY_ERROR_CODE:
+        base_delay_seconds = max(base_delay_seconds, _llm_provider_capacity_base_delay_seconds())
     delay_seconds = base_delay_seconds
-    if result_retryable:
+    if result_retryable or result_error_code == _LLM_PROVIDER_CAPACITY_ERROR_CODE:
         delay_seconds = min(base_delay_seconds * (2**current_attempt), 3600)
 
     label = "retryable failure" if decision.reason != "manifest_all" and not retry_cfg else "retry"
@@ -662,10 +743,12 @@ def _retry_run_exception(
     if scheduled:
         return error_code
 
-    current_run_row = repos.runs.get_any(run_id=run_id)
-    current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
-    retry_cfg = getattr(config, "retry", None) if config else None
-    max_attempts = retry_cfg.max_attempts if retry_cfg else _retryable_driver_max_attempts(error_code)
+    current_attempt, max_attempts = _retry_attempt_budget(
+        run_id=run_id,
+        config=config,
+        error_code=error_code,
+        repos=repos,
+    )
     if current_attempt >= max_attempts - 1:
         return _TRANSIENT_NETWORK_RETRY_EXHAUSTED_CODE
     return error_code
@@ -3668,6 +3751,14 @@ def execute_run(
             if was_shutdown_cancelled(run_id):
                 result_error = INTERRUPTED_RUN_ERROR
                 result_error_code = INTERRUPTED_RUN_ERROR_CODE
+            if result_error_code == _LLM_PROVIDER_CAPACITY_ERROR_CODE:
+                result_error, result_error_code = _terminal_retry_failure(
+                    run_id=run_id,
+                    config=config,
+                    error=result_error or "Run failed",
+                    error_code=result_error_code,
+                    repos=repos_obj,
+                )
             update_run_status(
                 run_id,
                 RunStatus.FAILED.value,

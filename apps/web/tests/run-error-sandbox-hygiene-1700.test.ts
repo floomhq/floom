@@ -40,6 +40,15 @@ describe("humanizeRunError sandbox hygiene (#1700)", () => {
     expect(humanizeRunError(SANDBOX_HEADLINE)).toBe(SANDBOX_HEADLINE);
   });
 
+  it("renders provider capacity codes as honest human messages", () => {
+    expect(humanizeRunError("llm_provider_capacity")).toBe(
+      "Temporary model capacity issue on our side. Your worker will retry automatically.",
+    );
+    expect(humanizeRunError("llm_provider_capacity_retry_exhausted")).toBe(
+      "Model capacity is still unavailable on our side after automatic retries. Try again later.",
+    );
+  });
+
   it("leaves normal mathematical angle-brackets alone", () => {
     expect(humanizeRunError("expected a < b")).toBe("expected a < b");
   });

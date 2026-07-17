@@ -69,6 +69,16 @@ def test_e2b_sandbox_error_operator_message_is_not_timeout_headline():
     assert "too long" not in headline
 
 
+def test_provider_capacity_operator_messages_are_honest_and_human():
+    assert main._operator_error_message("RESOURCE_EXHAUSTED", "llm_provider_capacity") == (
+        "Temporary model capacity issue on our side. Your worker will retry automatically."
+    )
+    assert main._operator_error_message(
+        "RESOURCE_EXHAUSTED",
+        "llm_provider_capacity_retry_exhausted",
+    ) == "Model capacity is still unavailable on our side after automatic retries. Try again later."
+
+
 def test_h2_connection_terminated_repr_is_not_stored_in_run_error_1700():
     # #1700: an h2 transport drop surfaces its __repr__ as the exception message;
     # that raw library repr must NOT be persisted into run.error.

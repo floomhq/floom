@@ -98,6 +98,13 @@ const ERROR_CODE_LABELS: Record<string, string> = {
   sandbox_transport_retry_exhausted: "Sandbox error",
 };
 
+const ERROR_CODE_MESSAGES: Record<string, string> = {
+  llm_provider_capacity:
+    "Temporary model capacity issue on our side. Your worker will retry automatically.",
+  llm_provider_capacity_retry_exhausted:
+    "Model capacity is still unavailable on our side after automatic retries. Try again later.",
+};
+
 // Calm headline for the sandbox-error code, mirroring the backend
 // _SANDBOX_HEADLINE in apps/api/services/public_view.py. Used when only a raw
 // `e2b_sandbox_error: <...>` string reaches the client (#1700).
@@ -129,6 +136,9 @@ export function humanizeRunError(error: string | null | undefined): string {
   const cleaned = (error || "").replace(/\s+/g, " ").trim();
   if (!cleaned) return "";
 
+  const exactCodeMessage = ERROR_CODE_MESSAGES[cleaned.toLowerCase()];
+  if (exactCodeMessage) return exactCodeMessage;
+
   // OpenAI-style "Error code: N - {'error': {'message': '...'}}"
   const dictMatch = cleaned.match(/Error code:\s*\d+\s*-\s*[{'"]/i);
   if (dictMatch) {
@@ -148,6 +158,8 @@ export function humanizeRunError(error: string | null | undefined): string {
   if (codeMatch) {
     const code = codeMatch[1].toLowerCase();
     const rest = codeMatch[2].trim();
+    const fixedMessage = ERROR_CODE_MESSAGES[code];
+    if (fixedMessage) return fixedMessage;
     // Sandbox errors carry raw transport-layer detail (h2 reprs, template ids).
     // Never surface the detail; collapse to the calm headline (#1700).
     if (code === "e2b_sandbox_error" || code === "sandbox_error" || code === "sandbox_transport_retry_exhausted") {

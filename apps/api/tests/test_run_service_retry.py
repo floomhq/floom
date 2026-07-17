@@ -304,6 +304,65 @@ def test_llm_setup_errors_do_not_retry_and_provider_error_retries(monkeypatch):
     assert scheduled[-1]["attempt"] == 1
 
 
+def test_llm_provider_capacity_uses_spaced_bounded_retries(monkeypatch):
+    scheduled: list[dict] = []
+    monkeypatch.delenv("WORKEROS_LLM_CAPACITY_RETRY_MAX_ATTEMPTS", raising=False)
+    monkeypatch.delenv("WORKEROS_LLM_CAPACITY_RETRY_BASE_SECONDS", raising=False)
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kwargs: scheduled.append(kwargs))
+
+    for retry_attempt, expected_delay in ((0, 1800), (1, 3600)):
+        did_schedule = run_service._schedule_retry_for_failed_run(
+            run_id=f"run-capacity-{retry_attempt}",
+            worker_id="worker-a",
+            inputs={},
+            owner_id="user-a",
+            config=None,
+            result_retryable=True,
+            result_error_code="llm_provider_capacity",
+            repos=_Repos(retry_attempt=retry_attempt),
+            log_fn=lambda *_args, **_kwargs: None,
+        )
+        assert did_schedule is True
+        assert scheduled[-1]["attempt"] == retry_attempt + 1
+        assert scheduled[-1]["delay_seconds"] == expected_delay
+
+    did_schedule = run_service._schedule_retry_for_failed_run(
+        run_id="run-capacity-exhausted",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        result_retryable=True,
+        result_error_code="llm_provider_capacity",
+        repos=_Repos(retry_attempt=2),
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+    assert did_schedule is False
+    assert len(scheduled) == 2
+
+
+def test_llm_provider_capacity_exhaustion_has_honest_terminal_failure(monkeypatch):
+    monkeypatch.delenv("WORKEROS_LLM_CAPACITY_RETRY_MAX_ATTEMPTS", raising=False)
+
+    error, error_code = run_service._terminal_retry_failure(
+        run_id="run-capacity-exhausted",
+        config=None,
+        error="Temporary model capacity issue on our side. Your worker will retry automatically.",
+        error_code="llm_provider_capacity",
+        repos=_Repos(retry_attempt=2),
+    )
+
+    assert error_code == "llm_provider_capacity_retry_exhausted"
+    assert error == "Model capacity is still unavailable on our side after automatic retries. Try again later."
+    assert run_service._classify_retry_failure(error_code=error_code).retryable is False
+    explicit_retry = run_service._classify_retry_failure(
+        error_code=error_code,
+        retry_cfg=_RetryConfig(on=[error_code]),
+    )
+    assert explicit_retry.retryable is False
+    assert explicit_retry.reason == "retry_exhausted"
+
+
 def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
     created: list[str] = []
     started: list[str] = []
