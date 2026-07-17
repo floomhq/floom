@@ -133,7 +133,15 @@ class WorkspaceInfoResponse(BaseModel):
 def _active_workspace_git_key(auth: AuthContext) -> str:
     import git_ops as _git_ops
 
-    return _git_ops.get_active_workspace_id() or _active_local_workspace_id(auth)
+    workspace_id = _git_ops.get_active_workspace_id()
+    if workspace_id is not None:
+        return workspace_id
+    if _is_cloud_deploy():
+        raise HTTPException(
+            status_code=503,
+            detail="workspace-unresolved: unable to determine the active workspace for this request",
+        )
+    return _active_local_workspace_id(auth)
 
 
 def _workspace_owner_user_id(auth: AuthContext, repos: Repositories) -> str:
@@ -789,18 +797,9 @@ def _workspace_info_id(auth: AuthContext) -> str:
     """Active workspace id for this request.
 
     Cloud requires the registered git_ops resolver's per-request workspace
-    context. OSS falls back to its single local workspace.
+    context (fails closed via _active_workspace_git_key when unresolved).
+    OSS falls back to its single local workspace.
     """
-    if _is_cloud_deploy():
-        import git_ops as _git_ops
-
-        workspace_id = _git_ops.get_active_workspace_id()
-        if workspace_id is None:
-            raise HTTPException(
-                status_code=503,
-                detail="workspace-unresolved: unable to determine the active workspace for this request",
-            )
-        return str(workspace_id)
     return str(_active_workspace_git_key(auth))
 
 

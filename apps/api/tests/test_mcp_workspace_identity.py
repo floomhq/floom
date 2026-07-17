@@ -155,7 +155,7 @@ def test_workspace_info_id_uses_distinct_cloud_workspace_resolver_values(monkeyp
 
 @pytest.mark.parametrize(
     "resolver",
-    [lambda: None, lambda: (_ for _ in ()).throw(RuntimeError("boom"))],
+    [None, lambda: None, lambda: (_ for _ in ()).throw(RuntimeError("boom"))],
 )
 def test_workspace_info_id_fails_closed_when_cloud_workspace_unresolved(
     monkeypatch, tmp_path, resolver
