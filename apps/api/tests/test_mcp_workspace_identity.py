@@ -7,6 +7,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -134,6 +136,57 @@ def test_member_workspace_info_returns_workspace_and_principal_without_system_me
         "email": None,
         "role": "admin",
     }
+
+
+def test_workspace_info_id_uses_distinct_cloud_workspace_resolver_values(monkeypatch, tmp_path):
+    _load_api(monkeypatch, tmp_path)
+    import git_ops
+    from routers.workspace import _workspace_info_id
+
+    auth = types.SimpleNamespace(user_id="cloud-user")
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    try:
+        for workspace_id in ("cloud-workspace-alpha", "cloud-workspace-beta"):
+            git_ops.set_workspace_id_resolver(lambda value=workspace_id: value)
+            assert _workspace_info_id(auth) == workspace_id
+    finally:
+        git_ops.set_workspace_id_resolver(None)
+
+
+@pytest.mark.parametrize(
+    "resolver",
+    [lambda: None, lambda: (_ for _ in ()).throw(RuntimeError("boom"))],
+)
+def test_workspace_info_id_fails_closed_when_cloud_workspace_unresolved(
+    monkeypatch, tmp_path, resolver
+):
+    _load_api(monkeypatch, tmp_path)
+    import git_ops
+    from routers.workspace import _workspace_info_id
+
+    auth = types.SimpleNamespace(user_id="cloud-user")
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    git_ops.set_workspace_id_resolver(resolver)
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            _workspace_info_id(auth)
+    finally:
+        git_ops.set_workspace_id_resolver(None)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == (
+        "workspace-unresolved: unable to determine the active workspace for this request"
+    )
+
+
+def test_workspace_info_id_keeps_local_default_fallback(monkeypatch, tmp_path):
+    _load_api(monkeypatch, tmp_path)
+    import git_ops
+    from routers.workspace import _workspace_info_id
+
+    auth = types.SimpleNamespace(user_id="mcp-test-user")
+    git_ops.set_workspace_id_resolver(None)
+    assert _workspace_info_id(auth) == "local-default"
 
 
 def test_member_system_info_remains_admin_gated(monkeypatch, tmp_path):

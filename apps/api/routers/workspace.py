@@ -45,6 +45,7 @@ from core.config import (
     WORKSPACE_IMPORT_BODY_LIMIT_BYTES,
     _MAX_IMPORT_ENTRIES,
     _MAX_IMPORT_UNCOMPRESSED_BYTES,
+    _is_cloud_deploy,
 )
 from core.urls import _public_api_base_url
 from db import Repositories, get_repos
@@ -787,10 +788,19 @@ async def get_workspace(auth: AuthContext = Depends(get_auth_context)) -> PlainT
 def _workspace_info_id(auth: AuthContext) -> str:
     """Active workspace id for this request.
 
-    Reuses _active_workspace_git_key: the cloud-registered git_ops resolver
-    (per-request workspace contextvar) when present, else the OSS scoped
-    auth user id (``local-default`` for the single-workspace case).
+    Cloud requires the registered git_ops resolver's per-request workspace
+    context. OSS falls back to its single local workspace.
     """
+    if _is_cloud_deploy():
+        import git_ops as _git_ops
+
+        workspace_id = _git_ops.get_active_workspace_id()
+        if workspace_id is None:
+            raise HTTPException(
+                status_code=503,
+                detail="workspace-unresolved: unable to determine the active workspace for this request",
+            )
+        return str(workspace_id)
     return str(_active_workspace_git_key(auth))
 
 
