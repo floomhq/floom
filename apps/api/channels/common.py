@@ -795,21 +795,34 @@ def bound_user_is_valid(user_id: str) -> bool:
         return True
 
 
-async def collect_agent_reply(
+class AgentReplyError(RuntimeError):
+    """The workspace agent stream reported a failure before completing.
+
+    ``str(exc)`` is the client-safe message emitted by chat_service (already
+    passed through ``safe_llm_error_message``), so callers may surface it.
+    Subclasses RuntimeError for backwards compatibility with existing
+    ``except RuntimeError`` channel handlers.
+    """
+
+
+async def collect_agent_reply_details(
     *,
     message: str,
     user_id: str,
     conversation_id: Optional[str],
     source: str = "slack",
     system_suffix: str = "",
-) -> str:
-    """Stream the workspace-agent reply for an inbound channel message.
+) -> dict:
+    """Stream the workspace-agent reply and return reply details.
 
-    Drives ``chat_service.stream_chat`` over an asyncio Queue and returns the
-    concatenated text reply (em-dashes stripped).  Named ``collect_agent_reply``
-    here (channel-neutral); main.py re-exports it as
-    ``_collect_workspace_agent_reply_for_slack`` for backwards compatibility with
-    tests that monkeypatch that name directly.
+    Drives ``chat_service.stream_chat`` over an asyncio Queue and returns
+    ``{"reply", "conversation_id", "message_id"}`` where ``conversation_id`` is
+    the REAL persisted id from the finish event (#2269 — callers need it to
+    resume the same thread).
+
+    #2266: once the finish event has been consumed the reply is complete; a
+    late exception from the stream task (client teardown, provider close) is
+    logged and ignored instead of converting a completed run into a failure.
     """
     from chat_service import stream_chat, strip_em_dashes  # lazy — avoids circular import
 
@@ -826,17 +839,55 @@ async def collect_agent_reply(
         )
     )
     text_parts: list[str] = []
+    finish_part: dict = {}
     try:
         while True:
             part = await queue.get()
             if part.get("type") == "text":
                 text_parts.append(str(part.get("text") or ""))
             if part.get("type") == "error":
-                raise RuntimeError(str(part.get("error") or "workspace agent failed"))
+                raise AgentReplyError(str(part.get("error") or "workspace agent failed"))
             if part.get("type") == "finish":
+                finish_part = part
                 break
-        await task
+        try:
+            await task
+        except Exception:
+            logger.exception(
+                "workspace agent stream task failed after finish for conversation %s; "
+                "reply already complete — returning it",
+                finish_part.get("conversation_id"),
+            )
     finally:
         if not task.done():
             task.cancel()
-    return strip_em_dashes("".join(text_parts).strip())
+    return {
+        "reply": strip_em_dashes("".join(text_parts).strip()),
+        "conversation_id": finish_part.get("conversation_id"),
+        "message_id": finish_part.get("message_id"),
+    }
+
+
+async def collect_agent_reply(
+    *,
+    message: str,
+    user_id: str,
+    conversation_id: Optional[str],
+    source: str = "slack",
+    system_suffix: str = "",
+) -> str:
+    """Stream the workspace-agent reply for an inbound channel message.
+
+    Returns the concatenated text reply (em-dashes stripped).  Named
+    ``collect_agent_reply`` here (channel-neutral); main.py re-exports it as
+    ``_collect_workspace_agent_reply_for_slack`` for backwards compatibility with
+    tests that monkeypatch that name directly.
+    """
+    details = await collect_agent_reply_details(
+        message=message,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        source=source,
+        system_suffix=system_suffix,
+    )
+    return str(details.get("reply") or "")

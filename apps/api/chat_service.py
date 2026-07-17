@@ -2388,6 +2388,17 @@ async def stream_chat(
     mcp_servers: List[Any] = []
     conversation_token = _current_chat_conversation_id.set(conversation_id)
 
+    def _persist_side_effect(label: str, fn, *args, **kwargs):
+        """#2266: tool-card/transcript persistence is a side effect of the run;
+        a DB hiccup here must not abort a run whose actual work succeeded."""
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            logger.exception(
+                "%s failed (non-fatal) for conversation %s", label, conversation_id
+            )
+            return None
+
     try:
         # Dial registered MCP servers (workspace-agent policy ? require_approval=always).
         # SSRF + auth-header injection carry over from the shared module. A failed
@@ -2492,7 +2503,10 @@ async def stream_chat(
                     args=raw_args,
                     phase="call",
                 )
-                _persist_tool_card(conversation_id, user_id, call_id, tool_name_raw, metadata)
+                _persist_side_effect(
+                    "tool card persistence",
+                    _persist_tool_card, conversation_id, user_id, call_id, tool_name_raw, metadata,
+                )
                 card_summaries[metadata["card"]["id"]] = {
                     "id": metadata["card"]["id"],
                     "callId": call_id,
@@ -2546,7 +2560,10 @@ async def stream_chat(
                     result=parsed_output,
                     phase="result",
                 )
-                _persist_tool_card(conversation_id, user_id, call_id, tool_name, metadata)
+                _persist_side_effect(
+                    "tool card persistence",
+                    _persist_tool_card, conversation_id, user_id, call_id, tool_name, metadata,
+                )
                 card_summaries[metadata["card"]["id"]] = {
                     "id": metadata["card"]["id"],
                     "callId": call_id,
@@ -2603,7 +2620,10 @@ async def stream_chat(
                     successful_tool_results.append((tool_name, safe_result))
                 # Persist tool message
                 content_str = json.dumps(safe_result, default=str) if not isinstance(safe_result, str) else safe_result
-                insert_message(conversation_id, "tool", content_str, tool_call_id=call_id)
+                _persist_side_effect(
+                    "tool transcript persistence",
+                    insert_message, conversation_id, "tool", content_str, tool_call_id=call_id,
+                )
 
         flushed_text = stream_text_sanitizer.flush()
         if flushed_text:
@@ -2630,13 +2650,38 @@ async def stream_chat(
                     "message_id": assistant_message_id,
                     "text": full_reply,
                 })
-        full_reply = _sanitize_preview_text(full_reply)
-        full_reply = _ensure_bare_greeting_identity(message, full_reply)
+        # ------------------------------------------------------------------
+        # #2266: the agent run is complete — everything below is post-run
+        # bookkeeping. A failure here must not convert the finished reply
+        # into an error part (which MCP callers see as a false failure);
+        # log it and still emit the finish event with the reply.
+        # ------------------------------------------------------------------
+        try:
+            full_reply = _sanitize_preview_text(full_reply)
+            full_reply = _ensure_bare_greeting_identity(message, full_reply)
+        except Exception:
+            logger.exception(
+                "post-run reply sanitization failed (non-fatal) for conversation %s",
+                conversation_id,
+            )
         if full_reply:
-            final_message_id = insert_message(conversation_id, "assistant", full_reply)
+            try:
+                final_message_id = insert_message(conversation_id, "assistant", full_reply)
+            except Exception:
+                logger.exception(
+                    "assistant reply persistence failed (non-fatal) for conversation %s; "
+                    "streamed reply is still returned",
+                    conversation_id,
+                )
 
         # Evict if needed
-        _maybe_evict_conversation(conversation_id, user_id)
+        try:
+            _maybe_evict_conversation(conversation_id, user_id)
+        except Exception:
+            logger.exception(
+                "conversation eviction failed (non-fatal) for conversation %s",
+                conversation_id,
+            )
 
         await part_queue.put({
             "type": "finish",
@@ -2708,8 +2753,17 @@ async def stream_chat(
         })
     finally:
         # Tear down MCP servers (best-effort) before releasing the OpenAI client.
+        # #2266: teardown runs after the finish event has been emitted; nothing
+        # here may raise out of the coroutine, or a caller awaiting the task
+        # would report failure for an already-completed reply.
         _current_chat_conversation_id.reset(conversation_token)
         if mcp_servers:
-            await agent_capabilities.cleanup_mcp_servers(mcp_servers, _cap_log)
+            try:
+                await agent_capabilities.cleanup_mcp_servers(mcp_servers, _cap_log)
+            except Exception:
+                logger.exception("MCP server teardown failed (non-fatal)")
         # Release the per-stream OpenAI + httpx client on this loop.
-        await loop_local_provider.aclose()
+        try:
+            await loop_local_provider.aclose()
+        except Exception:
+            logger.exception("chat model client close failed (non-fatal)")
