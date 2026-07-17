@@ -409,6 +409,21 @@ def test_base64_size_cap_rejected_before_decode_on_both_api_paths(monkeypatch, t
     client = TestClient(main.app)
     oversized = base64.b64encode(b"x" * 48).decode("ascii")
 
+    # Spy on base64.b64decode (shared module object referenced by both
+    # main.py and services/uploads.py) to prove the oversized payload is
+    # rejected by the pre-decode size guard and never actually decoded —
+    # not merely rejected later by a post-decode size check that would
+    # still pass this test's status/message assertions alone.
+    real_b64decode = base64.b64decode
+    decoded_oversized_calls = []
+
+    def _spy_b64decode(data, *args, **kwargs):
+        if data == oversized:
+            decoded_oversized_calls.append(data)
+        return real_b64decode(data, *args, **kwargs)
+
+    monkeypatch.setattr(main.base64, "b64decode", _spy_b64decode)
+
     upload = _serve(
         client,
         "files.upload",
@@ -416,6 +431,10 @@ def test_base64_size_cap_rejected_before_decode_on_both_api_paths(monkeypatch, t
     )
     assert upload.get("isError") is True, upload
     assert "exceeds 32 bytes limit" in upload["content"][0]["text"]
+    assert decoded_oversized_calls == [], (
+        "files.upload decoded the oversized base64 payload instead of "
+        "rejecting it before decode"
+    )
 
     worker_id = _create_file_worker(client)
     run = client.post(
@@ -433,3 +452,7 @@ def test_base64_size_cap_rejected_before_decode_on_both_api_paths(monkeypatch, t
     )
     assert run.status_code == 400, run.text
     assert run.json()["detail"] == "Uploaded file exceeds 32 bytes limit"
+    assert decoded_oversized_calls == [], (
+        "inline file-input path decoded the oversized base64 payload "
+        "instead of rejecting it before decode"
+    )
