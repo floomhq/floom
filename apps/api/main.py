@@ -5878,7 +5878,7 @@ app.include_router(review_pack_router)
 
 # Workspace route group (instructions/base-persona docs, members, settings,
 # template export/import, share link, changelog).
-from routers.workspace import workspace_router
+from routers.workspace import get_workspace_info, workspace_router
 app.include_router(workspace_router)
 
 # Git-backed workspace issues (#1781): .floom/issues/ in the workspace git repo.
@@ -6488,6 +6488,9 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             "inputSchema": _mcp_json_schema({
                 "include_system": {"type": "boolean", "default": False},
                 "include_archived": {"type": "boolean", "default": False},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+                "offset": {"type": "integer", "minimum": 0, "default": 0},
+                "verbose": {"type": "boolean", "default": False},
             }),
         },
         {
@@ -6620,6 +6623,11 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
                 "content": {"type": "string"},
             }, ["name", "path", "content"]),
         },
+        {
+            "name": "workspace.info",
+            "description": "Get the active workspace identity and authenticated principal.",
+            "inputSchema": _mcp_json_schema({}),
+        },
     ]
 
 
@@ -6733,14 +6741,45 @@ async def _mcp_call_workspace_agent(arguments: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
+_MCP_WORKER_LIST_HEAVY_FIELDS = frozenset({
+    "long_description",
+    "use_cases",
+    "example_input",
+    "example_output",
+    "how_it_works",
+    "timeseries",
+})
+
+
+def _mcp_worker_list_projection(data: Any, *, verbose: bool) -> Any:
+    projected = jsonable_encoder(data)
+    if verbose:
+        return projected
+    rows = projected.get("data") if isinstance(projected, dict) else projected
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, dict):
+                for field in _MCP_WORKER_LIST_HEAVY_FIELDS:
+                    row.pop(field, None)
+    return projected
+
+
 def _mcp_call_workers_list(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    verbose = bool(arguments.get("verbose", False))
     data = list_workers(
         include_system=bool(arguments.get("include_system", False)),
         include_archived=bool(arguments.get("include_archived", False)),
-        shape="full",
+        shape="full" if verbose else "list",
+        limit=min(max(int(arguments.get("limit") or 50), 1), 500),
+        offset=max(int(arguments.get("offset") or 0), 0),
         auth=auth,
         repos=repos,
     )
+    return _mcp_call_result(_mcp_worker_list_projection(data, verbose=verbose))
+
+
+def _mcp_call_workspace_info(auth: AuthContext) -> Dict[str, Any]:
+    data = get_workspace_info(_internal_asgi_request(), auth=auth)
     return _mcp_call_result(data)
 
 
@@ -6995,6 +7034,8 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_contexts_read(arguments, auth)
         if tool_name == "contexts.write":
             return _mcp_call_contexts_write(arguments, auth, repos)
+        if tool_name == "workspace.info":
+            return _mcp_call_workspace_info(auth)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
     except ValidationError:
         raise
@@ -7522,7 +7563,16 @@ def _api_call_response_data(resp: Any) -> Any:
     """
     status_code = int(getattr(resp, "status_code", 0) or 0)
     raw = getattr(resp, "content", b"")
-    if raw in (b"", "", None) or status_code == 204:
+    if status_code == 204:
+        return {}
+    if raw in (b"", "", None):
+        content_type = str(getattr(resp, "headers", {}).get("content-type", "")).lower()
+        if status_code < 400 and (
+            content_type.startswith("text/")
+            or "markdown" in content_type
+            or "charset=" in content_type
+        ):
+            return {"content": ""}
         return {}
     try:
         return resp.json()
@@ -7596,7 +7646,7 @@ async def _api_call(
 
 _MCP_DEFAULT_TOOLS: List[dict] = [
     # --- workers ---
-    {"name": "workers.list", "description": "List Floom workers.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workers.list", "description": "List Floom workers with a compact projection by default.", "inputSchema": {"type": "object", "properties": {"include_system": {"type": "boolean", "default": False}, "include_archived": {"type": "boolean", "default": False}, "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}, "offset": {"type": "integer", "minimum": 0, "default": 0}, "verbose": {"type": "boolean", "default": False}}}},
     {"name": "workers.get", "description": "Get a Floom worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py or run_ts. For agent/skill-mode workers supply skill_md.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "run_ts": {"type": "string", "description": "TypeScript source for run.ts."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Optional complete worker bundle files. Must include worker.yml when supplied."}}, "required": ["worker_yml"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
@@ -7650,6 +7700,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     # --- workspace ---
     {"name": "workspace.chat", "description": "Send a message to the Floom workspace agent and receive a reply.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
     {"name": "workspace.instructions.get", "description": "Read the current workspace agent instructions.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workspace.info", "description": "Get the active workspace identity and authenticated principal.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "workspace.instructions.set", "description": "Update the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
     {"name": "workspace.versions", "description": "List saved versions of the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
     {"name": "workspace.rollback", "description": "Restore workspace agent instructions to a previous version.", "inputSchema": {"type": "object", "properties": {"version_id": {"type": "string"}}, "required": ["version_id"]}},
@@ -7801,8 +7852,22 @@ async def _mcp_dispatch(
 
     # --- workers ---
     if name == "workers.list":
-        data, s = await _api_call("GET", "/workers", request)
-        return _mcp_api_result(data, s)
+        verbose = bool(a.get("verbose", False))
+        data, s = await _api_call(
+            "GET",
+            "/workers",
+            request,
+            params={
+                "include_system": a.get("include_system", False),
+                "include_archived": a.get("include_archived", False),
+                "shape": "full" if verbose else "list",
+                "limit": a.get("limit", 50),
+                "offset": a.get("offset", 0),
+            },
+        )
+        if s >= 400:
+            return _mcp_api_result(data, s)
+        return _mcp_call_result(_mcp_worker_list_projection(data, verbose=verbose))
     if name == "workers.get":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}", request)
         return _mcp_api_result(data, s)
@@ -7998,6 +8063,9 @@ async def _mcp_dispatch(
         )
     if name == "workspace.instructions.get":
         data, s = await _api_call("GET", "/workspace", request)
+        return _mcp_api_result(data, s)
+    if name == "workspace.info":
+        data, s = await _api_call("GET", "/workspace/info", request)
         return _mcp_api_result(data, s)
     if name == "workspace.instructions.set":
         data, s = await _api_call("PUT", "/workspace", request, body={"content": a["content"]})

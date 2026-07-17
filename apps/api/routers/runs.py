@@ -201,6 +201,21 @@ def _effective_runs_limit(request: Request, limit: int) -> int:
     return min(current_limit, default_limit)
 
 
+def _run_not_found_detail(auth: AuthContext, request: Request | None = None) -> str:
+    """404 detail naming ONLY the workspace that was searched (#workspace-mismatch).
+
+    Agents holding runs in several workspaces get an actionable message without
+    leaking anything about other workspaces: the id/name here always describe
+    the CURRENT request's workspace, never the candidate run's scope.
+    """
+    from routers.workspace import _workspace_info_id, _workspace_info_name
+
+    workspace_id = _workspace_info_id(auth)
+    name = _workspace_info_name(workspace_id, auth)
+    label = f"{name} ({workspace_id})" if name != workspace_id else workspace_id
+    return f"Run not found in workspace {label}"
+
+
 @runs_router.get("/runs", response_model=List[RunSummary])
 def list_runs(
     request: Request,
@@ -1074,13 +1089,14 @@ def download_artifact(
 @runs_router.get("/runs/{run_id}", response_model=RunDetail, response_model_exclude_none=True)
 def get_run(
     run_id: str,
+    request: Request = None,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> RunDetail:
     from run_service import get_worker_config_for_run, queued_run_position
     run = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=_run_not_found_detail(auth))
 
     run["output"] = _safe_run_output_payload(run, user_id=auth.user_id, repos=repos)
     run["outputs"] = run["output"]

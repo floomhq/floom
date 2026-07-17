@@ -133,7 +133,7 @@ def test_tools_list_defaults_to_lean_audit_surface(monkeypatch, tmp_path):
 
     tools = _list_tools(main, _admin(main))
 
-    assert len(tools) == 14
+    assert len(tools) == 15  # +workspace.info (member-level workspace identity)
     assert {
         "workers.list",
         "workers.create",
@@ -142,6 +142,7 @@ def test_tools_list_defaults_to_lean_audit_surface(monkeypatch, tmp_path):
         "runs.watch",
         "secrets.list",
         "contexts.read",
+        "workspace.info",
     } <= tools
     assert "workers.delete" not in tools
     assert "tools.register" not in tools
@@ -153,7 +154,7 @@ def test_full_tools_env_restores_complete_default_registry(monkeypatch, tmp_path
 
     tools = _list_tools(main, _admin(main))
 
-    assert len(tools) == 61
+    assert len(tools) == 62  # +workspace.info
     assert "workers.delete" in tools
     assert "workers.reload" in tools
     assert "tools.register" in tools
