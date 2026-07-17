@@ -7522,7 +7522,16 @@ def _api_call_response_data(resp: Any) -> Any:
     """
     status_code = int(getattr(resp, "status_code", 0) or 0)
     raw = getattr(resp, "content", b"")
-    if raw in (b"", "", None) or status_code == 204:
+    if status_code == 204:
+        return {}
+    if raw in (b"", "", None):
+        content_type = str(getattr(resp, "headers", {}).get("content-type", "")).lower()
+        if status_code < 400 and (
+            content_type.startswith("text/")
+            or "markdown" in content_type
+            or "charset=" in content_type
+        ):
+            return {"content": ""}
         return {}
     try:
         return resp.json()
