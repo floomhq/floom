@@ -207,7 +207,12 @@ def test_emily_worker_list_resolves_header_alias_to_user_with_workers(tmp_path, 
     assert {worker["id"] for worker in result["workers"]} == {"alias-real"}
 
 
-def test_emily_worker_list_does_not_widen_admin_to_all_users_by_default(tmp_path, monkeypatch):
+def test_emily_worker_list_admin_default_matches_grid_scope(tmp_path, monkeypatch):
+    """#2270: Emily's default view mirrors the caller's dashboard grid exactly
+    (list_operator_workers, single source of truth). The grid gives an admin
+    the full workspace view (repos.workers.list role="admin"), so Emily
+    reports the same set — a narrower Emily default re-creates the count
+    split-brain between the grid header and Emily's answer."""
     admin_user_id = "admin-user"
     db_path = tmp_path / "workeros.db"
     contexts_dir = tmp_path / "contexts"
@@ -222,7 +227,9 @@ def test_emily_worker_list_does_not_widen_admin_to_all_users_by_default(tmp_path
     chat_service = _load_chat_service()
 
     result = chat_service._tool_workers_list_all({}, admin_user_id)
-    assert {worker["id"] for worker in result["workers"]} == {"admin-real"}
+    assert {worker["id"] for worker in result["workers"]} == {"admin-real", "other-private"}
 
+    # include_all_users is retained for tool-schema compatibility; scope is
+    # already the grid's, so it is a no-op.
     all_users = chat_service._tool_workers_list_all({"include_all_users": True}, admin_user_id)
     assert {worker["id"] for worker in all_users["workers"]} == {"admin-real", "other-private"}

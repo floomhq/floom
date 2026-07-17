@@ -30,32 +30,45 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 
+_NOW = "2026-01-01T00:00:00Z"
+
+
 def _seed_db(path: Path) -> None:
+    """Seed the REAL schema (init_db already ran against *path*).
+
+    #2270: _tool_workers_list_all now routes through list_operator_workers /
+    repos.workers.list, which reads the full workers + skill_versions schema —
+    the old hand-rolled 3-column tables no longer parse.
+    """
     c = sqlite3.connect(path)
     c.execute(
-        "CREATE TABLE workers (id TEXT, name TEXT, trigger_type TEXT, enabled INTEGER, "
-        "owner_id TEXT, visibility TEXT, workspace_id TEXT, skill_version_id TEXT)"
+        "INSERT OR REPLACE INTO users (id,username,role,disabled,password_hash,created_at,updated_at) "
+        "VALUES ('admin-1','admin-1','admin',0,'x',?,?)",
+        (_NOW, _NOW),
     )
-    c.execute("CREATE TABLE skill_versions (id TEXT, manifest_json TEXT)")
-    # Include `username` so init_db()'s `CREATE UNIQUE INDEX ON users(username)`
-    # (run when _tool_workers_list_all imports main, which calls init_db on this
-    # seeded DB) does not fail with "no such column: username". The minimal
-    # (id, role) shape collided with the real users-table migration when this
-    # file ran in isolation (main not already imported by an earlier test).
-    c.execute("CREATE TABLE users (id TEXT, username TEXT, role TEXT)")
-    c.execute("INSERT INTO users (id, username, role) VALUES ('admin-1','admin-1','admin')")
-    rows = [
-        ("w-real", "Real worker", "manual", 1, "admin-1", "private", "local-default", "sv-real"),
-        ("w-system", "System worker", "manual", 1, "admin-1", "private", "local-default", "sv-system"),
-        ("w-example", "Example worker", "manual", 1, "admin-1", "private", "local-default", "sv-example"),
-    ]
-    c.executemany("INSERT INTO workers VALUES (?,?,?,?,?,?,?,?)", rows)
     manifests = [
         ("sv-real", json.dumps({"title": "Real"})),
         ("sv-system", json.dumps({"title": "Sys", "system_worker": True})),
         ("sv-example", json.dumps({"title": "Example", "is_example": True})),
     ]
-    c.executemany("INSERT INTO skill_versions VALUES (?,?)", manifests)
+    for svid, manifest in manifests:
+        c.execute(
+            "INSERT INTO skill_versions (id,name,version,manifest_json,bundle_path,created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (svid, svid, "1.0", manifest, "/x", _NOW),
+        )
+    rows = [
+        ("w-real", "sv-real", "Real worker"),
+        ("w-system", "sv-system", "System worker"),
+        ("w-example", "sv-example", "Example worker"),
+    ]
+    for wid, svid, name in rows:
+        c.execute(
+            "INSERT INTO workers (id,skill_version_id,name,trigger_type,enabled,"
+            "owner_id,workspace_id,visibility,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (wid, svid, name, "manual", 1, "admin-1", "local-default", "private", _NOW),
+        )
     c.commit()
     c.close()
 
@@ -65,9 +78,20 @@ def _load_chat_service(monkeypatch, db_path: Path):
     # priority over FLOOM_DB in db/sqlite.py's path resolution
     monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
+    # #2270: canonical listing also enumerates on-disk workers — isolate.
+    workers_dir = db_path.parent / "workers-empty"
+    workers_dir.mkdir(exist_ok=True)
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     for name in list(sys.modules):
-        if name in ("chat_service",) or name == "db" or name.startswith("db."):
+        if (
+            name in ("chat_service", "worker_registry", "runner_utils")
+            or name == "db"
+            or name.startswith("db.")
+        ):
             sys.modules.pop(name, None)
+    import db as dbmod
+
+    dbmod.init_db()
     import chat_service
 
     return chat_service
@@ -75,8 +99,8 @@ def _load_chat_service(monkeypatch, db_path: Path):
 
 def test_system_workers_hidden_examples_shown_by_default(tmp_path, monkeypatch):
     db = tmp_path / "f1.db"
-    _seed_db(db)
     cs = _load_chat_service(monkeypatch, db)
+    _seed_db(db)
 
     res = cs._tool_workers_list_all({}, "admin-1")
 
@@ -91,8 +115,8 @@ def test_system_workers_hidden_examples_shown_by_default(tmp_path, monkeypatch):
 
 def test_include_system_opts_back_in(tmp_path, monkeypatch):
     db = tmp_path / "f2.db"
-    _seed_db(db)
     cs = _load_chat_service(monkeypatch, db)
+    _seed_db(db)
 
     res = cs._tool_workers_list_all({"include_system": True}, "admin-1")
 

@@ -1066,17 +1066,19 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         _make_tool(
             "workers__list_all",
             "List the user's workers (name, id, trigger, last run status). "
-            "System and example workers are hidden unless include_system is true.",
+            "Reports the SAME worker set and count as the dashboard worker "
+            "grid (#2270). System and archived workers are hidden (footnoted "
+            "in hidden_system_count) unless include_system is true.",
             {
                 "type": "object",
                 "properties": {
                     "include_system": {
                         "type": "boolean",
-                        "description": "Also include system/example workers (hidden by default).",
+                        "description": "Also include hidden system/archived workers (hidden by default).",
                     },
                     "include_all_users": {
                         "type": "boolean",
-                        "description": "Admin only: include workers owned by every user.",
+                        "description": "Deprecated no-op (kept for compatibility): visibility always mirrors the user's dashboard grid.",
                     }
                 },
                 "required": [],

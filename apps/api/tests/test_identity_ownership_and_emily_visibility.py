@@ -155,6 +155,14 @@ def _seed_visibility_db(path: Path) -> None:
         "INSERT INTO workspace_members (workspace_id, user_id, role, status, created_at, updated_at) VALUES "
         "  ('local-default','admin-1','admin','active','2026-01-01','2026-01-01'),"
         "  ('local-default','member-1','member','active','2026-01-01','2026-01-01');"
+        # #2270: the canonical listing (repos.workers.list) INNER JOINs
+        # skill_versions, so every worker row needs a real skill_versions row
+        # (the old list_for_agent LEFT JOIN tolerated dangling ids).
+        "INSERT INTO skill_versions (id, name, version, manifest_json, bundle_path, created_at) VALUES "
+        "  ('sv-a','sv-a','1.0','{}','/x','2026-01-01'),"
+        "  ('sv-m','sv-m','1.0','{}','/x','2026-01-01'),"
+        "  ('sv-s','sv-s','1.0','{}','/x','2026-01-01'),"
+        "  ('sv-sh','sv-sh','1.0','{}','/x','2026-01-01');"
         "INSERT INTO workers (id, name, owner_id, visibility, workspace_id, skill_version_id, created_at) VALUES "
         "  ('w-admin','A','admin-1','private','local-default','sv-a','2026-01-01'),"
         "  ('w-member','M','member-1','private','local-default','sv-m','2026-01-01'),"
@@ -164,22 +172,39 @@ def _seed_visibility_db(path: Path) -> None:
     c.commit(); c.close()
 
 
-def test_emily_list_admin_defaults_to_own_and_shared_only(tmp_path, monkeypatch):
-    db = tmp_path / "vis1.db"
-    _seed_visibility_db(db)
+def _isolate_emily_env(monkeypatch, tmp_path, db) -> None:
+    """#2270: Emily lists via list_operator_workers (the grid's source of
+    truth), which also enumerates on-disk workers — point WORKERS_DIR at an
+    empty dir and reload the modules that captured the old env."""
     monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
+    workers_dir = tmp_path / "workers-empty"
+    workers_dir.mkdir(exist_ok=True)
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    for name in list(sys.modules):
+        if name in ("chat_service", "worker_registry", "runner_utils"):
+            sys.modules.pop(name, None)
+
+
+def test_emily_list_admin_matches_grid_scope(tmp_path, monkeypatch):
+    # #2270: Emily's default view now mirrors the caller's dashboard grid
+    # exactly (single source of truth). The grid gives an admin the full
+    # workspace view (repos.workers.list role="admin"), so Emily reports the
+    # same set — anything else re-creates the count split-brain the grid
+    # header vs Emily answer had.
+    db = tmp_path / "vis1.db"
+    _seed_visibility_db(db)
+    _isolate_emily_env(monkeypatch, tmp_path, db)
     import chat_service
     res = chat_service._tool_workers_list_all({}, "admin-1")
     ids = {w["id"] for w in res["workers"]}
-    assert ids == {"w-admin", "w-shared"}, ids
+    assert ids == {"w-admin", "w-member", "w-seed", "w-shared"}, ids
 
 
 def test_emily_list_admin_can_explicitly_include_all_users(tmp_path, monkeypatch):
     db = tmp_path / "vis1-all.db"
     _seed_visibility_db(db)
-    monkeypatch.setenv("WORKEROS_DB", str(db))
-    monkeypatch.setenv("FLOOM_DB", str(db))
+    _isolate_emily_env(monkeypatch, tmp_path, db)
     import chat_service
     res = chat_service._tool_workers_list_all({"include_all_users": True}, "admin-1")
     ids = {w["id"] for w in res["workers"]}
@@ -189,8 +214,7 @@ def test_emily_list_admin_can_explicitly_include_all_users(tmp_path, monkeypatch
 def test_emily_list_member_sees_own_and_shared_only(tmp_path, monkeypatch):
     db = tmp_path / "vis2.db"
     _seed_visibility_db(db)
-    monkeypatch.setenv("WORKEROS_DB", str(db))
-    monkeypatch.setenv("FLOOM_DB", str(db))
+    _isolate_emily_env(monkeypatch, tmp_path, db)
     import chat_service
     res = chat_service._tool_workers_list_all({}, "member-1")
     ids = {w["id"] for w in res["workers"]}

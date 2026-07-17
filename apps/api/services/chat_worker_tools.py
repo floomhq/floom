@@ -14,81 +14,83 @@ import re
 from typing import Any, Dict, List, Optional
 
 
+def _agent_worker_visibility_role(visibility_user_id: str) -> Optional[str]:
+    """Worker-visibility role for Emily's listing tool, mirroring the grid.
+
+    Inside an HTTP chat request the auth context carries the caller's role and
+    auth method — resolve it exactly like the grid does (_worker_repo_role), so
+    Emily and GET /workers scope identically for the same request. For direct
+    in-process calls (tests, background listeners) there is no auth context;
+    fall back to the users-table role, which is what the same operator's grid
+    request would carry. A missing/unreadable users row degrades to "member"
+    (owner + workspace-shared with active membership) — the same default the
+    old list_for_agent applied to non-admin callers — never to an admin view.
+    """
+    from auth.context import current_auth_context
+    from services.worker_access import _worker_repo_role
+
+    ctx = current_auth_context()
+    if ctx is not None:
+        return _worker_repo_role(ctx)
+    from db import get_db
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT role FROM users WHERE id = ?", (visibility_user_id,)
+            ).fetchone()
+        role = str(row["role"] or "").strip().lower() if row else ""
+    except Exception:
+        role = ""
+    return "admin" if role == "admin" else "member"
+
+
 def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    """List the operator's workers for Emily.
+
+    #2270: routes through ``services.worker_access.list_operator_workers`` —
+    the SAME single source of truth as GET /workers (dashboard grid + MCP
+    ``workers_list``) and GET /stats ``total_workers`` (MCP ``system_stats``) —
+    so Emily's answer can never disagree with the grid again. The previous
+    implementation read ``repos.workers.list_for_agent`` (DB rows only, broader
+    visibility tiers, its own stock/system hiding), which MISSED on-disk stock
+    workers the grid shows (csv_enricher, github-digest,
+    outbound-approval-demo, research_brief) while SURFACING public/shared rows
+    the grid hides — the 13-vs-8 split brain.
+
+    ``include_system: true`` opts the footnoted hidden set (manifest
+    ``system_worker`` + archived) back in, mirroring the grid's
+    include_system/include_archived toggles. ``include_all_users`` is retained
+    for tool-schema compatibility but is a no-op now: visibility always mirrors
+    the caller's grid role (admins already see the whole workspace there).
+    """
     from chat_service import _effective_worker_visibility_user_id
-    # #1027: route through the repository Protocol (was a direct get_db() read)
-    # so non-SQLite backends (hosted Supabase) supply their own implementation.
-    # The visibility logic now lives in WorkerRepository.list_for_agent; stock
-    # ids are passed in (caller owns the PUBLIC/PROTECTED sets) to keep the repo
-    # free of a db<-main import cycle.
     from db import get_repositories
-    from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
+    from services.worker_access import list_operator_workers
 
     visibility_user_id = _effective_worker_visibility_user_id(user_id)
-    include_all_users = bool(args.get("include_all_users"))
-    stock_id_set = PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS
-    all_stock_ids = list(stock_id_set)
-    rows = get_repositories().workers.list_for_agent(
-        user_id=visibility_user_id,
-        include_all_users=include_all_users,
-        stock_worker_ids=all_stock_ids,
-    )
-    # Emily must report the SAME worker set the operator sees in the dashboard
-    # worker grid (round-09 #1 split-brain: grid showed 1, Emily showed 9). The
-    # grid reads repos.workers.list (owner + workspace-member scoped) and never
-    # surfaces seeded stock workers on cloud. Emily's list_for_agent, however,
-    # pads in the PUBLIC/PROTECTED stock ids and pulls public-visibility seeds,
-    # so it over-counted by the seeded stock/example/test set the operator does
-    # NOT own. Hide EXACTLY what the grid hides:
-    #   (a) canonical system/internal workers (_worker_hidden_from_api —
-    #       workspace-agent, worker-author, slack/whatsapp listeners, ".",
-    #       _mcp_/smoke- prefixes) + manifest system_worker:true; PLUS
-    #   (b) any worker whose id is in the seeded stock/example/test set
-    #       (PUBLIC ∪ PROTECTED) that the operator does NOT own — these are the
-    #       cross-tenant seeds the owner-scoped grid never shows.
-    # A stock/example worker the operator GENUINELY owns (OSS seed-all, owner_id
-    # == visibility user) is still shown — the discriminator is ownership, not
-    # the cosmetic is_example label. The hidden set is footnoted in
-    # hidden_system_count and include_system opts it all back in.
-    from services.worker_access import _worker_hidden_from_api, _build_owned_tracked_ids
-    _owned_tracked = _build_owned_tracked_ids()
     include_system = bool(args.get("include_system"))
-    hidden_system = 0
+    workers, hidden_system = list_operator_workers(
+        user_id=visibility_user_id,
+        repos=get_repositories(),
+        role=_agent_worker_visibility_role(visibility_user_id),
+        include_system=include_system,
+        include_archived=include_system,
+    )
     result = []
-    for row in rows:
-        try:
-            manifest = json.loads(row.get("manifest_json") or "{}") if row.get("manifest_json") else {}
-        except Exception:
-            manifest = {}
-        entry = {
-            "id": row["id"],
-            "name": row["name"],
-            "title": manifest.get("title") or row["name"],
-            "trigger": row.get("trigger_type") or "manual",
-            "enabled": bool(row.get("enabled")),
-            "system_worker": manifest.get("system_worker", False),
-            "is_example": manifest.get("is_example", False),
-        }
-        wid = str(row["id"])
-        # owner_id may be absent if a backend doesn't supply it; in that case we
-        # cannot tell an owned seed from a cross-tenant one, so fall back to the
-        # prior behaviour (do not apply the stock-not-owned filter).
-        owner_id = row.get("owner_id")
-        unowned_stock = (
-            wid in stock_id_set
-            and owner_id is not None
-            and str(owner_id) != str(visibility_user_id)
+    for w in workers:
+        manifest = w.get("manifest") or {}
+        result.append(
+            {
+                "id": w["id"],
+                "name": w.get("name") or w["id"],
+                "title": manifest.get("title") or w.get("name") or w["id"],
+                "trigger": w.get("trigger_type") or "manual",
+                "enabled": bool(w.get("enabled", True)),
+                "system_worker": bool(manifest.get("system_worker", False)),
+                "is_example": bool(manifest.get("is_example", False)),
+            }
         )
-        is_hidden = (
-            _worker_hidden_from_api(wid, _owned_tracked)
-            or entry["system_worker"]
-            or unowned_stock
-        )
-        if is_hidden and not include_system:
-            hidden_system += 1
-            continue
-        result.append(entry)
-    out = {"ok": True, "workers": result, "count": len(result)}
+    out: Dict[str, Any] = {"ok": True, "workers": result, "count": len(result)}
     if hidden_system:
         out["hidden_system_count"] = hidden_system
     return out
