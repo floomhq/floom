@@ -157,6 +157,8 @@ class WorkerRepository(Protocol):
         user_id: str,
         worker_ids: list[str],
         days: int = 7,
+        # False is for an explicit worker_ids set authorized by the caller.
+        scope_to_owner: bool = True,
     ) -> dict[str, RecentStats]: ...
 
     def timeseries_batch(
@@ -288,6 +290,8 @@ class RunRepository(Protocol):
         *,
         user_id: str,
         worker_id: str | None = None,
+        # An explicit set is authoritative and must be authorized by the caller.
+        worker_ids: list[str] | None = None,
         statuses: list[str] | None = None,
         since: str | None = None,
         until: str | None = None,

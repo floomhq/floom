@@ -420,12 +420,15 @@ def test_stock_worker_not_owned_excluded_from_list_but_runnable(env, monkeypatch
         f"Stock worker {stock_id} the caller does not own must be EXCLUDED from "
         "the user-facing list so Emily matches the owner-scoped grid (#1)"
     )
-    # It is footnoted, not silently dropped.
-    assert listed.get("hidden_system_count", 0) >= 1
+    # #2270: Emily now shares the grid's source of truth
+    # (list_operator_workers). The cross-tenant seed is OUTSIDE the caller's
+    # visibility scope entirely — nothing is over-fetched, so nothing is
+    # footnoted, and include_system (which reveals in-scope system/archived
+    # workers) does not cross workspace visibility boundaries either.
+    assert listed.get("hidden_system_count", 0) == 0
 
-    # include_system opts the hidden stock set back in.
     listed_all = cs._tool_workers_list_all({"include_system": True}, user_id="emily-test")
-    assert stock_id in {w["id"] for w in listed_all["workers"]}
+    assert stock_id not in {w["id"] for w in listed_all["workers"]}
 
     # Runnability is unchanged: _worker_can_view still returns True for it.
     from db import get_db as _get_db

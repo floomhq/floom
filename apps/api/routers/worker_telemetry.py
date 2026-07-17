@@ -33,7 +33,13 @@ from models import (
 )
 from services.public_view import _redact_public_log_message
 from services.run_metrics import duration_summary, failures_by_category
-from services.worker_access import _active_local_workspace_id, _get_visible_worker
+from services.worker_access import (
+    _active_local_workspace_id,
+    _get_visible_worker,
+    _worker_access_user_id,
+    _worker_repo_role,
+    list_operator_workers,
+)
 from services.worker_serialize import _get_stats_batch, _get_timeseries_batch
 
 worker_telemetry_router = APIRouter()
@@ -128,15 +134,34 @@ def get_workspace_stats(
     repos: Repositories = Depends(get_repos),
 ) -> WorkspaceStats:
     """Aggregate health and run statistics across the entire workspace."""
-    workers = repos.workers.list(user_id=auth.user_id)
-    worker_ids = [w["id"] for w in workers if not w.get("archived")]
+    worker_user_id = _worker_access_user_id(auth)
+    # #2270: count the SAME worker set the dashboard grid / MCP workers_list
+    # returns (list_operator_workers = single source of truth), not a bare
+    # owner-scoped repo read. The old repos.workers.list(user_id) read counted
+    # hidden internal/system workers while missing stock, workspace-shared and
+    # granted workers, so system_stats.total_workers disagreed with
+    # workers_list (13 vs 8).
+    workers, hidden_workers = list_operator_workers(
+        user_id=worker_user_id,
+        repos=repos,
+        role=_worker_repo_role(auth),
+    )
+    worker_ids = [w["id"] for w in workers]
     total_workers = len(worker_ids)
 
     if not worker_ids:
-        return WorkspaceStats(total_workers=total_workers)
+        return WorkspaceStats(
+            total_workers=total_workers,
+            hidden_system_workers=hidden_workers,
+        )
 
+    # worker_ids is already the role-scoped, authorized population. Trust that
+    # explicit set so admin telemetry includes other owners' visible workers.
     stats_map = repos.workers.stats_batch(
-        user_id=auth.user_id, worker_ids=worker_ids, days=7
+        user_id=worker_user_id,
+        worker_ids=worker_ids,
+        days=7,
+        scope_to_owner=False,
     )
 
     total_runs_7d = sum(s.runs_7d for s in stats_map.values())
@@ -161,7 +186,7 @@ def get_workspace_stats(
     # Duration + failure taxonomy across recent runs. duration_summary excludes
     # orphaned/never-closed runs so a single stuck run can't poison the headline.
     runs_rows, _ = repos.runs.list(
-        user_id=auth.user_id, limit=200
+        user_id=worker_user_id, worker_ids=worker_ids, limit=200
     )
     dur = duration_summary(runs_rows)
     failed_rows = [
@@ -170,6 +195,7 @@ def get_workspace_stats(
 
     return WorkspaceStats(
         total_workers=total_workers,
+        hidden_system_workers=hidden_workers,
         active_workers=active_workers,
         total_runs_7d=total_runs_7d,
         success_rate_7d=success_rate_7d,

@@ -2834,6 +2834,11 @@ class WorkspaceStats(BaseModel):
     """Aggregate stats across the entire workspace."""
 
     total_workers: int = 0
+    # #2270: workers excluded from total_workers by the shared filter
+    # (manifest system_worker / archived), same accounting as Emily's
+    # hidden_system_count. Exposed so "total" vs "user-visible" is an explicit
+    # distinction, not three silently different numbers.
+    hidden_system_workers: int = 0
     active_workers: int = 0  # ran at least once in the last 7 days
     total_runs_7d: int = 0
     success_rate_7d: Optional[float] = None

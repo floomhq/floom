@@ -1404,13 +1404,25 @@ class SqliteWorkerRepository:
         runs = self.list_recent_runs(user_id=user_id, worker_id=worker_id, limit=1)
         return runs[0] if runs else None
 
-    def stats_batch(self, *, user_id: str, worker_ids: list[str], days: int = 7) -> dict[str, RecentStats]:
+    def stats_batch(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        days: int = 7,
+        scope_to_owner: bool = True,
+    ) -> dict[str, RecentStats]:
         if not worker_ids:
             # Do NOT set _last_run_batch — {} is not None so any later
             # get_last_run() would see a "populated" cache and return None
             # for every worker instead of falling back to the DB.
             return {}
+        # The unscoped mode trusts worker_ids as an upstream-authorized set. It
+        # is used by workspace telemetry after role-aware worker visibility has
+        # been resolved; owner scoping remains the default for every other call.
         placeholders = ",".join("?" for _ in worker_ids)
+        owner_sql = "w.owner_id = ? AND" if scope_to_owner else ""
+        query_params = [user_id, *worker_ids] if scope_to_owner else list(worker_ids)
         with get_db() as conn:
             rows = conn.execute(
                 f"""
@@ -1423,12 +1435,12 @@ class SqliteWorkerRepository:
                     SUM(CASE WHEN r.created_at <= datetime('now', '-{days} days') AND r.status = 'completed' THEN 1 ELSE 0 END) AS previous_completed_{days}d
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ?
-                  AND r.created_at > datetime('now', '-{days * 2} days')
+                WHERE {owner_sql}
+                  r.created_at > datetime('now', '-{days * 2} days')
                   AND r.worker_id IN ({placeholders})
                 GROUP BY r.worker_id
                 """,
-                [user_id, *worker_ids],
+                query_params,
             ).fetchall()
         result: dict[str, RecentStats] = {}
         for row in rows:
@@ -1462,9 +1474,9 @@ class SqliteWorkerRepository:
                         GROUP BY worker_id
                     ) latest ON r.worker_id = latest.worker_id AND r.created_at = latest.max_at
                     JOIN workers w ON w.id = r.worker_id
-                    WHERE w.owner_id = ?
+                    WHERE {"w.owner_id = ?" if scope_to_owner else "1 = 1"}
                     """,
-                    [*worker_ids, user_id],
+                    [*worker_ids, user_id] if scope_to_owner else list(worker_ids),
                 ).fetchall()
             batch: dict[str, Any] = {wid: None for wid in worker_ids}
             seen: set[str] = set()
@@ -2052,6 +2064,7 @@ class SqliteRunRepository:
         *,
         user_id: str,
         worker_id: str | None = None,
+        worker_ids: list[str] | None = None,
         statuses: list[str] | None = None,
         since: str | None = None,
         until: str | None = None,
@@ -2060,9 +2073,17 @@ class SqliteRunRepository:
         include_total: bool = True,
         workspace_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
+        if worker_ids == []:
+            return [], 0
         with get_db() as conn:
             has_actor_user_id = self._has_actor_user_id_column(conn)
-        if has_actor_user_id:
+        if worker_ids is not None:
+            # As with stats_batch(scope_to_owner=False), this is an explicit,
+            # upstream-authorized population rather than a caller-owner query.
+            where = [f"r.worker_id IN ({', '.join('?' for _ in worker_ids)})"]
+            params = list(worker_ids)
+            actor_select = "r.actor_user_id," if has_actor_user_id else "NULL AS actor_user_id,"
+        elif has_actor_user_id:
             where = ["(COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"]
             params: list[Any] = [user_id, user_id]
             actor_select = "r.actor_user_id,"

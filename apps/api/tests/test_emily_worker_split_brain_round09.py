@@ -36,8 +36,18 @@ _NOW = "2026-01-01T00:00:00Z"
 def _load_modules(monkeypatch, db_path: Path):
     monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
+    # #2270: Emily now routes through list_operator_workers (the grid's source
+    # of truth), which also enumerates on-disk workers. Point WORKERS_DIR at an
+    # empty dir so this unit fixture only exercises the DB rows it seeds.
+    workers_dir = db_path.parent / "workers-empty"
+    workers_dir.mkdir(exist_ok=True)
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     for name in list(sys.modules):
-        if name in ("chat_service",) or name == "db" or name.startswith("db."):
+        if (
+            name in ("chat_service", "worker_registry", "runner_utils")
+            or name == "db"
+            or name.startswith("db.")
+        ):
             sys.modules.pop(name, None)
     import db
     db.init_db()
@@ -117,9 +127,11 @@ def test_emily_count_matches_grid_seeded_stock_excluded(tmp_path, monkeypatch):
         f"split-brain: Emily {sorted(emily_ids)} != grid {sorted(grid_ids)}"
     )
     assert res["count"] == len(grid_ids) == 1
-    # The seeded stock/example/test workers the operator does not own are
-    # footnoted, never counted as the operator's workers.
-    assert res.get("hidden_system_count", 0) >= 3
+    # #2270: the seeded stock/example/test workers the operator does not own
+    # are OUTSIDE the operator's visibility scope entirely (same as the grid) —
+    # they are no longer over-fetched and footnoted. hidden_system_count only
+    # counts in-scope system/archived workers.
+    assert res.get("hidden_system_count", 0) == 0
 
 
 def test_owned_example_still_shown(tmp_path, monkeypatch):
