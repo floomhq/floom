@@ -35,7 +35,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from auth import AuthContext, get_auth_context
 from core.config import _is_cloud_deploy, _user_scoped_local_mode
@@ -657,6 +657,7 @@ def rename_context(
 def get_context_file(
     name: str,
     file_path: str,
+    format: Optional[str] = Query(default=None),
     auth: AuthContext = Depends(get_auth_context),
 ):
     from contexts import guess_mime_type, is_active_markup, is_binary_file
@@ -669,6 +670,36 @@ def get_context_file(
         raise HTTPException(status_code=404, detail="Context file not found")
     mime_type = guess_mime_type(rel)
     headers = {"Cache-Control": "no-store"}
+    if (format or "").strip().lower() == "json":
+        # #2268: machine-readable envelope for the MCP proxy (contexts.read).
+        # The raw-body response below is non-JSON for text hits; a generic
+        # JSON-first proxy parser cannot round-trip it faithfully (empty file
+        # -> {}, content that is itself valid JSON -> parsed instead of
+        # returned as text). Shape mirrors _mcp_call_contexts_read.
+        stat_size = target.stat().st_size
+        if is_binary_file(rel, mime_type):
+            return JSONResponse(
+                {
+                    "name": safe_name,
+                    "path": rel,
+                    "size": stat_size,
+                    "mime_type": mime_type,
+                    "is_binary": True,
+                    "note": "Binary brain-pack file. Use the Floom HTTP API to download bytes.",
+                },
+                headers=headers,
+            )
+        return JSONResponse(
+            {
+                "name": safe_name,
+                "path": rel,
+                "size": stat_size,
+                "mime_type": mime_type,
+                "is_binary": False,
+                "content": target.read_bytes().decode("utf-8", errors="replace"),
+            },
+            headers=headers,
+        )
     if is_binary_file(rel, mime_type):
         headers["Content-Disposition"] = f'attachment; filename="{Path(rel).name}"'
         return FileResponse(target, media_type=mime_type, headers=headers)

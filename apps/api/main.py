@@ -7928,7 +7928,18 @@ async def _mcp_dispatch(
         return _mcp_api_result(data, s)
     if name == "contexts.read":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
-        data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        # #2268: request the JSON envelope. The default (raw-body) response is
+        # non-JSON for text hits, and generic proxy parsing cannot round-trip
+        # it faithfully: naive parsers masked every successful read as
+        # {"detail": "Internal server error"}, empty files collapsed to {},
+        # and file content that itself is valid JSON was returned parsed
+        # instead of as text.
+        data, s = await _api_call(
+            "GET",
+            f"/contexts/{_enc(a['name'])}/files/{encoded_path}",
+            request,
+            params={"format": "json"},
+        )
         return _mcp_api_result(data, s)
     if name == "contexts.write":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
