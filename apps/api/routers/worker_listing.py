@@ -30,12 +30,12 @@ from services.run_serialize import _make_run_summary
 from services.secrets_env import _available_secret_names_for_user
 from services.worker_access import (
     _available_connection_slugs_for_user,
-    _list_visible_workers,
     _worker_access_user_id,
     _worker_connection_slugs,
     _worker_permissions,
     _worker_repo_role,
     _worker_required_secret_names,
+    list_operator_workers,
 )
 from services.worker_serialize import (
     _build_triggers_list,
@@ -204,23 +204,17 @@ def list_workers(
             )
             return fast_result
 
-    workers = _list_visible_workers(
+    # #2270: THE canonical user-visible worker set (single source of truth).
+    # GET /stats total_workers and Emily's workers__list_all route through the
+    # same function, so every user-facing count agrees with this list.
+    workers, _hidden_count = list_operator_workers(
         user_id=worker_user_id,
         repos=repos,
         use_cache=True,
         role=_worker_repo_role(auth),
+        include_system=include_system,
+        include_archived=include_archived,
     )
-    # Filter out system_worker: true workers unless explicitly requested.
-    if not include_system:
-        workers = [
-            w for w in workers
-            if not (w.get("manifest") or {}).get("system_worker", False)
-        ]
-    # Filter out archived workers unless explicitly requested.
-    # NOTE: when include_system and include_archived are both False this matches
-    # _list_operator_workers exactly (shared filter, see 1.5.4).
-    if not include_archived:
-        workers = [w for w in workers if not w.get("archived", False)]
     # #771: optional visibility-tier filter. Does NOT change access control —
     # only shapes the already-authorized list. "all" is the default no-op.
     if visibility and visibility != "all":

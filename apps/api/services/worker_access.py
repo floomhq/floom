@@ -706,6 +706,59 @@ def _list_visible_workers(
     return list(visible.values())
 
 
+def list_operator_workers(
+    *,
+    user_id: str,
+    repos: "Repositories",
+    role: Optional[str] = None,
+    include_system: bool = False,
+    include_archived: bool = False,
+    use_cache: bool = True,
+) -> tuple[List[Dict[str, Any]], int]:
+    """SINGLE SOURCE OF TRUTH for "which workers does this operator have" (#2270).
+
+    Every user-facing worker list/count — GET /workers (dashboard grid + MCP
+    ``workers_list``), GET /stats ``total_workers`` (MCP ``system_stats``), and
+    Emily's ``workers__list_all`` chat tool — MUST route through this function
+    so the numbers agree. Do NOT hand-roll ``repos.workers.list`` /
+    ``list_for_agent`` reads for a user-facing list or count; that is exactly
+    how the three surfaces diverged (13 vs 8 vs 8, issue #2270).
+
+    Inclusion rules (the documented, shared filter):
+      1. Base set = ``_list_visible_workers``: role-scoped DB workers
+         (owner + workspace-shared per role), curated on-disk stock workers
+         (OSS only, #264), the owner-scoped shared-filesystem fallback
+         (OSS only), and explicitly granted workers (#767/#768).
+         Internal/system ids (``_worker_hidden_from_api``: "." / ``_mcp_`` /
+         ``audit-local-`` / ``smoke-`` prefixes, ``_SYSTEM_WORKER_IDS``,
+         unowned git-tracked engine workers) are never in the base set and are
+         NOT footnoted — they are engine internals, not the operator's workers.
+      2. Workers whose manifest declares ``system_worker: true`` are excluded
+         unless ``include_system``.
+      3. Archived workers are excluded unless ``include_archived``.
+         Draft/stage labels are cosmetic — drafts count like any other worker.
+
+    Returns ``(visible_workers, hidden_count)`` where ``hidden_count`` is the
+    number of base-set workers excluded by rules 2-3. Surface it (Emily's
+    ``hidden_system_count``, /stats ``hidden_system_workers``) so "total" vs
+    "user-visible" is an explicit distinction, not three silently different
+    numbers.
+    """
+    workers = _list_visible_workers(
+        user_id=user_id, repos=repos, use_cache=use_cache, role=role
+    )
+    visible: List[Dict[str, Any]] = []
+    hidden = 0
+    for w in workers:
+        is_system = bool((w.get("manifest") or {}).get("system_worker", False))
+        is_archived = bool(w.get("archived", False))
+        if (is_system and not include_system) or (is_archived and not include_archived):
+            hidden += 1
+            continue
+        visible.append(w)
+    return visible, hidden
+
+
 def _mcp_input_schema_from_worker_record(worker: Dict[str, Any]) -> Dict[str, Any]:
     config = worker.get("config") or {}
     inputs = config.get("inputs") if isinstance(config, dict) else []
