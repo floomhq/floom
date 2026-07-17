@@ -60,6 +60,7 @@ def test_unknown_outer_exception_stays_crash_and_is_not_scheduled(monkeypatch):
         config=None,
         error_code=error_code,
         error="worker invariant violated",
+        execution_stage="driver_run",
         repos=_Repos(),
         log_fn=lambda *_args, **_kwargs: None,
     )
@@ -86,6 +87,7 @@ def test_transient_outer_exception_uses_bounded_retry_scheduler(monkeypatch):
         config=None,
         error_code="transient_network_error",
         error="Server disconnected",
+        execution_stage="driver_run",
         repos=_Repos(),
         log_fn=lambda *_args, **_kwargs: None,
     )
@@ -94,6 +96,31 @@ def test_transient_outer_exception_uses_bounded_retry_scheduler(monkeypatch):
     assert len(scheduled) == 1
     assert scheduled[0]["result_retryable"] is True
     assert scheduled[0]["result_error_code"] == "transient_network_error"
+
+
+def test_transport_disconnect_after_driver_return_is_not_retried(monkeypatch):
+    scheduled: list[dict] = []
+    monkeypatch.setattr(
+        run_service,
+        "_schedule_retry_for_failed_run",
+        lambda **kwargs: scheduled.append(kwargs) or True,
+    )
+
+    final_code = run_service._retry_run_exception(
+        run_id="run-post-driver",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        error_code="transient_network_error",
+        error="Server disconnected",
+        execution_stage="driver_returned",
+        repos=_Repos(),
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+
+    assert final_code == "transient_network_error"
+    assert scheduled == []
 
 
 def test_transport_retry_exhaustion_has_clear_terminal_code(monkeypatch):
@@ -109,6 +136,7 @@ def test_transport_retry_exhaustion_has_clear_terminal_code(monkeypatch):
         config=None,
         error_code="transient_network_error",
         error="Server disconnected",
+        execution_stage="driver_run",
         repos=_Repos(retry_attempt=2),
         log_fn=lambda *_args, **_kwargs: None,
     )

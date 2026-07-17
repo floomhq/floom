@@ -393,11 +393,12 @@ def _schedule_retry(
     repos: "Repositories",
     trigger_source: str = "retry",
 ) -> None:
-    """Enqueue a retry run after *delay_seconds* in a daemon thread.
+    """Persist a retry run that becomes drainable after *delay_seconds*.
 
     trigger_source distinguishes the retry kind: "retry" for the worker retry
     policy, "restart_retry" for #1434 restart recovery (used to bound recovery to
-    one attempt per lineage regardless of retry_attempt persistence).
+    one attempt per lineage regardless of retry_attempt persistence). Delayed
+    retries are stored before returning so a process restart cannot lose them.
     """
     retry_key = (original_run_id, int(attempt), trigger_source)
     with _scheduled_retry_lock:
@@ -411,36 +412,44 @@ def _schedule_retry(
             return
         _scheduled_retry_keys.add(retry_key)
 
-    def _do_retry() -> None:
-        if delay_seconds > 0:
-            time.sleep(delay_seconds)
-        try:
-            retry_run_id = f"run_{uuid.uuid4().hex[:12]}"
-            if user_id:
-                repos.runs.create(
-                    user_id=user_id,
-                    run_id=retry_run_id,
-                    worker_id=worker_id,
-                    trigger_source=trigger_source,
-                    retry_of_run_id=original_run_id,
-                    retry_attempt=attempt,
-                )
-                start_run(retry_run_id, worker_id, inputs, user_id=user_id, repos=repos)
-                logger.info(
-                    "Retry #%d enqueued as run %s for worker %s (original: %s)",
-                    attempt, retry_run_id, worker_id, original_run_id,
-                )
-        except Exception as exc:
-            logger.warning(
-                "Failed to schedule retry #%d for run %s: %s",
-                attempt, original_run_id, exc,
+    try:
+        retry_run_id = f"run_{uuid.uuid4().hex[:12]}"
+        if user_id:
+            not_before = None
+            if delay_seconds > 0:
+                not_before = (
+                    datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+                ).isoformat()
+            repos.runs.create(
+                user_id=user_id,
+                run_id=retry_run_id,
+                worker_id=worker_id,
+                status=RunStatus.QUEUED.value,
+                trigger_source=trigger_source,
+                trigger_ref=not_before,
+                input_json=inputs,
+                retry_of_run_id=original_run_id,
+                retry_attempt=attempt,
             )
-        finally:
-            with _scheduled_retry_lock:
-                _scheduled_retry_keys.discard(retry_key)
-
-    t = threading.Thread(target=_do_retry, daemon=True, name=f"retry-{original_run_id}")
-    t.start()
+            start_run(retry_run_id, worker_id, inputs, user_id=user_id, repos=repos)
+            logger.info(
+                "Retry #%d persisted as run %s for worker %s (original: %s, not_before: %s)",
+                attempt,
+                retry_run_id,
+                worker_id,
+                original_run_id,
+                not_before or "immediate",
+            )
+    except Exception as exc:
+        logger.warning(
+            "Failed to persist retry #%d for run %s: %s",
+            attempt,
+            original_run_id,
+            exc,
+        )
+    finally:
+        with _scheduled_retry_lock:
+            _scheduled_retry_keys.discard(retry_key)
 
 
 _PERMANENT_RETRY_ERROR_CODES = {
@@ -716,6 +725,7 @@ def _retry_run_exception(
     config: Any,
     error_code: str,
     error: str,
+    execution_stage: str,
     repos: "Repositories",
     log_fn,
 ) -> str:
@@ -725,7 +735,10 @@ def _retry_run_exception(
     worker manifest broadly opts into retries. This exception boundary is too
     broad to safely retry arbitrary application bugs.
     """
-    if error_code != _TRANSIENT_NETWORK_ERROR_CODE:
+    if (
+        error_code != _TRANSIENT_NETWORK_ERROR_CODE
+        or execution_stage != "driver_run"
+    ):
         return error_code
 
     scheduled = _schedule_retry_for_failed_run(
@@ -3411,6 +3424,7 @@ def execute_run(
     )
     perf.mark("approval_inputs")
     run_secrets: Dict[str, str] = {}
+    execution_stage = "pre_driver"
 
     def log_fn(msg: str, level: str = "info") -> None:
         safe_msg = scrub_secrets(msg, run_secrets)
@@ -3633,7 +3647,8 @@ def execute_run(
         driver = get_sandbox_driver(runner, config=config)
         perf.mark("driver_lookup")
         perf.log(log_fn, "run_service.pre_sandbox")
-        _mark_active_run_stage(run_id, "driver_run")
+        execution_stage = "driver_run"
+        _mark_active_run_stage(run_id, execution_stage)
         with use_context_scope(context_scope_for_user(owner_id)):
             result = driver.run(
                 worker_id=worker_id,
@@ -3647,6 +3662,8 @@ def execute_run(
                 connection_ids=connection_ids,
                 user_id=owner_id,
             )
+            execution_stage = "driver_returned"
+            _mark_active_run_stage(run_id, execution_stage)
 
         if was_shutdown_cancelled(run_id):
             update_run_status(
@@ -4186,6 +4203,7 @@ def execute_run(
                 config=config,
                 error_code=crash_error_code,
                 error=error_message,
+                execution_stage=execution_stage,
                 repos=repos_obj,
                 log_fn=log_fn,
             )

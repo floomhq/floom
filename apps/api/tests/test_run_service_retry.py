@@ -364,25 +364,16 @@ def test_llm_provider_capacity_exhaustion_has_honest_terminal_failure(monkeypatc
 
 
 def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
-    created: list[str] = []
+    created: list[dict] = []
     started: list[str] = []
 
     class Runs:
-        def create(self, *, run_id: str, **_kwargs):
-            created.append(run_id)
+        def create(self, **kwargs):
+            created.append(kwargs)
 
     class Repos:
         runs = Runs()
 
-    class ImmediateThread:
-        def __init__(self, *, target, **_kwargs):
-            self._target = target
-
-        def start(self):
-            self._target()
-
-    monkeypatch.setattr(run_service.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(run_service.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(run_service, "start_run", lambda run_id, *_args, **_kwargs: started.append(run_id))
 
     # Hold the key as if another scheduler thread already claimed it.
@@ -411,10 +402,15 @@ def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
         worker_id="worker-a",
         inputs={},
         attempt=1,
-        delay_seconds=0,
+        delay_seconds=1800,
         user_id="user-a",
         repos=Repos(),
     )
 
     assert len(created) == 1
-    assert started == created
+    assert started == [created[0]["run_id"]]
+    assert created[0]["status"] == "queued"
+    assert created[0]["trigger_source"] == "retry"
+    assert created[0]["retry_of_run_id"] == "run-original"
+    assert created[0]["retry_attempt"] == 1
+    assert created[0]["trigger_ref"]
