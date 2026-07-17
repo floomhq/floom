@@ -2489,6 +2489,16 @@ class SqliteRunRepository:
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def has_retry_child(self, *, parent_run_id: str) -> bool:
+        if not parent_run_id:
+            return False
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM runs WHERE retry_of_run_id = ? LIMIT 1",
+                (parent_run_id,),
+            ).fetchone()
+        return row is not None
+
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
         run_id = fields["run_id"]

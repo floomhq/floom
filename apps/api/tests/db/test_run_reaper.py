@@ -424,6 +424,37 @@ def test_recover_does_not_requeue_a_restart_retry(repo_bundle, monkeypatch):
     assert repos.runs.get(user_id="user-a", run_id="run-restart-retry")["status"] == RunStatus.FAILED.value
 
 
+def test_recover_does_not_duplicate_existing_retry_child(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    stale = (now - dt.timedelta(seconds=500)).isoformat()
+    _make_stale_running(repos, manifest, "run-parent", started=stale)
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-existing-retry",
+        worker_id="worker-a",
+        status=RunStatus.QUEUED.value,
+        trigger_source="retry",
+        input_json={"q": "hello"},
+        retry_of_run_id="run-parent",
+        retry_attempt=1,
+    )
+    scheduled: list[dict] = []
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+    monkeypatch.setenv("WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS", "1")
+
+    result = run_service.recover_abandoned_runs(
+        repos=repos, now=now, timeout_seconds=300, grace_seconds=60
+    )
+
+    assert result == {"failed": 1, "requeued": 0}
+    assert scheduled == []
+    assert repos.runs.has_retry_child(parent_run_id="run-parent") is True
+
+
 def test_recover_respects_disable_flag(repo_bundle, monkeypatch):
     import run_service
 

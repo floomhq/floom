@@ -392,7 +392,7 @@ def _schedule_retry(
     user_id: str | None,
     repos: "Repositories",
     trigger_source: str = "retry",
-) -> None:
+) -> bool:
     """Persist a retry run that becomes drainable after *delay_seconds*.
 
     trigger_source distinguishes the retry kind: "retry" for the worker retry
@@ -409,7 +409,7 @@ def _schedule_retry(
                 original_run_id,
                 trigger_source,
             )
-            return
+            return True
         _scheduled_retry_keys.add(retry_key)
 
     try:
@@ -440,6 +440,8 @@ def _schedule_retry(
                 original_run_id,
                 not_before or "immediate",
             )
+            return True
+        return False
     except Exception as exc:
         logger.warning(
             "Failed to persist retry #%d for run %s: %s",
@@ -447,6 +449,7 @@ def _schedule_retry(
             original_run_id,
             exc,
         )
+        return False
     finally:
         with _scheduled_retry_lock:
             _scheduled_retry_keys.discard(retry_key)
@@ -700,7 +703,7 @@ def _schedule_retry_for_failed_run(
         f"Scheduling {label} {current_attempt + 1}/{max_attempts - 1} in {delay_seconds}s",
         level="info",
     )
-    _schedule_retry(
+    persisted = _schedule_retry(
         original_run_id=run_id,
         worker_id=worker_id,
         inputs=inputs,
@@ -709,7 +712,7 @@ def _schedule_retry_for_failed_run(
         user_id=owner_id,
         repos=repos,
     )
-    return True
+    return persisted is not False
 
 
 _TRANSIENT_NETWORK_ERROR_CODE = "transient_network_error"
@@ -2481,6 +2484,9 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
     trigger_source = str(run.get("trigger_source") or "")
     if trigger_source.startswith("restart_retry"):
         return False
+    if repos_obj.runs.has_retry_child(parent_run_id=run_id):
+        logger.info("Run %s already has a persisted retry child; skipping restart retry", run_id)
+        return False
     attempt = int(run.get("retry_attempt") or 0)
     inputs = run.get("input_json")
     if isinstance(inputs, str):
@@ -2491,7 +2497,7 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
     if not isinstance(inputs, dict):
         inputs = {}
     try:
-        _schedule_retry(
+        persisted = _schedule_retry(
             original_run_id=run_id,
             worker_id=worker_id,
             inputs=inputs,
@@ -2501,6 +2507,8 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
             repos=repos_obj,
             trigger_source="restart_retry",
         )
+        if persisted is False:
+            return False
         repos_obj.runs.add_log(
             user_id=str(user_id),
             run_id=run_id,
