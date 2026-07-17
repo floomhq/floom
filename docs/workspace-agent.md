@@ -90,5 +90,12 @@ MCP tools still use the stable `contexts.*` names:
 - `contexts.write` writes text into a brain pack file.
 - `contexts.upload` uploads binary bytes into a brain pack file.
 
+For worker file inputs (as opposed to brain packs), use the `files.upload` MCP
+tool: it stores content through the same pipeline as `POST /uploads` and
+returns the SHA-256 reference that `workers.run` accepts for `type: file`
+inputs. `workers.run` also accepts inline text content (or
+`{content|content_base64, filename}`) for file inputs and uploads it
+transparently, so `workers.sample_input` examples are directly runnable.
+
 For operator-facing docs and UI copy, use "Brain" or "brain pack". For API and
 MCP references, keep the literal `contexts` tool and route names.
