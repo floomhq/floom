@@ -256,8 +256,6 @@ WORKER_ERROR_CODE = "worker_error"
 # scope for the duration of execution — reconstructed from the persisted run
 # row, since there is no live context to copy. Default: no-op.
 _run_execution_context_provider: Optional[Callable[[str], "contextlib.AbstractContextManager[Any]"]] = None
-_scheduled_retry_keys: set[tuple[str, int, str]] = set()
-_scheduled_retry_lock = threading.Lock()
 
 
 def _cache_ttl_seconds(env_name: str, default: float) -> float:
@@ -382,6 +380,27 @@ def _run_execution_context(run_id: str) -> "contextlib.AbstractContextManager[An
 
 
 
+def _retry_run_id(original_run_id: str, attempt: int, trigger_source: str) -> str:
+    lineage = f"{original_run_id}\0{int(attempt)}\0{trigger_source}".encode("utf-8")
+    return f"run_{hashlib.sha256(lineage).hexdigest()[:12]}"
+
+
+def _matching_retry_row(
+    row: dict[str, Any] | None,
+    *,
+    original_run_id: str,
+    attempt: int,
+    trigger_source: str,
+) -> bool:
+    if not row:
+        return False
+    return (
+        str(row.get("retry_of_run_id") or "") == original_run_id
+        and int(row.get("retry_attempt") or 0) == int(attempt)
+        and str(row.get("trigger_source") or "") == trigger_source
+    )
+
+
 def _schedule_retry(
     *,
     original_run_id: str,
@@ -400,20 +419,17 @@ def _schedule_retry(
     one attempt per lineage regardless of retry_attempt persistence). Delayed
     retries are stored before returning so a process restart cannot lose them.
     """
-    retry_key = (original_run_id, int(attempt), trigger_source)
-    with _scheduled_retry_lock:
-        if retry_key in _scheduled_retry_keys:
-            logger.info(
-                "Retry #%d for run %s (%s) is already scheduled; skipping duplicate",
-                attempt,
-                original_run_id,
-                trigger_source,
-            )
-            return True
-        _scheduled_retry_keys.add(retry_key)
-
+    retry_run_id = _retry_run_id(original_run_id, attempt, trigger_source)
     try:
-        retry_run_id = f"run_{uuid.uuid4().hex[:12]}"
+        existing = repos.runs.get_any(run_id=retry_run_id)
+        if _matching_retry_row(
+            existing,
+            original_run_id=original_run_id,
+            attempt=attempt,
+            trigger_source=trigger_source,
+        ):
+            logger.info("Retry #%d for run %s is already persisted as %s", attempt, original_run_id, retry_run_id)
+            return True
         if user_id:
             not_before = None
             if delay_seconds > 0:
@@ -443,6 +459,18 @@ def _schedule_retry(
             return True
         return False
     except Exception as exc:
+        try:
+            existing = repos.runs.get_any(run_id=retry_run_id)
+        except Exception:
+            existing = None
+        if _matching_retry_row(
+            existing,
+            original_run_id=original_run_id,
+            attempt=attempt,
+            trigger_source=trigger_source,
+        ):
+            logger.info("Concurrent retry insert already persisted run %s", retry_run_id)
+            return True
         logger.warning(
             "Failed to persist retry #%d for run %s: %s",
             attempt,
@@ -450,9 +478,6 @@ def _schedule_retry(
             exc,
         )
         return False
-    finally:
-        with _scheduled_retry_lock:
-            _scheduled_retry_keys.discard(retry_key)
 
 
 _PERMANENT_RETRY_ERROR_CODES = {
@@ -2484,10 +2509,22 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
     trigger_source = str(run.get("trigger_source") or "")
     if trigger_source.startswith("restart_retry"):
         return False
-    if repos_obj.runs.has_retry_child(parent_run_id=run_id):
-        logger.info("Run %s already has a persisted retry child; skipping restart retry", run_id)
-        return False
     attempt = int(run.get("retry_attempt") or 0)
+    next_attempt = attempt + 1
+    for retry_source in ("retry", "restart_retry"):
+        retry_id = _retry_run_id(run_id, next_attempt, retry_source)
+        try:
+            existing_retry = repos_obj.runs.get_any(run_id=retry_id)
+        except Exception:
+            existing_retry = None
+        if _matching_retry_row(
+            existing_retry,
+            original_run_id=run_id,
+            attempt=next_attempt,
+            trigger_source=retry_source,
+        ):
+            logger.info("Run %s already has persisted retry %s; skipping restart retry", run_id, retry_id)
+            return False
     inputs = run.get("input_json")
     if isinstance(inputs, str):
         try:
@@ -2501,7 +2538,7 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
             original_run_id=run_id,
             worker_id=worker_id,
             inputs=inputs,
-            attempt=attempt + 1,
+            attempt=next_attempt,
             delay_seconds=0,
             user_id=str(user_id),
             repos=repos_obj,

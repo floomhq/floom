@@ -369,34 +369,30 @@ def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
     started: list[str] = []
 
     class Runs:
+        row: dict | None = None
+
+        def get_any(self, *, run_id):
+            return self.row if self.row and self.row["run_id"] == run_id else None
+
         def create(self, **kwargs):
             created.append(kwargs)
+            self.row = kwargs
 
     class Repos:
         runs = Runs()
 
     monkeypatch.setattr(run_service, "start_run", lambda run_id, *_args, **_kwargs: started.append(run_id))
 
-    # Hold the key as if another scheduler thread already claimed it.
-    retry_key = ("run-original", 1, "retry")
-    with run_service._scheduled_retry_lock:
-        run_service._scheduled_retry_keys.add(retry_key)
-    try:
-        assert run_service._schedule_retry(
-            original_run_id="run-original",
-            worker_id="worker-a",
-            inputs={},
-            attempt=1,
-            delay_seconds=0,
-            user_id="user-a",
-            repos=Repos(),
-        ) is True
-    finally:
-        with run_service._scheduled_retry_lock:
-            run_service._scheduled_retry_keys.discard(retry_key)
-
-    assert created == []
-    assert started == []
+    repos = Repos()
+    assert run_service._schedule_retry(
+        original_run_id="run-original",
+        worker_id="worker-a",
+        inputs={},
+        attempt=1,
+        delay_seconds=1800,
+        user_id="user-a",
+        repos=repos,
+    ) is True
 
     assert run_service._schedule_retry(
         original_run_id="run-original",
@@ -405,7 +401,7 @@ def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
         attempt=1,
         delay_seconds=1800,
         user_id="user-a",
-        repos=Repos(),
+        repos=repos,
     ) is True
 
     assert len(created) == 1
@@ -419,6 +415,9 @@ def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
 
 def test_schedule_retry_reports_repository_insert_failure():
     class Runs:
+        def get_any(self, *, run_id):
+            return None
+
         def create(self, **_kwargs):
             raise RuntimeError("repository unavailable")
 
@@ -452,3 +451,40 @@ def test_failed_retry_persistence_is_not_reported_as_scheduled(monkeypatch):
     )
 
     assert did_schedule is False
+
+
+def test_concurrent_duplicate_insert_is_reported_only_when_matching_row_exists():
+    original_run_id = "run-original"
+    attempt = 1
+    retry_run_id = run_service._retry_run_id(original_run_id, attempt, "retry")
+
+    class Runs:
+        reads = 0
+
+        def get_any(self, *, run_id):
+            self.reads += 1
+            if self.reads == 1:
+                return None
+            return {
+                "run_id": run_id,
+                "retry_of_run_id": original_run_id,
+                "retry_attempt": attempt,
+                "trigger_source": "retry",
+            }
+
+        def create(self, **_kwargs):
+            raise RuntimeError("duplicate primary key")
+
+    class Repos:
+        runs = Runs()
+
+    assert run_service._schedule_retry(
+        original_run_id=original_run_id,
+        worker_id="worker-a",
+        inputs={},
+        attempt=attempt,
+        delay_seconds=60,
+        user_id="user-a",
+        repos=Repos(),
+    ) is True
+    assert retry_run_id == run_service._retry_run_id(original_run_id, attempt, "retry")

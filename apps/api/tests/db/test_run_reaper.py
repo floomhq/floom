@@ -432,9 +432,10 @@ def test_recover_does_not_duplicate_existing_retry_child(repo_bundle, monkeypatc
     now = dt.datetime.now(dt.timezone.utc)
     stale = (now - dt.timedelta(seconds=500)).isoformat()
     _make_stale_running(repos, manifest, "run-parent", started=stale)
+    retry_run_id = run_service._retry_run_id("run-parent", 1, "retry")
     repos.runs.create(
         user_id="user-a",
-        run_id="run-existing-retry",
+        run_id=retry_run_id,
         worker_id="worker-a",
         status=RunStatus.QUEUED.value,
         trigger_source="retry",
@@ -452,7 +453,7 @@ def test_recover_does_not_duplicate_existing_retry_child(repo_bundle, monkeypatc
 
     assert result == {"failed": 1, "requeued": 0}
     assert scheduled == []
-    assert repos.runs.has_retry_child(parent_run_id="run-parent") is True
+    assert repos.runs.get_any(run_id=retry_run_id) is not None
 
 
 def test_recover_respects_disable_flag(repo_bundle, monkeypatch):

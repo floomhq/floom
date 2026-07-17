@@ -116,8 +116,6 @@ def test_run_create_persists_error_code_and_retry_metadata(repo_bundle):
     assert row["error_code"] == "scheduler_missed"
     assert row["retry_of_run_id"] == "run-parent"
     assert row["retry_attempt"] == 2
-    assert repos.runs.has_retry_child(parent_run_id="run-parent") is True
-    assert repos.runs.has_retry_child(parent_run_id="run-missing") is False
 
 
 def test_queued_retry_is_not_claimable_before_trigger_ref(repo_bundle):

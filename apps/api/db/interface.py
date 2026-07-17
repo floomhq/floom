@@ -384,10 +384,6 @@ class RunRepository(Protocol):
         """
         ...
 
-    def has_retry_child(self, *, parent_run_id: str) -> bool:
-        """Whether a retry row already exists for the parent run."""
-        ...
-
     def cost_total_usd(
         self,
         *,
