@@ -256,7 +256,17 @@ def _redact_provider_message(message: str, secrets: Dict[str, str]) -> str:
     return _ASSIGNMENT_SECRET_RE.sub(r"\1\2<REDACTED>", scrubbed)
 
 
-def _classify_llm_provider_error(exc: BaseException | str) -> str | None:
+def _classify_llm_provider_error(
+    exc: BaseException | str,
+    *,
+    shared_credentials: bool = True,
+) -> str | None:
+    """Classify provider failures without blaming users for platform capacity.
+
+    AgentDriver uses host-side model credentials, so shared_credentials defaults
+    to True. A caller that invokes a provider with a user's own key must pass
+    False so that user's quota remains llm_quota_exceeded.
+    """
     text = str(exc)
     module = getattr(exc.__class__, "__module__", "") if isinstance(exc, BaseException) else ""
     class_name = exc.__class__.__name__ if isinstance(exc, BaseException) else ""
@@ -280,7 +290,7 @@ def _classify_llm_provider_error(exc: BaseException | str) -> str | None:
     if (_RATE_LIMIT_ERROR_RE.search(haystack) or "ratelimit" in class_name.lower()) and not hard_quota_match:
         return "llm_rate_limited"
     if hard_quota_match:
-        return "llm_quota_exceeded"
+        return "llm_provider_capacity" if shared_credentials else "llm_quota_exceeded"
     if status_code in {401, 403} or re.search(r"\b(?:401|403)\b", haystack):
         return "llm_auth_error"
     if _PROVIDER_ERROR_RE.search(haystack):
@@ -292,7 +302,9 @@ def _llm_error_message(error_code: str, model: str | None = None) -> str:
     if error_code == "llm_auth_error":
         return "The configured AI provider credentials were rejected. Update the platform model credentials and retry."
     if error_code == "llm_quota_exceeded":
-        return "The configured AI provider quota or billing limit was reached. Restore provider capacity and retry."
+        return "Your AI provider quota or billing limit was reached. Update your AI provider budget and retry."
+    if error_code == "llm_provider_capacity":
+        return "Temporary model capacity issue on our side. Your worker will retry automatically."
     if error_code == "llm_rate_limited":
         return "The configured AI provider is rate-limiting requests. The run can be retried."
     if error_code == "llm_model_not_configured":
@@ -476,7 +488,11 @@ class AgentDriver(SandboxDriver):
                     status="error",
                     error=_llm_error_message(llm_error_code),
                     error_code=llm_error_code,
-                    retryable=llm_error_code in {"llm_provider_error", "llm_rate_limited"},
+                    retryable=llm_error_code in {
+                        "llm_provider_capacity",
+                        "llm_provider_error",
+                        "llm_rate_limited",
+                    },
                 )
             logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
             log_fn(f"Agent runtime error: {exc}", "error")

@@ -3352,12 +3352,14 @@ class SqliteRunRepository:
         return run.get("bundle_snapshot_path") if run else None
 
     def get_queued(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        """Return queued runs ordered by created_at (FIFO), up to *limit* rows.
+        """Return due queued runs ordered by created_at (FIFO), up to *limit* rows.
 
         Used by the queue drain loop in run_service.  Returns only rows whose
         cancel_requested flag is 0 so that cancelled-before-dispatch runs are
-        skipped automatically.
+        skipped automatically. Retry rows may store an ISO not-before timestamp
+        in trigger_ref; those rows remain durable but undrainable until due.
         """
+        current_iso = now_iso()
         with get_db() as conn:
             rows = conn.execute(
                 """
@@ -3365,11 +3367,17 @@ class SqliteRunRepository:
                        w.owner_id AS user_id
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
-                WHERE r.status = 'queued' AND (r.cancel_requested = 0 OR r.cancel_requested IS NULL)
+                WHERE r.status = 'queued'
+                  AND (r.cancel_requested = 0 OR r.cancel_requested IS NULL)
+                  AND (
+                      r.trigger_source != 'retry'
+                      OR r.trigger_ref IS NULL
+                      OR r.trigger_ref <= ?
+                  )
                 ORDER BY r.created_at ASC, r.rowid ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (current_iso, limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -3390,13 +3398,18 @@ class SqliteRunRepository:
                 WHERE id = ?
                   AND status = 'queued'
                   AND (cancel_requested = 0 OR cancel_requested IS NULL)
+                  AND (
+                      trigger_source != 'retry'
+                      OR trigger_ref IS NULL
+                      OR trigger_ref <= ?
+                  )
                   AND EXISTS (
                       SELECT 1 FROM workers
                       WHERE workers.id = runs.worker_id
                         AND workers.owner_id = ?
                   )
                 """,
-                (started_at, run_id, user_id),
+                (started_at, run_id, started_at, user_id),
             )
             if cur.rowcount != 1:
                 return None
