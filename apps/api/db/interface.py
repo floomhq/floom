@@ -6,6 +6,22 @@ from models import RecentStats, TimeseriesDay
 
 RowDict = dict[str, Any]
 
+# Durable run-log evidence that an executor advanced beyond queue claim and
+# entered worker execution. Repository implementations use these prefixes to
+# distinguish a genuine pre-dispatch orphan from an executor lost mid-run.
+# Keep the historical agent and E2B markers so rows written by older releases
+# are classified correctly during rolling deploys.
+DURABLE_EXECUTION_LOG_PREFIXES = (
+    "Executing worker (mode=",
+    "Model call ",
+    "Tool call:",
+    "Tool finished:",
+    "[e2b] Preparing sandbox",
+    "[e2b] Spawning sandbox",
+    "[e2b] Sandbox ready",
+    "[e2b] Running worker",
+)
+
 
 class WorkerRepository(Protocol):
     def list(self, *, user_id: str, role: str | None = None) -> list[RowDict]: ...

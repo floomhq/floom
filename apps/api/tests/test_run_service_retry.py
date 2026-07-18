@@ -3,11 +3,18 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 import run_service
+
+
+@pytest.fixture(autouse=True)
+def _allow_retry_spend_checks(monkeypatch):
+    monkeypatch.setattr(run_service, "_enforce_run_spend_caps", lambda **_kwargs: None)
 
 
 class _Runs:
@@ -435,6 +442,40 @@ def test_schedule_retry_reports_repository_insert_failure():
     ) is False
 
 
+def test_restart_retry_preserves_trigger_ref_and_stores_backoff_separately(
+    monkeypatch,
+):
+    created: list[dict] = []
+
+    class Runs:
+        def get_any(self, *, run_id):
+            return None
+
+        def create(self, **kwargs):
+            created.append(kwargs)
+
+    class Repos:
+        runs = Runs()
+
+    monkeypatch.setattr(run_service, "start_run", lambda *_args, **_kwargs: None)
+
+    assert run_service._schedule_retry(
+        original_run_id="run-original",
+        worker_id="worker-a",
+        inputs={},
+        attempt=1,
+        delay_seconds=60,
+        user_id="user-a",
+        repos=Repos(),
+        trigger_source="restart_retry",
+        original_trigger_ref="run-worker-call-parent",
+    ) is True
+
+    assert created[0]["trigger_ref"] == "run-worker-call-parent"
+    assert created[0]["retry_not_before"]
+    assert created[0].get("started_at") is None
+
+
 def test_failed_retry_persistence_is_not_reported_as_scheduled(monkeypatch):
     monkeypatch.setattr(run_service, "_schedule_retry", lambda **_kwargs: False)
 
@@ -451,6 +492,35 @@ def test_failed_retry_persistence_is_not_reported_as_scheduled(monkeypatch):
     )
 
     assert did_schedule is False
+
+
+def test_failed_retry_is_not_scheduled_after_spend_cap_is_reached(monkeypatch):
+    scheduled: list[dict] = []
+    logs: list[tuple[str, str]] = []
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+    monkeypatch.setattr(
+        run_service,
+        "_enforce_run_spend_caps",
+        lambda **_kw: (_ for _ in ()).throw(
+            run_service.SpendCapExceeded("workspace cap reached")
+        ),
+    )
+
+    did_schedule = run_service._schedule_retry_for_failed_run(
+        run_id="run-original",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        result_retryable=True,
+        result_error_code="transient_network_error",
+        repos=_Repos(),
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+    )
+
+    assert did_schedule is False
+    assert scheduled == []
+    assert any("Automatic retry skipped" in msg for msg, _level in logs)
 
 
 def test_concurrent_duplicate_insert_is_reported_only_when_matching_row_exists():

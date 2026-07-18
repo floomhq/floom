@@ -367,7 +367,11 @@ def set_run_execution_context_provider(
     _run_execution_context_provider = provider
 
 
-def _run_execution_context(run_id: str) -> "contextlib.AbstractContextManager[Any]":
+def _run_execution_context(
+    run_id: str,
+    *,
+    strict: bool = False,
+) -> "contextlib.AbstractContextManager[Any]":
     provider = _run_execution_context_provider
     if provider is None:
         return contextlib.nullcontext()
@@ -375,6 +379,8 @@ def _run_execution_context(run_id: str) -> "contextlib.AbstractContextManager[An
         ctx = provider(run_id)
     except Exception:
         logger.warning("run execution context provider failed for %s", run_id, exc_info=True)
+        if strict:
+            raise
         return contextlib.nullcontext()
     return ctx if ctx is not None else contextlib.nullcontext()
 
@@ -411,6 +417,9 @@ def _schedule_retry(
     user_id: str | None,
     repos: "Repositories",
     trigger_source: str = "retry",
+    trigger_member_id: str | None = None,
+    actor_user_id: str | None = None,
+    original_trigger_ref: str | None = None,
 ) -> bool:
     """Persist a retry run that becomes drainable after *delay_seconds*.
 
@@ -442,10 +451,19 @@ def _schedule_retry(
                 worker_id=worker_id,
                 status=RunStatus.QUEUED.value,
                 trigger_source=trigger_source,
-                trigger_ref=not_before,
+                trigger_ref=(
+                    original_trigger_ref
+                    if trigger_source == "restart_retry"
+                    else not_before
+                ),
+                retry_not_before=(
+                    not_before if trigger_source == "restart_retry" else None
+                ),
                 input_json=inputs,
                 retry_of_run_id=original_run_id,
                 retry_attempt=attempt,
+                trigger_member_id=trigger_member_id,
+                actor_user_id=actor_user_id,
             )
             start_run(retry_run_id, worker_id, inputs, user_id=user_id, repos=repos)
             logger.info(
@@ -511,6 +529,7 @@ _TRANSIENT_RETRY_ERROR_CODES = {
     "context_mount_failed",
     "e2b_quota_exhausted",
     "e2b_sandbox_error",
+    "executor_lost_mid_run",
     "llm_provider_error",
     "llm_provider_capacity",
     "llm_rate_limited",
@@ -714,6 +733,40 @@ def _schedule_retry_for_failed_run(
         repos=repos,
     )
     if current_attempt >= max_attempts - 1:
+        return False
+
+    try:
+        current_run = repos.runs.get_any(run_id=run_id) or {}
+        cap_user_id = str(
+            current_run.get("actor_user_id")
+            or current_run.get("trigger_member_id")
+            or owner_id
+        )
+        # Re-enter the original run's workspace explicitly. A failed attempt can
+        # push any worker, user, or workspace budget over its cap, so admitting
+        # the next attempt without a fresh check would bypass the create-time
+        # spend guard.
+        with _run_execution_context(run_id, strict=True):
+            _enforce_run_spend_caps(
+                worker_id=worker_id,
+                config=config,
+                owner_id=str(owner_id),
+                cap_user_id=cap_user_id,
+                repos_obj=repos,
+            )
+    except SpendCapExceeded as exc:
+        log_fn(f"Automatic retry skipped: {exc}", level="warning")
+        return False
+    except Exception:
+        logger.warning(
+            "Automatic retry skipped because spend-cap scope could not be verified for run %s",
+            run_id,
+            exc_info=True,
+        )
+        log_fn(
+            "Automatic retry skipped because its spend-cap scope could not be verified.",
+            level="warning",
+        )
         return False
 
     base_delay_seconds = retry_cfg.delay_seconds if retry_cfg else 60
@@ -1260,60 +1313,13 @@ def create_run(
     if not owner_id:
         raise ValueError(f"Worker {worker_id} owner not found")
     config = loaded[1] if loaded else None
-    # #793: refuse dispatch when the worker has already spent its monthly cap.
-    _cap = _spend_cap_for_config(config)
-    if _cap is not None:
-        _spent = _worker_month_to_date_cost_usd(worker_id, repos=repos_obj, user_id=owner_id)
-        if _spent >= _cap:
-            raise SpendCapExceeded(
-                f"Worker {worker_id} has reached its monthly spend cap "
-                f"(${_spent:.2f} of ${_cap:.2f}). Raise the cap or wait for next month."
-            )
-    cap_user_id = str(user_id or owner_id or "").strip()
-    _user_day_cap = _user_daily_spend_cap_usd()
-    if cap_user_id and _user_day_cap is not None:
-        _user_day_spent = _user_day_to_date_cost_usd(
-            cap_user_id,
-            repos=repos_obj,
-            scope_user_id=owner_id,
-        )
-        if _user_day_spent >= _user_day_cap:
-            raise SpendCapExceeded(
-                f"User has reached their daily spend cap "
-                f"(${_user_day_spent:.2f} of ${_user_day_cap:.2f}). Raise it or wait until tomorrow."
-            )
-    _user_month_cap = _user_monthly_spend_cap_usd()
-    if cap_user_id and _user_month_cap is not None:
-        _user_month_spent = _user_month_to_date_cost_usd(
-            cap_user_id,
-            repos=repos_obj,
-            scope_user_id=owner_id,
-        )
-        if _user_month_spent >= _user_month_cap:
-            raise SpendCapExceeded(
-                f"User has reached their monthly spend cap "
-                f"(${_user_month_spent:.2f} of ${_user_month_cap:.2f}). Raise it or wait for next month."
-            )
-    # Launch abuse guard: every workspace gets a daily spend backstop by
-    # default, even if no explicit workspace setting has been saved.
-    _ws_day_cap = _workspace_daily_spend_cap_usd()
-    if _ws_day_cap is not None:
-        _ws_day_spent = _workspace_day_to_date_cost_usd(repos=repos_obj, user_id=owner_id)
-        if _ws_day_spent >= _ws_day_cap:
-            raise SpendCapExceeded(
-                f"Workspace has reached its daily spend cap "
-                f"(${_ws_day_spent:.2f} of ${_ws_day_cap:.2f}). Raise it in Settings or wait until tomorrow."
-            )
-    # #797: workspace-level monthly spend cap — aggregate ALL workers' month-to-
-    # date cost against the workspace budget.
-    _ws_cap = _workspace_monthly_spend_cap_usd()
-    if _ws_cap is not None:
-        _ws_spent = _workspace_month_to_date_cost_usd(repos=repos_obj, user_id=owner_id)
-        if _ws_spent >= _ws_cap:
-            raise SpendCapExceeded(
-                f"Workspace has reached its monthly spend cap "
-                f"(${_ws_spent:.2f} of ${_ws_cap:.2f}). Raise it in Settings or wait for next month."
-            )
+    _enforce_run_spend_caps(
+        worker_id=worker_id,
+        config=config,
+        owner_id=owner_id,
+        cap_user_id=str(user_id or owner_id or "").strip(),
+        repos_obj=repos_obj,
+    )
     instance = loaded[2] if loaded else None
     if instance and not instance.get("enabled", True):
         raise ValueError(f"Worker {worker_id} is disabled")
@@ -1360,6 +1366,70 @@ def create_run(
             logger.warning("Run %s bundle snapshot persist failed: %s", run_id, exc)
     logger.info("Created run %s for worker %s (runner=%s)", run_id, worker_id, runner)
     return run_id
+
+
+def _enforce_run_spend_caps(
+    *,
+    worker_id: str,
+    config: Optional[WorkerConfig],
+    owner_id: str,
+    cap_user_id: str,
+    repos_obj: Repositories,
+) -> None:
+    """Apply the same worker, user, and workspace admission caps to a run."""
+    # #793: refuse dispatch when the worker has already spent its monthly cap.
+    _cap = _spend_cap_for_config(config)
+    if _cap is not None:
+        _spent = _worker_month_to_date_cost_usd(worker_id, repos=repos_obj, user_id=owner_id)
+        if _spent >= _cap:
+            raise SpendCapExceeded(
+                f"Worker {worker_id} has reached its monthly spend cap "
+                f"(${_spent:.2f} of ${_cap:.2f}). Raise the cap or wait for next month."
+            )
+    _user_day_cap = _user_daily_spend_cap_usd()
+    if cap_user_id and _user_day_cap is not None:
+        _user_day_spent = _user_day_to_date_cost_usd(
+            cap_user_id,
+            repos=repos_obj,
+            scope_user_id=owner_id,
+        )
+        if _user_day_spent >= _user_day_cap:
+            raise SpendCapExceeded(
+                f"User has reached their daily spend cap "
+                f"(${_user_day_spent:.2f} of ${_user_day_cap:.2f}). Raise it or wait until tomorrow."
+            )
+    _user_month_cap = _user_monthly_spend_cap_usd()
+    if cap_user_id and _user_month_cap is not None:
+        _user_month_spent = _user_month_to_date_cost_usd(
+            cap_user_id,
+            repos=repos_obj,
+            scope_user_id=owner_id,
+        )
+        if _user_month_spent >= _user_month_cap:
+            raise SpendCapExceeded(
+                f"User has reached their monthly spend cap "
+                f"(${_user_month_spent:.2f} of ${_user_month_cap:.2f}). Raise it or wait for next month."
+            )
+    # Launch abuse guard: every workspace gets a daily spend backstop by
+    # default, even if no explicit workspace setting has been saved.
+    _ws_day_cap = _workspace_daily_spend_cap_usd()
+    if _ws_day_cap is not None:
+        _ws_day_spent = _workspace_day_to_date_cost_usd(repos=repos_obj, user_id=owner_id)
+        if _ws_day_spent >= _ws_day_cap:
+            raise SpendCapExceeded(
+                f"Workspace has reached its daily spend cap "
+                f"(${_ws_day_spent:.2f} of ${_ws_day_cap:.2f}). Raise it in Settings or wait until tomorrow."
+            )
+    # #797: workspace-level monthly spend cap — aggregate ALL workers' month-to-
+    # date cost against the workspace budget.
+    _ws_cap = _workspace_monthly_spend_cap_usd()
+    if _ws_cap is not None:
+        _ws_spent = _workspace_month_to_date_cost_usd(repos=repos_obj, user_id=owner_id)
+        if _ws_spent >= _ws_cap:
+            raise SpendCapExceeded(
+                f"Workspace has reached its monthly spend cap "
+                f"(${_ws_spent:.2f} of ${_ws_cap:.2f}). Raise it in Settings or wait for next month."
+            )
 
 
 def _persist_log_batch(batch: list[_PendingLog], repos: Repositories | None = None) -> None:
@@ -2146,20 +2216,22 @@ from services.run_secrets import (  # noqa: E402,F401
 
 INTERRUPTED_RUN_ERROR = "Run was interrupted by an API restart before completion."
 INTERRUPTED_RUN_ERROR_CODE = "interrupted_by_restart"
-ABANDONED_RUN_ERROR = "run abandoned (server restarted): no active executor after timeout window"
-ABANDONED_RUN_ERROR_CODE = "run_abandoned_server_restart"
-# The PERIODIC reaper (steady-state sweep between deploys) marks stale rows with
-# a distinct code so a run that silently hung mid-flight is diagnosable
-# separately from deploy/restart abandonment (which startup recovery labels
-# run_abandoned_server_restart).
-ORPHANED_RUN_ERROR = "run orphaned: still marked running past the run timeout with no active executor"
-ORPHANED_RUN_ERROR_CODE = "orphaned"
+EXECUTOR_LOST_MID_RUN_ERROR = "executor lost mid-run"
+EXECUTOR_LOST_MID_RUN_ERROR_CODE = "executor_lost_mid_run"
+# Backward-compatible names used by older callers. New failures use one stable
+# label and code whether the executor disappeared during a deploy or steady
+# state operation.
+ABANDONED_RUN_ERROR = EXECUTOR_LOST_MID_RUN_ERROR
+ABANDONED_RUN_ERROR_CODE = EXECUTOR_LOST_MID_RUN_ERROR_CODE
+ORPHANED_RUN_ERROR = EXECUTOR_LOST_MID_RUN_ERROR
+ORPHANED_RUN_ERROR_CODE = EXECUTOR_LOST_MID_RUN_ERROR_CODE
 DISPATCH_ORPHAN_ERROR = "run abandoned before sandbox dispatch: claimed by queue drain but no executor reached sandbox startup"
 DISPATCH_ORPHAN_ERROR_CODE = "run_claimed_without_dispatch"
 WORKER_DELETED_RUN_ERROR = "Worker deleted before run completed."
 _SCHEDULE_MISSING_SECRET_PAUSE_AFTER = 3
 _RUN_REAPER_DEFAULT_GRACE_SECONDS = 60
 _RUN_REAPER_DEFAULT_INTERVAL_SECONDS = 180
+_RESTART_RETRY_BACKOFF_SECONDS = 60
 
 
 @dataclass
@@ -2398,8 +2470,13 @@ def _fail_dispatch_orphan_rows(
     repos_obj: Repositories,
     *,
     now_dt: datetime,
+    timeout_seconds: int | None = None,
 ) -> list[dict[str, Any]]:
-    timeout = _dispatch_orphan_timeout_seconds()
+    timeout = (
+        _dispatch_orphan_timeout_seconds()
+        if timeout_seconds is None
+        else max(0, int(timeout_seconds))
+    )
     cutoff_iso = (now_dt - timedelta(seconds=timeout)).isoformat()
     active_ids = _active_run_ids_excluding_stale_pre_sandbox(timeout)
     fail_method = getattr(repos_obj.runs, "fail_stale_running_without_sandbox_logs", None)
@@ -2480,7 +2557,7 @@ def reap_abandoned_runs(
 
 
 def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool:
-    """Schedule a fresh retry for one reaped-abandoned run, if within budget.
+    """Schedule one delayed retry for an executor-lost run, if within budget.
 
     Returns True if a retry was enqueued. Reuses the existing retry plumbing
     (a new run with retry_of_run_id set), so it works identically on the SQLite
@@ -2534,16 +2611,53 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
     if not isinstance(inputs, dict):
         inputs = {}
     try:
-        persisted = _schedule_retry(
-            original_run_id=run_id,
-            worker_id=worker_id,
-            inputs=inputs,
-            attempt=next_attempt,
-            delay_seconds=0,
-            user_id=str(user_id),
-            repos=repos_obj,
-            trigger_source="restart_retry",
-        )
+        # Cloud restores the original run's workspace here. Without this
+        # context, workspace-scoped cost lookups can see an empty scope and
+        # incorrectly admit a restart retry after the cap is exhausted.
+        with _run_execution_context(run_id, strict=True):
+            loaded = _load_worker_recipe(
+                worker_id,
+                repos=repos_obj,
+                user_id=str(user_id),
+            )
+            config = loaded[1] if loaded else None
+            cap_user_id = str(
+                run.get("actor_user_id")
+                or run.get("trigger_member_id")
+                or user_id
+            )
+            _enforce_run_spend_caps(
+                worker_id=worker_id,
+                config=config,
+                owner_id=str(user_id),
+                cap_user_id=cap_user_id,
+                repos_obj=repos_obj,
+            )
+            persisted = _schedule_retry(
+                original_run_id=run_id,
+                worker_id=worker_id,
+                inputs=inputs,
+                attempt=next_attempt,
+                delay_seconds=_RESTART_RETRY_BACKOFF_SECONDS,
+                user_id=str(user_id),
+                repos=repos_obj,
+                trigger_source="restart_retry",
+                trigger_member_id=(
+                    str(run.get("trigger_member_id"))
+                    if run.get("trigger_member_id")
+                    else None
+                ),
+                actor_user_id=(
+                    str(run.get("actor_user_id"))
+                    if run.get("actor_user_id")
+                    else None
+                ),
+                original_trigger_ref=(
+                    str(run.get("trigger_ref"))
+                    if run.get("trigger_ref")
+                    else None
+                ),
+            )
         if persisted is False:
             return False
         repos_obj.runs.add_log(
@@ -2551,13 +2665,28 @@ def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool
             run_id=run_id,
             level="info",
             message=(
-                f"Auto-retrying after server restart (attempt {attempt + 1} of "
-                f"{max_restart}); a new run was enqueued to finish the work."
+                f"Auto-retrying after executor loss (attempt {attempt + 1} of "
+                f"{max_restart}) in {_RESTART_RETRY_BACKOFF_SECONDS}s; a new run "
+                "was enqueued to finish the work."
             ),
             timestamp=datetime.now(timezone.utc).isoformat(),
             trace_id=None,
         )
         return True
+    except SpendCapExceeded as exc:
+        try:
+            repos_obj.runs.add_log(
+                user_id=str(user_id),
+                run_id=run_id,
+                level="warning",
+                message=f"Automatic executor-loss retry skipped: {exc}",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                trace_id=None,
+            )
+        except Exception:
+            logger.debug("Failed to add spend-cap retry suppression log for %s", run_id, exc_info=True)
+        logger.warning("Skipped auto-requeue for run %s because a spend cap was reached", run_id)
+        return False
     except Exception as exc:
         logger.warning("Failed to auto-requeue abandoned run %s: %s", run_id, exc)
         return False
@@ -2569,19 +2698,25 @@ def recover_abandoned_runs(
     now: datetime | None = None,
     timeout_seconds: int | None = None,
     grace_seconds: int | None = None,
+    dispatch_timeout_seconds: int | None = None,
     error: str = ABANDONED_RUN_ERROR,
     error_code: str = ABANDONED_RUN_ERROR_CODE,
 ) -> dict[str, int]:
-    """Reap stale `running` rows AND auto-requeue the ones within retry budget.
+    """Classify stale `running` rows and auto-requeue within retry budget.
 
     #1434: a deploy/restart kills the executor thread, so in-flight runs would
-    otherwise hard-fail ("abandoned"). This reaps them (so the orphaned row
-    leaves `running`) and then enqueues a bounded retry so the user's work
-    completes instead of dying on every deploy. Returns {"failed", "requeued"}.
+    otherwise hard-fail. Genuine queue claims with no execution evidence get
+    the pre-dispatch code; rows with durable execution evidence get
+    ``executor_lost_mid_run``. A bounded delayed retry carries the work forward.
+    Returns {"failed", "requeued"}.
     """
     repos_obj = _repos(repos)
     timeout, grace, now_dt = _resolve_reaper_window(timeout_seconds, grace_seconds, now)
-    failed = _fail_dispatch_orphan_rows(repos_obj, now_dt=now_dt)
+    failed = _fail_dispatch_orphan_rows(
+        repos_obj,
+        now_dt=now_dt,
+        timeout_seconds=dispatch_timeout_seconds,
+    )
     failed.extend(
         _fail_stale_running_rows(
             repos_obj,
@@ -2813,9 +2948,7 @@ def _run_reaper_loop() -> None:
         try:
             # #1434: recover (reap + bounded auto-requeue) instead of a bare reap,
             # so a run orphaned by a restart is retried rather than hard-failed.
-            # Steady-state sweeps label rows `orphaned` (the process did NOT
-            # restart; the run silently lost its executor) so they are
-            # distinguishable from startup/restart abandonment.
+            # Startup and steady-state executor loss share one stable code.
             recover_abandoned_runs(
                 error=ORPHANED_RUN_ERROR,
                 error_code=ORPHANED_RUN_ERROR_CODE,
@@ -2940,17 +3073,47 @@ def _requeue_interrupted_run_in_place(
             return False
         if str(run.get("trigger_source") or "").startswith("restart_retry"):
             return False  # already a restart retry - do not loop across deploys
-        repos_obj.runs.update(
-            user_id=str(user_id),
-            run_id=run_id,
-            status=RunStatus.QUEUED.value,
-            started_at=None,
-            completed_at=None,
-            error=None,
-            error_code=None,
-            trigger_source="restart_retry",
-        )
+        with _run_execution_context(run_id, strict=True):
+            worker_id = str(run.get("worker_id") or "")
+            loaded = _load_worker_recipe(
+                worker_id,
+                repos=repos_obj,
+                user_id=str(user_id),
+            )
+            cap_user_id = str(
+                run.get("actor_user_id")
+                or run.get("trigger_member_id")
+                or user_id
+            )
+            _enforce_run_spend_caps(
+                worker_id=worker_id,
+                config=loaded[1] if loaded else None,
+                owner_id=str(user_id),
+                cap_user_id=cap_user_id,
+                repos_obj=repos_obj,
+            )
+            not_before = (
+                datetime.now(timezone.utc)
+                + timedelta(seconds=_RESTART_RETRY_BACKOFF_SECONDS)
+            ).isoformat()
+            repos_obj.runs.update(
+                user_id=str(user_id),
+                run_id=run_id,
+                status=RunStatus.QUEUED.value,
+                started_at=None,
+                completed_at=None,
+                duration_ms=None,
+                error=None,
+                error_code=None,
+                trigger_source="restart_retry",
+                retry_not_before=not_before,
+                cancel_requested=False,
+                cancelled_at=None,
+            )
         return True
+    except SpendCapExceeded:
+        logger.warning("Skipped graceful restart retry for run %s because a spend cap was reached", run_id)
+        return False
     except Exception as exc:
         logger.warning("Failed to requeue interrupted run %s on shutdown: %s", run_id, exc)
         return False
@@ -3050,10 +3213,15 @@ def fail_interrupted_runs_on_startup(
     (the active-run registry is empty), so recover immediately (timeout=0,
     grace=0) rather than waiting out the timeout+grace window the periodic reaper
     uses to avoid racing live runs. recover_abandoned_runs also auto-requeues the
-    orphaned runs within retry budget so a deploy does not silently kill them.
+    executor-lost runs within retry budget so a deploy does not silently kill them.
     Returns the count failed (for back-compat with callers that expect an int).
     """
-    return recover_abandoned_runs(repos=repos, timeout_seconds=0, grace_seconds=0)["failed"]
+    return recover_abandoned_runs(
+        repos=repos,
+        timeout_seconds=0,
+        grace_seconds=0,
+        dispatch_timeout_seconds=0,
+    )["failed"]
 
 
 _PENDING_APPROVAL_RESTART_ERROR = (
@@ -3497,6 +3665,39 @@ def execute_run(
                 current_status,
             )
             return
+        if str((current_run or {}).get("trigger_source") or "") in {
+            "retry",
+            "restart_retry",
+        }:
+            cap_user_id = str(
+                (current_run or {}).get("actor_user_id")
+                or (current_run or {}).get("trigger_member_id")
+                or owner_id
+                or ""
+            )
+            try:
+                # Retry rows can sit in backoff while spend changes. Recheck at
+                # dispatch so an earlier admission cannot cross a cap later.
+                with _run_execution_context(run_id, strict=True):
+                    _enforce_run_spend_caps(
+                        worker_id=worker_id,
+                        config=config,
+                        owner_id=str(owner_id or ""),
+                        cap_user_id=cap_user_id,
+                        repos_obj=repos_obj,
+                    )
+            except SpendCapExceeded as exc:
+                error = f"Automatic retry cancelled: {exc}"
+                update_run_status(
+                    run_id,
+                    RunStatus.FAILED.value,
+                    error=error,
+                    error_code="spend_cap_exceeded",
+                    user_id=owner_id,
+                    repos=repos_obj,
+                )
+                log_fn(error, level="warning")
+                return
         if current_status != RunStatus.RUNNING.value:
             update_run_status(run_id, RunStatus.RUNNING.value, user_id=owner_id, repos=repos_obj)
             perf.mark("status_update")
@@ -4429,18 +4630,11 @@ def _run_thread_entry_with_semaphore(
                     error=message,
                     error_code="executor_thread_pre_sandbox_exception",
                 )
-                trigger_source = str((row or {}).get("trigger_source") or "")
-                if _auto_requeue_abandoned_enabled() and _max_restart_retries() > 0 and not trigger_source.startswith("restart_retry"):
-                    _schedule_retry(
-                        original_run_id=run_id,
-                        worker_id=worker_id,
-                        inputs=inputs if isinstance(inputs, dict) else {},
-                        attempt=int((row or {}).get("retry_attempt") or 0) + 1,
-                        delay_seconds=0,
-                        user_id=str(owner_id),
-                        repos=repos_obj,
-                        trigger_source="restart_retry",
-                    )
+                retry_row = {**(row or {}), "user_id": str(owner_id)}
+                if _auto_requeue_abandoned_enabled() and _requeue_abandoned_run(
+                    repos_obj,
+                    retry_row,
+                ):
                     _wake_drain()
         except Exception:
             logger.exception("Failed to persist executor-thread crash for run %s", run_id)

@@ -88,6 +88,7 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "orphaned": "crash",
     "run_abandoned_server_restart": "crash",
     "run_claimed_without_dispatch": "crash",
+    "executor_lost_mid_run": "crash",
     "schedule_missed": "crash",
     "scheduler_missed": "crash",
     "scheduler_row_error": "crash",

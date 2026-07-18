@@ -2248,6 +2248,12 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_alert_throttle_dedup
         ON alert_throttle(workspace_id, worker_id, signature, sent_at);
     """,
+    # -- migration 94: durable retry eligibility without timestamp overloading
+    """
+    ALTER TABLE runs ADD COLUMN retry_not_before TEXT;
+    CREATE INDEX IF NOT EXISTS idx_runs_retry_not_before
+        ON runs(status, trigger_source, retry_not_before);
+    """,
 ]
 
 
@@ -2266,7 +2272,7 @@ def get_current_version(conn: sqlite3.Connection) -> int:
 def apply_migrations():
     with get_db() as conn:
         current = get_current_version(conn)
-    duplicate_column_tolerant = {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82, 86, 91}
+    duplicate_column_tolerant = {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82, 86, 91, 94}
     for i, migration in enumerate(MIGRATIONS, start=1):
         if i > current:
             with get_db() as conn:

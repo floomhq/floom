@@ -36,6 +36,7 @@ from models import (
 )
 
 from ._legacy_sqlite import _row_dict, get_db, now_iso
+from .interface import DURABLE_EXECUTION_LOG_PREFIXES
 
 
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
@@ -2474,7 +2475,8 @@ class SqliteRunRepository:
                        r.status, r.trigger_source, r.runner, r.input_json, r.output_json,
                        r.error, r.error_code, r.started_at, r.completed_at, r.duration_ms, r.created_at,
                        r.cancel_requested, r.cancelled_at, r.bundle_snapshot_path,
-                       r.quality_warning, r.trigger_ref, r.total_cost_usd
+                       r.quality_warning, r.trigger_ref, r.retry_not_before,
+                       r.total_cost_usd
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
@@ -2571,6 +2573,7 @@ class SqliteRunRepository:
                 "trigger_ref",
                 "retry_of_run_id",
                 "retry_attempt",
+                "retry_not_before",
             ]
             values = [
                 run_id,
@@ -2592,6 +2595,7 @@ class SqliteRunRepository:
                 fields.get("trigger_ref"),
                 fields.get("retry_of_run_id"),
                 int(fields.get("retry_attempt") or 0),
+                fields.get("retry_not_before"),
             ]
             if has_actor_user_id:
                 columns.insert(2, "actor_user_id")
@@ -2624,6 +2628,7 @@ class SqliteRunRepository:
             "bundle_snapshot_path",
             "quality_warning",
             "trigger_ref",
+            "retry_not_before",
             "total_tokens",
             "total_cost_usd",
         }
@@ -3205,7 +3210,7 @@ class SqliteRunRepository:
         error: str,
         error_code: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Fail running rows that were claimed but never reached sandbox startup logs."""
+        """Fail running rows with no durable evidence of worker execution."""
         completed_at = now_iso()
         excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
         exclude_clause = ""
@@ -3214,6 +3219,10 @@ class SqliteRunRepository:
             placeholders = ",".join("?" for _ in excluded)
             exclude_clause = f"AND r.id NOT IN ({placeholders})"
             params.extend(excluded)
+        execution_evidence_clause = " OR ".join(
+            "l.message LIKE ?" for _ in DURABLE_EXECUTION_LOG_PREFIXES
+        )
+        params.extend(f"{prefix}%" for prefix in DURABLE_EXECUTION_LOG_PREFIXES)
 
         with get_db() as conn:
             rows = conn.execute(
@@ -3228,12 +3237,7 @@ class SqliteRunRepository:
                       SELECT 1
                       FROM logs l
                       WHERE l.run_id = r.id
-                        AND (
-                            l.message LIKE '[e2b] Preparing sandbox%'
-                            OR l.message LIKE '[e2b] Spawning sandbox%'
-                            OR l.message LIKE '[e2b] Sandbox ready%'
-                            OR l.message LIKE '[e2b] Running worker%'
-                        )
+                        AND ({execution_evidence_clause})
                   )
                 ORDER BY COALESCE(r.started_at, r.created_at) ASC
                 """,
@@ -3378,7 +3382,7 @@ class SqliteRunRepository:
         Used by the queue drain loop in run_service.  Returns only rows whose
         cancel_requested flag is 0 so that cancelled-before-dispatch runs are
         skipped automatically. Retry rows may store an ISO not-before timestamp
-        in trigger_ref; those rows remain durable but undrainable until due.
+        in retry_not_before; those rows remain durable but undrainable until due.
         """
         current_iso = now_iso()
         with get_db() as conn:
@@ -3391,14 +3395,20 @@ class SqliteRunRepository:
                 WHERE r.status = 'queued'
                   AND (r.cancel_requested = 0 OR r.cancel_requested IS NULL)
                   AND (
-                      r.trigger_source != 'retry'
-                      OR r.trigger_ref IS NULL
-                      OR r.trigger_ref <= ?
+                      r.trigger_source NOT IN ('retry', 'restart_retry')
+                      OR (
+                          r.trigger_source = 'retry'
+                          AND (r.trigger_ref IS NULL OR r.trigger_ref <= ?)
+                      )
+                      OR (
+                          r.trigger_source = 'restart_retry'
+                          AND (r.retry_not_before IS NULL OR r.retry_not_before <= ?)
+                      )
                   )
                 ORDER BY r.created_at ASC, r.rowid ASC
                 LIMIT ?
                 """,
-                (current_iso, limit),
+                (current_iso, current_iso, limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -3414,15 +3424,22 @@ class SqliteRunRepository:
                 UPDATE runs
                 SET status = 'running',
                     started_at = ?,
+                    retry_not_before = NULL,
                     error = NULL,
                     error_code = NULL
                 WHERE id = ?
                   AND status = 'queued'
                   AND (cancel_requested = 0 OR cancel_requested IS NULL)
                   AND (
-                      trigger_source != 'retry'
-                      OR trigger_ref IS NULL
-                      OR trigger_ref <= ?
+                      trigger_source NOT IN ('retry', 'restart_retry')
+                      OR (
+                          trigger_source = 'retry'
+                          AND (trigger_ref IS NULL OR trigger_ref <= ?)
+                      )
+                      OR (
+                          trigger_source = 'restart_retry'
+                          AND (retry_not_before IS NULL OR retry_not_before <= ?)
+                      )
                   )
                   AND EXISTS (
                       SELECT 1 FROM workers
@@ -3430,7 +3447,7 @@ class SqliteRunRepository:
                         AND workers.owner_id = ?
                   )
                 """,
-                (started_at, run_id, started_at, user_id),
+                (started_at, run_id, started_at, started_at, user_id),
             )
             if cur.rowcount != 1:
                 return None

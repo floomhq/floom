@@ -159,6 +159,9 @@ class TestClassifyFailure:
     def test_claimed_without_dispatch_is_crash(self):
         assert classify_failure(error_code="run_claimed_without_dispatch") == "crash"
 
+    def test_executor_lost_mid_run_is_crash(self):
+        assert classify_failure(error_code="executor_lost_mid_run") == "crash"
+
     # --- new live-message substring mappings (error_code null on the cloud). ---
     def test_iteration_cap_message_is_timeout(self):
         assert classify_failure(error="Run hit the iteration cap of 25") == "timeout"
@@ -198,6 +201,7 @@ class TestClassifyFailure:
             "interrupted_by_restart",
             "run_abandoned_server_restart",
             "run_claimed_without_dispatch",
+            "executor_lost_mid_run",
         ]
         for code in samples:
             assert classify_failure(error_code=code) in FAILURE_CATEGORIES

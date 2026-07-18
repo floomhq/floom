@@ -868,6 +868,7 @@ _TRANSIENT_E2B_TRANSPORT_MARKERS = (
     "connection reset",
     "connection aborted",
     "remoteprotocolerror",
+    "error decoding header block",
     "readerror",
     "writeerror",
     "httpcore",
@@ -1132,38 +1133,27 @@ def _create_sandbox_with_key_fallback(
 ) -> Any:
     last_quota_error: Exception | None = None
     total = len(api_keys)
-    max_transport_attempts = _e2b_transport_max_attempts()
-
     for index, api_key in enumerate(api_keys, start=1):
-        for attempt in range(1, max_transport_attempts + 1):
-            try:
-                create_kwargs: dict[str, Any] = {
-                    "api_key": api_key,
-                    "timeout": timeout,
-                    "envs": envs,
-                    "network": network,
-                }
-                if template:
-                    create_kwargs["template"] = template
-                _pace_sandbox_create(log_fn)
-                return sandbox_cls.create(**create_kwargs)
-            except Exception as exc:
-                if _is_e2b_quota_or_rate_limit_error(exc):
-                    last_quota_error = exc
-                    break
-                if _is_transient_e2b_transport_error(exc):
-                    if attempt >= max_transport_attempts:
-                        raise E2BTransportDroppedError(exc, phase="sandbox_create") from exc
-                    delay = _e2b_transport_retry_delay_seconds(attempt)
-                    log_fn(
-                        "[e2b] Sandbox create transport dropped; "
-                        f"retrying create attempt {attempt + 1}/{max_transport_attempts} "
-                        f"in {delay:.1f}s",
-                        "warning",
-                    )
-                    if delay > 0:
-                        time.sleep(delay)
-                    continue
+        try:
+            create_kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "timeout": timeout,
+                "envs": envs,
+                "network": network,
+            }
+            if template:
+                create_kwargs["template"] = template
+            _pace_sandbox_create(log_fn)
+            return sandbox_cls.create(**create_kwargs)
+        except Exception as exc:
+            if _is_e2b_quota_or_rate_limit_error(exc):
+                last_quota_error = exc
+            elif _is_transient_e2b_transport_error(exc):
+                # The outer E2BSandboxDriver.run loop owns the single bounded
+                # lifecycle retry budget. Retrying here too multiplied three
+                # lifecycle attempts into as many as nine Sandbox.create calls.
+                raise E2BTransportDroppedError(exc, phase="sandbox_create") from exc
+            else:
                 raise
         if last_quota_error is not None:
             if index < total:
