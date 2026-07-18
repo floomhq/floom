@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import httpcore
+
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
@@ -12,6 +14,7 @@ from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import (
     E2BSandboxDriver,
     E2BTransportDroppedError,
+    _create_sandbox_with_key_fallback,
     _is_transient_e2b_transport_error,
     _pace_sandbox_create,
 )
@@ -28,6 +31,14 @@ def test_transient_transport_classifier_matches_observed_errors():
             return "<ConnectionTerminated error_code:1, last_stream_id:343>"
 
     assert _is_transient_e2b_transport_error(ConnectionTerminated()) is True
+    assert _is_transient_e2b_transport_error(
+        httpcore.LocalProtocolError(
+            "Error decoding header block: Encoder exceeded max allowable table size"
+        )
+    ) is True
+    assert _is_transient_e2b_transport_error(
+        httpcore.LocalProtocolError("Invalid URL scheme")
+    ) is False
     assert _is_transient_e2b_transport_error(RuntimeError("worker raised ValueError")) is False
 
 
@@ -124,6 +135,82 @@ def test_transport_retry_exhaustion_has_distinct_terminal_code(monkeypatch):
     assert result.error_code == "sandbox_transport_retry_exhausted"
     assert result.retryable is False
     assert "before the worker produced a result" in (result.error or "")
+
+
+class _CreateOnlyDriver(E2BSandboxDriver):
+    def __init__(self, sandbox_cls):
+        self.sandbox_cls = sandbox_cls
+
+    def _run_in_sandbox(self, *_args, **kwargs):
+        _create_sandbox_with_key_fallback(
+            self.sandbox_cls,
+            api_keys=["test-key"],
+            timeout=60,
+            envs={},
+            log_fn=kwargs.get("log_fn") or (lambda *_args, **_kwargs: None),
+        )
+        return WorkerResult(status="success", outputs={"created": True})
+
+
+def test_header_block_create_failure_retries_with_fresh_lifecycle(monkeypatch):
+    monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_MAX_ATTEMPTS", "3")
+    monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_RETRY_BASE_SECONDS", "0")
+    monkeypatch.setenv("WORKEROS_E2B_CREATE_MIN_INTERVAL_SECONDS", "0")
+    monkeypatch.setattr(e2b_driver, "run_cancel_requested", lambda _run_id: False)
+
+    class Sandbox:
+        calls = 0
+
+        @classmethod
+        def create(cls, **_kwargs):
+            cls.calls += 1
+            if cls.calls == 1:
+                raise httpcore.LocalProtocolError(
+                    "Error decoding header block: Encoder exceeded max allowable table size"
+                )
+            return object()
+
+    result = _CreateOnlyDriver(Sandbox).run(
+        worker_id="worker-a",
+        run_id="run-header-retry",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_args, **_kwargs: None,
+        trace_id="trace-header-retry",
+    )
+
+    assert Sandbox.calls == 2
+    assert result.status == "success"
+
+
+def test_header_block_create_failure_is_bounded_to_three_total_creates(monkeypatch):
+    monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_MAX_ATTEMPTS", "3")
+    monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_RETRY_BASE_SECONDS", "0")
+    monkeypatch.setenv("WORKEROS_E2B_CREATE_MIN_INTERVAL_SECONDS", "0")
+    monkeypatch.setattr(e2b_driver, "run_cancel_requested", lambda _run_id: False)
+
+    class Sandbox:
+        calls = 0
+
+        @classmethod
+        def create(cls, **_kwargs):
+            cls.calls += 1
+            raise httpcore.LocalProtocolError(
+                "Error decoding header block: Encoder exceeded max allowable table size"
+            )
+
+    result = _CreateOnlyDriver(Sandbox).run(
+        worker_id="worker-a",
+        run_id="run-header-exhausted",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_args, **_kwargs: None,
+        trace_id="trace-header-exhausted",
+    )
+
+    assert Sandbox.calls == 3
+    assert result.status == "error"
+    assert result.error_code == "sandbox_transport_retry_exhausted"
 
 
 def test_sandbox_create_pacing_waits_between_creates(monkeypatch):

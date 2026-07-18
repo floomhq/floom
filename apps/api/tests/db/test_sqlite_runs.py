@@ -153,6 +153,53 @@ def test_queued_retry_is_not_claimable_before_trigger_ref(repo_bundle):
     ) is None
 
 
+def test_queued_restart_retry_is_not_claimable_before_retry_not_before(repo_bundle):
+    repos, _db, manifest = repo_bundle
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    now = datetime.now(timezone.utc)
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-restart-due",
+        worker_id="worker-a",
+        trigger_source="restart_retry",
+        trigger_ref="run-parent-due",
+        retry_not_before=(now - timedelta(minutes=1)).isoformat(),
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-restart-future",
+        worker_id="worker-a",
+        trigger_source="restart_retry",
+        trigger_ref="run-parent-future",
+        retry_not_before=(now + timedelta(hours=1)).isoformat(),
+    )
+
+    queued_ids = {row["run_id"] for row in repos.runs.get_queued(limit=50)}
+    assert "run-restart-due" in queued_ids
+    assert "run-restart-future" not in queued_ids
+    assert repos.runs.claim_queued(
+        user_id="user-a",
+        run_id="run-restart-future",
+        started_at=now.isoformat(),
+    ) is None
+    repos.runs.update_status(
+        user_id="user-a",
+        run_id="run-restart-future",
+        status=RunStatus.FAILED.value,
+        error="cancelled during backoff",
+        error_code="cancelled_queued",
+    )
+    cancelled = repos.runs.get(user_id="user-a", run_id="run-restart-future")
+    assert cancelled["started_at"] is None
+    assert cancelled["duration_ms"] is None
+
+
 def test_run_service_failed_status_update_synthesizes_error_fields(repo_bundle):
     import run_service
 

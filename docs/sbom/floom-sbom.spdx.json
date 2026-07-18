@@ -2674,17 +2674,6 @@
       "copyrightText": "NOASSERTION"
     },
     {
-      "SPDXID": "SPDXRef-Package-8c5f6e725a35325f",
-      "name": "@types/jszip",
-      "versionInfo": "3.4.0",
-      "supplier": "Organization: npm",
-      "downloadLocation": "NOASSERTION",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION",
-      "copyrightText": "NOASSERTION"
-    },
-    {
       "SPDXID": "SPDXRef-Package-6b94a85881076d18",
       "name": "@types/mdast",
       "versionInfo": "4.0.4",
@@ -10869,9 +10858,9 @@
       "copyrightText": "NOASSERTION"
     },
     {
-      "SPDXID": "SPDXRef-Package-51848596a2b7677c",
+      "SPDXID": "SPDXRef-Package-996768ad8eaac51b",
       "name": "hono",
-      "versionInfo": "4.12.23",
+      "versionInfo": "4.12.26",
       "supplier": "Organization: npm",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -10924,9 +10913,9 @@
       "copyrightText": "NOASSERTION"
     },
     {
-      "SPDXID": "SPDXRef-Package-49d6a6a9674d8b8a",
+      "SPDXID": "SPDXRef-Package-e5858919c73bff20",
       "name": "fastapi",
-      "versionInfo": "0.138.0",
+      "versionInfo": "0.138.1",
       "supplier": "Organization: PyPI",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -11012,9 +11001,9 @@
       "copyrightText": "NOASSERTION"
     },
     {
-      "SPDXID": "SPDXRef-Package-1f83425d1659432b",
+      "SPDXID": "SPDXRef-Package-e05e4dc618627030",
       "name": "openai-agents",
-      "versionInfo": "[litellm]==0.17.6",
+      "versionInfo": "[litellm]==0.17.7",
       "supplier": "Organization: PyPI",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -11045,9 +11034,9 @@
       "copyrightText": "NOASSERTION"
     },
     {
-      "SPDXID": "SPDXRef-Package-4c80582d8b0297da",
+      "SPDXID": "SPDXRef-Package-e9c5dcb3dfb50c16",
       "name": "pypdf",
-      "versionInfo": "6.13.2",
+      "versionInfo": "6.14.2",
       "supplier": "Organization: PyPI",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -11089,9 +11078,9 @@
       "copyrightText": "NOASSERTION"
     },
     {
-      "SPDXID": "SPDXRef-Package-78629a66b698102e",
+      "SPDXID": "SPDXRef-Package-eb507fa94df54f02",
       "name": "e2b",
-      "versionInfo": "2.28.0",
+      "versionInfo": "2.34.0",
       "supplier": "Organization: PyPI",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -11188,9 +11177,9 @@
       "copyrightText": "NOASSERTION"
     },
     {
-      "SPDXID": "SPDXRef-Package-0154aaebf7634f00",
+      "SPDXID": "SPDXRef-Package-6e766bdd31e0f246",
       "name": "posthog",
-      "versionInfo": "7.19.2",
+      "versionInfo": "7.21.0",
       "supplier": "Organization: PyPI",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -11199,9 +11188,9 @@
       "copyrightText": "NOASSERTION"
     },
     {
-      "SPDXID": "SPDXRef-Package-7b64d986ee91b6fb",
+      "SPDXID": "SPDXRef-Package-3896a9d37897c587",
       "name": "boto3",
-      "versionInfo": "1.43.34,<2",
+      "versionInfo": "1.43.36,<2",
       "supplier": "Organization: PyPI",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -12426,11 +12415,6 @@
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-24423164863b7d6e"
-    },
-    {
-      "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
-      "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-8c5f6e725a35325f"
     },
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
@@ -16155,7 +16139,7 @@
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-51848596a2b7677c"
+      "relatedSpdxElement": "SPDXRef-Package-996768ad8eaac51b"
     },
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
@@ -16180,7 +16164,7 @@
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-49d6a6a9674d8b8a"
+      "relatedSpdxElement": "SPDXRef-Package-e5858919c73bff20"
     },
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
@@ -16220,7 +16204,7 @@
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-1f83425d1659432b"
+      "relatedSpdxElement": "SPDXRef-Package-e05e4dc618627030"
     },
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
@@ -16235,7 +16219,7 @@
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-4c80582d8b0297da"
+      "relatedSpdxElement": "SPDXRef-Package-e9c5dcb3dfb50c16"
     },
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
@@ -16255,7 +16239,7 @@
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-78629a66b698102e"
+      "relatedSpdxElement": "SPDXRef-Package-eb507fa94df54f02"
     },
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
@@ -16300,12 +16284,12 @@
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-0154aaebf7634f00"
+      "relatedSpdxElement": "SPDXRef-Package-6e766bdd31e0f246"
     },
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-7b64d986ee91b6fb"
+      "relatedSpdxElement": "SPDXRef-Package-3896a9d37897c587"
     },
     {
       "spdxElementId": "SPDXRef-Package-f6f570b49ae20b55",
