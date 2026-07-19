@@ -3171,6 +3171,33 @@ def update_worker(
                        "or 'America/New_York'.",
             )
 
+    base_trigger = (worker.get("config") or {}).get("trigger") or {}
+    previous_type = str(
+        worker.get("trigger_type") or base_trigger.get("type") or "manual"
+    ).strip().lower()
+    previous_type = "schedule" if previous_type == "cron" else previous_type
+    effective_type = (
+        payload.trigger_type
+        or worker.get("trigger_type")
+        or base_trigger.get("type")
+        or "manual"
+    )
+    effective_type = "schedule" if effective_type == "cron" else effective_type
+    effective_cron = (
+        new_cron_expr
+        if new_cron_expr is not None
+        else (worker.get("cron_expr") or base_trigger.get("cron"))
+    )
+    if (
+        payload.trigger_type is not None
+        or new_cron_expr is not None
+        or payload.cron_timezone is not None
+    ) and effective_type == "schedule" and not str(effective_cron or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Schedule triggers require a cron expression. Set cron_expr before saving.",
+        )
+
     updates: Dict[str, Any] = {}
 
     if payload.trigger_type is not None:
@@ -3241,26 +3268,6 @@ def update_worker(
         or payload.cron_timezone is not None
     )
     if trigger_changed:
-        base_trigger = (worker.get("config") or {}).get("trigger") or {}
-        previous_type = str(
-            worker.get("trigger_type")
-            or base_trigger.get("type")
-            or "manual"
-        ).strip().lower()
-        if previous_type == "cron":
-            previous_type = "schedule"
-        effective_type = (
-            payload.trigger_type
-            or worker.get("trigger_type")
-            or base_trigger.get("type")
-            or "manual"
-        )
-        effective_type = "schedule" if effective_type == "cron" else effective_type
-        effective_cron = (
-            new_cron_expr
-            if new_cron_expr is not None
-            else (worker.get("cron_expr") or base_trigger.get("cron"))
-        )
         effective_tz = (
             payload.cron_timezone
             if payload.cron_timezone is not None
@@ -3268,7 +3275,7 @@ def update_worker(
         )
         declared_trigger: Dict[str, Any] = {"type": effective_type}
         if effective_type == "schedule":
-            declared_trigger["cron"] = effective_cron or "0 9 * * *"
+            declared_trigger["cron"] = effective_cron
             declared_trigger["timezone"] = effective_tz or "UTC"
         declared_triggers = [declared_trigger]
         repos.workers.update(
@@ -3288,7 +3295,7 @@ def update_worker(
                 emit_worker_scheduled(
                     owner_id=auth.user_id,
                     worker_id=worker_id,
-                    cadence=str(effective_cron or "0 9 * * *"),
+                    cadence=str(effective_cron),
                     workspace_id=derive_workspace_id(auth.user_id),
                 )
             except Exception:
@@ -3301,7 +3308,7 @@ def update_worker(
                 existing_yml = worker_yml_path.read_text(encoding='utf-8')
                 trigger_lines = ["trigger:", f"  type: {effective_type}"]
                 if effective_type == "schedule":
-                    cron_val = effective_cron or "0 9 * * *"
+                    cron_val = effective_cron
                     tz_val = effective_tz or "UTC"
                     trigger_lines.append(f'  cron: "{cron_val}"')
                     trigger_lines.append(f'  timezone: "{tz_val}"')

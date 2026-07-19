@@ -153,6 +153,25 @@ def _emit_trigger_fired(
 
 logger = logging.getLogger("floom.scheduler")
 
+_WARNED_CRONLESS_SCHEDULE_WORKERS: set[str] = set()
+
+
+def _warn_cronless_schedule_once(worker_id: str, trigger_id: str | None = None) -> None:
+    if worker_id in _WARNED_CRONLESS_SCHEDULE_WORKERS:
+        return
+    _WARNED_CRONLESS_SCHEDULE_WORKERS.add(worker_id)
+    if trigger_id:
+        logger.warning(
+            "Trigger %s for worker %s is type=schedule but has no cron; it will not run",
+            trigger_id,
+            worker_id,
+        )
+    else:
+        logger.warning(
+            "Worker %s has trigger.type=schedule but no cron expression; it will not run",
+            worker_id,
+        )
+
 POLL_INTERVAL_SECONDS = 60  # check every minute
 _stop_event: threading.Event = threading.Event()
 _scheduler_thread: threading.Thread | None = None
@@ -428,9 +447,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
         workspace_id = row.get("workspace_id")
         cron_expr = _cron_expr_from_trigger_config(row.get("config_json"))
         if not cron_expr:
-            logger.warning(
-                "Trigger %s (worker %s) is type=schedule but has no cron", trigger_id, worker_id
-            )
+            _warn_cronless_schedule_once(worker_id, trigger_id)
             continue
         cron_timezone = _cron_timezone_from_trigger_config(row.get("config_json")) or row.get("cron_timezone") or "UTC"
         if _worker_is_archived(worker_id):
@@ -715,9 +732,7 @@ def _tick() -> None:
         cron_expr = w.get("cron_expr")
         cron_timezone = w.get("cron_timezone") or "UTC"
         if not cron_expr:
-            logger.warning(
-                "Worker %s has trigger.type=schedule but no cron expression", worker_id
-            )
+            _warn_cronless_schedule_once(worker_id)
             continue
         # Belt-and-suspenders: skip if manifest marks worker as archived.
         # The enabled=0 DB flag should already exclude them, but guard against

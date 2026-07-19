@@ -113,12 +113,12 @@ interface CronBuilderProps {
 // ---------------------------------------------------------------------------
 
 export function CronBuilder({ value, onChange, timezone = "UTC" }: CronBuilderProps) {
-  const [freq, setFreq] = useState<Frequency>("daily");
+  const [freq, setFreq] = useState<Frequency>(value.trim() ? "daily" : "custom");
   const [hour, setHour] = useState(9);
   const [minute, setMinute] = useState(0);
   const [dow, setDow] = useState<string[]>(["1"]); // Mon by default for weekly
   const [dom, setDom] = useState(1);
-  const [customExpr, setCustomExpr] = useState(value || "0 9 * * *");
+  const [customExpr, setCustomExpr] = useState(value);
 
   // On first mount: try to detect the frequency from the incoming value so
   // we pre-select the right preset instead of always defaulting to "daily".
