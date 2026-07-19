@@ -12,6 +12,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
+vi.mock("@/lib/useWorkspaceHref", () => ({
+  useWorkspaceHref: () => (href: string) => href,
+}));
+
 vi.mock("@/lib/query/hooks", () => ({
   // First-worker gate: 0 real workers, loaded successfully (not error/loading).
   useOverview: () => ({
@@ -48,47 +56,39 @@ function renderFirstWorker() {
 }
 
 describe("Emily home empty — first-worker zero-state (funnel reframe)", () => {
-  it("renders the first-worker hero heading", async () => {
+  it("renders the locked hero and the single goal question", async () => {
     renderFirstWorker();
-    expect(await screen.findByText(/get your first worker running/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText("Hire AI workers to handle the tasks you do over and over."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What do you want off your plate?" })).toBeInTheDocument();
+    expect(screen.getAllByText(/\?$/)).toHaveLength(1);
   });
 
-  it("presents the two real activation paths, template gallery first", async () => {
+  it("presents the four required goal lanes", async () => {
     renderFirstWorker();
-    await screen.findByText(/get your first worker running/i);
-
-    // PRIMARY: template gallery (a real link to the /templates gallery).
-    const browse = screen.getByRole("link", { name: /Browse templates/i });
-    expect(browse).toBeInTheDocument();
-    expect(browse.getAttribute("href")).toMatch(/\/templates$/);
-
-    // SECONDARY: coding-agent / MCP native path (opens the install modal).
-    expect(screen.getByRole("button", { name: /Set up in your coding agent/i })).toBeInTheDocument();
-
-    // Helper pills (assistant guides; does NOT build the worker in-dashboard).
-    expect(screen.getByRole("button", { name: /Which template fits my team/i })).toBeInTheDocument();
-    // The old false "Emily builds it" create pills are gone.
-    expect(screen.queryByRole("button", { name: /Create a Linear triage worker/i })).not.toBeInTheDocument();
+    await screen.findByText("Hire AI workers to handle the tasks you do over and over.");
+    for (const lane of ["Outreach & Leads", "Inbox & Comms", "Research", "Reports & Dev"]) {
+      expect(screen.getByRole("button", { name: new RegExp(lane) })).toBeInTheDocument();
+    }
   });
 
   it("has NO separate 'Uses' / 'Will use' chip-row label", async () => {
     renderFirstWorker();
-    await screen.findByText(/get your first worker running/i);
+    await screen.findByText("Hire AI workers to handle the tasks you do over and over.");
     expect(screen.queryByText(/^Uses$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Will use$/)).not.toBeInTheDocument();
   });
 
   it("removes the decorative radar mark above the heading", async () => {
     const { container } = renderFirstWorker();
-    const heading = await screen.findByText(/get your first worker running/i);
+    const heading = await screen.findByText("Hire AI workers to handle the tasks you do over and over.");
     // The radar mark was a full 48x48 viewBox SVG sibling above the heading.
     // After the change, any remaining inline SVG (e.g. pill capability glyphs)
     // must NOT be the 48-viewBox radar mark.
     const radar = container.querySelector('svg[viewBox="0 0 48 48"]');
     expect(radar).toBeNull();
-    // Sanity: the heading hero block has no SVG rendered directly before it.
-    const heroBlock = heading.parentElement as HTMLElement;
-    expect(heroBlock.querySelector("svg")).toBeNull();
+    expect(heading.previousElementSibling).toBeNull();
   });
 });
 

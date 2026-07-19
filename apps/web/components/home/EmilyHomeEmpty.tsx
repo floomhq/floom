@@ -36,6 +36,7 @@ import { tokenisePrompt } from "@/lib/prompt-detect";
 import { isMachineLabel } from "@/lib/workspace/display-name";
 import { Sparkline } from "@/components/Sparkline";
 import { resolveWorkersGate } from "./emily-home-empty";
+import { GoalOnboarding } from "./GoalOnboarding";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
 
@@ -396,6 +397,10 @@ export function EmilyHomeEmpty({
     },
     [onSeed],
   );
+
+  if (isFirstWorker && !createMode) {
+    return <GoalOnboarding />;
+  }
 
   return (
     <div className="flex w-full max-w-[760px] flex-col items-center px-6">
