@@ -742,7 +742,7 @@ export const api = {
     // download link -- no new auth surface). Callers gate on size/mime before
     // calling this; the response is untrusted worker output and MUST be
     // sanitized by the renderer (GenericOutput), never dangerouslySetInnerHTML.
-    artifactText: async (id: string, artifactId: string): Promise<string> => {
+    artifactText: async (id: string, artifactId: string, opts?: { maxBytes?: number }): Promise<string> => {
       const path = withWorkspaceQuery(
         `/runs/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`,
       );
@@ -750,7 +750,25 @@ export const api = {
       if (!res.ok) {
         throw new Error(await apiErrorFromResponse(res));
       }
-      return res.text();
+      const maxBytes = opts?.maxBytes;
+      if (maxBytes != null) {
+        // Don't trust artifact metadata (size_bytes) alone -- it can be stale
+        // or spoofed. Reject on the server-reported Content-Length before
+        // consuming the body so an oversized response can't force an
+        // unbounded client-side read/allocation.
+        const contentLength = res.headers.get("content-length");
+        if (contentLength != null && Number(contentLength) > maxBytes) {
+          throw new Error("Artifact exceeds inline preview size limit.");
+        }
+      }
+      const text = await res.text();
+      if (maxBytes != null && new TextEncoder().encode(text).length > maxBytes) {
+        // Re-check the actual decoded byte length after reading: a missing or
+        // inaccurate Content-Length header must not let an oversized artifact
+        // slip through to the renderer.
+        throw new Error("Artifact exceeds inline preview size limit.");
+      }
+      return text;
     },
   },
   approvals: {

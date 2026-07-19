@@ -803,7 +803,7 @@ function inlineKindForArtifact(artifact: RunDetail["artifacts"][number] | undefi
   if (artifact.size_bytes == null || artifact.size_bytes > INLINE_ARTIFACT_MAX_BYTES) return null;
   const mime = (artifact.type || "").toLowerCase();
   const name = (artifact.name || "").toLowerCase();
-  if (mime.includes("markdown") || /\.(md|markdown)$/.test(name)) return "markdown";
+  if (mime === "text/markdown" || mime === "text/x-markdown" || /\.(md|markdown)$/.test(name)) return "markdown";
   if (
     mime.startsWith("text/") ||
     mime === "application/json" ||
@@ -832,7 +832,7 @@ function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; p
     setInlineContent(null);
     setInlineFailed(false);
     api.runs
-      .artifactText(run.id, artifact.id)
+      .artifactText(run.id, artifact.id, { maxBytes: INLINE_ARTIFACT_MAX_BYTES })
       .then((text) => {
         if (!cancelled) setInlineContent(text);
       })
@@ -842,9 +842,10 @@ function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; p
     return () => {
       cancelled = true;
     };
-    // artifact.id is the stable identity here; run.id rarely changes without a
-    // remount but is included for correctness.
-  }, [inlineKind, artifact, run.id]);
+    // artifact?.id is the stable identity here (not the whole artifact object,
+    // whose identity can churn on every parent re-render); run.id rarely
+    // changes without a remount but is included for correctness.
+  }, [inlineKind, artifact?.id, run.id]);
 
   return (
     <div className="min-w-0 space-y-2">

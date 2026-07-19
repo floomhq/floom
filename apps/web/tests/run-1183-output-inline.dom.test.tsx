@@ -96,7 +96,7 @@ describe("#1183 inline artifact preview in the Output tab", () => {
     // Before the fix, this is where the buried-output bug lived: the artifact
     // body was never fetched, so the finding text below never appeared
     // anywhere in the Output tab (only in the raw infra-log feed).
-    expect(artifactText).toHaveBeenCalledWith("run_1183_inline", "artifact-report");
+    expect(artifactText).toHaveBeenCalledWith("run_1183_inline", "artifact-report", { maxBytes: 256 * 1024 });
     await waitFor(() => {
       expect(screen.getByText(/The run produced/i)).toBeInTheDocument();
     });
@@ -157,5 +157,125 @@ describe("#1183 inline artifact preview in the Output tab", () => {
 
     expect(screen.getByRole("link", { name: /Bundle out\/bundle\.zip/i })).toBeInTheDocument();
     expect(artifactText).not.toHaveBeenCalled();
+  });
+
+  // Codex review findings (post-implementation hardening), all re-verified here:
+  //  (B) the 256KB inline cap must not rely on artifact metadata alone --
+  //      OutputFileLink must pass it through to api.runs.artifactText so the
+  //      data layer can enforce it against the real response too.
+  //  (C) "markdown" mime matching must be exact, not a loose substring, so an
+  //      unrelated mime that merely contains "markdown" isn't misclassified.
+  //  (A) untrusted markdown images must never auto-load -- see the dedicated
+  //      generic-output hardening test alongside generic-output.tsx's own
+  //      suite; this file re-asserts the OutputFileLink -> GenericOutput wiring
+  //      surfaces artifact markdown through the sanitized renderer at all.
+
+  it("passes the 256KB cap through to api.runs.artifactText (defense in depth against spoofed size_bytes)", async () => {
+    artifactText.mockResolvedValueOnce("# Report\n\nOK");
+
+    render(
+      <RunDetailSplitPane
+        inline
+        run={run({
+          output_schema: [
+            { name: "report", kind: "file", label: "Report", type: "markdown", value: "out/report.md" },
+          ],
+          artifacts: [
+            {
+              id: "artifact-report",
+              run_id: "run_1183_inline",
+              name: "report.md",
+              path: "out/report.md",
+              relative_path: "out/report.md",
+              type: "text/markdown",
+              size_bytes: 512,
+              created_at: "2026-06-26T22:56:54Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(artifactText).toHaveBeenCalledWith("run_1183_inline", "artifact-report", {
+        maxBytes: 256 * 1024,
+      });
+    });
+  });
+
+  it("does not inline an artifact whose mime merely contains the substring \"markdown\" (exact-match only)", async () => {
+    render(
+      <RunDetailSplitPane
+        inline
+        run={run({
+          output_schema: [
+            { name: "report", kind: "file", label: "Report", type: "json", value: "out/report.weird" },
+          ],
+          artifacts: [
+            {
+              id: "artifact-weird",
+              run_id: "run_1183_inline",
+              name: "report.weird",
+              path: "out/report.weird",
+              relative_path: "out/report.weird",
+              // Contains "markdown" as a substring but is not an exact
+              // text/markdown or text/x-markdown mime, and has no .md
+              // extension -- must NOT be treated as inlinable markdown.
+              type: "application/x-not-quite-markdown",
+              size_bytes: 512,
+              created_at: "2026-06-26T22:56:54Z",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /Report out\/report\.weird/i })).toBeInTheDocument();
+    expect(artifactText).not.toHaveBeenCalled();
+  });
+
+  it("does not refetch when the artifact object's identity changes but its id stays the same", async () => {
+    artifactText.mockResolvedValueOnce("# Report\n\nOK");
+
+    const baseArtifact = {
+      id: "artifact-report",
+      run_id: "run_1183_inline",
+      name: "report.md",
+      path: "out/report.md",
+      relative_path: "out/report.md",
+      type: "text/markdown",
+      size_bytes: 512,
+      created_at: "2026-06-26T22:56:54Z",
+    };
+
+    const { rerender } = render(
+      <RunDetailSplitPane
+        inline
+        run={run({
+          output_schema: [
+            { name: "report", kind: "file", label: "Report", type: "markdown", value: "out/report.md" },
+          ],
+          artifacts: [{ ...baseArtifact }],
+        })}
+      />,
+    );
+
+    await waitFor(() => expect(artifactText).toHaveBeenCalledTimes(1));
+
+    // Same id, new object identity (e.g. a parent re-render created a fresh
+    // artifacts array) -- must not trigger a second fetch.
+    rerender(
+      <RunDetailSplitPane
+        inline
+        run={run({
+          output_schema: [
+            { name: "report", kind: "file", label: "Report", type: "markdown", value: "out/report.md" },
+          ],
+          artifacts: [{ ...baseArtifact }],
+        })}
+      />,
+    );
+
+    expect(artifactText).toHaveBeenCalledTimes(1);
   });
 });
