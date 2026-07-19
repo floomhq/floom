@@ -388,6 +388,7 @@ description: "Summarises recent Gmail messages."
 version: "0.1.0"
 trigger:
   type: "schedule"
+  cron: "0 * * * *"
 exec:
   entry: "SKILL.md"
   runner: "e2b"
@@ -411,6 +412,29 @@ connections: []
     assert worker_author._validate_generated_bundle(parsed, "Every hour, pull my latest Gmail.") is None
 
 
+def test_worker_author_rejects_cronless_schedule_instead_of_inventing_one():
+    worker_author = _load_worker_author_module()
+    error = worker_author._validate_worker_yml(
+        """
+schema_version: "0.3"
+name: "cronless-worker"
+title: "Cronless Worker"
+description: "A deliberately invalid scheduled worker."
+version: "0.1.0"
+trigger:
+  type: "schedule"
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+""",
+        prompt="Run this on a schedule.",
+    )
+
+    assert error is not None
+    assert "require a cron expression" in error.lower()
+    assert "instead of inventing one" in error.lower()
+
+
 def test_worker_author_repairs_agent_skill_finish_instruction():
     worker_author = _load_worker_author_module()
     parsed = worker_author._repair_generated_bundle(
@@ -423,6 +447,7 @@ description: "Summarises recent Gmail messages."
 version: "0.1.0"
 trigger:
   type: "schedule"
+  cron: "0 * * * *"
 exec:
   entry: "SKILL.md"
   runner: "e2b"
@@ -464,6 +489,7 @@ limits:
   timeout_seconds: 120
 trigger:
   type: "schedule"
+  cron: "0 * * * *"
 exec:
   entry: "SKILL.md"
   runner: "e2b"
@@ -505,6 +531,7 @@ description: "Summarises missed opportunities from Gmail."
 version: "0.1.0"
 trigger:
   type: "schedule"
+  cron: "0 * * * *"
 exec:
   entry: "SKILL.md"
   runner: "e2b"

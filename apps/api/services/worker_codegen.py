@@ -247,7 +247,8 @@ The WorkerContract YAML must follow schema_version "0.3":
 - `title`: human-readable title
 - `description`: 1-2 sentence description (max 500 chars)
 - ALWAYS double-quote every string scalar value (colons inside strings cause parse errors)
-- `trigger.cron`: REQUIRED when trigger.type is "schedule". Default: "0 9 * * *" if not specified.
+- `trigger.cron`: REQUIRED when trigger.type is "schedule". Derive it only from
+  timing the operator explicitly requested. Never invent a default cron.
 - `version`: semver like "0.1.0"
 - `targets`: ["generic"]
 
