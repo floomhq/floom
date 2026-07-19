@@ -599,3 +599,57 @@ def test_collect_agent_reply_details_logs_failure_raised_during_cancellation(
     assert "stream task failed during cancellation" in caplog.text
     assert "conv_cancel_failure" in caplog.text
     assert "teardown blew up" in caplog.text
+
+
+def test_collect_agent_reply_details_logs_natural_failure_during_external_cancellation(
+    monkeypatch, tmp_path, caplog
+):
+    _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+    common = importlib.import_module("channels.common")
+    post_finish_wait_entered = asyncio.Event()
+    release_stream_failure = asyncio.Event()
+    real_shield = asyncio.shield
+
+    def _tracking_shield(awaitable):
+        post_finish_wait_entered.set()
+        return real_shield(awaitable)
+
+    async def _finish_then_fail_when_released(*, part_queue, **kwargs):
+        await part_queue.put({"type": "text", "text": "completed before caller cancellation"})
+        await part_queue.put({
+            "type": "finish",
+            "conversation_id": "conv_external_cancel_failure",
+            "message_id": "msg_external_cancel_failure",
+        })
+        await release_stream_failure.wait()
+        raise RuntimeError("natural stream failure during external cancellation")
+
+    monkeypatch.setattr(common.asyncio, "shield", _tracking_shield)
+    monkeypatch.setattr(chat_service, "stream_chat", _finish_then_fail_when_released)
+
+    async def _cancel_collector_after_finish():
+        collector = asyncio.create_task(
+            common.collect_agent_reply_details(
+                message="hello",
+                user_id="mcp-test-user",
+                conversation_id=None,
+                source="mcp",
+            )
+        )
+        await post_finish_wait_entered.wait()
+        release_stream_failure.set()
+        collector.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await collector
+        await asyncio.sleep(0)
+
+    asyncio.run(asyncio.wait_for(_cancel_collector_after_finish(), timeout=1.0))
+    failure_records = [
+        record
+        for record in caplog.records
+        if record.exc_info
+        and str(record.exc_info[1])
+        == "natural stream failure during external cancellation"
+    ]
+    assert len(failure_records) == 1

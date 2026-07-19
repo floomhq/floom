@@ -844,7 +844,7 @@ async def collect_agent_reply_details(
     finish_part: dict = {}
     queue_get_task: Optional[asyncio.Task] = None
     task_outcome_retrieved = False
-    task_cancelled_during_cleanup = False
+    task_failure_logged = False
     try:
         while True:
             # stream_chat can fail before it reaches the try block that emits
@@ -906,6 +906,7 @@ async def collect_agent_reply_details(
                 "reply already complete — returning it",
                 finish_part.get("conversation_id"),
             )
+            task_failure_logged = True
     finally:
         if queue_get_task is not None and not queue_get_task.done():
             queue_get_task.cancel()
@@ -915,13 +916,14 @@ async def collect_agent_reply_details(
                 pass
         def _log_late_stream_failure(finished_task: asyncio.Task) -> None:
             try:
-                if finished_task.cancelled() or task_outcome_retrieved:
+                if (
+                    finished_task.cancelled()
+                    or task_outcome_retrieved
+                    or task_failure_logged
+                ):
                     return
                 exc = finished_task.exception()
                 if exc is not None:
-                    # A completed post-finish wait already logged this failure.
-                    if finish_part and not task_cancelled_during_cleanup:
-                        return
                     logger.exception(
                         "workspace agent stream task failed during cancellation "
                         "for conversation %s",
@@ -940,7 +942,6 @@ async def collect_agent_reply_details(
 
         task.add_done_callback(_log_late_stream_failure)
         if not task.done():
-            task_cancelled_during_cleanup = True
             task.cancel()
     return {
         "reply": strip_em_dashes("".join(text_parts).strip()),
