@@ -4709,17 +4709,21 @@ def create_worker_run(
     from run_service import SpendCapExceeded
 
     try:
-        # Execute with the worker owner's recipe/secrets. Preserve a distinct
-        # caller actor only for the curated stock-worker carve-out:
-        # ordinary workspace-visible runs intentionally stay owner-scoped even
-        # when a non-owner starts them. Stock workers may be materialized with
-        # workspace visibility, so the curated ID set, not mutable visibility,
-        # distinguishes that carve-out and prevents actor-aware lookups from
-        # widening ordinary workspace run visibility.
+        # Execute with the worker owner's recipe/secrets. Attribute non-owner MCP
+        # runs to their initiator based on how the run was started, not a worker-ID
+        # allowlist: an admin git-import can re-upsert a listed ID under another
+        # owner, so worker IDs are not a sound trust boundary. Although
+        # trigger_source is client-set, this only lets the caller observe the run
+        # they triggered: _get_visible_worker already requires permission to run
+        # the worker, and run scope joins each run to its own worker and matches
+        # only that run's actor or that worker's owner. The owner remains able to
+        # view and cancel the run through the scope predicate's OR w.owner_id term.
+        # Non-owner manual/session runs retain the established owner attribution.
         run_actor_user_id = true_owner_id
         if (
-            auth.user_id != true_owner_id
-            and worker_id in PUBLIC_STOCK_WORKER_IDS
+            auth.user_id
+            and auth.user_id != true_owner_id
+            and trigger_source == "mcp"
         ):
             run_actor_user_id = auth.user_id
         run_id = create_run(
