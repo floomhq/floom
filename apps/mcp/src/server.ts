@@ -28,8 +28,37 @@ const TERMINAL_RUN_STATUSES = new Set([
 const RUN_STATUS_VALUES = ["queued", "running", "pending_approval", "completed", "failed", "cancelled"] as const;
 const TOOL_TEXT_PREVIEW_CHARS = 4096;
 const TOOL_LIST_PREVIEW_ITEMS = 25;
+// Mirrors the API's _DEFAULT_UPLOAD_MAX_BYTES as a defense-in-depth guard
+// before local base64 decoding. The API's configured limit remains authoritative.
+const CLIENT_SIDE_MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 
 type JsonObject = Record<string, unknown>;
+
+export function estimateBase64DecodedSize(raw: string): number {
+  const padding = raw.endsWith("==") ? 2 : raw.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor(raw.length * 3 / 4) - padding);
+}
+
+export function assertBase64WithinLimit(raw: string, maxBytes: number): void {
+  const maxEncodedLength = 4 * Math.ceil(maxBytes / 3);
+  if (raw.length > maxEncodedLength || estimateBase64DecodedSize(raw) > maxBytes) {
+    throw new Error(`Uploaded file exceeds ${maxBytes} byte limit.`);
+  }
+}
+
+export function assertPlaintextWithinLimit(raw: string, maxBytes: number): void {
+  if (raw.length * 4 > maxBytes) {
+    throw new Error(`Uploaded file exceeds ${maxBytes} byte limit.`);
+  }
+}
+
+export function decodeBase64Strict(raw: string): Buffer {
+  const canonicalBase64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+  if (!canonicalBase64.test(raw)) {
+    throw new Error("'content_base64' is not valid canonical base64.");
+  }
+  return Buffer.from(raw, "base64");
+}
 
 function truncateToolText(value: unknown, limit = TOOL_TEXT_PREVIEW_CHARS): JsonObject {
   const text = value == null ? "" : String(value);
@@ -389,6 +418,54 @@ async function requestBytes(
     );
   }
   return parsed;
+}
+
+async function uploadInlineFile(
+  filename: string,
+  content?: string,
+  contentBase64?: string,
+): Promise<unknown> {
+  // #2265: MCP-native upload path so file-input workers are runnable. Reuses
+  // the same POST /uploads route (and therefore the same validation, caps,
+  // and ownership rows) the dashboard upload form uses.
+  if ((content === undefined) === (contentBase64 === undefined)) {
+    throw new Error("Provide exactly one of 'content' or 'content_base64'.");
+  }
+  let bytes: Buffer;
+  if (content !== undefined) {
+    assertPlaintextWithinLimit(content, CLIENT_SIDE_MAX_UPLOAD_BYTES);
+    bytes = Buffer.from(content, "utf-8");
+  } else {
+    const raw = contentBase64 ?? "";
+    assertBase64WithinLimit(raw, CLIENT_SIDE_MAX_UPLOAD_BYTES);
+    bytes = decodeBase64Strict(raw);
+  }
+  const form = new FormData();
+  form.append("file", new File([new Uint8Array(bytes)], filename));
+  const response = await fetch(buildUrl("/uploads"), {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      ...(await authHeaders()),
+    },
+    body: form,
+  });
+  const parsed = await parseResponse(response);
+  if (!response.ok) {
+    const safeParsed = redactSecrets(parsed);
+    const detail =
+      typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
+        ? renderErrorDetail((safeParsed as { detail: unknown }).detail)
+        : JSON.stringify(safeParsed);
+    throw new FloomApiError(
+      `Floom API POST /uploads failed with HTTP ${response.status}: ${detail}`,
+      response.status,
+      parsed,
+    );
+  }
+  const record: JsonObject = parsed && typeof parsed === "object" ? { ...(parsed as JsonObject) } : { data: parsed };
+  record.usage = "Pass this sha256 value as the file input's value in workers.run inputs.";
+  return record;
 }
 
 async function readContextFile(name: string, path: string): Promise<unknown> {
@@ -1060,16 +1137,47 @@ export function createServer(): McpServer {
     "workers.run",
     {
       title: "Run Worker",
-      description: "Start a Floom worker run through MCP.",
+      description:
+        "Start a Floom worker run through MCP. File-type inputs accept a SHA-256 upload reference " +
+        "(mint one with files.upload), inline text content, or {content|content_base64, filename} \u2014 " +
+        "inline content is uploaded transparently.",
       inputSchema: {
         id: z.string().min(1).describe("Floom worker id."),
-        inputs: z.record(z.string(), z.unknown()).default({}).describe("Input values for this run."),
+        inputs: z.record(z.string(), z.unknown()).default({}).describe(
+          "Input values for this run. For file-type inputs pass a SHA-256 reference from files.upload, " +
+          "inline text content, or {content|content_base64, filename}.",
+        ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async ({ id, inputs }) =>
       callTool(async () =>
         jsonResult(await request("POST", `/workers/${encodeURIComponent(id)}/runs`, { inputs, trigger_source: "mcp" })),
+      ),
+  );
+
+  server.registerTool(
+    "files.upload",
+    {
+      title: "Upload File",
+      description:
+        "Upload file content (UTF-8 text or base64) and get back the SHA-256 reference to pass as a " +
+        "file-type input value in workers.run. This is the MCP upload path for file-input workers \u2014 " +
+        "no browser form needed.",
+      inputSchema: {
+        filename: z.string().min(1).describe(
+          "Filename with extension, e.g. notes.txt or data.csv. The extension determines the stored media type.",
+        ),
+        content: z.string().optional().describe("UTF-8 text content. Provide exactly one of content or content_base64."),
+        content_base64: z.string().optional().describe(
+          "Base64-encoded binary content. Provide exactly one of content or content_base64.",
+        ),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ filename, content, content_base64 }) =>
+      callTool(async () =>
+        jsonResult(await uploadInlineFile(filename, content, content_base64), "File uploaded."),
       ),
   );
 
@@ -1752,7 +1860,10 @@ export function createServer(): McpServer {
     "workers.sample_input",
     {
       title: "Get Worker Sample Input",
-      description: "Get example input values for a worker's input fields. Useful for showing a user what to fill in before running.",
+      description:
+        "Get example input values for a worker's input fields. The returned values are directly runnable " +
+        "with workers.run \u2014 for file-type inputs the example is inline text content, which workers.run " +
+        "uploads transparently (or mint a SHA-256 reference with files.upload).",
       inputSchema: workerIdSchema.shape,
       annotations: { readOnlyHint: true, openWorldHint: true },
     },

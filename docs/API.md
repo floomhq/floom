@@ -43,6 +43,30 @@ the generated OpenAPI docs.
 | `/runs/{id}/feedback/issue` | POST | Convert actionable run feedback into a workspace issue bound to the run (`asset_type=run`, `source=run_feedback`, label `run-feedback`). Opt-in; a stable `feedback_id` dedups (returns the existing issue with `created=false`, `200`). |
 | `/approvals` | GET | List pending approvals |
 
+### Uploads and file inputs
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/uploads` | POST | Multipart upload; returns the content-addressed SHA-256 reference |
+| `/uploads/{sha256}` | GET | Signed-token download of an uploaded blob |
+| `/uploads/{sha256}` | DELETE | Drop ownership; blob is GC'd when unreferenced |
+
+A worker's `type: file` inputs accept any of these value forms in
+`POST /workers/{id}/runs` (#2265):
+
+- a SHA-256 reference from `POST /uploads` (or the `files.upload` MCP tool);
+- inline text content as a plain string — uploaded transparently through the
+  same pipeline (allowlists, size caps, quota, ownership all still apply);
+- `{"content": "...", "filename": "notes.txt"}` or
+  `{"content_base64": "...", "filename": "data.bin"}` for explicit filenames
+  or binary content.
+
+Values matching a hex digest shape that are not a valid 64-char lowercase
+SHA-256 are rejected with `400` instead of being treated as inline content, so
+a typo'd reference never silently becomes a file body. MCP agents can mint a
+reference with the `files.upload` tool, and `workers.sample_input` examples for
+file inputs are inline text that `workers.run` accepts directly.
+
 ### Connections and secrets
 
 | Endpoint | Method | Description |
