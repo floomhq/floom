@@ -1697,6 +1697,7 @@ class WorkerContract(BaseModel):
     resources: WorkerResources = Field(default_factory=WorkerResources)
     csv_required_columns: Optional[List[str]] = None
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
+    notify: Optional["NotifyConfig"] = None
     calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
 
     @model_validator(mode="before")
@@ -2025,6 +2026,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
+        notify=contract.notify,
         capabilities=_model_data(contract.capabilities),
         calls=list(contract.calls),
     )
@@ -2149,6 +2151,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         contexts=[_model_data(context) for context in config.contexts],
         memory=config.memory,
         csv_required_columns=config.csv_required_columns,
+        notify=config.notify,
     )
 
 
@@ -2755,6 +2758,9 @@ class NotifyConfig(BaseModel):
     secret: Optional[str] = None
     # Optional custom email subject (supports {worker_name} and {status} placeholders)
     email_subject: Optional[str] = None
+    # Slack channel that receives approval cards. The cloud wrapper resolves the
+    # channel against the workspace's Slack installation before sending.
+    slack_channel_id: Optional[str] = Field(default=None, pattern=r"^[CG][A-Z0-9]{8,31}$")
 
 
 # ---------------------------------------------------------------------------
