@@ -46,6 +46,12 @@ export function assertBase64WithinLimit(raw: string, maxBytes: number): void {
   }
 }
 
+export function assertPlaintextWithinLimit(raw: string, maxBytes: number): void {
+  if (raw.length * 4 > maxBytes) {
+    throw new Error(`Uploaded file exceeds ${maxBytes} byte limit.`);
+  }
+}
+
 export function decodeBase64Strict(raw: string): Buffer {
   const canonicalBase64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
   if (!canonicalBase64.test(raw)) {
@@ -427,6 +433,7 @@ async function uploadInlineFile(
   }
   let bytes: Buffer;
   if (content !== undefined) {
+    assertPlaintextWithinLimit(content, CLIENT_SIDE_MAX_UPLOAD_BYTES);
     bytes = Buffer.from(content, "utf-8");
   } else {
     const raw = contentBase64 ?? "";

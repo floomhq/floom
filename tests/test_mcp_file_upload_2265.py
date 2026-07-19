@@ -456,3 +456,44 @@ def test_base64_size_cap_rejected_before_decode_on_both_api_paths(monkeypatch, t
         "inline file-input path decoded the oversized base64 payload "
         "instead of rejecting it before decode"
     )
+
+
+def test_plaintext_content_size_cap_rejected_before_encode(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_UPLOAD_MAX_BYTES", "32")
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    oversized = "x" * 33
+
+    with main.get_db() as conn:
+        files_before = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+
+    upload = _serve(
+        client,
+        "files.upload",
+        {"filename": "large.txt", "content": oversized},
+    )
+    assert upload.get("isError") is True, upload
+    assert upload["structuredContent"]["status"] == 400
+    assert "exceeds 32 bytes limit" in upload["content"][0]["text"]
+
+    worker_id = _create_file_worker(client)
+    run = client.post(
+        f"/workers/{worker_id}/runs",
+        headers=_headers("user-a"),
+        json={
+            "inputs": {
+                "source_materials": {
+                    "content": oversized,
+                    "filename": "large.txt",
+                },
+                "topic": "t",
+            }
+        },
+    )
+    assert run.status_code == 400, run.text
+    assert run.json()["detail"] == "Uploaded file exceeds 32 bytes limit"
+
+    with main.get_db() as conn:
+        files_after = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+    assert files_after == files_before
+    assert not any((tmp_path / "blobs").rglob("*"))

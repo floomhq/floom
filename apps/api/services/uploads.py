@@ -165,6 +165,14 @@ def _reject_oversized_base64(raw: str, max_bytes: int) -> None:
         )
 
 
+def _reject_oversized_plaintext(raw: str, max_bytes: int) -> None:
+    if len(raw) * 4 > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Uploaded file exceeds {_format_bytes(max_bytes)} limit",
+        )
+
+
 def _upload_quota_key(uploaded_by: str) -> str:
     if not uploaded_by or uploaded_by == "anonymous":
         return "anon"

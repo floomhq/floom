@@ -2714,7 +2714,11 @@ def _resolve_inline_file_inputs(
         return inputs
 
     from async_bridge import run_coro_sync
-    from services.uploads import store_inline_upload
+    from services.uploads import (
+        _reject_oversized_plaintext,
+        resolve_upload_max_bytes,
+        store_inline_upload,
+    )
 
     def _to_ref(inp: Any, item: Any) -> Any:
         if is_sha256(item):
@@ -2732,6 +2736,10 @@ def _resolve_inline_file_inputs(
                         "content; pass {\"content\": ...} to force inline upload."
                     ),
                 )
+            _reject_oversized_plaintext(
+                item,
+                resolve_upload_max_bytes(getattr(inp, "max_size_mb", None)),
+            )
             content_bytes = item.encode("utf-8")
         elif isinstance(item, dict) and (
             item.get("content") is not None or item.get("content_base64") is not None
@@ -2752,6 +2760,10 @@ def _resolve_inline_file_inputs(
                         status_code=400,
                         detail=f"File input '{inp.name}': 'content' must be a string",
                     )
+                _reject_oversized_plaintext(
+                    raw_text,
+                    resolve_upload_max_bytes(getattr(inp, "max_size_mb", None)),
+                )
                 content_bytes = raw_text.encode("utf-8")
             else:
                 if not isinstance(raw_b64, str):
@@ -2761,7 +2773,6 @@ def _resolve_inline_file_inputs(
                     )
                 from services.uploads import (
                     _reject_oversized_base64,
-                    resolve_upload_max_bytes,
                 )
 
                 try:
@@ -7019,6 +7030,7 @@ async def _mcp_call_files_upload(
     """
     from services.uploads import (
         _reject_oversized_base64,
+        _reject_oversized_plaintext,
         resolve_upload_max_bytes,
         store_inline_upload,
     )
@@ -7034,6 +7046,10 @@ async def _mcp_call_files_upload(
     if content is not None:
         if not isinstance(content, str):
             return _mcp_tool_error("'content' must be a string")
+        try:
+            _reject_oversized_plaintext(content, resolve_upload_max_bytes())
+        except HTTPException as exc:
+            return _mcp_http_error_result(exc)
         data = content.encode("utf-8")
     else:
         if not isinstance(content_b64, str):
