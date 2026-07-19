@@ -36,6 +36,35 @@ def test_modern_worker_contract_preserves_slack_approval_target() -> None:
     assert projected.notify.slack_channel_id == "C0123456789"
 
 
+def test_worker_create_record_preserves_unquoted_yaml_on_event() -> None:
+    from services.worker_create import _worker_record_from_worker_yml
+
+    record = _worker_record_from_worker_yml(
+        "slack-approval-test",
+        """\
+schema_version: "0.3"
+name: slack-approval-test
+title: Slack approval test
+description: Verifies notification contract persistence.
+version: "0.1.0"
+exec:
+  command: python run.py
+notify:
+  slack_channel_id: C0123456789
+  on:
+    - pending_approval
+""",
+    )
+
+    expected = {
+        "on": ["pending_approval"],
+        "slack_channel_id": "C0123456789",
+    }
+    assert record["manifest"]["notify"] == expected
+    assert record["config"]["notify"]["on"] == ["pending_approval"]
+    assert record["config"]["notify"]["slack_channel_id"] == "C0123456789"
+
+
 @pytest.mark.asyncio
 async def test_agent_tool_pending_approval_calls_shared_slack_hook(monkeypatch) -> None:
     monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
