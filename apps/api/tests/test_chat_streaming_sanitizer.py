@@ -188,6 +188,9 @@ def test_stream_chat_emits_and_persists_only_sanitized_text(monkeypatch, tmp_pat
     class FakeLoopLocalModelProvider:
         provider = object()
 
+        def __init__(self, **_kwargs):
+            pass
+
         async def aclose(self):
             return None
 
