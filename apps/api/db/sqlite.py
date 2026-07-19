@@ -2046,17 +2046,26 @@ class SqliteRunRepository:
         offset: int,
     ) -> list[dict[str, Any]]:
         with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+            scope_sql = (
+                "(COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"
+                if has_actor_user_id
+                else "w.owner_id = ?"
+            )
+            scope_params: tuple[Any, ...] = (
+                (user_id, user_id) if has_actor_user_id else (user_id,)
+            )
             rows = conn.execute(
-                """
+                f"""
                 SELECT r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
                        r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ? AND r.worker_id = ?
+                WHERE {scope_sql} AND r.worker_id = ?
                 ORDER BY r.created_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                (user_id, worker_id, limit, offset),
+                (*scope_params, worker_id, limit, offset),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -2524,24 +2533,22 @@ class SqliteRunRepository:
                 raise ValueError(f"worker {worker_id} not found")
             # Allow workspace-visible workers to be run by any authenticated user.
             # Non-workspace private workers can only be run by their owner.
-            # When a non-owner runs a workspace worker, attribute the run to the
-            # worker's owner so existing owner-scoped run queries keep working.
+            # effective_user_id is the scope used to read the inserted row back;
+            # actor_user_id separately records the authenticated run initiator.
             #
             # Runnable-by-attribution carve-out: curated catalog/stock workers
             # (PUBLIC_STOCK_WORKER_IDS) ship with the product and may be run by
             # ANY authenticated user. They are seed-owned and `private`, so the
             # owner/visibility checks below would reject a fresh tenant with
-            # "Worker not found"/"Invalid request". Attribute the run to the
-            # CALLER's scope so the catalog worker runs without leaking another
-            # tenant's authored worker (only this curated set is widened).
+            # "Worker not found"/"Invalid request". Only this curated set gets
+            # the widened run permission.
             if worker["owner_id"] == user_id:
                 effective_user_id = user_id
             elif worker["visibility"] == "workspace":
                 effective_user_id = worker["owner_id"]
             elif worker_id in _public_stock_worker_ids():
-                # Curated catalog worker: attribute the run to the worker's owner
-                # (same as the workspace path) so the owner-scoped run JOIN
-                # (w.owner_id) resolves and get()/list() keep working.
+                # Read the inserted row back through its worker-owner scope. The
+                # caller remains independently recorded in actor_user_id.
                 effective_user_id = worker["owner_id"]
             else:
                 # Genuine cross-tenant ownership denial. Raise a typed error the
@@ -2643,8 +2650,17 @@ class SqliteRunRepository:
             else:
                 params.append(value)
         if updates:
-            params.extend([run_id, user_id])
             with get_db() as conn:
+                has_actor_user_id = self._has_actor_user_id_column(conn)
+                scope_sql = (
+                    "(COALESCE(runs.actor_user_id, workers.owner_id) = ? "
+                    "OR workers.owner_id = ?)"
+                    if has_actor_user_id
+                    else "workers.owner_id = ?"
+                )
+                scope_params: tuple[Any, ...] = (
+                    (user_id, user_id) if has_actor_user_id else (user_id,)
+                )
                 conn.execute(
                     f"""
                     UPDATE runs
@@ -2653,10 +2669,10 @@ class SqliteRunRepository:
                       AND EXISTS (
                           SELECT 1 FROM workers
                           WHERE workers.id = runs.worker_id
-                            AND workers.owner_id = ?
+                            AND {scope_sql}
                       )
                     """,
-                    tuple(params),
+                    (*params, run_id, *scope_params),
                 )
         return self.get(user_id=user_id, run_id=run_id)
 

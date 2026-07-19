@@ -216,6 +216,7 @@ _OPERATOR_TRIGGER_SOURCES = frozenset({
     "approval",
     "composio",
     "webhook",
+    "mcp",
     "workspace-agent",
 })
 

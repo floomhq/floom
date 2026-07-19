@@ -409,6 +409,7 @@ class TestDrainLoopDbMethods:
         assert owner_row is not None
         assert owner_row["status"] == "queued"
         assert owner_row["started_at"] is None
+        assert repos.runs.get_any(run_id=run_id)["actor_user_id"] == "worker-owner"
         assert repos.runs.get(user_id="workspace-admin", run_id=run_id) is None
 
         run_service = sys.modules.get("run_service")
