@@ -307,7 +307,7 @@ limits:
   max_tool_iterations: 30
   max_output_tokens: 4096
   max_total_tokens: 50000
-  timeout_seconds: 300
+  timeout_seconds: 900
 exec:
   runtime: python311
   runner: e2b
@@ -347,10 +347,11 @@ limits:
   max_tool_iterations: 60
   max_output_tokens: 100000
   max_total_tokens: 1000000
-  timeout_seconds: 300
+  timeout_seconds: 900
 ```
 
 This gives the agent enough room to consume large tool responses and still call `finish_with_outputs`.
+Browse, scrape, and research workers need `limits.timeout_seconds` set to 1800-3600.
 
 Live reference: [workers/research_brief/](../workers/research_brief/).
 
@@ -691,7 +692,7 @@ If smoke-test fails:
 |---|---|---|
 | Missing secret | Run fails with `KeyError` or empty output | Declare in `secrets:` AND `capabilities.secrets:` |
 | Egress not enabled | OpenAI calls hang | `capabilities.network.egress: true` |
-| Timeout too low | Run cancelled at 60s | Set `exec.limits.timeout_seconds: 300` (or higher) |
+| Timeout too low | Browse, scrape, or research run ends before completion | Set `limits.timeout_seconds: 1800-3600` |
 | Floating dep version | "It worked yesterday" | Pin exact versions in requirements.txt |
 | Modal claude-code tools | `Read is not defined` in sandbox | Switch to plain Python `open()` / `pathlib` |
 | Relative path to ~/ | `FileNotFoundError` in sandbox | Use bundle-relative paths only |

@@ -1042,7 +1042,10 @@ def _sandbox_exception_result(
     if _looks_like_timeout_exception(exc) and _timeout_elapsed_near_cap(elapsed_seconds, timeout_seconds):
         return WorkerResult(
             status="error",
-            error=f"Worker exceeded its {timeout_seconds}s timeout and was stopped.",
+            error=(
+                f"Worker exceeded its {timeout_seconds}s timeout and was stopped. "
+                "Raise limits.timeout_seconds in worker.yml (max 3600)."
+            ),
             error_code="timeout",
             retryable=True,
         )
