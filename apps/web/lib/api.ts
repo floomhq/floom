@@ -751,24 +751,51 @@ export const api = {
         throw new Error(await apiErrorFromResponse(res));
       }
       const maxBytes = opts?.maxBytes;
-      if (maxBytes != null) {
-        // Don't trust artifact metadata (size_bytes) alone -- it can be stale
-        // or spoofed. Reject on the server-reported Content-Length before
-        // consuming the body so an oversized response can't force an
-        // unbounded client-side read/allocation.
-        const contentLength = res.headers.get("content-length");
-        if (contentLength != null && Number(contentLength) > maxBytes) {
-          throw new Error("Artifact exceeds inline preview size limit.");
-        }
+      if (maxBytes == null) {
+        return res.text();
       }
-      const text = await res.text();
-      if (maxBytes != null && new TextEncoder().encode(text).length > maxBytes) {
-        // Re-check the actual decoded byte length after reading: a missing or
-        // inaccurate Content-Length header must not let an oversized artifact
-        // slip through to the renderer.
+      // Don't trust artifact metadata (size_bytes) alone -- it can be stale or
+      // spoofed. The download endpoint streams its response and does not
+      // always send Content-Length, so buffering the whole body with
+      // res.text() first (then measuring it) still lets an oversized artifact
+      // force an unbounded read/allocation before the check ever runs. Cheap
+      // fast path first, then stream the real body and abort as soon as the
+      // byte budget is exceeded.
+      const contentLength = res.headers.get("content-length");
+      if (contentLength != null && Number(contentLength) > maxBytes) {
         throw new Error("Artifact exceeds inline preview size limit.");
       }
-      return text;
+      const reader = res.body?.getReader();
+      if (!reader) {
+        // No streaming body available (e.g. a test/mock Response) -- fall
+        // back to a single read, still bounded by a post-hoc size check.
+        const text = await res.text();
+        if (new TextEncoder().encode(text).length > maxBytes) {
+          throw new Error("Artifact exceeds inline preview size limit.");
+        }
+        return text;
+      }
+      let received = 0;
+      const chunks: Uint8Array[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          received += value.byteLength;
+          if (received > maxBytes) {
+            await reader.cancel();
+            throw new Error("Artifact exceeds inline preview size limit.");
+          }
+          chunks.push(value);
+        }
+      }
+      const combined = new Uint8Array(received);
+      let offset = 0;
+      for (const chunk of chunks) {
+        combined.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return new TextDecoder("utf-8", { fatal: false }).decode(combined);
     },
   },
   approvals: {

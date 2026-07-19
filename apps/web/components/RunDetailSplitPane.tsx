@@ -826,13 +826,15 @@ function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; p
   const [inlineContent, setInlineContent] = useState<string | null>(null);
   const [inlineFailed, setInlineFailed] = useState(false);
 
+  const artifactId = artifact?.id;
+
   useEffect(() => {
-    if (!inlineKind || !artifact) return;
+    if (!inlineKind || !artifactId) return;
     let cancelled = false;
     setInlineContent(null);
     setInlineFailed(false);
     api.runs
-      .artifactText(run.id, artifact.id, { maxBytes: INLINE_ARTIFACT_MAX_BYTES })
+      .artifactText(run.id, artifactId, { maxBytes: INLINE_ARTIFACT_MAX_BYTES })
       .then((text) => {
         if (!cancelled) setInlineContent(text);
       })
@@ -842,10 +844,12 @@ function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; p
     return () => {
       cancelled = true;
     };
-    // artifact?.id is the stable identity here (not the whole artifact object,
-    // whose identity can churn on every parent re-render); run.id rarely
-    // changes without a remount but is included for correctness.
-  }, [inlineKind, artifact?.id, run.id]);
+    // artifactId (captured above) is the stable identity the effect closes
+    // over -- no reference to the whole artifact object here, so this
+    // dependency array is exhaustive-deps clean by construction, not just by
+    // suppression. run.id rarely changes without a remount but is included
+    // for correctness.
+  }, [inlineKind, artifactId, run.id]);
 
   return (
     <div className="min-w-0 space-y-2">
@@ -864,7 +868,7 @@ function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; p
         <Download className="size-4 shrink-0 text-muted-foreground" />
       </a>
       {/* Inline preview: SANITIZED via GenericOutput (same renderer already used
-          for non-file schema output — no dangerouslySetInnerHTML, no rehype-raw,
+          for non-file schema output: no dangerouslySetInnerHTML, no rehype-raw,
           worker text/markdown is treated as untrusted throughout). Silently
           falls back to the download-only stub above on fetch failure. */}
       {inlineKind && !inlineFailed && (
