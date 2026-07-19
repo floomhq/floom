@@ -11,6 +11,10 @@ function anchors(container: HTMLElement): HTMLAnchorElement[] {
   return Array.from(container.querySelectorAll("a"));
 }
 
+function images(container: HTMLElement): HTMLImageElement[] {
+  return Array.from(container.querySelectorAll("img"));
+}
+
 describe("#914 markdown link sanitization", () => {
   const payloads = [
     "[click me](javascript:alert(document.cookie))",
@@ -61,6 +65,47 @@ describe("#914 markdown link sanitization", () => {
       expect(found.length).toBe(1);
       expect(found[0].getAttribute("href")).toBeNull();
       expect(found[0].getAttribute("target")).toBe("_blank");
+    }
+  });
+});
+
+// #1183 — untrusted markdown images must never auto-load. Worker artifact
+// content (e.g. a rendered report.md) can embed `![alt](url)`; without an
+// explicit override, react-markdown renders a live <img> that fires a
+// network request the instant the Output tab renders -- a tracking-pixel /
+// viewer-IP-leak vector with no user action and no confirmation.
+describe("#1183 markdown image sanitization", () => {
+  it("never renders a live <img> tag for markdown images, even for safe-looking https URLs", () => {
+    const md = "![tracking pixel](https://attacker.example/track.png?u=victim)";
+    const { container } = render(<GenericOutput type="markdown" value={md} />);
+    expect(images(container).length).toBe(0);
+  });
+
+  it("surfaces the image as an explicit, sanitized, opt-in link instead", () => {
+    const md = "![a chart](https://example.com/chart.png)";
+    const { container } = render(<GenericOutput type="markdown" value={md} />);
+    expect(images(container).length).toBe(0);
+    const found = anchors(container);
+    expect(found.length).toBe(1);
+    expect(found[0].getAttribute("href")).toBe("https://example.com/chart.png");
+    expect(found[0].getAttribute("target")).toBe("_blank");
+    expect(found[0].textContent).toMatch(/a chart/i);
+  });
+
+  it("drops dangerous-protocol image sources entirely (no href, no fallback navigation)", () => {
+    const payloads = [
+      "![x](javascript:alert(1))",
+      "![x](data:text/html,<script>alert(1)</script>)",
+      "![x](vbscript:msgbox(1))",
+      "![x](//attacker.example/fake.png)",
+    ];
+    for (const md of payloads) {
+      const { container } = render(<GenericOutput type="markdown" value={md} />);
+      expect(images(container).length).toBe(0);
+      for (const a of anchors(container)) {
+        const href = a.getAttribute("href") ?? "";
+        expect(href).not.toMatch(/^\s*(javascript|vbscript|data):/i);
+      }
     }
   });
 });
