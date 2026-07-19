@@ -376,6 +376,7 @@ export function EmilyHomeEmpty({
 
   useEffect(() => {
     onGoalOnboardingChange?.(showGoalOnboarding);
+    return () => onGoalOnboardingChange?.(false);
   }, [onGoalOnboardingChange, showGoalOnboarding]);
 
   // Fix-as-prompt: needs-attention items + per-worker fix pills.
