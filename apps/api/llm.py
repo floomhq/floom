@@ -37,9 +37,10 @@ _PROVIDER_ERROR_RE = _re.compile(
     r"error code: \d{3}|openai|anthropic|litellm|bedrock|api.?connection",
     _re.IGNORECASE,
 )
-_GEMINI_KEY_FALLBACK_RE = _re.compile(
+_PROVIDER_FALLBACK_RE = _re.compile(
     r"invalid api key|api[_ -]?key|authentication|permission|unauthorized|forbidden"
     r"|billing|quota|exceeded your current quota|rate.?limit|resource_exhausted"
+    r"|credential|access.?denied|unrecognizedclient|expiredtoken|security token"
     r"|429|401|403",
     _re.IGNORECASE,
 )
@@ -57,6 +58,12 @@ def safe_llm_error_message(exc: BaseException | str, *, action: str = "This requ
     emit an `LLM_PROVIDER_ALERT` ERROR record so ops alerting can key on it.
     """
     text = str(exc)
+    if "chat model fallback exhausted" in text.lower():
+        logger.error("LLM_PROVIDER_ALERT chat fallback exhausted (%s)", action)
+        return (
+            f"{action} hit a temporary capacity issue after retrying another provider. "
+            "Please try again."
+        )
     if is_llm_provider_outage(text):
         logger.error("LLM_PROVIDER_ALERT quota/auth failure (%s): %s", action, text)
         return (
@@ -105,7 +112,12 @@ def _gemini_fallback_key() -> str | None:
 
 
 def _should_retry_gemini_with_fallback(exc: BaseException) -> bool:
-    return bool(_GEMINI_KEY_FALLBACK_RE.search(str(exc)))
+    return should_retry_chat_with_fallback(exc)
+
+
+def should_retry_chat_with_fallback(exc: BaseException) -> bool:
+    """True when a chat provider failure is safe to retry on another model."""
+    return bool(_PROVIDER_FALLBACK_RE.search(str(exc)))
 
 
 def agent_model(model: str) -> str:
