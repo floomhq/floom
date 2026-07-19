@@ -2765,6 +2765,22 @@ class NotifyConfig(BaseModel):
     # channel against the workspace's Slack installation before sending.
     slack_channel_id: Optional[str] = Field(default=None, pattern=r"^[CG][A-Z0-9]{8,31}$")
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_yaml_11_on_key(cls, value: Any) -> Any:
+        """Preserve an unquoted YAML ``on:`` key parsed by PyYAML as ``True``.
+
+        PyYAML's safe loader follows YAML 1.1 boolean rules, where ``on`` is a
+        boolean synonym. Worker manifests commonly use the idiomatic unquoted
+        form, so normalize only this notification key before field validation.
+        An explicitly quoted ``on`` field remains authoritative if both forms
+        are present.
+        """
+        if isinstance(value, dict) and "on" not in value and True in value:
+            value = {**value, "on": value[True]}
+            value.pop(True, None)
+        return value
+
 
 # ---------------------------------------------------------------------------
 # Alert (webhook) response shapes
