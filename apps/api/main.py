@@ -6329,6 +6329,7 @@ async def _collect_workspace_agent_reply_for_langdock(
     )
 
 
+# TODO(#follow-up): workspace.chat accepts timeout_ms but does not enforce it end-to-end.
 async def _mcp_workspace_chat_result(arguments: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """Shared workspace.chat handler for both MCP dispatchers (#2266/#2269).
 

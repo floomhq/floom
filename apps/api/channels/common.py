@@ -15,6 +15,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_POST_FINISH_TEARDOWN_GRACE_SECONDS = 5.0
+
 # ---------------------------------------------------------------------------
 # Maximum inbound webhook body size (applies to all channels).
 # Reject payloads larger than this before any parsing or HMAC work.
@@ -883,7 +885,16 @@ async def collect_agent_reply_details(
                 finish_part = part
                 break
         try:
-            await task
+            await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=_POST_FINISH_TEARDOWN_GRACE_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "workspace agent reply already complete for conversation %s; "
+                "returning it while teardown was still pending",
+                finish_part.get("conversation_id"),
+            )
         except Exception:
             logger.exception(
                 "workspace agent stream task failed after finish for conversation %s; "

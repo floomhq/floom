@@ -469,3 +469,51 @@ def test_collect_agent_reply_details_keeps_finish_when_task_then_raises(monkeypa
         "conversation_id": "conv_finished",
         "message_id": "msg_finished",
     }
+
+
+def test_collect_agent_reply_details_returns_when_post_finish_teardown_hangs(
+    monkeypatch, tmp_path, caplog
+):
+    _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+    common = importlib.import_module("channels.common")
+    teardown_cancelled = asyncio.Event()
+
+    async def _finish_then_hang(*, part_queue, **kwargs):
+        try:
+            await part_queue.put({"type": "text", "text": "completed before teardown"})
+            await part_queue.put({
+                "type": "finish",
+                "conversation_id": "conv_teardown_hang",
+                "message_id": "msg_teardown_hang",
+            })
+            await asyncio.Event().wait()
+        finally:
+            teardown_cancelled.set()
+
+    monkeypatch.setattr(chat_service, "stream_chat", _finish_then_hang)
+
+    async def _collect():
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        result = await asyncio.wait_for(
+            common.collect_agent_reply_details(
+                message="hello",
+                user_id="mcp-test-user",
+                conversation_id=None,
+                source="mcp",
+            ),
+            timeout=7.0,
+        )
+        return result, loop.time() - started
+
+    result, elapsed = asyncio.run(_collect())
+    assert result == {
+        "reply": "completed before teardown",
+        "conversation_id": "conv_teardown_hang",
+        "message_id": "msg_teardown_hang",
+    }
+    assert elapsed < 6.5, f"post-finish grace period did not bound teardown: {elapsed:.2f}s"
+    assert teardown_cancelled.is_set(), "hung stream task was not cancelled"
+    assert "reply already complete" in caplog.text
+    assert "teardown was still pending" in caplog.text
