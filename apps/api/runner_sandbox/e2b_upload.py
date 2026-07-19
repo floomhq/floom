@@ -12,6 +12,7 @@ from typing import Any, Callable
 logger = logging.getLogger("floom.runner_sandbox.upload")
 
 _UPLOAD_ARCHIVE_NAME = ".workeros-upload.tar.gz"
+E2B_FILE_REQUEST_TIMEOUT_SECONDS = 60
 
 
 def _safe_tar_name(rel: Path) -> str:
@@ -77,7 +78,10 @@ def upload_tree_tarball(
         raise ValueError(f"local upload root is not a directory: {local_root}")
 
     started = time.monotonic()
-    sandbox.files.make_dir(remote_root)
+    sandbox.files.make_dir(
+        remote_root,
+        request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+    )
     make_dir_ms = (time.monotonic() - started) * 1000.0
 
     tar_started = time.monotonic()
@@ -88,7 +92,11 @@ def upload_tree_tarball(
 
     archive_path = f"{remote_root.rstrip('/')}/{_UPLOAD_ARCHIVE_NAME}"
     write_started = time.monotonic()
-    sandbox.files.write(archive_path, raw)
+    sandbox.files.write(
+        archive_path,
+        raw,
+        request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+    )
     write_ms = (time.monotonic() - write_started) * 1000.0
     extract_started = time.monotonic()
     result = sandbox.commands.run(

@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -156,6 +157,8 @@ POLL_INTERVAL_SECONDS = 60  # check every minute
 _stop_event: threading.Event = threading.Event()
 _scheduler_thread: threading.Thread | None = None
 _scheduler_lock = threading.Lock()
+_SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS = POLL_INTERVAL_SECONDS * 3.0
+_scheduler_last_heartbeat_monotonic: float | None = None
 SCHEDULE_MISSED_ERROR_CODE = "scheduler_missed"
 SCHEDULE_MISSED_ERROR = "Scheduled fire was missed or delayed by the scheduler."
 
@@ -929,17 +932,52 @@ def _tick() -> None:
             )
 
 
+def _record_scheduler_heartbeat() -> None:
+    global _scheduler_last_heartbeat_monotonic
+    _scheduler_last_heartbeat_monotonic = time.monotonic()
+    logger.info("Scheduler heartbeat")
+
+
+def scheduler_heartbeat_status(*, now_monotonic: float | None = None) -> dict[str, Any]:
+    """Return scheduler thread and monotonic heartbeat readiness."""
+    thread = _scheduler_thread
+    alive = bool(thread is not None and thread.is_alive())
+    running = alive and not _stop_event.is_set()
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    last_heartbeat = _scheduler_last_heartbeat_monotonic
+    heartbeat_age = (
+        max(0.0, now - last_heartbeat)
+        if last_heartbeat is not None
+        else None
+    )
+    stale = running and (
+        heartbeat_age is None
+        or heartbeat_age > _SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS
+    )
+    return {
+        "ok": running and not stale,
+        "running": running,
+        "thread": thread.name if thread is not None else None,
+        "stopping": _stop_event.is_set(),
+        "heartbeat_age_seconds": heartbeat_age,
+        "stale_after_seconds": _SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS,
+        "stale": stale,
+    }
+
+
 def start_scheduler() -> None:
     """Start the scheduler in a background daemon thread."""
-    global _scheduler_thread
+    global _scheduler_thread, _scheduler_last_heartbeat_monotonic
     with _scheduler_lock:
         if _scheduler_thread is not None and _scheduler_thread.is_alive():
             return
         _stop_event.clear()
+        _scheduler_last_heartbeat_monotonic = time.monotonic()
 
         def _loop() -> None:
             logger.info("Scheduler started (poll interval: %ds)", POLL_INTERVAL_SECONDS)
             while not _stop_event.is_set():
+                _record_scheduler_heartbeat()
                 try:
                     _tick()
                 except Exception as exc:

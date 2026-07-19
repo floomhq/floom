@@ -16,6 +16,8 @@ import contexts as contexts_module
 from models import WorkerConfig, WorkerOutput, WorkerRuntime, WorkerTrigger
 from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import (
+    E2B_CREATE_REQUEST_TIMEOUT_SECONDS,
+    E2B_FILE_REQUEST_TIMEOUT_SECONDS,
     E2BSandboxDriver,
     _configured_e2b_api_keys,
     _e2b_command_request_timeout,
@@ -116,7 +118,7 @@ class FakeFullSandbox:
         cls.last_create_kwargs = kwargs
         return cls()
 
-    def kill(self):
+    def kill(self, **_kwargs):
         self.killed = True
 
 
@@ -156,15 +158,18 @@ class FakeWritableFiles(FakeFiles):
     def __init__(self, files: dict[str, bytes]):
         super().__init__(files)
         self.dirs = set()
+        self.operations = []
 
-    def make_dir(self, _path):
+    def make_dir(self, _path, **kwargs):
+        self.operations.append(("make_dir", _path, kwargs))
         self.dirs.add(_path)
         return None
 
     def exists(self, path, **_kwargs):
         return path in self._files or path in self.dirs
 
-    def write(self, path, content):
+    def write(self, path, content, **kwargs):
+        self.operations.append(("write", path, kwargs))
         if isinstance(content, str):
             content = content.encode("utf-8")
         self._files[path] = bytes(content)
@@ -197,7 +202,7 @@ class FakeOOMSandbox:
     def create(cls, **_kwargs):
         return cls()
 
-    def kill(self):
+    def kill(self, **_kwargs):
         self.killed = True
 
 
@@ -229,7 +234,7 @@ class FakeRaisingOOMSandbox:
     def create(cls, **_kwargs):
         return cls()
 
-    def kill(self):
+    def kill(self, **_kwargs):
         self.killed = True
 
 
@@ -251,7 +256,7 @@ class FakeCancelledSandbox:
     def create(cls, **_kwargs):
         return cls()
 
-    def kill(self):
+    def kill(self, **_kwargs):
         self.killed = True
 
 
@@ -424,6 +429,17 @@ def test_e2b_driver_sets_request_timeouts_for_dependency_installs(tmp_path, monk
 
     assert result.status == "success"
     sandbox = FakeFullSandbox.instances[-1]
+    assert FakeFullSandbox.last_create_kwargs["request_timeout"] == E2B_CREATE_REQUEST_TIMEOUT_SECONDS
+    bounded_paths = {
+        "/home/user/worker",
+        "/home/user/worker/inputs.json",
+        "/home/user/worker/.env.local",
+        "/home/user/worker/secrets.json",
+        "/home/user/worker/connections.json",
+    }
+    for operation, path, kwargs in sandbox.files.operations:
+        if path in bounded_paths:
+            assert kwargs["request_timeout"] == E2B_FILE_REQUEST_TIMEOUT_SECONDS
     pip_command, pip_kwargs = next(call for call in sandbox.commands.run_calls if call[0].startswith("pip install"))
     npm_command, npm_kwargs = next(call for call in sandbox.commands.run_calls if call[0].startswith("cd /home/user/worker && npm install"))
     worker_command, worker_kwargs = next(call for call in sandbox.commands.run_calls if "python run.py" in call[0])
@@ -670,7 +686,7 @@ def test_uploads_git_context_by_cloning_into_sandbox(tmp_path, monkeypatch):
     assert sandbox.commands.run_calls[:1] == [(
         "git clone --depth 1 https://github.com/example/notes.git "
         "/home/user/worker/context/external-notes",
-        {"timeout": 180},
+        {"timeout": 180, "request_timeout": _e2b_command_request_timeout(180)},
     )]
     assert "/home/user/worker/context/external-notes" in sandbox.files.dirs
     assert not any(path.startswith("/home/user/worker/context/external-notes/") for path in sandbox.files._files)
@@ -701,7 +717,7 @@ def test_uploads_git_context_blocks_file_url_before_clone(tmp_path, monkeypatch)
         def host_path(self, sandbox_path: str) -> Path:
             return self.root / sandbox_path.removeprefix("/")
 
-        def make_dir(self, sandbox_path: str):
+        def make_dir(self, sandbox_path: str, **_kwargs):
             self.dirs.add(sandbox_path)
             self.host_path(sandbox_path).mkdir(parents=True, exist_ok=True)
 
@@ -1172,7 +1188,7 @@ def test_cancel_sandbox_kills_registered_sandbox():
         def __init__(self):
             self.killed = False
 
-        def kill(self):
+        def kill(self, **_kwargs):
             self.killed = True
 
     with e2b_driver._active_sandboxes_lock:

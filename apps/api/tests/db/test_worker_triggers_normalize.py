@@ -463,6 +463,30 @@ def test_scheduler_status_reports_running_thread():
     }
 
 
+def test_scheduler_heartbeat_status_detects_staleness():
+    scheduler = _fresh_scheduler()
+
+    class LiveThread:
+        name = "workeros-scheduler"
+
+        def is_alive(self):
+            return True
+
+    scheduler._scheduler_thread = LiveThread()
+    scheduler._stop_event.clear()
+    scheduler._scheduler_last_heartbeat_monotonic = 100.0
+
+    fresh = scheduler.scheduler_heartbeat_status(now_monotonic=101.0)
+    stale = scheduler.scheduler_heartbeat_status(
+        now_monotonic=100.0 + scheduler._SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS + 0.1
+    )
+
+    assert fresh["ok"] is True
+    assert fresh["stale"] is False
+    assert stale["ok"] is False
+    assert stale["stale"] is True
+
+
 # ---------------------------------------------------------------------------
 # Webhook + composio resolution to specific rows
 # ---------------------------------------------------------------------------

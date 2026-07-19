@@ -52,6 +52,30 @@ def test_workeros_role_web_disables_executor_loops(monkeypatch):
     assert run_service._run_reaper_thread is None
 
 
+def test_drain_heartbeat_status_detects_staleness(monkeypatch):
+    run_service = _fresh_run_service(monkeypatch)
+
+    class LiveThread:
+        name = "workeros-queue-drain"
+
+        def is_alive(self):
+            return True
+
+    run_service._drain_thread = LiveThread()
+    run_service._drain_stop.clear()
+    run_service._drain_last_heartbeat_monotonic = 50.0
+
+    fresh = run_service.drain_loop_status(now_monotonic=51.0)
+    stale = run_service.drain_loop_status(
+        now_monotonic=50.0 + run_service._DRAIN_HEARTBEAT_STALE_AFTER_SECONDS + 0.1
+    )
+
+    assert fresh["ok"] is True
+    assert fresh["stale"] is False
+    assert stale["ok"] is False
+    assert stale["stale"] is True
+
+
 def test_worker_recipe_cache_hits_and_invalidates(monkeypatch):
     run_service = _fresh_run_service(monkeypatch)
     calls = {"count": 0}

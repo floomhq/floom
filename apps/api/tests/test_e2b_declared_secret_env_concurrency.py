@@ -29,11 +29,11 @@ class _Files:
     def _host_path(self, sandbox_path: str) -> Path:
         return self.host_root / sandbox_path.removeprefix("/")
 
-    def make_dir(self, sandbox_path: str):
+    def make_dir(self, sandbox_path: str, **_kwargs):
         self.dirs.add(sandbox_path)
         self._host_path(sandbox_path).mkdir(parents=True, exist_ok=True)
 
-    def write(self, sandbox_path: str, content):
+    def write(self, sandbox_path: str, content, **_kwargs):
         if isinstance(content, str):
             content = content.encode("utf-8")
         data = bytes(content)
@@ -62,6 +62,12 @@ class _Commands:
     def run(self, command: str, **kwargs):
         self.run_calls.append((command, kwargs))
         cwd = self.files._host_path(kwargs.get("cwd") or "/home/user/worker")
+        sandbox_tmp = self.files._host_path("/tmp")
+        sandbox_tmp.mkdir(parents=True, exist_ok=True)
+        command = command.replace(
+            "find /tmp ",
+            f"find {shlex.quote(str(sandbox_tmp))} ",
+        )
         envs = kwargs.get("envs") or {}
         env = {**os.environ, **envs}
         if envs:
@@ -108,10 +114,10 @@ class _Sandbox:
         cls.last_create_kwargs = kwargs
         return cls()
 
-    def kill(self):
+    def kill(self, **_kwargs):
         self.killed = True
 
-    def set_timeout(self, timeout: int):
+    def set_timeout(self, timeout: int, **_kwargs):
         self.set_timeout_calls.append(timeout)
 
 

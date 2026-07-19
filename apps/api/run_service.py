@@ -2755,6 +2755,10 @@ _drain_thread: Optional[threading.Thread] = None
 _drain_lock = threading.Lock()
 
 _DRAIN_POLL_INTERVAL = 0.5  # seconds between polls when runs are queued
+_DRAIN_HEARTBEAT_STALE_AFTER_SECONDS = max(30.0, _DRAIN_POLL_INTERVAL * 3)
+_DRAIN_HEARTBEAT_LOG_INTERVAL_SECONDS = 30.0
+_drain_last_heartbeat_monotonic: float | None = None
+_drain_last_heartbeat_log_monotonic: float | None = None
 
 _run_reaper_stop = threading.Event()
 _run_reaper_thread: Optional[threading.Thread] = None
@@ -2766,6 +2770,43 @@ def _wake_drain() -> None:
     _drain_event.set()
 
 
+def _record_drain_heartbeat() -> None:
+    global _drain_last_heartbeat_monotonic, _drain_last_heartbeat_log_monotonic
+    now = time.monotonic()
+    _drain_last_heartbeat_monotonic = now
+    last_log = _drain_last_heartbeat_log_monotonic
+    if last_log is None or now - last_log >= _DRAIN_HEARTBEAT_LOG_INTERVAL_SECONDS:
+        logger.info("Queue drain heartbeat")
+        _drain_last_heartbeat_log_monotonic = now
+
+
+def drain_loop_status(*, now_monotonic: float | None = None) -> dict[str, Any]:
+    """Return queue-drain thread and monotonic heartbeat readiness."""
+    thread = _drain_thread
+    alive = bool(thread is not None and thread.is_alive())
+    running = alive and not _drain_stop.is_set()
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    last_heartbeat = _drain_last_heartbeat_monotonic
+    heartbeat_age = (
+        max(0.0, now - last_heartbeat)
+        if last_heartbeat is not None
+        else None
+    )
+    stale = running and (
+        heartbeat_age is None
+        or heartbeat_age > _DRAIN_HEARTBEAT_STALE_AFTER_SECONDS
+    )
+    return {
+        "ok": running and not stale,
+        "running": running,
+        "thread": thread.name if thread is not None else None,
+        "stopping": _drain_stop.is_set(),
+        "heartbeat_age_seconds": heartbeat_age,
+        "stale_after_seconds": _DRAIN_HEARTBEAT_STALE_AFTER_SECONDS,
+        "stale": stale,
+    }
+
+
 def _drain_loop() -> None:
     """Background thread: drain the queued-runs table as execution slots free up."""
     logger.info("Queue drain loop started (max_concurrent=%d)", _max_concurrent_runs())
@@ -2775,6 +2816,7 @@ def _drain_loop() -> None:
         _drain_event.clear()
         if _drain_stop.is_set():
             break
+        _record_drain_heartbeat()
         _drain_one_batch()
 
 
@@ -2913,7 +2955,7 @@ def _drain_one_batch() -> None:
 
 def start_drain_loop() -> None:
     """Start the background queue drain thread (idempotent)."""
-    global _drain_thread
+    global _drain_thread, _drain_last_heartbeat_monotonic
     if not execution_role_enabled():
         logger.info("Skipping queue drain loop start because WORKEROS_ROLE=%s", workeros_role())
         return
@@ -2921,6 +2963,7 @@ def start_drain_loop() -> None:
         if _drain_thread is not None and _drain_thread.is_alive():
             return
         _drain_stop.clear()
+        _drain_last_heartbeat_monotonic = time.monotonic()
         _drain_thread = threading.Thread(
             target=_drain_loop,
             daemon=True,
