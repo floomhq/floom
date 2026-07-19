@@ -186,7 +186,7 @@ limits:                      # agent-mode only; ignored for script mode
   max_tool_iterations: 30
   max_output_tokens: 4096
   max_total_tokens: 50000
-  timeout_seconds: 300
+  timeout_seconds: 900
 
 # Use these higher limits for integration-heavy agent workers, especially
 # Gmail/email/CRM/Slack/GitHub/Calendar Composio tools:
@@ -194,7 +194,7 @@ limits:                      # agent-mode only; ignored for script mode
 #   max_tool_iterations: 60
 #   max_output_tokens: 100000
 #   max_total_tokens: 1000000
-#   timeout_seconds: 300
+#   timeout_seconds: 900
 
 resources:                   # optional sandbox sizing request
   memory_mb: 2048            # capped by WORKEROS_MAX_WORKER_MEMORY_MB
@@ -790,7 +790,8 @@ Rules the agent should follow (these are the failure modes observed in real draf
 - **Include `long_description`, `use_cases`, `how_it_works`** — these power the Overview tab and make the worker understandable before someone opens the source.
 - **Pin every secret** the worker will read. Missing-secret failure = silent empty output.
 - **Set `capabilities.network.egress: true`** if any external API is called. Default-deny.
-- **Set realistic `limits.timeout_seconds`** - 300 is the safe default; longer needs justification.
+- **Set realistic `limits.timeout_seconds`** - use 900 for general agent workers.
+- Browse, scrape, and research workers need `limits.timeout_seconds` set to 1800-3600.
 - **Set `approvals.required: true`** for any worker that sends external messages, deletes data, or spends money. Default-off saves a click but raises a regret tax.
 - **Default `trigger: manual`** unless the prompt explicitly says "every Monday" / "when X arrives".
 

@@ -573,7 +573,10 @@ class AgentDriver(SandboxDriver):
                     )
             return WorkerResult(
                 status="error",
-                error=f"Agent run exceeded timeout of {timeout_seconds}s",
+                error=(
+                    f"Agent run exceeded timeout of {timeout_seconds}s. "
+                    "Raise limits.timeout_seconds in worker.yml (max 3600)."
+                ),
                 error_code="timeout",
             )
 

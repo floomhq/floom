@@ -2452,6 +2452,9 @@ class WorkerDetail(BaseModel):
     trigger_type: str
     runner: str
     config: WorkerConfig
+    # Advisory messages returned by manifest save endpoints. Saves remain
+    # successful; callers can surface these without parsing server logs.
+    warnings: List[str] = Field(default_factory=list)
     last_run: Optional[DetailLastRun] = None
     recent_stats: Optional[RecentStats] = None
     recent_runs: List[RunSummary] = Field(default_factory=list)
@@ -3247,6 +3250,7 @@ class DraftAndCreateRequest(BaseModel):
 
 class DraftAndCreateResponse(BaseModel):
     worker_id: str
+    warnings: List[str] = Field(default_factory=list)
     # FIX 4 (2026-05-29): both creation paths run the smoke+repair safety net.
     # smoke_status: "passed" | "failed" | "skipped" | None. When "failed" the
     # worker is created but DISABLED (stays editable) — surface the reason so

@@ -542,6 +542,75 @@ def _requirements_covered_by_baked_template(requirements_path: Path) -> tuple[bo
     return not missing, missing
 
 
+def _exact_requirement_pins(requirements_path: Path) -> dict[str, tuple[str, str]]:
+    pins: dict[str, tuple[str, str]] = {}
+    for raw_line in requirements_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = re.match(
+            r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?\s*==\s*([^\s;]+)",
+            line,
+        )
+        if not match:
+            continue
+        distribution = match.group(1)
+        normalized = distribution.lower().replace("_", "-")
+        pins[normalized] = (distribution, match.group(2))
+    return pins
+
+
+def _warn_on_baked_pin_mismatches(
+    *,
+    sandbox: Any,
+    requirements_path: Path,
+    log_fn: Callable[[str, str], None],
+) -> None:
+    pins = _exact_requirement_pins(requirements_path)
+    if not pins:
+        return
+    names_json = json.dumps(sorted(pins))
+    script = (
+        "import importlib.metadata as m,json; "
+        f"names={names_json}; "
+        "print(json.dumps({n:(m.version(n) if n else None) for n in names}))"
+    )
+    try:
+        result = sandbox.commands.run(
+            f"python3 -c {shlex.quote(script)}",
+            timeout=15,
+            request_timeout=_e2b_command_request_timeout(15),
+        )
+        if result.exit_code != 0:
+            raise RuntimeError((result.stderr or result.stdout or "metadata query failed")[:300])
+        versions = json.loads((result.stdout or "").strip().splitlines()[-1])
+        if not isinstance(versions, dict):
+            raise ValueError("metadata query did not return an object")
+    except Exception as exc:
+        rendered = ", ".join(
+            f"{distribution}=={version}" for distribution, version in pins.values()
+        )
+        log_fn(
+            "[e2b] Warning: requirements.txt contains exact pins that the baked "
+            f"template could not verify ({rendered}); those pins are not installed "
+            f"for this run ({type(exc).__name__}).",
+            "warning",
+        )
+        return
+
+    for normalized, (distribution, pinned_version) in pins.items():
+        baked_version = versions.get(normalized)
+        if str(baked_version or "") == pinned_version:
+            continue
+        provided = str(baked_version) if baked_version else "no installed version"
+        log_fn(
+            f"[e2b] Warning: requirements.txt pins {distribution}=={pinned_version}, "
+            f"but the baked template provides {distribution}=={provided}; the pin "
+            "is not installed for this run.",
+            "warning",
+        )
+
+
 def _runtime_kind(config: WorkerConfig | None) -> str:
     runtime_type = (getattr(getattr(config, "runtime", None), "type", "") or "").strip().lower()
     if runtime_type.startswith("node") or runtime_type in {"javascript", "typescript", "js", "ts"}:
@@ -1042,7 +1111,10 @@ def _sandbox_exception_result(
     if _looks_like_timeout_exception(exc) and _timeout_elapsed_near_cap(elapsed_seconds, timeout_seconds):
         return WorkerResult(
             status="error",
-            error=f"Worker exceeded its {timeout_seconds}s timeout and was stopped.",
+            error=(
+                f"Worker exceeded its {timeout_seconds}s timeout and was stopped. "
+                "Raise limits.timeout_seconds in worker.yml (max 3600)."
+            ),
             error_code="timeout",
             retryable=True,
         )
@@ -2438,6 +2510,11 @@ class E2BSandboxDriver(SandboxDriver):
                             "warning",
                         )
                 if python_template_deps_baked and requirements_covered:
+                    _warn_on_baked_pin_mismatches(
+                        sandbox=sandbox,
+                        requirements_path=req_path,
+                        log_fn=log_fn,
+                    )
                     log_fn(
                         "[e2b] Skipping requirements.txt install; configured template marks Python deps as baked",
                         "info",

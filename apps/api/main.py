@@ -3859,6 +3859,23 @@ async def draft_and_create_worker(
         *,
         allow_code_repair: bool,
     ) -> DraftAndCreateResponse:
+        from services.worker_timeout_guidance import warnings_for_saved_worker
+
+        save_warnings: List[str] = []
+        try:
+            saved_config = get_worker_config_for_run(created_worker_id)
+            if saved_config is not None:
+                save_warnings = warnings_for_saved_worker(
+                    saved_config,
+                    worker_id=created_worker_id,
+                )
+        except Exception:
+            logger.warning(
+                "Could not evaluate timeout guidance for saved worker %s",
+                created_worker_id,
+                exc_info=True,
+            )
+
         # Wedge safety net (FIX 4, 2026-05-29): unify the raw create path with the
         # UI worker-author path. Prove the SCRIPT-mode worker actually RUNS,
         # validate it produces real output, and gate it: a smoke-failed worker is
@@ -3899,6 +3916,7 @@ async def draft_and_create_worker(
         if isinstance(smoke_result, dict) and smoke_result.get("status") == "failed":
             return DraftAndCreateResponse(
                 worker_id=created_worker_id,
+                warnings=save_warnings,
                 smoke_status="failed",
                 smoke_reason=(
                     humanize_smoke_reason(smoke_result.get("reason"))
@@ -3907,6 +3925,7 @@ async def draft_and_create_worker(
             )
         return DraftAndCreateResponse(
             worker_id=created_worker_id,
+            warnings=save_warnings,
             smoke_status=(smoke_result.get("status") if isinstance(smoke_result, dict) else None),
         )
 
@@ -4276,13 +4295,17 @@ def update_worker(
                 skill_path.unlink()
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return _build_worker_detail(
-        worker_id,
-        user_id=auth.user_id,
-        repos=repos,
-        # donation model: an admin editing a workspace-owned worker is not its
-        # owner, so the detail fetch needs the admin-role path.
-        role="admin" if auth.is_admin else None,
+    from services.worker_timeout_guidance import attach_save_warnings
+
+    return attach_save_warnings(
+        _build_worker_detail(
+            worker_id,
+            user_id=auth.user_id,
+            repos=repos,
+            # donation model: an admin editing a workspace-owned worker is not its
+            # owner, so the detail fetch needs the admin-role path.
+            role="admin" if auth.is_admin else None,
+        )
     )
 
 
@@ -4549,10 +4572,14 @@ def update_worker_files(
         author_name, author_email = _git_author(auth)
         _git_commit_worker(worker_id, message=f"worker: save files for {worker_id}", author_name=author_name, author_email=author_email)
 
-        return _build_worker_detail(
-            worker_id,
-            user_id=auth.user_id,
-            repos=repos,
+        from services.worker_timeout_guidance import attach_save_warnings
+
+        return attach_save_warnings(
+            _build_worker_detail(
+                worker_id,
+                user_id=auth.user_id,
+                repos=repos,
+            )
         )
 
     except HTTPException:
