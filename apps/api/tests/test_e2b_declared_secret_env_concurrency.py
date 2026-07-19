@@ -440,6 +440,57 @@ with open("result.json", "w", encoding="utf-8") as handle:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
 
 
+def test_e2b_python_template_warns_when_exact_pin_differs(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_DEPS_BAKED", "1")
+
+    worker_dir = tmp_path / "worker-pin-warning"
+    worker_dir.mkdir()
+    (worker_dir / "requirements.txt").write_text("requests==0.0.1\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text(
+        "import json\njson.dump({'status': 'success', 'outputs': {}, 'artifacts': []}, open('result.json', 'w'))\n",
+        encoding="utf-8",
+    )
+    config = WorkerConfig(
+        id="pin-warning-worker",
+        name="Pin Warning Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="pin-warning-worker",
+        run_id="run-pin-warning-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-pin-warning-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert any(
+        level == "warning"
+        and "requirements.txt pins requests==0.0.1" in message
+        and "baked template provides requests==" in message
+        for message, level in logs
+    ), logs
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
 def test_e2b_bundle_baked_template_skips_cold_bundle_upload(tmp_path, monkeypatch):
     import json
 

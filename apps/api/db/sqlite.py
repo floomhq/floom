@@ -36,7 +36,11 @@ from models import (
 )
 
 from ._legacy_sqlite import _row_dict, get_db, now_iso
-from .interface import DURABLE_EXECUTION_LOG_PREFIXES
+from .interface import (
+    DURABLE_EXECUTION_LOG_PREFIXES,
+    RUN_LOG_DRAIN_MARKER_LEVEL,
+    RUN_LOG_DRAIN_MARKER_MESSAGE,
+)
 
 
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
@@ -2863,6 +2867,27 @@ class SqliteRunRepository:
                 batch,
             )
 
+    def logs_drained(self, *, user_id: str, run_id: str) -> bool:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM logs l
+                JOIN runs r ON r.id = l.run_id
+                JOIN workers w ON w.id = r.worker_id
+                WHERE l.run_id = ? AND w.owner_id = ?
+                  AND l.level = ? AND l.message = ?
+                LIMIT 1
+                """,
+                (
+                    run_id,
+                    user_id,
+                    RUN_LOG_DRAIN_MARKER_LEVEL,
+                    RUN_LOG_DRAIN_MARKER_MESSAGE,
+                ),
+            ).fetchone()
+        return row is not None
+
     def list_logs(
         self,
         *,
@@ -2893,11 +2918,11 @@ class SqliteRunRepository:
                 FROM logs l
                 JOIN runs r ON r.id = l.run_id
                 JOIN workers w ON w.id = r.worker_id
-                WHERE {scope_sql}
-                ORDER BY l.timestamp
+                WHERE {scope_sql} AND l.level != ?
+                ORDER BY l.timestamp, l.id
                 LIMIT ?
                 """,
-                params,
+                (*params[:-1], RUN_LOG_DRAIN_MARKER_LEVEL, params[-1]),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -2911,7 +2936,7 @@ class SqliteRunRepository:
         limit: int = 200,
     ) -> list[dict[str, Any]]:
         """Cross-run logs for a worker, scoped to user_id, optionally filtered by level/since."""
-        params: list[Any] = [user_id, worker_id]
+        params: list[Any] = [user_id, worker_id, RUN_LOG_DRAIN_MARKER_LEVEL]
         level_clause = ""
         since_clause = ""
         if level:
@@ -2928,7 +2953,7 @@ class SqliteRunRepository:
                 FROM logs l
                 JOIN runs r ON r.id = l.run_id
                 JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ? AND r.worker_id = ?
+                WHERE w.owner_id = ? AND r.worker_id = ? AND l.level != ?
                   {level_clause} {since_clause}
                 ORDER BY l.timestamp DESC
                 LIMIT ?

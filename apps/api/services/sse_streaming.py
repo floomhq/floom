@@ -47,6 +47,7 @@ _RUN_PART_TTL_SECONDS = 300
 _TERMINAL_STATUSES = frozenset({
     RunStatus.COMPLETED.value,
     RunStatus.FAILED.value,
+    RunStatus.CANCELLED.value,
     RunStatus.REJECTED.value,
 })
 _sse_user_stream_counts: Dict[str, int] = {}
