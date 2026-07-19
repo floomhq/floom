@@ -666,6 +666,7 @@ class ApprovalRepository(Protocol):
         owner_id: str,
         run_id: str,
         decided_at: str,
+        approval_id: str | None = None,
         edited_output_json: str | None = None,
         follow_up_run_id: str | None = None,
         annotations_json: str | None = None,
@@ -700,6 +701,7 @@ class ApprovalRepository(Protocol):
         owner_id: str,
         run_id: str,
         decided_at: str,
+        approval_id: str | None = None,
         reason: str | None = None,
         annotations_json: str | None = None,
     ) -> RowDict | None:
