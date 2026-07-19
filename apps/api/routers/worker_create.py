@@ -41,6 +41,7 @@ from services.worker_registry_ops import (
     _rewrite_worker_yml_id,
 )
 from services.worker_serialize import _DEFAULT_RUN_PY_STUB, _is_secret_bearing_export_path
+from services.worker_timeout_guidance import attach_save_warnings
 
 import logging
 
@@ -107,7 +108,9 @@ def create_worker(
             user_id=auth.user_id,
             repos=repos,
         )
-        return _build_worker_detail_after_write(created_id, user_id=auth.user_id, repos=repos)
+        return attach_save_warnings(
+            _build_worker_detail_after_write(created_id, user_id=auth.user_id, repos=repos)
+        )
 
     if payload.run_py is None:
         raise HTTPException(status_code=422, detail="run_py is required when files are not supplied")
@@ -289,8 +292,10 @@ async def create_worker_from_bundle(
             detail=f"Failed to persist worker bundle for {worker_id!r}: {exc}",
         ) from exc
 
-    return _build_worker_detail_after_write(
-        worker_id,
-        user_id=auth.user_id,
-        repos=repos,
+    return attach_save_warnings(
+        _build_worker_detail_after_write(
+            worker_id,
+            user_id=auth.user_id,
+            repos=repos,
+        )
     )

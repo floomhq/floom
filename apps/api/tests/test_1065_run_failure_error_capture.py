@@ -53,7 +53,10 @@ def test_near_cap_timeout_like_e2b_exception_is_worker_timeout():
     result = _sandbox_exception_result(exc, elapsed_seconds=291.0, timeout_seconds=300)
 
     assert result.error_code == "timeout"
-    assert result.error == "Worker exceeded its 300s timeout and was stopped."
+    assert result.error == (
+        "Worker exceeded its 300s timeout and was stopped. "
+        "Raise limits.timeout_seconds in worker.yml (max 3600)."
+    )
 
 
 def test_e2b_sandbox_error_operator_message_is_not_timeout_headline():

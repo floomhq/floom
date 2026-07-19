@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import logging
 import sys
 import textwrap
 import types
@@ -136,6 +137,28 @@ def _worker_ts_yml(worker_id: str) -> str:
     ).strip()
 
 
+def _agent_worker_yml(worker_id: str, timeout_seconds: int) -> str:
+    return textwrap.dedent(
+        f"""
+        schema_version: "0.3"
+        name: "{worker_id}"
+        title: t
+        description: d
+        version: "0.1.0"
+        limits:
+          timeout_seconds: {timeout_seconds}
+        exec:
+          entry: SKILL.md
+          runtime: skill
+          runner: e2b
+          inputs: []
+          outputs: []
+        trigger:
+          type: manual
+        """
+    ).strip()
+
+
 # ---------------------------------------------------------------------------
 # M-01 — workers.create via /api/mcp must create a worker (not -32603)
 # ---------------------------------------------------------------------------
@@ -206,6 +229,83 @@ def test_m01_workers_create_via_mcp_accepts_typescript_worker(monkeypatch, tmp_p
     file_paths = {item["path"] for item in listed.json()["result"]["structuredContent"]["files"]}
     assert "worker.yml" in file_paths
     assert "run.ts" in file_paths
+
+
+def test_m01_workers_create_warns_but_accepts_low_agent_timeout(
+    monkeypatch, tmp_path, caplog
+):
+    main = _load_api(monkeypatch, tmp_path)
+    worker_yml = _agent_worker_yml("m01-low-timeout-agent", 300)
+    caplog.set_level(logging.WARNING, logger="floom.api")
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/call", params={
+                "name": "workers.create",
+                "arguments": {
+                    "worker_yml": worker_yml,
+                    "files": [
+                        {"path": "worker.yml", "content": worker_yml},
+                        {"path": "SKILL.md", "content": "Research the requested topic."},
+                    ],
+                },
+            })),
+            headers=_auth_headers(),
+        )
+
+    assert resp.status_code == 200, resp.text
+    result = resp.json()["result"]
+    assert result["isError"] is False, result
+    warnings = result["structuredContent"]["warnings"]
+    assert warnings == [
+        "Agent-mode worker timeout is 300s. For browse, scrape, and research "
+        "workers, set limits.timeout_seconds to 1800-3600 in worker.yml (max 3600)."
+    ]
+    assert "saved with a low agent timeout" in caplog.text
+
+
+def test_workers_write_file_warns_but_accepts_low_agent_timeout(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    initial_yml = _agent_worker_yml("write-low-timeout-agent", 900)
+    updated_yml = _agent_worker_yml("write-low-timeout-agent", 300)
+
+    with TestClient(main.app) as client:
+        created = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/call", params={
+                "name": "workers.create",
+                "arguments": {
+                    "worker_yml": initial_yml,
+                    "files": [
+                        {"path": "worker.yml", "content": initial_yml},
+                        {"path": "SKILL.md", "content": "Research the requested topic."},
+                    ],
+                },
+            })),
+            headers=_auth_headers(),
+        )
+        assert created.json()["result"]["structuredContent"]["warnings"] == []
+
+        updated = client.put(
+            "/workers/write-low-timeout-agent/files",
+            json={
+                "files": [
+                    {"path": "worker.yml", "content": updated_yml},
+                    {"path": "SKILL.md", "content": "Research the requested topic."},
+                ],
+            },
+            headers=_serve_headers(),
+        )
+
+    assert created.status_code == 200, created.text
+    assert updated.status_code == 200, updated.text
+    result = updated.json()
+    assert result["config"]["runtime"]["limits"]["timeout_seconds"] == 300
+    assert result["warnings"] == [
+        "Agent-mode worker timeout is 300s. For browse, scrape, and research "
+        "workers, set limits.timeout_seconds to 1800-3600 in worker.yml (max 3600)."
+    ]
 
 
 def test_m01_workers_create_schema_advertises_typescript_without_run_py_required(monkeypatch, tmp_path):

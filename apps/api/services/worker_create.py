@@ -33,6 +33,7 @@ from services.worker_registry_ops import (
     _skill_version_id,
 )
 from services.worker_serialize import _build_worker_detail
+from services.worker_timeout_guidance import attach_save_warnings
 
 if TYPE_CHECKING:
     from auth import AuthContext
@@ -390,7 +391,7 @@ def _create_worker_from_parsed_payload(
             _emit_worker_created(
                 worker_id=worker_id, owner_id=auth.user_id, config=config
             )
-            return detail
+            return attach_save_warnings(detail)
         except sqlite3.IntegrityError as exc:
             raise HTTPException(
                 status_code=409,
