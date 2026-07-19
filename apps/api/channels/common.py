@@ -843,6 +843,8 @@ async def collect_agent_reply_details(
     text_parts: list[str] = []
     finish_part: dict = {}
     queue_get_task: Optional[asyncio.Task] = None
+    task_outcome_retrieved = False
+    task_cancelled_during_cleanup = False
     try:
         while True:
             # stream_chat can fail before it reaches the try block that emits
@@ -853,7 +855,10 @@ async def collect_agent_reply_details(
                 try:
                     part = queue.get_nowait()
                 except asyncio.QueueEmpty:
-                    await task  # Propagate a pre-finish stream exception.
+                    try:
+                        await task  # Propagate a pre-finish stream exception.
+                    finally:
+                        task_outcome_retrieved = True
                     raise AgentReplyError(
                         "workspace agent stream ended before emitting a finish event"
                     )
@@ -908,30 +913,34 @@ async def collect_agent_reply_details(
                 await queue_get_task
             except asyncio.CancelledError:
                 pass
-        if not task.done():
-            def _log_late_stream_failure(finished_task: asyncio.Task) -> None:
-                try:
-                    if finished_task.cancelled():
+        def _log_late_stream_failure(finished_task: asyncio.Task) -> None:
+            try:
+                if finished_task.cancelled() or task_outcome_retrieved:
+                    return
+                exc = finished_task.exception()
+                if exc is not None:
+                    # A completed post-finish wait already logged this failure.
+                    if finish_part and not task_cancelled_during_cleanup:
                         return
-                    exc = finished_task.exception()
-                    if exc is not None:
-                        logger.exception(
-                            "workspace agent stream task failed during cancellation "
-                            "for conversation %s",
-                            finish_part.get("conversation_id"),
-                            exc_info=(type(exc), exc, exc.__traceback__),
-                        )
+                    logger.exception(
+                        "workspace agent stream task failed during cancellation "
+                        "for conversation %s",
+                        finish_part.get("conversation_id"),
+                        exc_info=(type(exc), exc, exc.__traceback__),
+                    )
+            except BaseException:
+                try:
+                    logger.exception(
+                        "failed to inspect cancelled workspace agent stream task "
+                        "for conversation %s",
+                        finish_part.get("conversation_id"),
+                    )
                 except BaseException:
-                    try:
-                        logger.exception(
-                            "failed to inspect cancelled workspace agent stream task "
-                            "for conversation %s",
-                            finish_part.get("conversation_id"),
-                        )
-                    except BaseException:
-                        pass
+                    pass
 
-            task.add_done_callback(_log_late_stream_failure)
+        task.add_done_callback(_log_late_stream_failure)
+        if not task.done():
+            task_cancelled_during_cleanup = True
             task.cancel()
     return {
         "reply": strip_em_dashes("".join(text_parts).strip()),

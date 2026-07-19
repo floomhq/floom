@@ -417,6 +417,39 @@ def test_workspace_chat_pre_event_stream_failure_returns_actionable_tool_error(m
     assert "internal error" not in text.lower(), text
 
 
+def test_collect_agent_reply_details_retrieves_done_task_failure_after_error_part(
+    monkeypatch, tmp_path, caplog
+):
+    _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+    common = importlib.import_module("channels.common")
+
+    async def _queue_error_then_raise(*, part_queue, **kwargs):
+        await part_queue.put({"type": "error", "error": "queued workspace failure"})
+        raise RuntimeError("distinct stream task failure")
+
+    monkeypatch.setattr(chat_service, "stream_chat", _queue_error_then_raise)
+
+    async def _collect():
+        with pytest.raises(common.AgentReplyError, match="queued workspace failure"):
+            await common.collect_agent_reply_details(
+                message="hello",
+                user_id="mcp-test-user",
+                conversation_id=None,
+                source="mcp",
+            )
+        await asyncio.sleep(0)
+
+    asyncio.run(asyncio.wait_for(_collect(), timeout=1.0))
+    failure_records = [
+        record
+        for record in caplog.records
+        if record.exc_info
+        and str(record.exc_info[1]) == "distinct stream task failure"
+    ]
+    assert len(failure_records) == 1
+
+
 def test_collect_agent_reply_details_rejects_normal_return_without_finish(monkeypatch, tmp_path):
     _load_api(monkeypatch, tmp_path)
     chat_service = importlib.import_module("chat_service")
