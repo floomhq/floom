@@ -53,8 +53,6 @@ import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { EmilyHomeEmpty } from "@/components/home/EmilyHomeEmpty";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { readStoredConversationId } from "@/lib/emily-chat-storage";
-import { useWorkers } from "@/lib/query/hooks";
-import { resolveWorkersGate } from "@/components/home/emily-home-empty";
 
 // ── Chat controls (New chat + Export) ─────────────────────────────────────────
 
@@ -536,15 +534,8 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
   // live path; the optionality only matters for isolated component tests.
   const queryClient = useContext(QueryClientContext);
   const [input, setInput] = useState(primeInput ?? "");
-  const workersQuery = useWorkers();
-  const goalOnboardingActive =
-    homeMode &&
-    !createMode &&
-    resolveWorkersGate({
-      workers: workersQuery.data,
-      isLoading: workersQuery.isLoading && !workersQuery.data,
-      isError: workersQuery.isError,
-    }).isFirstWorker;
+  const [goalOnboardingActive, setGoalOnboardingActive] = useState(false);
+  const suppressGoalComposer = homeMode && !createMode && goalOnboardingActive;
   // Seed the composer when primeInput ARRIVES after mount. The full-page chat
   // passes primeInput at mount (handled by useState above), but the dock core is
   // mounted once for the whole app, so a later `/?create=1&prime=<text>` deep
@@ -807,7 +798,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
   // BEHAVIOR flag only (buildCreateWorkerMessage on first send + ephemeral thread).
   const emptyHomeLike = homeMode || createMode;
   const showCenteredComposer =
-    emptyHomeLike && !hasMessages && !isHydrating && !goalOnboardingActive;
+    emptyHomeLike && !hasMessages && !isHydrating && !suppressGoalComposer;
 
   return (
     <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
@@ -865,32 +856,35 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
                 initialData={homeInitialData}
                 onSeed={(text) => setInput(text)}
                 onPickMcp={() => mcpModal.open()}
+                onGoalOnboardingChange={setGoalOnboardingActive}
                 createMode={createMode}
               />
-              {!goalOnboardingActive && <div className="mt-6 w-full max-w-2xl px-6">
-                {/* Hero composer (Federico 2026-06-21): the home/create empty
-                    state is the primary call-to-action, so it uses the FLAT,
-                    BORDERLESS landing-style composer (no "Uses" chip row) at the
-                    LARGER hero size. Tool names are highlighted INLINE inside the
-                    example pills above (PromptTokens), matching the landing box. */}
-                <PromptInput
-                  value={input}
-                  onChange={setInput}
-                  onSubmit={handleSubmit}
-                  onFilesChange={setAttachedFiles}
-                  attachedFiles={attachedFiles}
-                  sendDisabled={isStreaming}
-                  placeholder={`Message ${assistantName}...`}
-                  variant="landing"
-                  ctaLabel="Ask"
-                  large
-                  // #1698: "New worker" / ?create=1 must give visible feedback
-                  // from ANY route. Focus the composer when entering create mode
-                  // so the click lands a caret here instead of a dead no-op.
-                  autoFocus={createMode}
-                  focusKey={createEpoch}
-                />
-              </div>}
+              {!suppressGoalComposer && (
+                <div className="mt-6 w-full max-w-2xl px-6">
+                  {/* Hero composer (Federico 2026-06-21): the home/create empty
+                      state is the primary call-to-action, so it uses the FLAT,
+                      BORDERLESS landing-style composer (no "Uses" chip row) at the
+                      LARGER hero size. Tool names are highlighted INLINE inside the
+                      example pills above (PromptTokens), matching the landing box. */}
+                  <PromptInput
+                    value={input}
+                    onChange={setInput}
+                    onSubmit={handleSubmit}
+                    onFilesChange={setAttachedFiles}
+                    attachedFiles={attachedFiles}
+                    sendDisabled={isStreaming}
+                    placeholder={`Message ${assistantName}...`}
+                    variant="landing"
+                    ctaLabel="Ask"
+                    large
+                    // #1698: "New worker" / ?create=1 must give visible feedback
+                    // from ANY route. Focus the composer when entering create mode
+                    // so the click lands a caret here instead of a dead no-op.
+                    autoFocus={createMode}
+                    focusKey={createEpoch}
+                  />
+                </div>
+              )}
             </div>
           ) : (
             <ChatEmptyState onSuggest={(text) => { setInput(text); }} isNewWorkspace={isNewWorkspace} />
@@ -936,7 +930,7 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
           empty state the composer is centered with the greeting/pills above
           (showCenteredComposer), so this bottom block is suppressed to avoid the
           dead-whitespace Federico previously flagged. */}
-      {!showCenteredComposer && !goalOnboardingActive && (
+      {!showCenteredComposer && !suppressGoalComposer && (
         <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
           <Separator className="mb-2" />
           {/* Suggestion pills: visible in active chat (not on empty state, not while streaming) */}
