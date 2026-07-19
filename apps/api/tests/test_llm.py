@@ -4,17 +4,39 @@ Covers model-id routing (OpenAI vs litellm providers), Agents-SDK model
 normalization, Anthropic/Bedrock prompt-cache tagging, credential detection, and
 the platform-key bridge, all without any network calls.
 """
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 import llm  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "error",
+    (
+        "429 exceeded your current quota",
+        "AuthenticationError: invalid API key",
+        "ResourceExhaustedError: RESOURCE_EXHAUSTED",
+        "PermissionDeniedError: 403 forbidden",
+        "ExpiredTokenException: security token expired",
+        "NoCredentialsError: unable to locate credentials",
+    ),
+)
+def test_chat_model_fallback_retryable_provider_errors(error):
+    assert llm.should_retry_chat_with_fallback(RuntimeError(error))
+
+
+def test_chat_model_fallback_does_not_retry_application_errors():
+    assert not llm.should_retry_chat_with_fallback(RuntimeError("invalid response format"))
 
 
 def test_is_litellm_model():
@@ -188,9 +210,13 @@ def test_cache_control_extra_args():
     # Anthropic/Bedrock: inject a system-message cache breakpoint for litellm so the
     # static system prompt is cached across agent-loop turns.
     args = llm.cache_control_extra_args("litellm/bedrock/us.anthropic.claude-sonnet-4-6")
-    assert args == {
-        "cache_control_injection_points": [{"location": "message", "role": "system"}]
-    }
+    assert args == {"cache_control_injection_points": [{"location": "message", "role": "system"}]}
     # OpenAI caches prefixes automatically -> no extra args.
     assert llm.cache_control_extra_args("gpt-5.5") is None
     assert llm.cache_control_extra_args("gpt-5.4-mini") is None
+
+
+def test_safe_error_message_for_exhausted_chat_fallback():
+    assert llm.safe_llm_error_message(
+        RuntimeError("chat model fallback exhausted"), action="Chat"
+    ) == ("Chat hit a temporary capacity issue after retrying another provider. Please try again.")

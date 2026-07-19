@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from .base import SandboxDriver
 from .cancellation import run_cancel_requested
-from .e2b_upload import upload_tree_tarball
+from .e2b_upload import E2B_FILE_REQUEST_TIMEOUT_SECONDS, upload_tree_tarball
 from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult, assert_safe_outbound_url
 import contexts as _contexts_module
@@ -63,6 +63,8 @@ MAX_CONTEXT_TAR_MEMBER_BYTES = 100 * 1024 * 1024  # 100 MiB per member
 MAX_CONTEXT_TAR_TOTAL_BYTES = 250 * 1024 * 1024  # 250 MiB total per extraction
 E2B_COMMAND_REQUEST_TIMEOUT_BUFFER_SECONDS = 60
 E2B_INSTALL_COMMAND_MIN_REQUEST_TIMEOUT_SECONDS = 300
+E2B_CREATE_REQUEST_TIMEOUT_SECONDS = 120
+E2B_CONTROL_REQUEST_TIMEOUT_SECONDS = 60
 MAX_WORKER_ERROR_OUTPUT_CHARS = 1000
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
@@ -126,7 +128,7 @@ def _sandbox_alive(sandbox: Any, workdir: str) -> bool:
 
 def _kill_sandbox_quietly(sandbox: Any) -> None:
     try:
-        sandbox.kill()
+        sandbox.kill(request_timeout=E2B_CONTROL_REQUEST_TIMEOUT_SECONDS)
     except Exception:
         logger.debug("E2B sandbox kill suppressed", exc_info=True)
 
@@ -876,6 +878,12 @@ _TRANSIENT_E2B_TRANSPORT_MARKERS = (
     "streamidtoolowerror",
     "stream id too low",
     "deque mutated during iteration",
+    "request timed out",
+    "request_timeout",
+    "connecttimeout",
+    "readtimeout",
+    "writetimeout",
+    "pooltimeout",
     "json could not be generated",
 )
 
@@ -1140,6 +1148,7 @@ def _create_sandbox_with_key_fallback(
                 "timeout": timeout,
                 "envs": envs,
                 "network": network,
+                "request_timeout": E2B_CREATE_REQUEST_TIMEOUT_SECONDS,
             }
             if template:
                 create_kwargs["template"] = template
@@ -1197,8 +1206,13 @@ def _read_result_json(
     """
     # 1. Read. A read failure means the worker exited 0 but never wrote the file.
     try:
-        result_raw = sandbox.files.read(result_path)
+        result_raw = sandbox.files.read(
+            result_path,
+            request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+        )
     except Exception as exc:
+        if _is_transient_e2b_transport_error(exc):
+            raise E2BTransportDroppedError(exc, phase="result_read") from exc
         log_fn(f"[e2b] No result.json at {result_path}: {exc}", "error")
         return None, WorkerResult(
             status="error",
@@ -1341,7 +1355,7 @@ def cancel_sandbox(run_id: str, *, reason: str | None = None) -> bool:
     if sandbox is None:
         return False
     try:
-        sandbox.kill()
+        sandbox.kill(request_timeout=E2B_CONTROL_REQUEST_TIMEOUT_SECONDS)
         logger.warning("Killed active E2B sandbox for run %s: %s", run_id, reason or "cancel requested")
         return True
     except Exception as exc:
@@ -1504,7 +1518,10 @@ def _refresh_sandbox_lifetime(
         logger.debug("E2B sandbox object does not expose set_timeout(); skipping lifetime refresh")
         return
     try:
-        set_timeout(timeout)
+        set_timeout(
+            timeout,
+            request_timeout=E2B_CONTROL_REQUEST_TIMEOUT_SECONDS,
+        )
         log_fn(f"[e2b] Refreshed sandbox lifetime to {timeout}s before worker command", "debug")
     except Exception as exc:
         log_fn(
@@ -2264,7 +2281,10 @@ class E2BSandboxDriver(SandboxDriver):
                 writeable_contexts = set(warm_entry.writeable_contexts if warm_entry else set())
                 perf.mark("warm_cleanup")
             else:
-                sandbox.files.make_dir(workdir)
+                sandbox.files.make_dir(
+                    workdir,
+                    request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+                )
                 perf.mark("make_workdir")
 
             if not sandbox_prepared and not bundle_baked_template:
@@ -2295,7 +2315,11 @@ class E2BSandboxDriver(SandboxDriver):
                 # declares calls; keeps the sandbox clean for workers that do not need it.
                 if _worker_call_token:
                     from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT  # noqa: PLC0415
-                    sandbox.files.write(f"{workdir}/workeros.py", WORKEROS_PY_CONTENT.encode())
+                    sandbox.files.write(
+                        f"{workdir}/workeros.py",
+                        WORKEROS_PY_CONTENT.encode(),
+                        request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+                    )
                     log_fn("[e2b] Uploaded workeros.py (worker-to-worker calling enabled)", "info")
                     perf.mark("workeros_helper_upload")
                 else:
@@ -2334,12 +2358,19 @@ class E2BSandboxDriver(SandboxDriver):
                 local_path = Path(value)
                 if local_path.is_absolute() and local_path.is_file():
                     if not e2b_inputs_made:
-                        sandbox.files.make_dir(e2b_inputs_dir)
+                        sandbox.files.make_dir(
+                            e2b_inputs_dir,
+                            request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+                        )
                         made_dirs.add(e2b_inputs_dir)
                         e2b_inputs_made = True
                     remote_name = local_path.name
                     remote_path = f"{e2b_inputs_dir}/{remote_name}"
-                    sandbox.files.write(remote_path, local_path.read_bytes())
+                    sandbox.files.write(
+                        remote_path,
+                        local_path.read_bytes(),
+                        request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+                    )
                     log_fn(f"[e2b] Uploaded input file {remote_name}", "debug")
                     # Remap to the relative path the worker expects inside the sandbox.
                     e2b_inputs[key] = f"inputs/{remote_name}"
@@ -2351,6 +2382,7 @@ class E2BSandboxDriver(SandboxDriver):
             sandbox.files.write(
                 f"{workdir}/inputs.json",
                 json.dumps(sandbox_inputs, indent=2),
+                request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
             )
             perf.mark("inputs_json")
 
@@ -2360,6 +2392,7 @@ class E2BSandboxDriver(SandboxDriver):
             sandbox.files.write(
                 f"{workdir}/.env.local",
                 "\n".join(env_local_lines) + ("\n" if env_local_lines else ""),
+                request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
             )
             perf.mark("env_local")
 
@@ -2369,6 +2402,7 @@ class E2BSandboxDriver(SandboxDriver):
             sandbox.files.write(
                 f"{workdir}/secrets.json",
                 json.dumps(secrets, indent=2),
+                request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
             )
             perf.mark("secrets_json")
 
@@ -2378,6 +2412,7 @@ class E2BSandboxDriver(SandboxDriver):
             sandbox.files.write(
                 f"{workdir}/connections.json",
                 json.dumps(connection_ids, indent=2),
+                request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
             )
             perf.mark("connections_json")
 
@@ -2477,6 +2512,7 @@ class E2BSandboxDriver(SandboxDriver):
                     _boto_res = sandbox.commands.run(
                         "pip install -q boto3",
                         timeout=install_timeout,
+                        request_timeout=_e2b_install_request_timeout(install_timeout),
                     )
                     if _boto_res.exit_code != 0:
                         err = (
@@ -2776,7 +2812,7 @@ class E2BSandboxDriver(SandboxDriver):
                 try:
                     # e2b 2.x: kill() may raise if the sandbox already exited.
                     # We attempt gracefully; any exception is a warning, not a failure.
-                    sandbox.kill()
+                    sandbox.kill(request_timeout=E2B_CONTROL_REQUEST_TIMEOUT_SECONDS)
                     log_fn("[e2b] Sandbox killed", "debug")
                 except Exception as close_exc:
                     # Sandbox may have self-terminated (timeout, OOM) — not an error.
@@ -2820,13 +2856,19 @@ class E2BSandboxDriver(SandboxDriver):
                 name = context["name"]
 
                 if not made_context_root:
-                    sandbox.files.make_dir(contexts_root)
+                    sandbox.files.make_dir(
+                        contexts_root,
+                        request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+                    )
                     made_dirs.add(contexts_root)
                     made_context_root = True
 
                 source = context["source"]
                 sandbox_target = f"{contexts_root}/{name}"
-                sandbox.files.make_dir(sandbox_target)
+                sandbox.files.make_dir(
+                    sandbox_target,
+                    request_timeout=E2B_FILE_REQUEST_TIMEOUT_SECONDS,
+                )
                 made_dirs.add(sandbox_target)
                 if mounted_contexts is not None:
                     mounted_contexts.add(name)
@@ -2843,6 +2885,7 @@ class E2BSandboxDriver(SandboxDriver):
                         "git clone --depth 1 "
                         f"{shlex.quote(repo_url)} {shlex.quote(sandbox_target)}",
                         timeout=180,
+                        request_timeout=_e2b_command_request_timeout(180),
                     )
                     if result.exit_code != 0:
                         return (
@@ -2926,6 +2969,7 @@ class E2BSandboxDriver(SandboxDriver):
                 result = sandbox.commands.run(
                     f"cd {shlex.quote(sandbox_source)} && tar -cf {shlex.quote(tar_path)} .",
                     timeout=120,
+                    request_timeout=_e2b_command_request_timeout(120),
                 )
                 if result.exit_code != 0:
                     log_fn(

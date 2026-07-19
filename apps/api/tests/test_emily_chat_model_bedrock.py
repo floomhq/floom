@@ -22,6 +22,7 @@ BEDROCK = "bedrock/us.anthropic.claude-sonnet-4-6"
 
 def _clear(monkeypatch):
     monkeypatch.delenv("WORKEROS_CHAT_MODEL", raising=False)
+    monkeypatch.delenv("WORKEROS_CHAT_MODEL_FALLBACK", raising=False)
     monkeypatch.delenv("WORKEROS_WORKER_AGENT_MODEL", raising=False)
 
 
@@ -42,6 +43,13 @@ def test_emily_inherits_worker_model_when_no_chat_override(monkeypatch):
 def test_oss_zero_config_fallback(monkeypatch):
     _clear(monkeypatch)
     assert chat_service._default_chat_model() == chat_service.DEFAULT_WORKSPACE_AGENT_MODEL
+
+
+def test_chat_fallback_model_is_explicit_and_optional(monkeypatch):
+    _clear(monkeypatch)
+    assert chat_service._fallback_chat_model() is None
+    monkeypatch.setenv("WORKEROS_CHAT_MODEL_FALLBACK", "  gpt-5.4-mini  ")
+    assert chat_service._fallback_chat_model() == "gpt-5.4-mini"
 
 
 def test_bedrock_model_routes_through_litellm_for_the_agent_sdk():

@@ -34,7 +34,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from dataclasses import replace
+from typing import Any, AsyncIterator, Callable, Optional
 
 logger = logging.getLogger("floom.runner_sandbox.loop_local_provider")
 
@@ -62,6 +63,130 @@ def _uses_openai_provider(model_name: str | None) -> bool:
     return prefix == "openai"
 
 
+class _FallbackModel:
+    """Retry one failed model call on a second provider without leaking partial output."""
+
+    def __init__(
+        self,
+        *,
+        primary: Any,
+        fallback_factory: Callable[[], Any],
+        primary_name: str,
+        fallback_name: str,
+        should_fallback: Callable[[BaseException], bool],
+        fallback_extra_args: dict[str, Any] | None = None,
+    ) -> None:
+        self._primary = primary
+        self._fallback_factory = fallback_factory
+        self._fallback: Any = None
+        self._fallback_active = False
+        self._primary_name = primary_name
+        self._fallback_name = fallback_name
+        self._should_fallback = should_fallback
+        self._fallback_extra_args = fallback_extra_args
+
+    def _get_fallback(self) -> Any:
+        if self._fallback is None:
+            self._fallback = self._fallback_factory()
+        return self._fallback
+
+    def get_retry_advice(self, request: Any) -> Any:
+        model = (
+            self._fallback
+            if self._fallback_active and self._fallback is not None
+            else self._primary
+        )
+        get_advice = getattr(model, "get_retry_advice", None)
+        return get_advice(request) if callable(get_advice) else None
+
+    def _fallback_call(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        fallback_args = list(args)
+        fallback_kwargs = dict(kwargs)
+        if len(fallback_args) > 2 and fallback_args[2] is not None:
+            fallback_args[2] = replace(fallback_args[2], extra_args=self._fallback_extra_args)
+        elif fallback_kwargs.get("model_settings") is not None:
+            fallback_kwargs["model_settings"] = replace(
+                fallback_kwargs["model_settings"], extra_args=self._fallback_extra_args
+            )
+        return tuple(fallback_args), fallback_kwargs
+
+    async def get_response(self, *args: Any, **kwargs: Any) -> Any:
+        if self._fallback_active:
+            fallback_args, fallback_kwargs = self._fallback_call(args, kwargs)
+            try:
+                return await self._get_fallback().get_response(*fallback_args, **fallback_kwargs)
+            except Exception as fallback_exc:
+                raise RuntimeError("chat model fallback exhausted") from fallback_exc
+        try:
+            return await self._primary.get_response(*args, **kwargs)
+        except Exception as exc:
+            if not self._should_fallback(exc):
+                raise
+            logger.warning(
+                "Chat model %s failed with a quota/auth error; retrying model call on %s",
+                self._primary_name,
+                self._fallback_name,
+            )
+            self._fallback_active = True
+            fallback_args, fallback_kwargs = self._fallback_call(args, kwargs)
+            try:
+                return await self._get_fallback().get_response(*fallback_args, **fallback_kwargs)
+            except Exception as fallback_exc:
+                logger.error(
+                    "Chat fallback model %s failed after primary model %s",
+                    self._fallback_name,
+                    self._primary_name,
+                    exc_info=True,
+                )
+                raise RuntimeError("chat model fallback exhausted") from fallback_exc
+
+    async def stream_response(self, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+        buffered: list[Any] = []
+        if self._fallback_active:
+            fallback_args, fallback_kwargs = self._fallback_call(args, kwargs)
+            try:
+                async for event in self._get_fallback().stream_response(
+                    *fallback_args, **fallback_kwargs
+                ):
+                    buffered.append(event)
+            except Exception as fallback_exc:
+                raise RuntimeError("chat model fallback exhausted") from fallback_exc
+            for event in buffered:
+                yield event
+            return
+        try:
+            async for event in self._primary.stream_response(*args, **kwargs):
+                buffered.append(event)
+        except Exception as exc:
+            if not self._should_fallback(exc):
+                raise
+            logger.warning(
+                "Chat model %s stream failed with a quota/auth error; restarting model call on %s",
+                self._primary_name,
+                self._fallback_name,
+            )
+            self._fallback_active = True
+            fallback_args, fallback_kwargs = self._fallback_call(args, kwargs)
+            buffered = []
+            try:
+                async for event in self._get_fallback().stream_response(
+                    *fallback_args, **fallback_kwargs
+                ):
+                    buffered.append(event)
+            except Exception as fallback_exc:
+                logger.error(
+                    "Chat fallback model %s stream failed after primary model %s",
+                    self._fallback_name,
+                    self._primary_name,
+                    exc_info=True,
+                )
+                raise RuntimeError("chat model fallback exhausted") from fallback_exc
+        for event in buffered:
+            yield event
+
+
 class LoopLocalModelProvider:
     """A ModelProvider bound to a per-run AsyncOpenAI + httpx client.
 
@@ -76,10 +201,20 @@ class LoopLocalModelProvider:
     ``get_model``, so it can be passed directly as ``RunConfig.model_provider``.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        fallback_model_name: str | None = None,
+        should_fallback: Callable[[BaseException], bool] | None = None,
+        fallback_extra_args: dict[str, Any] | None = None,
+    ) -> None:
         self._provider: Any = None
         self._openai_client: Any = None
         self._http_client: Any = None
+        self._fallback_model_name = fallback_model_name
+        self._should_fallback = should_fallback
+        self._fallback_extra_args = fallback_extra_args
+        self._fallback_models: dict[str | None, Any] = {}
 
     def _ensure_provider(self, *, needs_openai_client: bool) -> Any:
         if self._provider is not None:
@@ -120,9 +255,26 @@ class LoopLocalModelProvider:
 
     # --- ModelProvider protocol -------------------------------------------------
     def get_model(self, model_name: str | None) -> Any:
-        return self._ensure_provider(
+        if model_name in self._fallback_models:
+            return self._fallback_models[model_name]
+        primary = self._ensure_provider(
             needs_openai_client=_uses_openai_provider(model_name)
         ).get_model(model_name)
+        fallback_name = self._fallback_model_name
+        if not fallback_name or not self._should_fallback or fallback_name == model_name:
+            return primary
+        model = _FallbackModel(
+            primary=primary,
+            fallback_factory=lambda: self._ensure_provider(
+                needs_openai_client=_uses_openai_provider(fallback_name)
+            ).get_model(fallback_name),
+            primary_name=model_name or "default",
+            fallback_name=fallback_name,
+            should_fallback=self._should_fallback,
+            fallback_extra_args=self._fallback_extra_args,
+        )
+        self._fallback_models[model_name] = model
+        return model
 
     @property
     def openai_provider(self) -> Any:
