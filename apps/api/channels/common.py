@@ -840,9 +840,41 @@ async def collect_agent_reply_details(
     )
     text_parts: list[str] = []
     finish_part: dict = {}
+    queue_get_task: Optional[asyncio.Task] = None
     try:
         while True:
-            part = await queue.get()
+            # stream_chat can fail before it reaches the try block that emits
+            # error/finish events. Drain any already-queued parts first, then
+            # race the next part against stream completion so such a failure
+            # cannot leave this collector blocked on queue.get() forever.
+            if task.done():
+                try:
+                    part = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    await task  # Propagate a pre-finish stream exception.
+                    raise AgentReplyError(
+                        "workspace agent stream ended before emitting a finish event"
+                    )
+            else:
+                queue_get_task = asyncio.create_task(queue.get())
+                done, _ = await asyncio.wait(
+                    {queue_get_task, task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if queue_get_task in done:
+                    part = queue_get_task.result()
+                    queue_get_task = None
+                else:
+                    # The stream completed while no queue part was ready. Cancel
+                    # this receive, then loop once more to drain an event queued
+                    # immediately before task completion.
+                    queue_get_task.cancel()
+                    try:
+                        await queue_get_task
+                    except asyncio.CancelledError:
+                        pass
+                    queue_get_task = None
+                    continue
             if part.get("type") == "text":
                 text_parts.append(str(part.get("text") or ""))
             if part.get("type") == "error":
@@ -859,6 +891,12 @@ async def collect_agent_reply_details(
                 finish_part.get("conversation_id"),
             )
     finally:
+        if queue_get_task is not None and not queue_get_task.done():
+            queue_get_task.cancel()
+            try:
+                await queue_get_task
+            except asyncio.CancelledError:
+                pass
         if not task.done():
             task.cancel()
     return {

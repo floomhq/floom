@@ -170,6 +170,13 @@ def _tool_result(response):
     return body["result"]
 
 
+def _workspace_chat_result(main, arguments, user_id="mcp-test-user", timeout=1.0):
+    async def _call():
+        return await main._mcp_workspace_chat_result(arguments, user_id)
+
+    return asyncio.run(asyncio.wait_for(_call(), timeout=timeout))
+
+
 # ---------------------------------------------------------------------------
 # #2269 — conversation isolation and continuity
 # ---------------------------------------------------------------------------
@@ -257,6 +264,30 @@ def test_workspace_chat_unknown_conversation_id_errors_without_forking(monkeypat
     text = result["content"][0]["text"]
     assert "not found" in text.lower(), text
     assert _conversations_in_db(main) == [], "unknown id must not silently create a conversation"
+
+
+def test_workspace_chat_foreign_conversation_errors_without_forking_or_leaking(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+    foreign_id = chat_service.create_conversation(
+        "other-workspace-user",
+        title="Foreign private thread",
+    )
+    chat_service.insert_message(foreign_id, "user", "secret launch phrase: violet-otter")
+    conversations_before = _conversations_in_db(main)
+    messages_before = _messages_for(main, foreign_id)
+
+    result = _workspace_chat_result(
+        main,
+        {"message": "resume that thread", "conversation_id": foreign_id},
+    )
+
+    assert result["isError"] is True, result
+    text = result["content"][0]["text"]
+    assert "not found in this workspace" in text.lower(), text
+    assert "violet-otter" not in text, text
+    assert _conversations_in_db(main) == conversations_before
+    assert _messages_for(main, foreign_id) == messages_before
 
 
 def test_workspace_chat_serve_endpoint_roundtrip(monkeypatch, tmp_path):
@@ -363,3 +394,78 @@ def test_workspace_chat_genuine_failure_surfaces_actionable_message(monkeypatch,
     assert text.strip(), result
     assert "internal server error" not in text.lower(), text
     assert "internal error" not in text.lower(), text
+
+
+def test_workspace_chat_pre_event_stream_failure_returns_actionable_tool_error(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+
+    def _fail_before_any_queue_event(*args, **kwargs):
+        raise RuntimeError("pre-event conversation resolution exploded")
+
+    monkeypatch.setattr(chat_service, "resolve_conversation_id", _fail_before_any_queue_event)
+
+    result = _workspace_chat_result(
+        main,
+        {"message": "this fails before the stream emits"},
+    )
+
+    assert result["isError"] is True, result
+    text = result["content"][0]["text"]
+    assert text.strip(), result
+    assert "internal server error" not in text.lower(), text
+    assert "internal error" not in text.lower(), text
+
+
+def test_collect_agent_reply_details_rejects_normal_return_without_finish(monkeypatch, tmp_path):
+    _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+    common = importlib.import_module("channels.common")
+
+    async def _return_without_event(**kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "stream_chat", _return_without_event)
+
+    async def _collect():
+        return await common.collect_agent_reply_details(
+            message="hello",
+            user_id="mcp-test-user",
+            conversation_id=None,
+            source="mcp",
+        )
+
+    with pytest.raises(common.AgentReplyError, match="before emitting a finish event"):
+        asyncio.run(asyncio.wait_for(_collect(), timeout=1.0))
+
+
+def test_collect_agent_reply_details_keeps_finish_when_task_then_raises(monkeypatch, tmp_path):
+    _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+    common = importlib.import_module("channels.common")
+
+    async def _finish_then_fail(*, part_queue, **kwargs):
+        await part_queue.put({"type": "text", "text": "completed reply"})
+        await part_queue.put({
+            "type": "finish",
+            "conversation_id": "conv_finished",
+            "message_id": "msg_finished",
+        })
+        raise RuntimeError("post-finish teardown exploded")
+
+    monkeypatch.setattr(chat_service, "stream_chat", _finish_then_fail)
+
+    async def _collect():
+        return await common.collect_agent_reply_details(
+            message="hello",
+            user_id="mcp-test-user",
+            conversation_id=None,
+            source="mcp",
+        )
+
+    result = asyncio.run(asyncio.wait_for(_collect(), timeout=1.0))
+    assert result == {
+        "reply": "completed reply",
+        "conversation_id": "conv_finished",
+        "message_id": "msg_finished",
+    }
