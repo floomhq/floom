@@ -4709,12 +4709,17 @@ def create_worker_run(
     from run_service import SpendCapExceeded
 
     try:
+        # Execute with the worker owner's recipe/secrets, but preserve the
+        # authenticated caller as the run actor. Public stock workers are
+        # seed-owned, so collapsing these identities makes their runs invisible
+        # to the MCP caller immediately after this endpoint returns.
         run_id = create_run(
             worker_id,
             payload.inputs,
             trigger_source,
             status=RunStatus.RUNNING.value,
             user_id=true_owner_id,
+            actor_user_id=auth.user_id,
             trigger_ref=trigger_ref,
             repos=repos,
         )

@@ -1300,6 +1300,7 @@ def create_run(
     *,
     status: str | None = None,
     user_id: str | None = None,
+    actor_user_id: str | None = None,
     trigger_ref: str | None = None,
     retry_of_run_id: str | None = None,
     retry_attempt: int = 0,
@@ -1344,6 +1345,7 @@ def create_run(
                 trigger_ref=trigger_ref,
                 retry_of_run_id=retry_of_run_id,
                 retry_attempt=retry_attempt,
+                actor_user_id=actor_user_id,
             )
             last_exc = None
             break
