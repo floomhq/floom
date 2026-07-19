@@ -82,11 +82,11 @@ class _FakeFiles:
         self.writes: list[str] = []
         self.existing: set[str] = {"/home/user/worker"}
 
-    def make_dir(self, path: str) -> None:
+    def make_dir(self, path: str, **_kwargs) -> None:
         self.dirs.append(path)
         self.existing.add(path)
 
-    def write(self, path: str, _data: bytes) -> None:
+    def write(self, path: str, _data: bytes, **_kwargs) -> None:
         self.writes.append(path)
 
     def exists(self, path: str, **_kwargs) -> bool:
@@ -99,7 +99,7 @@ class _FakeSandbox:
         self.commands = _FakeCommands()
         self.killed = False
 
-    def kill(self) -> None:
+    def kill(self, **_kwargs) -> None:
         self.killed = True
 
 
