@@ -517,3 +517,52 @@ def test_collect_agent_reply_details_returns_when_post_finish_teardown_hangs(
     assert teardown_cancelled.is_set(), "hung stream task was not cancelled"
     assert "reply already complete" in caplog.text
     assert "teardown was still pending" in caplog.text
+
+
+def test_collect_agent_reply_details_logs_failure_raised_during_cancellation(
+    monkeypatch, tmp_path, caplog
+):
+    _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+    common = importlib.import_module("channels.common")
+    monkeypatch.setattr(common, "_POST_FINISH_TEARDOWN_GRACE_SECONDS", 0.01)
+
+    async def _finish_then_fail_when_cancelled(*, part_queue, **kwargs):
+        try:
+            await part_queue.put({"type": "text", "text": "completed before cancellation"})
+            await part_queue.put({
+                "type": "finish",
+                "conversation_id": "conv_cancel_failure",
+                "message_id": "msg_cancel_failure",
+            })
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise RuntimeError("teardown blew up")
+
+    monkeypatch.setattr(chat_service, "stream_chat", _finish_then_fail_when_cancelled)
+
+    async def _collect():
+        result = await asyncio.wait_for(
+            common.collect_agent_reply_details(
+                message="hello",
+                user_id="mcp-test-user",
+                conversation_id=None,
+                source="mcp",
+            ),
+            timeout=1.0,
+        )
+        for _ in range(10):
+            if "teardown blew up" in caplog.text:
+                break
+            await asyncio.sleep(0)
+        return result
+
+    result = asyncio.run(_collect())
+    assert result == {
+        "reply": "completed before cancellation",
+        "conversation_id": "conv_cancel_failure",
+        "message_id": "msg_cancel_failure",
+    }
+    assert "stream task failed during cancellation" in caplog.text
+    assert "conv_cancel_failure" in caplog.text
+    assert "teardown blew up" in caplog.text

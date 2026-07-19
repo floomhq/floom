@@ -909,6 +909,29 @@ async def collect_agent_reply_details(
             except asyncio.CancelledError:
                 pass
         if not task.done():
+            def _log_late_stream_failure(finished_task: asyncio.Task) -> None:
+                try:
+                    if finished_task.cancelled():
+                        return
+                    exc = finished_task.exception()
+                    if exc is not None:
+                        logger.exception(
+                            "workspace agent stream task failed during cancellation "
+                            "for conversation %s",
+                            finish_part.get("conversation_id"),
+                            exc_info=(type(exc), exc, exc.__traceback__),
+                        )
+                except BaseException:
+                    try:
+                        logger.exception(
+                            "failed to inspect cancelled workspace agent stream task "
+                            "for conversation %s",
+                            finish_part.get("conversation_id"),
+                        )
+                    except BaseException:
+                        pass
+
+            task.add_done_callback(_log_late_stream_failure)
             task.cancel()
     return {
         "reply": strip_em_dashes("".join(text_parts).strip()),
