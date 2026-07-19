@@ -737,6 +737,21 @@ export const api = {
       `${API_BASE}${withWorkspaceQuery(`/runs/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`)}`,
     bundleUrl: (id: string, filename: string) =>
       `${API_BASE}${withWorkspaceQuery(`/runs/${encodeURIComponent(id)}/bundle/${encodeURIComponent(filename)}`)}`,
+    // #1183: fetch a small artifact's raw text content for inline rendering in
+    // the Output tab (same-origin proxy request, cookie-authed exactly like the
+    // download link -- no new auth surface). Callers gate on size/mime before
+    // calling this; the response is untrusted worker output and MUST be
+    // sanitized by the renderer (GenericOutput), never dangerouslySetInnerHTML.
+    artifactText: async (id: string, artifactId: string): Promise<string> => {
+      const path = withWorkspaceQuery(
+        `/runs/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+      );
+      const res = await fetchApi(path, `${API_BASE}${path}`, { headers: withWorkspaceHeaders() });
+      if (!res.ok) {
+        throw new Error(await apiErrorFromResponse(res));
+      }
+      return res.text();
+    },
   },
   approvals: {
     list: async (status?: string) => {
