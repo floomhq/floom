@@ -147,7 +147,8 @@ def _resolve_pending_approval_for_actor(
 
 
 def _decide_approval(
-    *, decision: str, approval_id: Optional[str], run_id: Optional[str], user_id: str
+    *, decision: str, approval_id: Optional[str], run_id: Optional[str], user_id: str,
+    reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Approve or reject the actor's pending approval (#891).
 
@@ -204,7 +205,7 @@ def _decide_approval(
                 result = approve_run(target_run_id, ApproveRequest(), auth, repos)
                 status = getattr(result, "status", "approved")
         else:
-            reason = f"Rejected via chat by {user_id}"
+            reason = (reason or "").strip() or f"Rejected via chat by {user_id}"
             if kind == "destructive_delete":
                 result = reject_destructive_action(
                     approval_id, RejectRequest(reason=reason), auth, repos
@@ -246,4 +247,5 @@ def _tool_approvals_reject(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
         approval_id=args.get("approval_id"),
         run_id=args.get("run_id"),
         user_id=user_id,
+        reason=args.get("reason"),
     )
