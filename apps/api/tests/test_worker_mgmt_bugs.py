@@ -175,6 +175,70 @@ def test_worker_create_accepts_full_file_bundle(app_ctx):
     assert "lib/helper.py" in file_paths
 
 
+def test_worker_file_update_merges_and_preserves_omitted_files(app_ctx):
+    client, main, _scheduler = app_ctx
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    requirements = worker_dir / "requirements.txt"
+    requirements.write_text("httpx==0.28.1\n", encoding="utf-8")
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+
+    response = client.put(
+        "/workers/sales-summary/files",
+        json={"files": [
+            {"path": "worker.yml", "content": worker_yml},
+            {"path": "run.py", "content": "print('changed')\n"},
+        ]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert requirements.read_text(encoding="utf-8") == "httpx==0.28.1\n"
+
+
+def test_worker_versions_returns_history_after_file_edit(app_ctx):
+    client, main, _scheduler = app_ctx
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+
+    edited = client.put(
+        "/workers/sales-summary/files",
+        json={"files": [
+            {"path": "worker.yml", "content": worker_yml},
+            {"path": "run.py", "content": "print('versioned')\n"},
+        ]},
+    )
+    versions = client.get("/workers/sales-summary/versions")
+
+    assert edited.status_code == 200, edited.text
+    assert versions.status_code == 200, versions.text
+    assert len(versions.json()) >= 1
+    assert versions.json()[0]["id"] != ""
+
+
+def test_worker_pause_and_resume_toggle_enabled(app_ctx):
+    client, _main, _scheduler = app_ctx
+
+    paused = client.post("/workers/sales-summary/pause")
+    resumed = client.post("/workers/sales-summary/resume")
+
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["enabled"] is False
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["enabled"] is True
+
+
+def test_worker_management_tools_are_exposed_on_all_mcp_surfaces(app_ctx):
+    _client, main, _scheduler = app_ctx
+    required = {"workers.delete", "workers.pause", "workers.resume", "workers.write_file", "workers.versions"}
+    cloud = {tool["name"] for tool in main._MCP_DEFAULT_TOOLS}
+    remote = {tool["name"] for tool in main._workeros_remote_mcp_tool_definitions()}
+    server_source = (Path(__file__).parents[2] / "mcp" / "src" / "server.ts").read_text(encoding="utf-8")
+
+    assert required <= cloud
+    assert required <= remote
+    assert all(f'"{name}"' in server_source for name in required - {"workers.pause", "workers.resume"})
+    assert '`workers.${action}`' in server_source
+
+
 def test_worker_create_rejects_oversized_json_file_bundle(app_ctx):
     client, _main, _scheduler = app_ctx
     worker_yml = _worker_yml("huge-json-bundle", title="Huge JSON Bundle")

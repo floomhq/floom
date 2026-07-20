@@ -1133,6 +1133,25 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await request("DELETE", `/workers/${encodeURIComponent(id)}`), "Worker deleted.")),
   );
 
+  for (const action of ["pause", "resume"] as const) {
+    server.registerTool(
+      `workers.${action}`,
+      {
+        title: `${action === "pause" ? "Pause" : "Resume"} Worker`,
+        description: `${action === "pause" ? "Pause" : "Resume"} a Floom worker.`,
+        inputSchema: workerIdSchema.shape,
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      },
+      async ({ id }) =>
+        callTool(async () =>
+          jsonResult(
+            await request("POST", `/workers/${encodeURIComponent(id)}/${action}`),
+            `Worker ${action === "pause" ? "paused" : "resumed"}.`,
+          ),
+        ),
+    );
+  }
+
   server.registerTool(
     "workers.run",
     {
@@ -1424,7 +1443,7 @@ export function createServer(): McpServer {
     "workers.write_file",
     {
       title: "Write Worker File",
-      description: "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Atomically replaces all provided files. You must include worker.yml in every call.",
+      description: "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Omitted files are preserved. You must include worker.yml in every call.",
       inputSchema: {
         id: z.string().min(1).describe("Worker ID."),
         files: z.array(

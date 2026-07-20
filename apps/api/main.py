@@ -4413,7 +4413,7 @@ def update_worker_files(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
-    """Replace all files in a worker's directory atomically.
+    """Merge files into a worker's directory atomically.
 
     Accepts a list of {path, content} objects and writes them to disk.
     The write is atomic: files are written to a temp directory first, then
@@ -4504,21 +4504,6 @@ def update_worker_files(
             dest = tmp_dir / item.path
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(item.content, encoding="utf-8")
-
-        # Remove any existing files NOT in the new payload (keep backups)
-        existing_files = list(target_dir.rglob("*"))
-        new_paths = {item.path for item in payload.files}
-        for existing in existing_files:
-            if not existing.is_file():
-                continue
-            try:
-                rel = existing.relative_to(target_dir).as_posix()
-            except ValueError:
-                continue
-            if rel not in new_paths and not _should_ignore_worker_file(rel):
-                bak = existing.with_suffix(existing.suffix + f".bak{os.getpid()}")
-                existing.rename(bak)
-                backed_up.append((existing, bak))
 
         # Write new files from staging dir into target dir, backing up existing ones
         for item in payload.files:
@@ -6854,6 +6839,44 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             }, ["id"]),
         },
         {
+            "name": "workers.pause",
+            "description": "Pause a Floom worker so scheduled and manual runs are disabled.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.resume",
+            "description": "Resume a paused Floom worker.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.delete",
+            "description": "Delete a Floom worker when the caller has delete permission.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.write_file",
+            "description": "Merge source-file updates into a worker bundle; omitted files are preserved.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                        "required": ["path", "content"],
+                    },
+                },
+            }, ["id", "files"]),
+        },
+        {
+            "name": "workers.versions",
+            "description": "List saved versions of a worker, newest first.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            }, ["id"]),
+        },
+        {
             "name": "workers.run",
             "description": (
                 "Start a manual Floom worker run. File-type inputs accept a "
@@ -7164,6 +7187,40 @@ def _mcp_call_workers_update(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(data, "Worker updated.")
 
 
+def _mcp_call_worker_lifecycle(
+    action: str, arguments: Dict[str, Any], auth: AuthContext, repos: Repositories
+) -> Dict[str, Any]:
+    worker_id = _mcp_arg(arguments, "id")
+    request = _internal_asgi_request()
+    if action == "pause":
+        return _mcp_call_result(pause_worker(worker_id, request, auth=auth, repos=repos), "Worker paused.")
+    if action == "resume":
+        return _mcp_call_result(resume_worker(worker_id, request, auth=auth, repos=repos), "Worker resumed.")
+    delete_worker(worker_id, request, auth=auth, repos=repos)
+    return _mcp_call_result({"id": worker_id, "deleted": True}, "Worker deleted.")
+
+
+def _mcp_call_workers_write_file(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    files = arguments.get("files")
+    if not isinstance(files, list):
+        raise ValueError("Tool argument 'files' is required")
+    payload = WorkerFilesUpdateRequest(files=files)
+    data = update_worker_files(
+        _mcp_arg(arguments, "id"), payload, _internal_asgi_request(), auth=auth, repos=repos
+    )
+    return _mcp_call_result(data, "Worker files updated.")
+
+
+def _mcp_call_workers_versions(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_worker_versions(
+        _mcp_arg(arguments, "id"),
+        limit=min(max(int(arguments.get("limit") or 50), 1), 100),
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(data)
+
+
 def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     payload = RunCreate(
         inputs=arguments.get("inputs") if isinstance(arguments.get("inputs"), dict) else {},
@@ -7461,6 +7518,12 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_workers_create(arguments, auth, repos)
         if tool_name == "workers.update":
             return _mcp_call_workers_update(arguments, auth, repos)
+        if tool_name in {"workers.pause", "workers.resume", "workers.delete"}:
+            return _mcp_call_worker_lifecycle(tool_name.split(".", 1)[1], arguments, auth, repos)
+        if tool_name == "workers.write_file":
+            return _mcp_call_workers_write_file(arguments, auth, repos)
+        if tool_name == "workers.versions":
+            return _mcp_call_workers_versions(arguments, auth, repos)
         if tool_name == "workers.run":
             return _mcp_call_workers_run(arguments, auth, repos)
         if tool_name == "files.upload":
@@ -8105,10 +8168,12 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "workers.get", "description": "Get a Floom worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py or run_ts. For agent/skill-mode workers supply skill_md.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "run_ts": {"type": "string", "description": "TypeScript source for run.ts."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Optional complete worker bundle files. Must include worker.yml when supplied."}}, "required": ["worker_yml"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
+    {"name": "workers.pause", "description": "Pause a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.resume", "description": "Resume a paused Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.delete", "description": "Delete a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.run", "description": "Start a Floom worker run through MCP. File-type inputs accept a SHA-256 upload reference (mint one with files.upload), inline text content, or {content|content_base64, filename} — inline content is uploaded transparently.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run. For file-type inputs pass a SHA-256 reference from files.upload, inline text content, or {content|content_base64, filename}."}}, "required": ["id"]}},
     {"name": "files.upload", "description": "Upload file content (UTF-8 text or base64) and get back the SHA-256 reference to pass as a file-type input value in workers.run. This is the MCP upload path — no browser form needed.", "inputSchema": {"type": "object", "properties": {"filename": {"type": "string", "description": "Filename with extension, e.g. notes.txt or data.csv. The extension determines the stored media type and must be on the upload allowlist."}, "content": {"type": "string", "description": "UTF-8 text content. Provide exactly one of content or content_base64."}, "content_base64": {"type": "string", "description": "Base64-encoded binary content. Provide exactly one of content or content_base64."}}, "required": ["filename"]}},
-    {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, run.ts, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
+    {"name": "workers.write_file", "description": "Merge source-file updates into a worker directory (worker.yml, SKILL.md, run.py, run.ts, requirements.txt). Omitted files are preserved. Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to merge. Must include worker.yml."}}, "required": ["id", "files"]}},
     {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
     {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.timeseries", "description": "Get daily run counts and success/failure breakdown for a worker over the last N days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "days": {"type": "integer", "default": 30, "description": "Days of history (1–90)."}}, "required": ["id"]}},
@@ -8333,6 +8398,10 @@ async def _mcp_dispatch(
     if name == "workers.update":
         body = {k: a[k] for k in a if k != "id"}
         data, s = await _api_call("PATCH", f"/workers/{_enc(a['id'])}", request, body=body)
+        return _mcp_api_result(data, s)
+    if name in {"workers.pause", "workers.resume"}:
+        action = name.split(".", 1)[1]
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/{action}", request)
         return _mcp_api_result(data, s)
     if name == "workers.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}", request)
