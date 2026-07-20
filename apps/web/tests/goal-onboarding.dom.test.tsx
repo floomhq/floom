@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -34,6 +36,16 @@ beforeEach(() => {
 });
 
 describe("goal-based first-open onboarding", () => {
+  it("uses the shared button system for all five CTA implementations", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "components/home/GoalOnboarding.tsx"),
+      "utf8",
+    );
+    expect(source.match(/<Button\b/g)).toHaveLength(4);
+    expect(source).toContain("className={buttonVariants({");
+    expect(source).not.toMatch(/<button\b/);
+  });
+
   it("maps every lane to a real live-gallery template", () => {
     expect(GOAL_LANES.map((lane) => [lane.title, lane.template.slug])).toEqual([
       ["Outreach & Leads", "partnership-signal-outreach"],

@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { Button, buttonVariants } from "@/components/ui/button";
 import { api, setActiveWorkspaceId } from "@/lib/api";
 import { getPublicSiteOrigin } from "@/lib/api-base";
 import { useWorkspaceHref } from "@/lib/useWorkspaceHref";
@@ -192,14 +193,16 @@ function Progress({ step }: { step: OnboardingStep }) {
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-xs font-medium text-[var(--ink-soft)] transition-colors hover:text-ink"
+      className="h-7 gap-1 bg-transparent px-0 text-xs text-[var(--ink-soft)] hover:bg-transparent hover:text-ink"
     >
       <ArrowLeft className="size-3.5" aria-hidden="true" />
       Back
-    </button>
+    </Button>
   );
 }
 
@@ -270,11 +273,12 @@ export function GoalOnboarding() {
             {GOAL_LANES.map((item) => {
               const Icon = item.Icon;
               return (
-                <button
+                <Button
                   key={item.id}
                   type="button"
+                  variant="outline"
                   onClick={() => chooseLane(item)}
-                  className="group flex min-h-[88px] items-center gap-3 rounded-[var(--radius-card)] bg-[var(--bg-card)] px-4 py-3.5 text-left [border:var(--bd-card)] transition-colors hover:bg-[var(--bg-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  className="group h-auto min-h-[88px] w-full justify-start gap-3 rounded-[var(--radius-card)] bg-[var(--bg-card)] px-4 py-3.5 text-left whitespace-normal [border:var(--bd-card)] hover:bg-[var(--bg-2)]"
                 >
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] bg-[var(--accent-soft)] text-[var(--accent)]">
                     <Icon className="size-[17px]" aria-hidden="true" />
@@ -287,7 +291,7 @@ export function GoalOnboarding() {
                       {item.summary}
                     </span>
                   </span>
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -319,16 +323,21 @@ export function GoalOnboarding() {
               ))}
             </ul>
 
-            <button
+            <Button
               type="button"
+              size="lg"
               onClick={() => setStep("sample")}
-              className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-[var(--radius-button)] bg-[var(--accent)] px-4 text-[13.5px] font-semibold text-white transition-opacity hover:opacity-90"
+              className="mt-6 h-11 w-full px-4 text-[13.5px] font-semibold"
             >
               See it with sample data first
-            </button>
+            </Button>
             <Link
               href={connectHref}
-              className="mt-2.5 inline-flex h-10 w-full items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-2)] px-4 text-[13px] font-medium text-[var(--ink-soft)] no-underline transition-colors hover:bg-[var(--bg-3)] hover:text-ink"
+              className={buttonVariants({
+                variant: "outline",
+                size: "lg",
+                className: "mt-2.5 h-10 w-full px-4 text-[13px] no-underline",
+              })}
             >
               Connect {template.connectionName}
             </Link>
@@ -380,14 +389,15 @@ export function GoalOnboarding() {
               </p>
             )}
 
-            <button
+            <Button
               type="button"
+              size="lg"
               onClick={() => void importTemplate()}
               disabled={importing}
-              className="mt-5 inline-flex h-11 w-full items-center justify-center rounded-[var(--radius-button)] bg-[var(--accent)] px-4 text-[13.5px] font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+              className="mt-5 h-11 w-full px-4 text-[13.5px] font-semibold disabled:cursor-wait"
             >
               {importing ? "Adding worker..." : "Add to workspace and continue"}
-            </button>
+            </Button>
             <div className="mt-2.5 flex flex-col items-center justify-center gap-1.5 text-xs sm:flex-row sm:gap-4">
               <Link
                 href={connectHref}
