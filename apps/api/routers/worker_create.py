@@ -34,6 +34,7 @@ from services.worker_registry_ops import (
     MAX_WORKER_BUNDLE_UNCOMPRESSED_BYTES,
     _embed_files_in_skill_version,
     _free_worker_id,
+    _normalize_worker_yml_connections,
     _parse_worker_payload,
     _persist_discovered_workers,
     _purge_partial_worker,
@@ -95,6 +96,7 @@ def create_worker(
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
     _reject_raw_local_runner_on_create(worker_yml)
     worker_yml = _apply_workspace_approval_default(worker_yml)  # #794
+    worker_yml = _normalize_worker_yml_connections(worker_yml)
     worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id, repos=repos)
     if payload.files:
         file_map = {item.path: item.content for item in payload.files}
@@ -195,6 +197,7 @@ async def create_worker_from_bundle(
 
     worker_yml_path_in_zip = f"{prefix}worker.yml"
     worker_yml = zf.read(worker_yml_path_in_zip).decode("utf-8")
+    worker_yml = _normalize_worker_yml_connections(worker_yml)
 
     worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id, repos=repos)
 
@@ -243,6 +246,7 @@ async def create_worker_from_bundle(
                 dest = dest / part
                 dest.mkdir(exist_ok=True)
             (dest / parts[-1]).write_bytes(data)
+        (target_dir / "worker.yml").write_text(worker_yml, encoding="utf-8")
     except HTTPException:
         import shutil
         shutil.rmtree(target_dir, ignore_errors=True)

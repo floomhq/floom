@@ -257,9 +257,9 @@ The WorkerContract YAML must follow schema_version "0.3":
 - Only include integrations for apps EXPLICITLY NAMED in the user's prompt.
 - Choose ONE auth method per app: "oauth" (for Gmail/HubSpot/Slack/etc.) or "api_key" (for Granola/Apollo/Stripe/etc.)
 - Never list the same app twice.
-- OAuth connections must be a top-level sibling of `exec`. Never put
-  `connections` inside `exec`; the WorkerContract runtime only resolves the
-  top-level field.
+- OAuth connections must be a top-level sibling of `exec` and `capabilities`.
+  Never put `connections` inside `exec` or `capabilities`; the WorkerContract
+  runtime only resolves the top-level field.
 
 === RESPONSE FORMAT ===
 
@@ -540,10 +540,14 @@ def _repair_generated_worker_manifest(raw_manifest: Dict[str, Any]) -> Dict[str,
     """Normalize small schema drift in generated WorkerContract YAML.
 
     The worker-author and draft-from-prompt LLMs occasionally emit `schema_version`
-    as a numeric scalar and omit the required top-level `version`. Repair those
-    two cases in the generation path so the backend returns a valid contract
-    instead of bouncing a retry on a trivially fixable format error.
+    as a numeric scalar and omit the required top-level `version`. Repair these
+    cases in the generation path so the backend returns a valid contract
+    instead of bouncing a retry on trivially fixable format errors. Legacy
+    generated manifests with capabilities.connections are also migrated to the
+    canonical top-level connections field.
     """
+    from models import normalize_worker_contract_connections
+
     repaired = dict(raw_manifest)
     schema_version = repaired.get("schema_version")
     if schema_version is not None and not isinstance(schema_version, str):
@@ -556,4 +560,4 @@ def _repair_generated_worker_manifest(raw_manifest: Dict[str, Any]) -> Dict[str,
             repaired["version"] = "0.1.0"
     if "version" in repaired and repaired["version"] is not None and not isinstance(repaired["version"], str):
         repaired["version"] = str(repaired["version"])
-    return repaired
+    return normalize_worker_contract_connections(repaired)
