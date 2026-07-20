@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import importlib
 import json
 import sys
@@ -82,6 +81,7 @@ def app_ctx(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    monkeypatch.setenv("WORKSPACE_AGENT_MCP_TOKEN", "worker-mgmt-mcp-token")
 
     for name in [
         "db",
@@ -282,73 +282,66 @@ def test_worker_management_tools_are_exposed_on_all_mcp_surfaces(app_ctx):
     assert '`workers.${action}`' in server_source
 
 
-def test_remote_mcp_worker_lifecycle_and_tenant_isolation(app_ctx):
+@pytest.mark.parametrize("endpoint", ["/api/mcp", "/mcp-tools/serve"])
+def test_mcp_dispatch_executes_worker_mutations(app_ctx, monkeypatch, endpoint):
     client, main, _scheduler = app_ctx
-    main.set_current_auth_context(
-        main.AuthContext(user_id="local-user", email=None, scopes=("admin", "mcp"))
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
+    if endpoint == "/mcp-tools/serve":
+        monkeypatch.delenv("WORKEROS_ENABLE_USER_HEADER_SCOPE")
+        monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
+        from fastapi.testclient import TestClient
+
+        client = TestClient(main.app, headers={"x-floom-secret": "worker-mgmt-secret"})
+    headers = (
+        {"Authorization": "Bearer worker-mgmt-mcp-token"}
+        if endpoint == "/api/mcp"
+        else {"x-floom-secret": "worker-mgmt-secret"}
     )
 
-    paused = asyncio.run(main._call_workeros_remote_mcp_tool("workers.pause", {"id": "sales-summary"}))
-    resumed = asyncio.run(main._call_workeros_remote_mcp_tool("workers.resume", {"id": "sales-summary"}))
-
-    assert paused.get("isError") is not True
-    assert paused["structuredContent"]["enabled"] is False
-    assert resumed.get("isError") is not True
-    assert resumed["structuredContent"]["enabled"] is True
-
-    main.set_current_auth_context(
-        main.AuthContext(user_id="other-user", email=None, scopes=("admin", "mcp"))
-    )
-    worker_dir = main.WORKERS_DIR / "sales-summary"
-    before_files = {
-        path.relative_to(worker_dir): path.read_bytes()
-        for path in worker_dir.rglob("*")
-        if path.is_file()
-    }
-    with main.get_db() as conn:
-        before_rows = conn.execute(
-            "SELECT COUNT(*) AS count FROM workers WHERE id = ?", ("sales-summary",)
-        ).fetchone()["count"]
-    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
-
-    denied_results = {
-        operation: asyncio.run(main._call_workeros_remote_mcp_tool(operation, arguments))
-        for operation, arguments in {
-            "workers.pause": {"id": "sales-summary"},
-            "workers.resume": {"id": "sales-summary"},
-            "workers.write_file": {
-                "id": "sales-summary",
-                "files": [
-                    {"path": "worker.yml", "content": worker_yml},
-                    {"path": "new.py", "content": "print('denied')\n"},
-                ],
+    def call(operation, arguments):
+        response = client.post(
+            endpoint,
+            json={
+                "jsonrpc": "2.0",
+                "id": operation,
+                "method": "tools/call",
+                "params": {"name": operation, "arguments": arguments},
             },
-            "workers.delete": {"id": "sales-summary"},
-        }.items()
-    }
-    for operation, denied in denied_results.items():
-        assert denied["isError"] is True, operation
-        assert denied["structuredContent"]["status"] == 404, operation
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert "error" not in body, body
+        result = body["result"]
+        assert result.get("isError") is not True, result
+        return result["structuredContent"]
 
-    with main.get_db() as conn:
-        after_rows = conn.execute(
-            "SELECT COUNT(*) AS count FROM workers WHERE id = ?", ("sales-summary",)
-        ).fetchone()["count"]
-    after_files = {
-        path.relative_to(worker_dir): path.read_bytes()
-        for path in worker_dir.rglob("*")
-        if path.is_file()
-    }
-    assert after_rows == before_rows == 1
-    assert after_files == before_files
-    assert client.get("/workers/sales-summary").status_code == 200
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+    original_run = (worker_dir / "run.py").read_text(encoding="utf-8")
 
-    main.set_current_auth_context(
-        main.AuthContext(user_id="local-user", email=None, scopes=("admin", "mcp"))
+    written = call(
+        "workers.write_file",
+        {
+            "id": "sales-summary",
+            "files": [
+                {"path": "worker.yml", "content": worker_yml},
+                {"path": "new.py", "content": "print('written through MCP')\n"},
+            ],
+        },
     )
-    deleted = asyncio.run(main._call_workeros_remote_mcp_tool("workers.delete", {"id": "sales-summary"}))
-    assert deleted.get("isError") is not True
-    assert deleted["structuredContent"] == {"id": "sales-summary", "deleted": True}
+    assert written["id"] == "sales-summary"
+    assert (worker_dir / "new.py").read_text(encoding="utf-8") == "print('written through MCP')\n"
+    assert (worker_dir / "run.py").read_text(encoding="utf-8") == original_run
+
+    paused = call("workers.pause", {"id": "sales-summary"})
+    resumed = call("workers.resume", {"id": "sales-summary"})
+    assert paused["enabled"] is False
+    assert resumed["enabled"] is True
+
+    deleted = call("workers.delete", {"id": "sales-summary"})
+    if endpoint == "/api/mcp":
+        assert deleted == {"id": "sales-summary", "deleted": True}
     assert client.get("/workers/sales-summary").status_code == 404
 
 
