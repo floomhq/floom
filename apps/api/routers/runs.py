@@ -49,6 +49,7 @@ from models import (
     ActionResponse,
     ApprovalEntry,
     Artifact,
+    CancelResponse,
     LogEntry,
     OutputField,
     RunDetail,
@@ -620,12 +621,12 @@ def clear_runs(
 _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled", "rejected"})
 
 
-@runs_router.post("/runs/{run_id}/cancel", response_model=ActionResponse)
+@runs_router.post("/runs/{run_id}/cancel", response_model=CancelResponse)
 def cancel_run(
     run_id: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> ActionResponse:
+) -> CancelResponse:
     """Request cancellation of an in-flight or queued run.
 
     For queued runs (not yet dispatched to a sandbox): immediately marks the
@@ -651,7 +652,7 @@ def cancel_run(
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row["status"] in _TERMINAL_RUN_STATUSES:
-        return ActionResponse(status=row["status"], run_id=run_id, cancelled=False)
+        return CancelResponse(status=row["status"], run_id=run_id, cancelled=False)
 
     cancelled_at = now_iso()
     repos.runs.cancel(
@@ -673,7 +674,7 @@ def cancel_run(
             repos=repos,
         )
         logger.info("Cancelled queued run %s before dispatch", run_id)
-        return ActionResponse(status="cancelled", run_id=run_id, cancelled=True)
+        return CancelResponse(status="cancelled", run_id=run_id, cancelled=True)
 
     try:
         from runner_sandbox.e2b_driver import cancel_sandbox
@@ -691,7 +692,7 @@ def cancel_run(
         repos=repos,
     )
     logger.info("Cancelled running run %s", run_id)
-    return ActionResponse(status="cancelled", run_id=run_id, cancelled=True)
+    return CancelResponse(status="cancelled", run_id=run_id, cancelled=True)
 
 
 # ---------------------------------------------------------------------------

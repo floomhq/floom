@@ -228,9 +228,14 @@ def _create_run(main, *, user_id: str, worker_id: str, run_id: str):
 
 
 @pytest.mark.parametrize("tool_name", ["runs.get", "workers.get"])
-def test_get_tools_reject_empty_id_on_both_mcp_surfaces(monkeypatch, tmp_path, tool_name):
+@pytest.mark.parametrize("invalid_id", ["", "   "])
+def test_get_tools_reject_empty_id_on_both_mcp_surfaces(
+    monkeypatch, tmp_path, tool_name, invalid_id
+):
     main = _load_api(monkeypatch, tmp_path)
-    payload = _rpc("tools/call", params={"name": tool_name, "arguments": {"id": ""}})
+    payload = _rpc(
+        "tools/call", params={"name": tool_name, "arguments": {"id": invalid_id}}
+    )
 
     with TestClient(main.app) as client:
         served = client.post(
@@ -323,14 +328,21 @@ def test_workers_get_404_names_only_current_workspace_for_cross_workspace_worker
             "/workers/worker-other-workspace", headers=_headers()
         )
         foreign_user = client.get("/workers/worker-foreign-user", headers=_headers())
-        mcp = client.post(
-            "/mcp-tools/serve",
-            data=json.dumps(_rpc("tools/call", params={
-                "name": "workers.get",
-                "arguments": {"id": "worker-other-workspace"},
-            })),
-            headers=_headers(),
-        )
+        mcp_responses = {
+            (surface, worker_id): client.post(
+                surface,
+                data=json.dumps(_rpc("tools/call", params={
+                    "name": "workers.get",
+                    "arguments": {"id": worker_id},
+                })),
+                headers=headers,
+            )
+            for surface, headers in (
+                ("/mcp-tools/serve", _headers()),
+                ("/api/mcp", _remote_mcp_headers()),
+            )
+            for worker_id in ("worker-other-workspace", "worker-foreign-user")
+        }
 
     expected = "Worker not found in workspace Current Workspace (local-default)"
     assert same_user_other_workspace.status_code == 404
@@ -339,12 +351,14 @@ def test_workers_get_404_names_only_current_workspace_for_cross_workspace_worker
     assert foreign_user.json() == {"detail": expected}
     assert other_workspace["id"] not in same_user_other_workspace.text
     assert "Other Secret Workspace" not in same_user_other_workspace.text
-    mcp_result = mcp.json()["result"]
-    assert mcp_result["isError"] is True
-    assert mcp_result["structuredContent"]["status"] == 404
-    assert expected in mcp_result["content"][0]["text"]
-    assert other_workspace["id"] not in mcp_result["content"][0]["text"]
-    assert "Other Secret Workspace" not in mcp_result["content"][0]["text"]
+    for response in mcp_responses.values():
+        assert response.status_code == 200, response.text
+        mcp_result = response.json()["result"]
+        assert mcp_result["isError"] is True
+        assert mcp_result["structuredContent"]["status"] == 404
+        assert expected in mcp_result["content"][0]["text"]
+        assert other_workspace["id"] not in mcp_result["content"][0]["text"]
+        assert "Other Secret Workspace" not in mcp_result["content"][0]["text"]
 
 
 def test_workers_list_mcp_is_paginated_and_compact_unless_verbose(monkeypatch, tmp_path):

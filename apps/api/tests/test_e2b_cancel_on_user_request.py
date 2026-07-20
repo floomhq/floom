@@ -77,6 +77,15 @@ def _create_worker_and_run(repos, *, status: str) -> None:
     )
 
 
+def test_shared_action_response_does_not_include_cancelled(monkeypatch, tmp_path):
+    _db, main = _load_app(monkeypatch, tmp_path)
+
+    assert main.ActionResponse(status="queued").model_dump() == {
+        "status": "queued",
+        "run_id": None,
+    }
+
+
 def test_running_run_cancel_kills_e2b_sandbox(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     repos = db.get_repositories()
