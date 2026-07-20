@@ -176,6 +176,7 @@ def get_worker_detail(
         include_grants=True,
         owner_aliases={auth.user_id, auth.username or ""},
         shape=shape if shape == "run" else None,
+        auth=auth,
     )
 
 

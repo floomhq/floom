@@ -2577,6 +2577,10 @@ class ActionResponse(BaseModel):
     run_id: Optional[str] = None
 
 
+class CancelResponse(ActionResponse):
+    cancelled: bool
+
+
 class McpToolItem(BaseModel):
     id: str
     name: str
