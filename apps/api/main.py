@@ -6822,6 +6822,32 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             }, ["id"]),
         },
         {
+            "name": "approvals.approve",
+            "description": (
+                "Approve a pending run so it continues executing and releases "
+                "its gated side effect. Only approvals owned by your own "
+                "workspace are visible, and the run must currently be awaiting "
+                "approval."
+            ),
+            "inputSchema": _mcp_json_schema({
+                "run_id": {"type": "string", "description": "Id of the run awaiting approval."},
+                "approval_id": {"type": "string", "description": "Optional approval id to disambiguate."},
+            }, ["run_id"]),
+        },
+        {
+            "name": "approvals.reject",
+            "description": (
+                "Reject a pending run so it stops instead of releasing its "
+                "gated side effect. Only approvals owned by your own workspace "
+                "are visible, and the run must currently be awaiting approval."
+            ),
+            "inputSchema": _mcp_json_schema({
+                "run_id": {"type": "string", "description": "Id of the run awaiting approval."},
+                "approval_id": {"type": "string", "description": "Optional approval id to disambiguate."},
+                "reason": {"type": "string", "description": "Optional reason recorded with the rejection."},
+            }, ["run_id"]),
+        },
+        {
             "name": "secrets.list",
             "description": "List configured secret names and status. Values are never returned.",
             "inputSchema": _mcp_json_schema({}),
@@ -7300,6 +7326,37 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(result, message)
 
 
+def _mcp_remote_approval_decision(
+    decision: str, arguments: Dict[str, Any], auth: AuthContext
+) -> Dict[str, Any]:
+    """approvals.approve / approvals.reject for the workspace-agent remote MCP
+    surface (#2271). Delegates to the SAME owner-scoped decision path the chat
+    tool and the POST /runs/{id}/approve REST endpoint use
+    (services.chat_approvals -> approve_run/reject_run), so tenant isolation
+    (owner_id must equal auth.user_id) and the awaiting_approval status guard
+    are enforced identically here. The target is resolved ONLY within the
+    actor's own pending approvals; a caller-supplied owner is never trusted, so
+    an actor authenticated for one workspace can never decide a run belonging
+    to another workspace."""
+    from services.chat_approvals import _tool_approvals_approve, _tool_approvals_reject
+    args: Dict[str, Any] = {
+        "run_id": arguments.get("run_id"),
+        "approval_id": arguments.get("approval_id"),
+    }
+    if decision == "approved":
+        result = _tool_approvals_approve(args, auth.user_id)
+    else:
+        args["reason"] = arguments.get("reason")
+        result = _tool_approvals_reject(args, auth.user_id)
+    if not isinstance(result, dict) or not result.get("ok"):
+        message = str(result.get("error") or "") if isinstance(result, dict) else ""
+        return _mcp_tool_error(message or "Approval decision failed")
+    status = str(result.get("status") or "decided")
+    run_id = str(result.get("run_id") or "")
+    summary = f"Approval {status}" + (f" for run {run_id}" if run_id else "")
+    return _mcp_call_result(result, summary)
+
+
 async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     auth = _workspace_agent_mcp_auth_context()
     repos = get_repositories()
@@ -7351,6 +7408,10 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_contexts_write(arguments, auth, repos)
         if tool_name == "workspace.info":
             return _mcp_call_workspace_info(auth)
+        if tool_name == "approvals.approve":
+            return _mcp_remote_approval_decision("approved", arguments, auth)
+        if tool_name == "approvals.reject":
+            return _mcp_remote_approval_decision("rejected", arguments, auth)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
     except ValidationError:
         raise
