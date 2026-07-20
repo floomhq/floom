@@ -76,6 +76,7 @@ import {
   Clipboard,
   CopyPlus,
   Edit3,
+  KeyRound,
   Lock,
   Mail,
   PauseCircle,
@@ -2527,6 +2528,56 @@ export default function WorkersCollection({
   const [now] = useState(() => Date.now());
   const visible = useMemo(() => workers.filter((w) => !isSystemWorker(w)), [workers]);
 
+  // #1208: the one-click "next action" that resolves the reason a worker's
+  // pill is showing needs-attention/missing-secret (see StatusPill's tooltip
+  // for the WHY). Every branch reuses an EXISTING route/action already in
+  // this codebase, no new backend endpoints:
+  //  - missing secret -> deep-link to the secrets page, pre-filled (#556 data
+  //    + the existing /connections/secrets?prefill= flow used from Browse).
+  //  - last run failed -> the existing run detail page.
+  //  - durably disabled -> the existing POST /workers/{id}/resume lifecycle
+  //    action (same one wired into the detail pane's Pause/Resume menu item).
+  const nextActionForWorker = useCallback(
+    (w: WorkerSummary): { label: string; icon: React.ReactNode; run: () => void } | null => {
+      if (w.status === "missing_secret") {
+        const name = (w.missing_secrets ?? [])[0];
+        if (!name) return null;
+        return {
+          label: `Add secret: ${name}`,
+          icon: <KeyRound className="size-4" />,
+          run: () => router.push(workspaceHref(`/connections/secrets?prefill=${encodeURIComponent(name)}`)),
+        };
+      }
+      if (w.status === "needs_attention") {
+        if (w.last_run?.status === "failed" && w.last_run.id) {
+          const runId = w.last_run.id;
+          return {
+            label: "View last run",
+            icon: <ArrowRight className="size-4" />,
+            run: () => router.push(workspaceHref(`/runs/${encodeURIComponent(runId)}`)),
+          };
+        }
+        if (w.enabled === false) {
+          return {
+            label: "Resume worker",
+            icon: <PlayCircle className="size-4" />,
+            run: () => {
+              api.workers
+                .resume(w.id)
+                .then((updated) => {
+                  setWorkers((prev) => prev.map((item) => (item.id === w.id ? { ...item, ...detailToSummary(updated) } : item)));
+                  toast.success("Worker resumed");
+                })
+                .catch((err: Error) => toast.error(err.message || "Could not resume worker"));
+            },
+          };
+        }
+      }
+      return null;
+    },
+    [router, workspaceHref],
+  );
+
   const config: CollectionConfig<WorkerSummary> = {
     title: "Workers",
     subtitle: "Your AI workers.",
@@ -2610,22 +2661,31 @@ export default function WorkersCollection({
         3: { value: (w) => workerStatusPill(w)?.label ?? "" },
       },
     },
-    row: (w) => ({
-      // V4 SPEC rule 3: no avatar for workers.
-      // Lock icon: inline after title at baseline (small + muted), never as leading.
-      leading: undefined,
-      primary: w.visibility === "private"
-        ? <span className="inline-flex items-center gap-1.5">{w.name}<Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
-        : w.name,
-      secondary: displayBrandCopy(w.description),
-      cols: [
-        <WorkerIconPills key="t" worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
-        rel(w.recent_stats?.last_run_at),
-      ],
-      status: workerStatusPill(w),
-      menu: [
+    row: (w) => {
+      // #1208: the pill tooltip explains WHY; this surfaces the one-click fix
+      // (Add secret / View last run / Resume) right in the row menu.
+      // "View last run" is pure navigation (same gating as Open/Run); Resume
+      // and Add-secret mutate the worker, so they're gated like Duplicate/
+      // Archive/Delete below.
+      const action = nextActionForWorker(w);
+      const showAction = Boolean(action) && (action!.label === "View last run" || canManageWorkers);
+      return {
+        // V4 SPEC rule 3: no avatar for workers.
+        // Lock icon: inline after title at baseline (small + muted), never as leading.
+        leading: undefined,
+        primary: w.visibility === "private"
+          ? <span className="inline-flex items-center gap-1.5">{w.name}<Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
+          : w.name,
+        secondary: displayBrandCopy(w.description),
+        cols: [
+          <WorkerIconPills key="t" worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
+          rel(w.recent_stats?.last_run_at),
+        ],
+        status: workerStatusPill(w),
+        menu: [
         { label: "Open", icon: <ArrowRight className="size-4" />, onSelect: () => router.push(workspaceHref(`/workers?sel=${encodeURIComponent(w.id)}`)) },
         { label: "Run", icon: <PlayCircle className="size-4" />, onSelect: () => router.push(workspaceHref(`/run/${encodeURIComponent(w.id)}`)) },
+        ...(showAction ? [{ label: action!.label, icon: action!.icon, onSelect: action!.run }] : []),
         ...(canManageWorkers ? [
           {
             label: "Duplicate",
@@ -2676,12 +2736,18 @@ export default function WorkersCollection({
             },
           },
         ] : []),
-      ],
-    }),
+        ],
+      };
+    },
     card: (w) => {
       const meta = workerCardMeta(w);
       const isDraft = workerStageKey(w) === "draft";
       const isPrivate = w.visibility === "private";
+      // #1208: same one-click fix as the row menu (Add secret / View last
+      // run / Resume), surfaced via the grid card's existing hover-revealed
+      // quickActions row.
+      const action = nextActionForWorker(w);
+      const showAction = Boolean(action) && (action!.label === "View last run" || canManageWorkers);
       return {
         // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
         // Draft = quiet muted pill (mess-control); live shows nothing (calm default).
@@ -2708,7 +2774,7 @@ export default function WorkersCollection({
           : undefined,
         // #1308: removed View (redundant — clicking the card opens it) and
         // Edit (opens the same split-pane; Config tab is one click away).
-        quickActions: [],
+        quickActions: showAction ? [{ label: action!.label, onClick: () => action!.run() }] : [],
       };
     },
     detail: (w, activeTab) => {

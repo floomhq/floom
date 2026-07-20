@@ -338,6 +338,11 @@ def list_workers(
                 system=bool((w.get("manifest") or {}).get("system_worker", False)),
                 archived=is_archived,
                 archive_reason=_sanitize_operator_text(w.get("archive_reason")),
+                # #1208: mirror the same w.enabled column the resolver reads
+                # (stock/filesystem workers carry no enabled flag and are
+                # treated as enabled), so the list UI can distinguish a
+                # durably-disabled worker from a failed-last-run worker.
+                enabled=bool(w.get("enabled", True)),
                 stage=_resolve_worker_stage(w),
                 tags=w.get("tags") or [],
                 folder=w.get("folder"),

@@ -2386,6 +2386,12 @@ class WorkerSummary(BaseModel):
     system: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # #1208: expose whether the worker is enabled (NOT paused) on the LIST
+    # shape too (WorkerDetail already carries this, see below) so the workers
+    # list/card UI can tell a durably-disabled worker apart from one whose
+    # last run simply failed, both of which resolve to status=needs_attention.
+    # Defaults true (a normal active worker).
+    enabled: bool = True
     # Maturity label: "draft" (WIP) | "live" (promoted). Pure label, never gates
     # execution. Defaults None on the model; the serializer resolves draft/live.
     stage: Optional[str] = None
