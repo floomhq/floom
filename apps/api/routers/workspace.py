@@ -1409,6 +1409,7 @@ class WorkspaceSpendResponse(BaseModel):
 
 @workspace_router.get("/workspace/spend", response_model=WorkspaceSpendResponse)
 def get_workspace_spend(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkspaceSpendResponse:
@@ -1423,12 +1424,13 @@ def get_workspace_spend(
         _workspace_month_to_date_cost_usd,
         _workspace_monthly_spend_cap_usd,
     )
+    workspace_id = _active_workspace_id(request)
 
     return WorkspaceSpendResponse(
         day_spend_usd=_workspace_day_to_date_cost_usd(repos=repos, user_id=auth.user_id),
         month_spend_usd=_workspace_month_to_date_cost_usd(repos=repos, user_id=auth.user_id),
-        daily_cap_usd=_workspace_daily_spend_cap_usd(),
-        monthly_cap_usd=_workspace_monthly_spend_cap_usd(),
+        daily_cap_usd=_workspace_daily_spend_cap_usd(workspace_id=workspace_id),
+        monthly_cap_usd=_workspace_monthly_spend_cap_usd(workspace_id=workspace_id),
     )
 
 

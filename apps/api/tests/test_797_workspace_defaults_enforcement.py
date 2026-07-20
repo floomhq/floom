@@ -405,6 +405,33 @@ class TestCurrentSpendSurfaced:
         assert body["daily_cap_usd"] == 10.0
         assert body["monthly_cap_usd"] == 50.0
 
+    def test_workspace_spend_endpoint_returns_active_workspace_caps(self, client_main):
+        """The cap read uses the request's active workspace, not local-default."""
+        client, _ = client_main
+        _set(client, "daily_spend_cap_usd", "10.0")
+        _set(client, "monthly_spend_cap_usd", "50.0")
+
+        created = client.post("/workspaces", json={"name": "Spend visibility"})
+        assert created.status_code == 200, created.text
+        workspace_id = created.json()["id"]
+        headers = {"x-floom-workspace": workspace_id}
+        assert client.put(
+            "/workspace/settings/daily_spend_cap_usd",
+            json={"value": "21.0"},
+            headers=headers,
+        ).status_code in (200, 204)
+        assert client.put(
+            "/workspace/settings/monthly_spend_cap_usd",
+            json={"value": "84.0"},
+            headers=headers,
+        ).status_code in (200, 204)
+
+        resp = client.get("/workspace/spend", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["daily_cap_usd"] == 21.0
+        assert resp.json()["monthly_cap_usd"] == 84.0
+
     def test_workspace_spend_endpoint_uses_repo_backend_when_available(self, client_main):
         """#1201: regression guard for the exact bug this PR fixes: the
         workspace spend read must go through Repositories.runs.cost_total_usd
