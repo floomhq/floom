@@ -2162,10 +2162,42 @@ async def stream_chat(
     # Langdock, custom clients) are mapped to deterministic owner-scoped internal
     # ids so the same caller id continues the same thread without becoming
     # guessable across users.
+    # #2269 (race -> silent fork): when the caller EXPLICITLY supplied an
+    # internal conversation id ("conv_..."), the resume path is fail-closed. If
+    # it cannot be re-resolved and re-verified as owned right here (it may have
+    # been deleted or reassigned since any endpoint preflight ran), surface a
+    # not-found error instead of silently CREATING a new conversation under a
+    # remapped id, which would fork the thread. Only caller thread ids (Slack /
+    # Langdock / stable client ids) and the no-id path may create-on-first-use.
+    requested_conversation_id = conversation_id
+    require_existing_conversation = bool(
+        requested_conversation_id
+        and str(requested_conversation_id).strip().startswith("conv_")
+    )
     conversation_id = resolve_conversation_id(conversation_id, user_id)
     if conversation_id:
         conv = get_conversation(conversation_id, user_id)
         if not conv:
+            if require_existing_conversation:
+                await part_queue.put({
+                    "type": "error",
+                    "version": CHAT_EVENT_VERSION,
+                    "error": (
+                        f"Conversation '{str(requested_conversation_id).strip()}' "
+                        "was not found or is not accessible in this workspace."
+                    ),
+                    "conversation_id": None,
+                    "message_id": None,
+                })
+                await part_queue.put({
+                    "type": "finish",
+                    "version": CHAT_EVENT_VERSION,
+                    "conversation_id": None,
+                    "message_id": None,
+                    "assistant_message_id": None,
+                    "cards": [],
+                })
+                return
             conv_title = message[:60] + ("..." if len(message) > 60 else "")
             conversation_id = create_conversation(
                 user_id,
@@ -2633,12 +2665,16 @@ async def stream_chat(
                     })
                 if not decoded.is_error and isinstance(safe_result, dict) and safe_result.get("ok") is True:
                     successful_tool_results.append((tool_name, safe_result))
-                # Persist tool message
+                # Persist tool RESULT into durable conversation history.
+                # #2266 over-correction fix: unlike the best-effort UI tool-card
+                # writes above, this durable transcript row is what a RESUMED run
+                # replays. Suppressing a failure here would report success with an
+                # incomplete transcript, and a resume could REPEAT an already-
+                # performed side-effecting tool call. So it stays FATAL during the
+                # active run: a failure propagates to the outer handler and
+                # surfaces as an error, never a phantom success.
                 content_str = json.dumps(safe_result, default=str) if not isinstance(safe_result, str) else safe_result
-                _persist_side_effect(
-                    "tool transcript persistence",
-                    insert_message, conversation_id, "tool", content_str, tool_call_id=call_id,
-                )
+                insert_message(conversation_id, "tool", content_str, tool_call_id=call_id)
 
         flushed_text = stream_text_sanitizer.flush()
         if flushed_text:
