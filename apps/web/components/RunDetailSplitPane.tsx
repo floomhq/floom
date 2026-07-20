@@ -25,6 +25,7 @@ import { StackTrace } from "@/components/ai-elements/stack-trace";
 import { Task } from "@/components/ai-elements/task";
 import { OutputRenderer } from "@/components/output-renderer";
 import { GenericOutput } from "@/components/generic-output";
+import { DryRunNotice } from "@/components/run-page/DryRunNotice";
 import { api } from "@/lib/api";
 import { formatAbsolute } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -353,6 +354,8 @@ export function RunDetailSplitPane({
           )}
         </div>
       )}
+
+      {run.dry_run && <DryRunNotice />}
 
       <RunMetricsStrip run={run} status={displayStatus} />
 

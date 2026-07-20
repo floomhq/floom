@@ -1702,6 +1702,19 @@ class WorkerContract(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
+    def reject_connections_nested_under_exec(cls, value: Any) -> Any:
+        """Reject a placement Pydantic would otherwise silently discard."""
+        if isinstance(value, dict):
+            exec_block = value.get("exec")
+            if isinstance(exec_block, dict) and "connections" in exec_block:
+                raise ValueError(
+                    "connections must be a top-level sibling of exec, not nested "
+                    "under exec; no worker was saved"
+                )
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
     def fill_missing_description(cls, value: Any) -> Any:
         if isinstance(value, dict) and not str(value.get("description") or "").strip():
             fallback = str(value.get("title") or value.get("name") or "Floom worker").strip()
@@ -2300,6 +2313,7 @@ class RunDetail(BaseModel):
     runner: str
     input: Dict[str, Any] = Field(default_factory=dict)
     inputs: Dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
     output: Dict[str, Any] = Field(default_factory=dict)
     outputs: Dict[str, Any] = Field(default_factory=dict)
     output_schema: List["OutputField"] = Field(default_factory=list)

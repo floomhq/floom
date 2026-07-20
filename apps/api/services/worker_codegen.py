@@ -187,6 +187,8 @@ files:
     description: "Fetch recent Granola meetings and update HubSpot with action items."
     version: "0.1.0"
     targets: [generic]
+    connections:
+    - hubspot
     exec:
       entry: "run.py"
       runtime: "python311"
@@ -194,8 +196,6 @@ files:
       command: "python run.py"
       secrets:
       - GRANOLA_API_KEY
-      connections:
-      - hubspot
       outputs:
       - name: summary
         kind: file
@@ -257,6 +257,9 @@ The WorkerContract YAML must follow schema_version "0.3":
 - Only include integrations for apps EXPLICITLY NAMED in the user's prompt.
 - Choose ONE auth method per app: "oauth" (for Gmail/HubSpot/Slack/etc.) or "api_key" (for Granola/Apollo/Stripe/etc.)
 - Never list the same app twice.
+- OAuth connections must be a top-level sibling of `exec`. Never put
+  `connections` inside `exec`; the WorkerContract runtime only resolves the
+  top-level field.
 
 === RESPONSE FORMAT ===
 
