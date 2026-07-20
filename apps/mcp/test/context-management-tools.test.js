@@ -27,6 +27,9 @@ test("#2272 stdio MCP executes contexts.files, contexts.versions, and contexts.d
     if (request.method === "GET" && url.pathname === "/contexts/managed/versions") {
       return json(response, 200, [{ id: "abc123", message: "context managed: update" }]);
     }
+    if (request.method === "DELETE" && url.pathname === "/contexts/managed/files/nested/notes.md") {
+      return json(response, 200, { status: "deleted", path: "nested/notes.md" });
+    }
     if (request.method === "DELETE" && url.pathname === "/contexts/managed") {
       return json(response, 200, { status: "deleted", referenced_by: [] });
     }
@@ -54,6 +57,13 @@ test("#2272 stdio MCP executes contexts.files, contexts.versions, and contexts.d
     assert.equal(versions.isError, undefined);
     assert.equal(versions.structuredContent.data[0].id, "abc123");
 
+    const deletedFile = await client.callTool({
+      name: "contexts.delete",
+      arguments: { name: "managed", path: "nested/notes.md" },
+    });
+    assert.equal(deletedFile.isError, undefined);
+    assert.equal(deletedFile.structuredContent.path, "nested/notes.md");
+
     const deleted = await client.callTool({ name: "contexts.delete", arguments: { name: "managed" } });
     assert.equal(deleted.isError, undefined);
     assert.equal(deleted.structuredContent.status, "deleted");
@@ -65,6 +75,7 @@ test("#2272 stdio MCP executes contexts.files, contexts.versions, and contexts.d
   assert.deepEqual(seen.filter((request) => request.path.startsWith("/contexts/")), [
     { method: "GET", path: "/contexts/managed", search: "" },
     { method: "GET", path: "/contexts/managed/versions", search: "?limit=7" },
+    { method: "DELETE", path: "/contexts/managed/files/nested/notes.md", search: "" },
     { method: "DELETE", path: "/contexts/managed", search: "" },
   ]);
 });

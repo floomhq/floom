@@ -6413,10 +6413,22 @@ def _workspace_agent_mcp_user_id() -> str:
     ).strip() or _bootstrap_user_id()
 
 
-def _workspace_agent_mcp_auth_context() -> AuthContext:
+def _workspace_agent_mcp_auth_context(request: Request | None = None) -> AuthContext:
     existing = current_auth_context()
-    if existing is not None:
+    if request is None and existing is not None:
         return existing
+    if request is not None and os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
+        header_user = (request.headers.get("x-floom-user") or "").strip()
+        if not header_user:
+            raise HTTPException(
+                status_code=401,
+                detail="x-floom-user header required when user-header scope is enabled",
+            )
+        if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,128}", header_user):
+            raise HTTPException(status_code=400, detail="invalid x-floom-user")
+        ctx = AuthContext(user_id=header_user, email=None, scopes=("admin", "mcp"))
+        set_current_auth_context(ctx)
+        return ctx
     user_id = _workspace_agent_mcp_user_id()
     if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local":
         user_id = local_workspace_user_id(local_workspace_base_user_id(user_id), DEFAULT_WORKSPACE_ID)
@@ -7645,7 +7657,7 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
     # holder of the single cloud-wide secret). Force cloud callers down the
     # per-tenant PAT path. Static token stays valid only on OSS/local.
     if deploy != "cloud" and _verify_workspace_agent_mcp_auth(request):
-        _workspace_agent_mcp_auth_context()
+        _workspace_agent_mcp_auth_context(request)
     else:
         cloud_ctx = await _workspace_agent_mcp_cloud_auth_context(request)
         if cloud_ctx is None:

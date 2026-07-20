@@ -75,16 +75,23 @@ def _call(main, name: str, arguments: dict, *, user_id: str = "owner-2272") -> d
     return result["result"]
 
 
-def _remote_call(client, name: str, arguments: dict) -> dict:
-    response = client.post(
-        "/api/mcp",
-        content=json.dumps({
-            "jsonrpc": "2.0",
-            "id": 2272,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        }),
-    )
+def _remote_call(
+    client, name: str, arguments: dict, *, user_id: str = "owner-2272",
+) -> dict:
+    previous_user = client.headers["x-floom-user"]
+    client.headers["x-floom-user"] = user_id
+    try:
+        response = client.post(
+            "/api/mcp",
+            content=json.dumps({
+                "jsonrpc": "2.0",
+                "id": 2272,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }),
+        )
+    finally:
+        client.headers["x-floom-user"] = previous_user
     assert response.status_code == 200, response.text
     return response.json()["result"]
 
@@ -166,7 +173,9 @@ def test_context_management_tools_deny_cross_owner(client_and_main, tool):
         "name": "owner-private", "path": "private.txt", "content": "owner only",
     })
 
-    denied = _call(main, tool, {"name": "owner-private"}, user_id="other-owner")
+    denied = _remote_call(
+        client, tool, {"name": "owner-private"}, user_id="other-owner",
+    )
     assert denied["isError"] is True, denied
     assert "not found" in denied["content"][0]["text"].lower()
     assert client.get("/contexts/owner-private/files/private.txt").status_code == 200
