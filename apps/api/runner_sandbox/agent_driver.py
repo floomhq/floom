@@ -230,9 +230,37 @@ def _resolve_max_total_tokens(limits: "Any", config: "Optional[WorkerConfig]") -
     )
 
 
+def _system_forced_agent_model() -> str | None:
+    """System-level model authority.
+
+    When ``WORKEROS_FORCE_AGENT_MODEL`` is set, the platform decides the agent
+    model for every run and overrides any per-worker pin. This exists so a
+    provider-wide problem (e.g. a capacity cap on one provider) can be resolved
+    at the system level by pointing all agent runs at a healthy provider,
+    without editing individual worker manifests. Unset = no-op (per-worker
+    precedence preserved).
+    """
+    return (os.environ.get("WORKEROS_FORCE_AGENT_MODEL") or "").strip() or None
+
+
+def _agent_fallback_model(current: str | None = None) -> str | None:
+    """The alternate provider to swap to when ``current`` hits a capacity error.
+
+    ``WORKEROS_AGENT_FALLBACK_MODEL`` lets Bedrock and Gemini be exchanged: if
+    the primary model fails on provider capacity, the run retries once on this
+    model. Returns None when unset or identical to ``current`` (nothing to swap
+    to).
+    """
+    fallback = (os.environ.get("WORKEROS_AGENT_FALLBACK_MODEL") or "").strip() or None
+    if fallback and current and fallback.strip().lower() == current.strip().lower():
+        return None
+    return fallback
+
+
 def _resolve_agent_model(config: WorkerConfig) -> str:
     return (
-        config.runtime.model
+        _system_forced_agent_model()
+        or config.runtime.model
         or _ws_default_model()
         or _ws_fallback_model()
         or default_worker_agent_model()
@@ -445,63 +473,97 @@ class AgentDriver(SandboxDriver):
         connection_ids: Optional[Dict[str, str]] = None,
         user_id: str | None = None,
     ) -> WorkerResult:
-        try:
-            return self._run_coro_sync(
-                self._run_agent_async(
-                    worker_id=worker_id,
-                    run_id=run_id,
-                    inputs=inputs,
-                    secrets=secrets,
-                    log_fn=log_fn,
-                    trace_id=trace_id,
-                    timeout_seconds=timeout_seconds,
-                    config=config,
-                    connection_ids=connection_ids or {},
-                    user_id=user_id,
+        # Model exchange: try the resolved (system-forced or worker) model, then
+        # swap to the configured fallback provider once if the first hits a
+        # provider CAPACITY class error. This lets Bedrock and Gemini be
+        # exchanged at the system level so a capacity cap on one provider does
+        # not fail the run. Non-capacity errors (runtime, token limit) do not
+        # swap. See _agent_fallback_model / WORKEROS_AGENT_FALLBACK_MODEL.
+        _CAPACITY_SWAP_CODES = {"llm_provider_capacity", "llm_provider_error", "llm_rate_limited"}
+        primary_model = _resolve_agent_model(config) if config and config.runtime else None
+        models_to_try: list[str | None] = [primary_model]
+        _fb = _agent_fallback_model(primary_model)
+        if _fb:
+            models_to_try.append(_fb)
+
+        for _attempt, _model in enumerate(models_to_try):
+            _has_next = _attempt < len(models_to_try) - 1
+            try:
+                return self._run_coro_sync(
+                    self._run_agent_async(
+                        worker_id=worker_id,
+                        run_id=run_id,
+                        inputs=inputs,
+                        secrets=secrets,
+                        log_fn=log_fn,
+                        trace_id=trace_id,
+                        timeout_seconds=timeout_seconds,
+                        config=config,
+                        connection_ids=connection_ids or {},
+                        user_id=user_id,
+                        model_override=_model,
+                    )
                 )
-            )
-        except Exception as exc:
-            exc_str = str(exc)
-            if "response.incomplete" in exc_str or "max_output_tokens" in exc_str.lower():
-                log_fn(f"Output token limit reached: {exc}", "error")
+            except Exception as exc:
+                exc_str = str(exc)
+                if "response.incomplete" in exc_str or "max_output_tokens" in exc_str.lower():
+                    log_fn(f"Output token limit reached: {exc}", "error")
+                    return WorkerResult(
+                        status="error",
+                        error=(
+                            "The model's response exceeded the per-turn output token limit. "
+                            "Increase max_output_tokens in the worker's limits or simplify the task."
+                        ),
+                        error_code="output_token_limit",
+                        retryable=False,
+                    )
+                llm_error_code = _classify_llm_provider_error(exc)
+                if llm_error_code:
+                    redacted = _redact_provider_message(exc_str, secrets)
+                    if llm_error_code in _CAPACITY_SWAP_CODES and _has_next:
+                        log_fn(
+                            f"Model {_model} hit {llm_error_code}; exchanging to fallback "
+                            f"{models_to_try[_attempt + 1]}",
+                            "warning",
+                        )
+                        logger.warning(
+                            "Agent model %s hit %s for worker %s run %s; exchanging to fallback %s",
+                            _model,
+                            llm_error_code,
+                            worker_id,
+                            run_id,
+                            models_to_try[_attempt + 1],
+                        )
+                        continue
+                    logger.warning(
+                        "Agent LLM provider failure for worker %s run %s classified as %s: %s",
+                        worker_id,
+                        run_id,
+                        llm_error_code,
+                        redacted,
+                    )
+                    log_fn(f"LLM provider error ({llm_error_code}): {redacted}", "error")
+                    return WorkerResult(
+                        status="error",
+                        error=_llm_error_message(llm_error_code),
+                        error_code=llm_error_code,
+                        retryable=llm_error_code in _CAPACITY_SWAP_CODES,
+                    )
+                logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
+                log_fn(f"Agent runtime error: {exc}", "error")
                 return WorkerResult(
                     status="error",
-                    error=(
-                        "The model's response exceeded the per-turn output token limit. "
-                        "Increase max_output_tokens in the worker's limits or simplify the task."
-                    ),
-                    error_code="output_token_limit",
-                    retryable=False,
+                    error=str(exc),
+                    error_code="agent_runtime_error",
+                    retryable=True,
                 )
-            llm_error_code = _classify_llm_provider_error(exc)
-            if llm_error_code:
-                redacted = _redact_provider_message(exc_str, secrets)
-                logger.warning(
-                    "Agent LLM provider failure for worker %s run %s classified as %s: %s",
-                    worker_id,
-                    run_id,
-                    llm_error_code,
-                    redacted,
-                )
-                log_fn(f"LLM provider error ({llm_error_code}): {redacted}", "error")
-                return WorkerResult(
-                    status="error",
-                    error=_llm_error_message(llm_error_code),
-                    error_code=llm_error_code,
-                    retryable=llm_error_code in {
-                        "llm_provider_capacity",
-                        "llm_provider_error",
-                        "llm_rate_limited",
-                    },
-                )
-            logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
-            log_fn(f"Agent runtime error: {exc}", "error")
-            return WorkerResult(
-                status="error",
-                error=str(exc),
-                error_code="agent_runtime_error",
-                retryable=True,
-            )
+        # Unreachable in practice (loop always returns), but keep a safe default.
+        return WorkerResult(
+            status="error",
+            error=_llm_error_message("llm_provider_capacity"),
+            error_code="llm_provider_capacity",
+            retryable=True,
+        )
 
     def _run_coro_sync(self, coro: Any) -> WorkerResult:
         # #605: delegate to the shared async_bridge utility so the
@@ -521,6 +583,7 @@ class AgentDriver(SandboxDriver):
         config: Optional[WorkerConfig],
         connection_ids: Dict[str, str],
         user_id: str | None,
+        model_override: str | None = None,
     ) -> WorkerResult:
         if not config or not config.runtime:
             return WorkerResult(status="error", error="Worker config not found", error_code="invalid_worker")
@@ -545,6 +608,7 @@ class AgentDriver(SandboxDriver):
                     config=config,
                     connection_ids=connection_ids,
                     user_id=user_id,
+                    model_override=model_override,
                 ),
                 timeout=timeout_seconds,
             )
@@ -592,12 +656,13 @@ class AgentDriver(SandboxDriver):
         config: WorkerConfig,
         connection_ids: Dict[str, str],
         user_id: str | None,
+        model_override: str | None = None,
     ) -> WorkerResult:
         disable_openai_agents_tracing()
         from agents import Agent, ModelSettings, RunConfig
 
         limits = config.runtime.limits
-        resolved_model = _resolve_agent_model(config)
+        resolved_model = model_override or _resolve_agent_model(config)
         if _uses_default_agent_stream_runner(self) and not _llm.provider_credentials_present(resolved_model):
             message = _llm_error_message("llm_model_not_configured", resolved_model)
             log_fn(message, "error")
