@@ -258,6 +258,22 @@ def _create_synthetic_failed_schedule_run(
         return None
 
     try:
+        from alerting import dispatch_ops_run_failure
+
+        dispatch_ops_run_failure(
+            run_id=run_id,
+            worker_id=worker_id,
+            error_code=error_code,
+            user_id=user_id,
+            repos=repos,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to dispatch OPS alert evaluation for scheduled run %s",
+            run_id,
+        )
+
+    try:
         paused = _maybe_pause_scheduled_worker_after_setup_failure(
             worker_id=worker_id,
             run_id=run_id,

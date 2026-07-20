@@ -288,6 +288,7 @@ def test_recover_does_not_reap_fresh_active_thread_before_sandbox_start(repo_bun
 
 
 def test_executor_thread_logs_and_fails_pre_sandbox_exception(repo_bundle, monkeypatch):
+    import alerting
     import run_service
 
     repos, _db, manifest = repo_bundle
@@ -309,8 +310,14 @@ def test_executor_thread_logs_and_fails_pre_sandbox_exception(repo_bundle, monke
         yield
 
     scheduled: list[dict] = []
+    dispatched: list[dict] = []
     monkeypatch.setattr(run_service, "_run_execution_context", broken_context)
     monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+    monkeypatch.setattr(
+        alerting,
+        "dispatch_ops_run_failure",
+        lambda **kwargs: dispatched.append(kwargs),
+    )
 
     run_service._run_thread_entry_with_semaphore(
         "run-context-boom",
@@ -330,6 +337,8 @@ def test_executor_thread_logs_and_fails_pre_sandbox_exception(repo_bundle, monke
     # The workspace context itself failed, so the engine cannot evaluate the
     # workspace spend cap safely and does not admit a restart retry.
     assert scheduled == []
+    assert dispatched[0]["run_id"] == "run-context-boom"
+    assert dispatched[0]["error_code"] == "executor_thread_pre_sandbox_exception"
 
 
 def test_executor_thread_pre_sandbox_crash_retries_with_owner_scope(

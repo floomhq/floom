@@ -298,6 +298,16 @@ class WorkerRepository(Protocol):
 
 
 class RunRepository(Protocol):
+    def ops_error_code_stats(
+        self,
+        *,
+        error_code: str,
+        since_iso: str,
+        exclude_run_id: str | None = None,
+    ) -> RowDict:
+        """Platform-wide failure count and historical existence for OPS alerts."""
+        ...
+
     def list_for_worker(
         self,
         *,
@@ -938,6 +948,29 @@ class AlertThrottleRepository(Protocol):
         signature: str,
         sent_at_iso: str,
     ) -> None: ...
+
+    def reserve(
+        self,
+        *,
+        since_iso: str,
+        workspace_id: str,
+        worker_id: str,
+        signature: str,
+        sent_at_iso: str,
+    ) -> bool:
+        """Atomically record a send only when no matching recent row exists."""
+        ...
+
+    def release(
+        self,
+        *,
+        workspace_id: str,
+        worker_id: str,
+        signature: str,
+        sent_at_iso: str,
+    ) -> None:
+        """Delete an exact reservation after delivery failure."""
+        ...
 
     def count_since(
         self,
