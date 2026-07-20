@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, ExternalLink, Loader2, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { sanitizeRedirect } from "@/lib/redirects";
@@ -26,6 +27,7 @@ const DEFAULT_POLL_TIMEOUT_MS = 2 * 60 * 1000;
 function RedirectInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const slug = (searchParams.get("app") || "").trim().toLowerCase();
   const returnTo = normalizeReturnTo(searchParams.get("return_to"));
   const providerName = useMemo(() => formatProviderName(slug), [slug]);
@@ -81,6 +83,18 @@ function RedirectInner() {
         );
         if (active) {
           setPhase("done");
+          // #1209/#1206: the connection just went active but the shared
+          // TanStack Query cache (30s staleTime, refetchOnMount:false, and
+          // persisted to localStorage so it survives even a brand-new tab) can
+          // still be serving the pre-connection read to whatever surface we
+          // route back to next (worker detail's missing-connections banner,
+          // Overview's connected-apps list, the connections page itself).
+          // Invalidate the connection-status read path ONCE, here, at the one
+          // place that actually knows the state changed, instead of patching
+          // every surface that reads it.
+          queryClient.invalidateQueries({ queryKey: ["connections"] });
+          queryClient.invalidateQueries({ queryKey: ["worker-detail"] });
+          queryClient.invalidateQueries({ queryKey: ["system", "overview"] });
           pollRef.current = setTimeout(() => {
             if (!cancelledRef.current) router.replace(returnTo);
           }, 1200);
@@ -97,7 +111,7 @@ function RedirectInner() {
       }
     };
     pollRef.current = setTimeout(tick, 2000);
-  }, [slug, returnTo, router, connectionId, pollTimeoutMs]);
+  }, [slug, returnTo, router, connectionId, pollTimeoutMs, queryClient]);
 
   useEffect(() => {
     return () => {

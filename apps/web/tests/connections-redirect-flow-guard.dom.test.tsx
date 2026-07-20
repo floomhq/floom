@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // P1 connection-flow audit (2026-06-23): the /connections/redirect page must
 //  (a) render the PROPER provider display name ("Google Calendar", not the
@@ -39,6 +40,18 @@ vi.mock("@/lib/api", () => ({
 import RedirectPage from "@/app/connections/redirect/page";
 
 const COMPOSIO_URL = "https://platform.composio.dev/link/abc123";
+
+// #1209/#1206: RedirectPage now invalidates TanStack Query caches (connections
+// / worker-detail / overview) once the poll finds an active connection, so it
+// needs a real QueryClient in the tree.
+function renderRedirectPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <RedirectPage />
+    </QueryClientProvider>
+  );
+}
 
 async function flushEffects(times = 4) {
   for (let i = 0; i < times; i += 1) await Promise.resolve();
@@ -85,7 +98,7 @@ describe("connections/redirect provider name + flow guards", () => {
   });
 
   it("humanizes the provider slug and keeps the space in the explainer copy", async () => {
-    render(<RedirectPage />);
+    renderRedirectPage();
     // The explainer asserts BOTH the proper display name AND the spacing fix
     // ("Google Calendar on", never "Googlecalendaron").
     await waitFor(() =>
@@ -97,7 +110,7 @@ describe("connections/redirect provider name + flow guards", () => {
   });
 
   it("does not navigate back to the connect screen after the user leaves", async () => {
-    const { unmount } = render(<RedirectPage />);
+    const { unmount } = renderRedirectPage();
     await waitForPolling();
 
     vi.useFakeTimers({ now: Date.now(), shouldAdvanceTime: true });
@@ -117,7 +130,7 @@ describe("connections/redirect provider name + flow guards", () => {
   // jsdom + React 19 async polling: fake timers and real timers both fail to
   // reach the terminal phase reliably in isolation. Covered manually on localhost.
   it.skip("shows a terminal waiting state instead of spinning forever", async () => {
-    render(<RedirectPage />);
+    renderRedirectPage();
     fireEvent.click(await waitForAuthorizedButton());
     // Drive the first poll tick after the 2-minute deadline; connection never goes active.
     vi.setSystemTime(Date.now() + 2 * 60 * 1000 + 5000);
