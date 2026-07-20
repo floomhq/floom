@@ -1,4 +1,4 @@
-"""#1201 — GET /workers/{worker_id}/spend: a single worker's month-to-date
+"""#1201: GET /workers/{worker_id}/spend, a single worker's month-to-date
 spend + its configured monthly cap, read-only.
 
 Run: cd apps/api && python -m pytest tests/test_1201_worker_spend_endpoint.py -q

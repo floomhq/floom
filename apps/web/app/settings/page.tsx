@@ -1627,7 +1627,7 @@ export function WorkspaceInfoSettings({ canEdit = true }: { canEdit?: boolean })
 
 export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
-  // #1201: "who pays for this, doesn't this cost a lot" — spend-to-date next
+  // #1201: "who pays for this, doesn't this cost a lot", spend-to-date next
   // to the cap itself, so the number that matters sits beside the control
   // that changes it. Fetched from the purpose-built GET /workspace/spend
   // (not parsed out of getSettings) so it stays correct if that endpoint's

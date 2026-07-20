@@ -225,7 +225,7 @@ export function useWorkerDetailQuery(id: string, workspaceId?: string | null) {
 }
 
 // #1201: month-to-date spend + configured cap for one worker. Cache-first,
-// same defaults as the rest of the detail pane (see QueryProvider) — failing
+// same defaults as the rest of the detail pane (see QueryProvider); failing
 // soft (react-query surfaces isError, no thrown render) is fine here since
 // this is a supplementary stat, not blocking detail render.
 export function useWorkerSpendQuery(id: string) {

@@ -1396,7 +1396,7 @@ def get_workspace_settings(
 
 
 class WorkspaceSpendResponse(BaseModel):
-    """#1201: 'who pays for this, doesn't this cost a lot' — a purpose-built,
+    """#1201: 'who pays for this, doesn't this cost a lot', a purpose-built,
     read-only readout of workspace spend-to-date against its configured caps.
     Reuses the same aggregation the spend-cap enforcement already runs
     (services.run_cost); never writes anything."""

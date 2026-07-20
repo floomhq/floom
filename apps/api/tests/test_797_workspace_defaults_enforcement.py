@@ -406,7 +406,7 @@ class TestCurrentSpendSurfaced:
         assert body["monthly_cap_usd"] == 50.0
 
     def test_workspace_spend_endpoint_uses_repo_backend_when_available(self, client_main):
-        """#1201: regression guard for the exact bug this PR fixes — the
+        """#1201: regression guard for the exact bug this PR fixes: the
         workspace spend read must go through Repositories.runs.cost_total_usd
         (workspace_scoped=True) when the deploy provides one, not silently
         fall back to the engine's local sqlite (empty on a hosted deploy)."""
