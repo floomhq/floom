@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -116,6 +117,165 @@ def test_run_create_persists_error_code_and_retry_metadata(repo_bundle):
     assert row["error_code"] == "scheduler_missed"
     assert row["retry_of_run_id"] == "run-parent"
     assert row["retry_attempt"] == 2
+
+
+def test_ops_error_code_stats_are_platform_wide_and_exclude_current_history(repo_bundle):
+    repos, _db, manifest = repo_bundle
+    now = datetime.now(timezone.utc)
+    for user_id, worker_id in (("user-a", "worker-a"), ("user-b", "worker-b")):
+        repos.workers.create(
+            user_id=user_id,
+            worker_id=worker_id,
+            name=worker_id,
+            manifest_json=manifest(worker_id, worker_id),
+            bundle_path=f"workers/{worker_id}",
+        )
+        repos.runs.create(
+            user_id=user_id,
+            run_id=f"run-{worker_id}",
+            worker_id=worker_id,
+            status=RunStatus.FAILED.value,
+            trigger_source="manual",
+            runner="e2b",
+            error="capacity",
+            error_code="llm_provider_capacity",
+            started_at=now.isoformat(),
+            completed_at=now.isoformat(),
+            created_at=now.isoformat(),
+        )
+
+    stats = repos.runs.ops_error_code_stats(
+        error_code="LLM_PROVIDER_CAPACITY",
+        since_iso=(now - timedelta(minutes=15)).isoformat(),
+        exclude_run_id="run-worker-b",
+    )
+
+    assert stats == {"count_since": 2, "seen_before": True}
+
+
+def test_ops_throttle_reservation_is_atomic(repo_bundle):
+    repos, _db, _manifest = repo_bundle
+    now = datetime.now(timezone.utc)
+
+    def _reserve(_: int) -> bool:
+        return repos.alert_throttle.reserve(
+            since_iso=(now - timedelta(minutes=10)).isoformat(),
+            workspace_id="__floom_ops__",
+            worker_id="platform",
+            signature="ops:e2b_sandbox_error",
+            sent_at_iso=now.isoformat(),
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(_reserve, range(8)))
+
+    assert results.count(True) == 1
+    assert results.count(False) == 7
+
+    repos.alert_throttle.release(
+        workspace_id="__floom_ops__",
+        worker_id="platform",
+        signature="ops:e2b_sandbox_error",
+        sent_at_iso=now.isoformat(),
+    )
+    assert _reserve(9) is True
+
+
+def test_terminal_failed_status_dispatches_ops_evaluation(monkeypatch, repo_bundle):
+    import alerting
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-platform-failure",
+        worker_id="worker-a",
+        status="running",
+        trigger_source="manual",
+        runner="e2b",
+    )
+    dispatched: list[dict] = []
+    monkeypatch.setattr(
+        alerting,
+        "dispatch_ops_run_failure",
+        lambda **kwargs: dispatched.append(kwargs),
+    )
+    monkeypatch.setattr(run_service, "_dispatch_terminal_run_alerts", lambda **kwargs: None)
+    monkeypatch.setattr(run_service, "_publish_sse", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_service, "_persist_run_cost", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_service, "_emit_run_lifecycle_event", lambda **kwargs: None)
+
+    run_service.update_run_status(
+        "run-platform-failure",
+        "failed",
+        error="capacity exhausted",
+        error_code="llm_provider_capacity_retry_exhausted",
+        user_id="user-a",
+        repos=repos,
+    )
+
+    assert len(dispatched) == 1
+    assert dispatched[0]["run_id"] == "run-platform-failure"
+    assert dispatched[0]["worker_id"] == "worker-a"
+    assert dispatched[0]["error_code"] == "llm_provider_capacity_retry_exhausted"
+    assert dispatched[0]["user_id"] == "user-a"
+
+
+def test_completed_with_error_dispatches_from_effective_failed_status(
+    monkeypatch,
+    repo_bundle,
+):
+    import alerting
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-coerced-failure",
+        worker_id="worker-a",
+        status=RunStatus.RUNNING.value,
+        trigger_source="manual",
+        runner="e2b",
+    )
+    dispatched: list[dict] = []
+    monkeypatch.setattr(
+        alerting,
+        "dispatch_ops_run_failure",
+        lambda **kwargs: dispatched.append(kwargs),
+    )
+    monkeypatch.setattr(run_service, "_dispatch_terminal_run_alerts", lambda **kwargs: None)
+    monkeypatch.setattr(run_service, "_publish_sse", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_service, "_persist_run_cost", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_service, "_emit_run_lifecycle_event", lambda **kwargs: None)
+
+    run_service.update_run_status(
+        "run-coerced-failure",
+        RunStatus.COMPLETED.value,
+        output={"result": "must be dropped"},
+        error="sandbox failed",
+        error_code="e2b_sandbox_error",
+        user_id="user-a",
+        repos=repos,
+    )
+
+    row = repos.runs.get(user_id="user-a", run_id="run-coerced-failure")
+    assert row["status"] == RunStatus.FAILED.value
+    assert not row.get("output_json")
+    assert [call["run_id"] for call in dispatched] == ["run-coerced-failure"]
 
 
 def test_queued_retry_is_not_claimable_before_trigger_ref(repo_bundle):
