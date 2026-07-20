@@ -653,3 +653,135 @@ def test_collect_agent_reply_details_logs_natural_failure_during_external_cancel
         == "natural stream failure during external cancellation"
     ]
     assert len(failure_records) == 1
+
+
+# ---------------------------------------------------------------------------
+# Blocker fixes — race-closing resume + fatal durable tool-result persistence
+# ---------------------------------------------------------------------------
+
+def test_stream_chat_explicit_missing_conversation_fails_closed_without_forking(
+    monkeypatch, tmp_path
+):
+    """Blocker 1 (race -> silent fork): the authoritative must-exist guard lives
+    INSIDE stream_chat, not only in the endpoint preflight. Driving stream_chat
+    directly with an explicit conv_ id that is unresolved/unowned at resolve
+    time (simulating a conversation deleted between the preflight and here) must
+    emit an error and must NOT create a new conversation (thread fork)."""
+    main = _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+
+    async def _drive():
+        queue: asyncio.Queue = asyncio.Queue()
+        await chat_service.stream_chat(
+            message="resume the vanished thread",
+            user_id="mcp-test-user",
+            conversation_id="conv_vanished_mid_race",
+            part_queue=queue,
+            source="mcp",
+        )
+        parts = []
+        while not queue.empty():
+            parts.append(queue.get_nowait())
+        return parts
+
+    parts = asyncio.run(asyncio.wait_for(_drive(), timeout=2.0))
+    kinds = [p.get("type") for p in parts]
+    assert "error" in kinds, parts
+    error_part = next(p for p in parts if p.get("type") == "error")
+    assert "not found" in str(error_part.get("error")).lower(), error_part
+    # Never silently forks: no conversation (and no user row) was created.
+    assert _conversations_in_db(main) == [], \
+        "must-exist resume must not create a conversation"
+    # And the finish carries no phantom message id.
+    finish = next((p for p in parts if p.get("type") == "finish"), None)
+    assert finish is not None, parts
+    assert finish.get("message_id") is None, finish
+
+
+def test_stream_chat_missing_conversation_error_surfaces_via_collector(
+    monkeypatch, tmp_path
+):
+    """Blocker 1: the in-stream fail-closed error is surfaced to MCP callers as
+    an actionable AgentReplyError (isError tool result), not a silent fork."""
+    _load_api(monkeypatch, tmp_path)
+    common = importlib.import_module("channels.common")
+
+    async def _collect():
+        return await common.collect_agent_reply_details(
+            message="resume please",
+            user_id="mcp-test-user",
+            conversation_id="conv_gone_forever",
+            source="mcp",
+        )
+
+    with pytest.raises(common.AgentReplyError, match="not found or is not accessible"):
+        asyncio.run(asyncio.wait_for(_collect(), timeout=2.0))
+
+
+def test_workspace_chat_tool_result_persistence_failure_surfaces_not_phantom_success(
+    monkeypatch, tmp_path
+):
+    """Blocker 2 (#2266 over-correction): a failed durable tool-RESULT insert
+    during an ACTIVE run must surface as an error, never a silent success with
+    an incomplete transcript (which could make a resumed run REPEAT a side
+    effect). It must also never return a msg_pending_ placeholder id."""
+    main = _load_api(monkeypatch, tmp_path)
+    chat_service = importlib.import_module("chat_service")
+    from runner_sandbox import agent_capabilities
+
+    async def _no_mcp(*a, **k):
+        return []
+
+    monkeypatch.setattr(agent_capabilities, "connect_mcp_servers", _no_mcp)
+    monkeypatch.setattr(agent_capabilities, "cleanup_mcp_servers", _no_mcp)
+    monkeypatch.setattr(chat_service, "_workspace_tools", lambda *a, **k: [])
+    monkeypatch.setattr(chat_service, "_brain_read_tools", lambda *a, **k: [])
+    monkeypatch.setattr(chat_service, "_composio_read_tools", lambda *a, **k: [])
+    import runner_sandbox.stream_adapter as stream_adapter
+    monkeypatch.setattr(stream_adapter, "decode_stream_event", lambda event: event)
+
+    class _FakeResult:
+        async def stream_events(self):
+            yield SimpleNamespace(
+                kind="tool_output",
+                call_id="call_send_email",
+                output={"ok": True, "data": "email sent to ceo@corp.test"},
+                is_error=False,
+            )
+            yield SimpleNamespace(kind="text_delta", text="All done, I sent it.")
+
+    def _fake_run_streamed(agent, *args, **kwargs):
+        return _FakeResult()
+
+    import agents
+    monkeypatch.setattr(agents.Runner, "run_streamed", staticmethod(_fake_run_streamed))
+
+    # Durable tool-RESULT history write fails; user/assistant writes are fine.
+    real_insert = chat_service.insert_message
+
+    def _insert(conversation_id, role, content, *a, **k):
+        if role == "tool":
+            raise RuntimeError("durable tool transcript write failed")
+        return real_insert(conversation_id, role, content, *a, **k)
+
+    monkeypatch.setattr(chat_service, "insert_message", _insert)
+
+    result = _workspace_chat_result(main, {"message": "send the email"})
+    assert result["isError"] is True, \
+        f"tool-result persistence failure must surface, not phantom success: {result}"
+    sc = result.get("structuredContent") or {}
+    assert not str(sc.get("message_id") or "").startswith("msg_pending"), sc
+
+
+def test_workspace_chat_empty_reply_does_not_return_pending_message_id(
+    monkeypatch, tmp_path
+):
+    """Blocker 2: when no assistant row is stored, the result must not surface a
+    msg_pending_ placeholder as the stored message id."""
+    main = _load_api(monkeypatch, tmp_path)
+    _FakeAgentRuntime(monkeypatch, reply_text="")
+
+    result = _workspace_chat_result(main, {"message": "produce nothing"})
+    assert result["isError"] is False, result
+    sc = result["structuredContent"]
+    assert sc["message_id"] is None or not str(sc["message_id"]).startswith("msg_pending"), sc
