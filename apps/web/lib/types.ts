@@ -252,6 +252,7 @@ export interface RunDetail {
   trigger_source: string;
   runner: string;
   input: Record<string, unknown>;
+  dry_run?: boolean;
   output: Record<string, unknown>;
   output_schema: OutputField[];
   logs: LogEntry[];

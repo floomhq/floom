@@ -17,6 +17,7 @@ import { RunStatusBadge } from "@/components/RunStatus";
 import { Task } from "@/components/ai-elements/task";
 import { Tool } from "@/components/ai-elements/tool";
 import { StackTrace } from "@/components/ai-elements/stack-trace";
+import { DryRunNotice } from "@/components/run-page/DryRunNotice";
 import { useRunStream } from "@/lib/useRunStream";
 import { api } from "@/lib/api";
 import { humanizeLogMessage, humanizeRunError } from "@/lib/run-format";
@@ -320,36 +321,43 @@ export function RunPanel({ runId, submitting = false }: RunPanelProps) {
     return <IdlePlaceholder />;
   }
 
-  const status = run?.status ?? "running";
+  // A previous run can remain in state for one render while runId changes.
+  // Never display its status or dry-run warning for the newly selected run.
+  const visibleRun = run?.id === runId ? run : null;
+  const status = visibleRun?.status ?? "running";
   const isTerminal = status === "completed" || status === "failed";
 
   // Done
-  if (isTerminal && run) {
+  if (isTerminal && visibleRun) {
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <RunStatusBadge status={status} />
-          {run.worker_name && (
+          {visibleRun.worker_name && (
             <span className="text-sm text-muted-foreground">
-              {run.worker_name}
+              {visibleRun.worker_name}
             </span>
           )}
         </div>
-        <DoneOutput run={run} />
+        {visibleRun.dry_run && <DryRunNotice />}
+        <DoneOutput run={visibleRun} />
       </div>
     );
   }
 
   // Running (or queued)
   return (
-    <LiveTranscript
-      runId={runId}
-      parts={parts}
-      run={run}
-      connected={connected}
-      streamError={error}
-      streamUnavailable={streamUnavailable}
-      onRefresh={refresh}
-    />
+    <div className="space-y-4">
+      {visibleRun?.dry_run && <DryRunNotice />}
+      <LiveTranscript
+        runId={runId}
+        parts={parts}
+        run={visibleRun}
+        connected={connected}
+        streamError={error}
+        streamUnavailable={streamUnavailable}
+        onRefresh={refresh}
+      />
+    </div>
   );
 }
