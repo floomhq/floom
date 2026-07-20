@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import sys
@@ -180,6 +181,9 @@ def test_worker_file_update_merges_and_preserves_omitted_files(app_ctx):
     worker_dir = main.WORKERS_DIR / "sales-summary"
     requirements = worker_dir / "requirements.txt"
     requirements.write_text("httpx==0.28.1\n", encoding="utf-8")
+    nested = worker_dir / "lib" / "preserved" / "helper.py"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("VALUE = 'nested'\n", encoding="utf-8")
     worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
 
     response = client.put(
@@ -192,6 +196,43 @@ def test_worker_file_update_merges_and_preserves_omitted_files(app_ctx):
 
     assert response.status_code == 200, response.text
     assert requirements.read_text(encoding="utf-8") == "httpx==0.28.1\n"
+    assert nested.read_text(encoding="utf-8") == "VALUE = 'nested'\n"
+
+
+def test_worker_file_update_persistence_failure_restores_entire_bundle(app_ctx, monkeypatch):
+    client, main, _scheduler = app_ctx
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    nested = worker_dir / "lib" / "existing.py"
+    nested.parent.mkdir(parents=True)
+    nested.write_bytes(b"ORIGINAL NESTED\n")
+    before = {
+        path.relative_to(worker_dir): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+
+    def fail_persistence(*args, **kwargs):
+        raise RuntimeError("injected persistence failure")
+
+    monkeypatch.setattr(main, "_persist_discovered_workers", fail_persistence)
+    response = client.put(
+        "/workers/sales-summary/files",
+        json={"files": [
+            {"path": "worker.yml", "content": worker_yml},
+            {"path": "run.py", "content": "print('must roll back')\n"},
+            {"path": "new/deep/file.py", "content": "print('must disappear')\n"},
+        ]},
+    )
+
+    after = {
+        path.relative_to(worker_dir): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    assert response.status_code == 502, response.text
+    assert after == before
+    assert not (worker_dir / "new" / "deep" / "file.py").exists()
 
 
 def test_worker_versions_returns_history_after_file_edit(app_ctx):
@@ -211,7 +252,9 @@ def test_worker_versions_returns_history_after_file_edit(app_ctx):
     assert edited.status_code == 200, edited.text
     assert versions.status_code == 200, versions.text
     assert len(versions.json()) >= 1
-    assert versions.json()[0]["id"] != ""
+    # The edit path commits the worker bundle. This must be a real git-backed
+    # version, not only the synthetic fallback used for never-edited workers.
+    assert versions.json()[0]["id"] not in {"", "current"}
 
 
 def test_worker_pause_and_resume_toggle_enabled(app_ctx):
@@ -237,6 +280,76 @@ def test_worker_management_tools_are_exposed_on_all_mcp_surfaces(app_ctx):
     assert required <= remote
     assert all(f'"{name}"' in server_source for name in required - {"workers.pause", "workers.resume"})
     assert '`workers.${action}`' in server_source
+
+
+def test_remote_mcp_worker_lifecycle_and_tenant_isolation(app_ctx):
+    client, main, _scheduler = app_ctx
+    main.set_current_auth_context(
+        main.AuthContext(user_id="local-user", email=None, scopes=("admin", "mcp"))
+    )
+
+    paused = asyncio.run(main._call_workeros_remote_mcp_tool("workers.pause", {"id": "sales-summary"}))
+    resumed = asyncio.run(main._call_workeros_remote_mcp_tool("workers.resume", {"id": "sales-summary"}))
+
+    assert paused.get("isError") is not True
+    assert paused["structuredContent"]["enabled"] is False
+    assert resumed.get("isError") is not True
+    assert resumed["structuredContent"]["enabled"] is True
+
+    main.set_current_auth_context(
+        main.AuthContext(user_id="other-user", email=None, scopes=("admin", "mcp"))
+    )
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    before_files = {
+        path.relative_to(worker_dir): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    with main.get_db() as conn:
+        before_rows = conn.execute(
+            "SELECT COUNT(*) AS count FROM workers WHERE id = ?", ("sales-summary",)
+        ).fetchone()["count"]
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+
+    denied_results = {
+        operation: asyncio.run(main._call_workeros_remote_mcp_tool(operation, arguments))
+        for operation, arguments in {
+            "workers.pause": {"id": "sales-summary"},
+            "workers.resume": {"id": "sales-summary"},
+            "workers.write_file": {
+                "id": "sales-summary",
+                "files": [
+                    {"path": "worker.yml", "content": worker_yml},
+                    {"path": "new.py", "content": "print('denied')\n"},
+                ],
+            },
+            "workers.delete": {"id": "sales-summary"},
+        }.items()
+    }
+    for operation, denied in denied_results.items():
+        assert denied["isError"] is True, operation
+        assert denied["structuredContent"]["status"] == 404, operation
+
+    with main.get_db() as conn:
+        after_rows = conn.execute(
+            "SELECT COUNT(*) AS count FROM workers WHERE id = ?", ("sales-summary",)
+        ).fetchone()["count"]
+    after_files = {
+        path.relative_to(worker_dir): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    assert after_rows == before_rows == 1
+    assert after_files == before_files
+    assert client.get("/workers/sales-summary").status_code == 200
+
+    main.set_current_auth_context(
+        main.AuthContext(user_id="local-user", email=None, scopes=("admin", "mcp"))
+    )
+    deleted = asyncio.run(main._call_workeros_remote_mcp_tool("workers.delete", {"id": "sales-summary"}))
+    assert deleted.get("isError") is not True
+    assert deleted["structuredContent"] == {"id": "sales-summary", "deleted": True}
+    assert client.get("/workers/sales-summary").status_code == 404
 
 
 def test_worker_create_rejects_oversized_json_file_bundle(app_ctx):

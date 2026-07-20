@@ -4492,6 +4492,26 @@ def update_worker_files(
 
     tmp_dir: Optional[Path] = None
     backed_up: List[tuple] = []  # list of (original_path, backup_path)
+    created_files: List[Path] = []
+
+    def rollback_files() -> None:
+        # A destination without a backup did not exist before this update. It
+        # must be removed as well as restoring overwritten files, otherwise a
+        # failed persistence step leaves a partially updated bundle on disk.
+        for created in reversed(created_files):
+            try:
+                created.unlink(missing_ok=True)
+            except Exception:
+                pass
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                if bak.exists():
+                    bak.rename(orig)
+            except Exception:
+                pass
+        invalidate_worker_cache()
 
     try:
         # Stage new files to a temp dir
@@ -4512,6 +4532,10 @@ def update_worker_files(
                 bak = dest.with_suffix(dest.suffix + f".bak{os.getpid()}")
                 dest.rename(bak)
                 backed_up.append((dest, bak))
+            else:
+                # Record this before copy2 so even a partially copied file is
+                # removed if copying or any later operation fails.
+                created_files.append(dest)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(tmp_dir / item.path, dest)
 
@@ -4530,23 +4554,15 @@ def update_worker_files(
                     conn, this_worker_list, user_id=auth.user_id, raise_on_skip=True
                 )
             except Exception as exc:
-                # Roll back: restore backups. Catch any persist failure
-                # (IntegrityError, ValidationError, RuntimeError) so a bad save
-                # never leaves the worker files half-written.
-                for orig, bak in reversed(backed_up):
-                    try:
-                        if orig.exists():
-                            orig.unlink()
-                        bak.rename(orig)
-                    except Exception:
-                        pass
-                invalidate_worker_cache()
+                # Catch any persist failure (IntegrityError, ValidationError,
+                # RuntimeError) so the outer rollback restores the full bundle.
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         # Remove backups on success
         for _orig, bak in backed_up:
             bak.unlink(missing_ok=True)
         backed_up.clear()
+        created_files.clear()
 
         try:
             _embed_files_in_skill_version(worker_id, target_dir)
@@ -4568,17 +4584,11 @@ def update_worker_files(
         )
 
     except HTTPException:
+        rollback_files()
         raise
     except Exception as exc:
         logger.exception("update_worker_files failed for %s", worker_id)
-        # Restore backups on unexpected error
-        for orig, bak in reversed(backed_up):
-            try:
-                if orig.exists():
-                    orig.unlink()
-                bak.rename(orig)
-            except Exception:
-                pass
+        rollback_files()
         raise HTTPException(status_code=500, detail=f"Failed to update worker files: {exc}") from exc
     finally:
         if tmp_dir is not None and tmp_dir.exists():
