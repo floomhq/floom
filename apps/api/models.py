@@ -1596,6 +1596,40 @@ class WorkerContractCapabilities(BaseModel):
     network: WorkerContractNetworkCapabilities = Field(default_factory=WorkerContractNetworkCapabilities)
 
 
+def normalize_worker_contract_connections(value: Any) -> Any:
+    """Move the legacy misplaced capabilities.connections block to top level."""
+    if not isinstance(value, dict):
+        return value
+
+    exec_block = value.get("exec")
+    if isinstance(exec_block, dict) and "connections" in exec_block:
+        raise ValueError(
+            "connections must be a top-level sibling of exec, not nested "
+            "under exec; no worker was saved"
+        )
+
+    capabilities = value.get("capabilities")
+    if not isinstance(capabilities, dict) or "connections" not in capabilities:
+        return value
+
+    misplaced = capabilities.get("connections")
+    canonical = value.get("connections")
+    canonical_declared = "connections" in value
+    if canonical_declared and canonical != misplaced:
+        raise ValueError(
+            "connections are declared both at top level and under capabilities "
+            "with different values; keep only the top-level declaration"
+        )
+
+    normalized = dict(value)
+    normalized_capabilities = dict(capabilities)
+    normalized_capabilities.pop("connections", None)
+    normalized["capabilities"] = normalized_capabilities
+    if not canonical_declared:
+        normalized["connections"] = misplaced
+    return normalized
+
+
 class WorkerContractTrigger(BaseModel):
     type: str = "manual"
     cron: Optional[str] = None
@@ -1702,16 +1736,9 @@ class WorkerContract(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def reject_connections_nested_under_exec(cls, value: Any) -> Any:
-        """Reject a placement Pydantic would otherwise silently discard."""
-        if isinstance(value, dict):
-            exec_block = value.get("exec")
-            if isinstance(exec_block, dict) and "connections" in exec_block:
-                raise ValueError(
-                    "connections must be a top-level sibling of exec, not nested "
-                    "under exec; no worker was saved"
-                )
-        return value
+    def normalize_misplaced_connections(cls, value: Any) -> Any:
+        """Migrate the legacy capabilities placement and reject exec placement."""
+        return normalize_worker_contract_connections(value)
 
     @model_validator(mode="before")
     @classmethod

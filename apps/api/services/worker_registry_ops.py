@@ -178,6 +178,32 @@ def _rewrite_worker_yml_id(worker_yml: str, new_id: str) -> str:
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
 
+def _normalize_worker_yml_connections(worker_yml: str) -> str:
+    """Return YAML with legacy capabilities.connections moved to top level."""
+    import yaml as pyyaml
+
+    from models import normalize_worker_contract_connections
+
+    try:
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception:
+        return worker_yml
+    if not isinstance(raw, dict):
+        return worker_yml
+    try:
+        normalized = normalize_worker_contract_connections(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if normalized is raw:
+        return worker_yml
+    return pyyaml.safe_dump(
+        normalized,
+        sort_keys=False,
+        default_flow_style=False,
+        allow_unicode=True,
+    )
+
+
 def _redacted_validation_errors(
     errors: List[Dict[str, Any]],
     *,
@@ -366,6 +392,13 @@ def _parse_worker_payload(
                 "Move it to the top-level sibling of exec. No worker was saved."
             ),
         )
+
+    from models import normalize_worker_contract_connections
+
+    try:
+        raw = normalize_worker_contract_connections(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # P1-3: reject path-traversal in caller-supplied bundle_path BEFORE schema parsing
     # (the projection from WorkerContract may strip the field, so we check raw YAML).
@@ -627,6 +660,7 @@ def _register_worker_from_files(
     if not worker_yml_file:
         raise HTTPException(status_code=400, detail="files must include worker.yml")
 
+    worker_yml_file.content = _normalize_worker_yml_connections(worker_yml_file.content)
     worker_id, _config = _parse_worker_payload(worker_yml_file.content, user_id=user_id, repos=repos)
 
     # The author hook can collide on a reused suggested id; allocate a free id

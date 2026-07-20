@@ -428,6 +428,7 @@ from services.worker_registry_ops import (
     _should_embed_file,
     _extract_triggers_from_manifest,
     _free_worker_id,
+    _normalize_worker_yml_connections,
     _parse_worker_payload,
     _SENSITIVE_FILE_NAMES,
     _SENSITIVE_FILE_SUFFIXES,
@@ -4227,7 +4228,8 @@ def update_worker(
         raise HTTPException(status_code=422, detail="run_py is required")
 
     worker_id = _canonical_worker_id(worker_id)
-    raw_worker_id = _raw_worker_id_from_worker_yml(payload.worker_yml)
+    normalized_worker_yml = _normalize_worker_yml_connections(payload.worker_yml)
+    raw_worker_id = _raw_worker_id_from_worker_yml(normalized_worker_yml)
     if raw_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
@@ -4235,7 +4237,7 @@ def update_worker(
         )
     _raise_if_protected_worker_mutation(worker_id)
 
-    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id, repos=repos)
+    parsed_worker_id, _config = _parse_worker_payload(normalized_worker_yml, user_id=auth.user_id, repos=repos)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
@@ -4257,7 +4259,7 @@ def update_worker(
     had_requirements = requirements_path.exists()
     old_skill = skill_path.read_text(encoding='utf-8') if skill_path.exists() else None
 
-    worker_yml_path.write_text(payload.worker_yml, encoding='utf-8')
+    worker_yml_path.write_text(normalized_worker_yml, encoding='utf-8')
     run_py_path.write_text(payload.run_py, encoding='utf-8')
     if not requirements_path.exists():
         requirements_path.write_text("", encoding='utf-8')
@@ -4471,6 +4473,7 @@ def update_worker_files(
 
     # Validate worker.yml is parseable
     yml_item = next(f for f in payload.files if f.path == "worker.yml")
+    yml_item.content = _normalize_worker_yml_connections(yml_item.content)
     parsed_worker_id, _config = _parse_worker_payload(yml_item.content, user_id=auth.user_id, repos=repos)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
