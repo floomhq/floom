@@ -102,7 +102,16 @@ def list_context_versions(
     """List git commit history for a brain pack (newest first)."""
     import git_ops as _git_ops
 
-    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    from contexts import is_context_sensitive
+
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _require_context_for_user(
+        name, user_id=context_user_id, repos=repos
+    )
+    # Sensitive packs are deliberately excluded from git. Avoid attempting a
+    # baseline commit, and keep the MCP/REST contract explicit.
+    if is_context_sensitive(safe_name):
+        return []
     workspace = _git_workspace()
     rel_path = _context_git_path(safe_name)
     rows = _git_ops.get_log(

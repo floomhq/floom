@@ -6091,7 +6091,11 @@ app.include_router(asset_access_router)
 # because the /search and workspace-agent MCP routes call it directly.
 from routers.contexts import (
     contexts_router,
+    delete_context,
+    delete_context_file,
+    get_context,
     list_contexts,
+    list_context_versions,
     _record_candidate_feedback_event,
 )
 app.include_router(contexts_router)
@@ -6997,6 +7001,28 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             }, ["name", "path", "content"]),
         },
         {
+            "name": "contexts.files",
+            "description": "List file paths inside a Floom brain pack.",
+            "inputSchema": _mcp_json_schema({"name": {"type": "string"}}, ["name"]),
+        },
+        {
+            "name": "contexts.delete",
+            "description": "Delete a brain pack, or one file when path is supplied.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "path": {"type": "string"},
+                "force": {"type": "boolean", "default": False},
+            }, ["name"]),
+        },
+        {
+            "name": "contexts.versions",
+            "description": "List saved versions of a non-sensitive brain pack, newest first.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            }, ["name"]),
+        },
+        {
             "name": "workspace.info",
             "description": "Get the active workspace identity and authenticated principal.",
             "inputSchema": _mcp_json_schema({}),
@@ -7405,6 +7431,35 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(result, message)
 
 
+def _mcp_call_contexts_files(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    detail = get_context(_mcp_arg(arguments, "name"), auth=auth, repos=repos)
+    return _mcp_call_result({
+        "name": detail.name,
+        "paths": [item.path for item in detail.files],
+        "files": detail.files,
+    })
+
+
+def _mcp_call_contexts_delete(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    name = _mcp_arg(arguments, "name")
+    path = str(arguments.get("path") or "").strip()
+    if path:
+        data = delete_context_file(name, path, auth=auth, repos=repos)
+        return _mcp_call_result(data, "Context file deleted.")
+    data = delete_context(name, force=bool(arguments.get("force", False)), auth=auth, repos=repos)
+    return _mcp_call_result(data, "Context deleted.")
+
+
+def _mcp_call_contexts_versions(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    rows = list_context_versions(
+        _mcp_arg(arguments, "name"),
+        limit=min(max(int(arguments.get("limit", 50)), 1), 100),
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(rows)
+
+
 def _mcp_remote_approval_decision(
     decision: str, arguments: Dict[str, Any], auth: AuthContext
 ) -> Dict[str, Any]:
@@ -7485,6 +7540,12 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_contexts_read(arguments, auth)
         if tool_name == "contexts.write":
             return _mcp_call_contexts_write(arguments, auth, repos)
+        if tool_name == "contexts.files":
+            return _mcp_call_contexts_files(arguments, auth, repos)
+        if tool_name == "contexts.delete":
+            return _mcp_call_contexts_delete(arguments, auth, repos)
+        if tool_name == "contexts.versions":
+            return _mcp_call_contexts_versions(arguments, auth, repos)
         if tool_name == "workspace.info":
             return _mcp_call_workspace_info(auth)
         if tool_name == "approvals.approve":
@@ -8143,7 +8204,8 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
     {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
-    {"name": "contexts.delete", "description": "Delete a brain pack context and all its files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
+    {"name": "contexts.files", "description": "List file paths inside a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "contexts.delete", "description": "Delete a brain pack context, or one file when path is supplied.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
     {"name": "contexts.delete_file", "description": "Delete a specific file from a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
     {"name": "contexts.rollback", "description": "Restore a brain pack context to a previous version.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "version_id": {"type": "string"}}, "required": ["name", "version_id"]}},
@@ -8471,12 +8533,22 @@ async def _mcp_dispatch(
         data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
         return _mcp_api_result(data, s)
     if name == "contexts.delete":
-        qs = "?force=true" if a.get("force") else ""
-        data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
+        if a.get("path"):
+            encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
+            data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        else:
+            qs = "?force=true" if a.get("force") else ""
+            data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
         return _mcp_api_result(data, s)
     if name == "contexts.delete_file":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        return _mcp_api_result(data, s)
+    if name == "contexts.files":
+        data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}", request)
+        if s < 400 and isinstance(data, dict):
+            files = data.get("files") if isinstance(data.get("files"), list) else []
+            data = {"name": data.get("name", a["name"]), "paths": [f.get("path") for f in files if isinstance(f, dict) and f.get("path")], "files": files}
         return _mcp_api_result(data, s)
     if name == "contexts.versions":
         data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/versions", request, params={"limit": a.get("limit", 50)})
