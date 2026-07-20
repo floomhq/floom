@@ -2265,6 +2265,19 @@ def update_run_status(
         )
     previous_error = (run_row or {}).get("error")
     previous_error_code = (run_row or {}).get("error_code")
+    persistence_status = status
+    if status == RunStatus.COMPLETED.value:
+        effective_error = error if error is not None else previous_error
+        effective_error_code = error_code if error_code is not None else previous_error_code
+        if (effective_error and str(effective_error).strip()) or (
+            effective_error_code and str(effective_error_code).strip()
+        ):
+            # Match the repository honesty guard before the write so every
+            # post-persistence hook observes the same effective terminal state.
+            status = RunStatus.FAILED.value
+            error = effective_error
+            error_code = effective_error_code
+            output = None
     if status == RunStatus.FAILED.value:
         normalized_error = str(error).strip() if error is not None else ""
         normalized_error_code = str(error_code).strip() if error_code is not None else ""
@@ -2296,13 +2309,26 @@ def update_run_status(
         lambda: repos_obj.runs.update_status(
             user_id=owner_id,
             run_id=run_id,
-            status=status,
+            status=persistence_status,
             output_json=output,
             error=error,
             error_code=error_code,
         ),
         label="runs.update_status",
     )
+    if status == RunStatus.FAILED.value:
+        try:
+            from alerting import dispatch_ops_run_failure
+
+            dispatch_ops_run_failure(
+                run_id=run_id,
+                worker_id=worker_id,
+                error_code=error_code,
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+        except Exception:
+            logger.exception("Failed to dispatch OPS alert evaluation for run %s", run_id)
     if status in {
         RunStatus.COMPLETED.value,
         RunStatus.FAILED.value,
@@ -2641,6 +2667,22 @@ def _fail_stale_running_rows(
             )
         except Exception as exc:
             logger.warning("Failed to add abandoned-run log for %s: %s", run_id, exc)
+        try:
+            from alerting import dispatch_ops_run_failure
+
+            worker_id = str(row.get("worker_id") or "")
+            if not worker_id:
+                persisted = repos_obj.runs.get_any(run_id=run_id) or {}
+                worker_id = str(persisted.get("worker_id") or "")
+            dispatch_ops_run_failure(
+                run_id=run_id,
+                worker_id=worker_id,
+                error_code=error_code,
+                user_id=str(user_id),
+                repos=repos_obj,
+            )
+        except Exception:
+            logger.exception("Failed to dispatch OPS alert evaluation for reaped run %s", run_id)
     if failed:
         logger.warning(
             "Reaped %d abandoned running run(s) older than %ss + %ss grace",
@@ -2689,6 +2731,25 @@ def _fail_dispatch_orphan_rows(
             )
         except Exception as exc:
             logger.warning("Failed to add dispatch-orphan log for %s: %s", run_id, exc)
+        try:
+            from alerting import dispatch_ops_run_failure
+
+            worker_id = str(row.get("worker_id") or "")
+            if not worker_id:
+                persisted = repos_obj.runs.get_any(run_id=run_id) or {}
+                worker_id = str(persisted.get("worker_id") or "")
+            dispatch_ops_run_failure(
+                run_id=run_id,
+                worker_id=worker_id,
+                error_code=DISPATCH_ORPHAN_ERROR_CODE,
+                user_id=str(user_id),
+                repos=repos_obj,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to dispatch OPS alert evaluation for dispatch-orphan run %s",
+                run_id,
+            )
     if failed:
         logger.warning(
             "Reaped %d claimed-without-dispatch run(s) older than %ss",
@@ -4858,6 +4919,21 @@ def _run_thread_entry_with_semaphore(
                     error=message,
                     error_code="executor_thread_pre_sandbox_exception",
                 )
+                try:
+                    from alerting import dispatch_ops_run_failure
+
+                    dispatch_ops_run_failure(
+                        run_id=run_id,
+                        worker_id=worker_id,
+                        error_code="executor_thread_pre_sandbox_exception",
+                        user_id=str(owner_id),
+                        repos=repos_obj,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to dispatch OPS alert evaluation for executor crash run %s",
+                        run_id,
+                    )
                 retry_row = {**(row or {}), "user_id": str(owner_id)}
                 if _auto_requeue_abandoned_enabled() and _requeue_abandoned_run(
                     repos_obj,

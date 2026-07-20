@@ -2254,6 +2254,16 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_runs_retry_not_before
         ON runs(status, trigger_source, retry_not_before);
     """,
+    # -- migration 95: real-time OPS error-code aggregate --------------------
+    """
+    CREATE INDEX IF NOT EXISTS idx_runs_ops_error_code_time
+        ON runs(
+            status,
+            LOWER(TRIM(COALESCE(error_code, ''))),
+            COALESCE(completed_at, started_at, created_at),
+            id
+        );
+    """,
 ]
 
 
