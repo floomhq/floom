@@ -61,6 +61,7 @@ logger = logging.getLogger("floom.runner_sandbox.agent")
 
 _OPENAI_MAX_OUTPUT_CAP = 16_384
 _BEDROCK_MAX_OUTPUT_CAP = 64_000
+_DEFAULT_AGENT_FALLBACK_MODEL = "bedrock/us.anthropic.claude-sonnet-4-6"
 _AUTH_ERROR_RE = re.compile(
     r"authentication|unauthorized|forbidden|invalid[_ -]?api[_ -]?key|incorrect api key"
     r"|access denied|expired token|signaturedoesnotmatch|unrecognizedclient",
@@ -71,7 +72,8 @@ _RATE_LIMIT_ERROR_RE = re.compile(
     re.IGNORECASE,
 )
 _QUOTA_ERROR_RE = re.compile(
-    r"insufficient[_ -]?quota|quota exceeded|exceeded your current quota|billing|credit",
+    r"insufficient[_ -]?quota|quota exceeded|exceeded your current quota|billing|credit"
+    r"|resource[_ -]?exhausted",
     re.IGNORECASE,
 )
 _MODEL_NOT_CONFIGURED_RE = re.compile(
@@ -239,6 +241,39 @@ def _resolve_agent_model(config: WorkerConfig) -> str:
     )
 
 
+def _resolve_agent_fallback_model(primary_model: str) -> str | None:
+    """Resolve the runtime-only cross-provider fallback without changing manifests."""
+    fallback_model = (
+        os.environ.get("WORKEROS_AGENT_FALLBACK_MODEL")
+        or _DEFAULT_AGENT_FALLBACK_MODEL
+    ).strip()
+    if not fallback_model:
+        return None
+    if _llm.agent_model(fallback_model) == _llm.agent_model(primary_model):
+        return None
+    if _llm.model_provider_name(fallback_model) == _llm.model_provider_name(primary_model):
+        logger.warning(
+            "Agent fallback model %s uses the primary provider; cross-provider fallback is disabled",
+            fallback_model,
+        )
+        return None
+    if not _llm.provider_credentials_present(fallback_model):
+        logger.warning(
+            "Agent fallback model %s is not configured; capacity fallback is disabled",
+            fallback_model,
+        )
+        return None
+    return fallback_model
+
+
+def _should_retry_agent_with_fallback(exc: BaseException) -> bool:
+    """Only provider capacity, quota, and throttling failures cross providers."""
+    return _classify_llm_provider_error(exc) in {
+        "llm_provider_capacity",
+        "llm_rate_limited",
+    }
+
+
 def _uses_default_agent_stream_runner(driver: object) -> bool:
     stream_runner = getattr(driver, "_run_streamed", None)
     return getattr(stream_runner, "__func__", stream_runner) is AgentDriver._run_streamed
@@ -287,7 +322,12 @@ def _classify_llm_provider_error(
     if _MODEL_NOT_CONFIGURED_RE.search(haystack):
         return "llm_model_not_configured"
     hard_quota_match = _QUOTA_ERROR_RE.search(haystack)
-    if (_RATE_LIMIT_ERROR_RE.search(haystack) or "ratelimit" in class_name.lower()) and not hard_quota_match:
+    if (
+        status_code == 429
+        or _RATE_LIMIT_ERROR_RE.search(haystack)
+        or "ratelimit" in class_name.lower()
+        or "toomanyrequests" in class_name.lower()
+    ) and not hard_quota_match:
         return "llm_rate_limited"
     if hard_quota_match:
         return "llm_provider_capacity" if shared_credentials else "llm_quota_exceeded"
@@ -607,6 +647,7 @@ class AgentDriver(SandboxDriver):
                 error_code="llm_model_not_configured",
                 retryable=False,
             )
+        fallback_model = _resolve_agent_fallback_model(resolved_model)
         max_tool_iterations = _resolve_max_tool_iterations(limits, config)
         max_total_tokens = _resolve_max_total_tokens(limits, config)
         bundle_dir = _worker_dir_for_run(worker_id, config)
@@ -719,7 +760,38 @@ class AgentDriver(SandboxDriver):
         # client to THIS run's loop fully isolates concurrent runs.
         from .loop_local_provider import LoopLocalModelProvider
 
-        loop_local_provider = LoopLocalModelProvider()
+        normalized_fallback_model = (
+            _llm.agent_model(fallback_model) if fallback_model else None
+        )
+        loop_local_provider = LoopLocalModelProvider(
+            fallback_model_name=normalized_fallback_model,
+            should_fallback=(
+                _should_retry_agent_with_fallback if normalized_fallback_model else None
+            ),
+            fallback_extra_args=(
+                _llm.cache_control_extra_args(normalized_fallback_model)
+                if normalized_fallback_model
+                else None
+            ),
+            fallback_max_tokens=(
+                _agent_effective_max_tokens(
+                    normalized_fallback_model,
+                    _resolve_max_output_tokens(limits),
+                )
+                if normalized_fallback_model
+                else None
+            ),
+            fallback_operation_name="Agent",
+            fallback_exhausted_marker=None,
+            on_fallback=(
+                lambda primary, fallback: log_fn(
+                    f"Agent model capacity reached on {primary}; retrying model call on {fallback}",
+                    "warning",
+                )
+            )
+            if normalized_fallback_model
+            else None,
+        )
         run_config = RunConfig(
             workflow_name=f"workeros:{worker_id}",
             trace_id=trace_id,

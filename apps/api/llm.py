@@ -132,6 +132,16 @@ def agent_model(model: str) -> str:
     return f"litellm/{model}" if is_litellm_model(model) else model
 
 
+def model_provider_name(model: str) -> str:
+    """Return the effective provider name used for cross-provider comparisons."""
+    normalized = (model or "").strip().lower()
+    if normalized.startswith("litellm/"):
+        normalized = normalized.removeprefix("litellm/")
+    if "/" not in normalized or normalized.startswith("openai/"):
+        return "openai"
+    return normalized.split("/", 1)[0]
+
+
 def provider_credentials_present(model: str) -> bool:
     """True when environment credentials for ``model``'s provider are configured.
 
