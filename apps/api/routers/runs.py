@@ -1228,6 +1228,7 @@ def get_run(
                 run_input = _redact_run_inputs(run_input)
         except Exception:
             run_input = {}
+    dry_run = run_input.get("dry_run") is True
     if _has_sensitive_run_artifacts:
         run_input = {}
 
@@ -1284,6 +1285,7 @@ def get_run(
         runner=run["runner"],
         input=run_input,
         inputs=run_input,
+        dry_run=dry_run,
         output=run["output"],
         outputs=run["output"],
         output_schema=output_schema,

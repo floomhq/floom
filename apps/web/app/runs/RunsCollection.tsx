@@ -32,6 +32,7 @@ import { InlineFileOpen, type InlineFile } from "@/components/file-viewer/Inline
 import { OutputRenderer } from "@/components/output-renderer";
 import { GenericOutput } from "@/components/generic-output";
 import { RunTranscript } from "@/components/RunDetailSplitPane";
+import { DryRunNotice } from "@/components/run-page/DryRunNotice";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
 import { useRunLogStream } from "@/lib/useRunLogStream";
 import { contentTagOptions } from "@/lib/workers/derive";
@@ -229,6 +230,11 @@ function OutputTab({ r }: { r: RunSummary }) {
   // toggle now sits in the "Output" group label so it reads as a section control.
   return (
     <div>
+      {d.dry_run && (
+        <div style={{ marginBottom: 16 }}>
+          <DryRunNotice />
+        </div>
+      )}
       {/* R9: output-first. The metrics now lead as the register summary strip,
           matching the worker-detail treatment. */}
       <RunMetricsStrip d={d} />

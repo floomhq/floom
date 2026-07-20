@@ -354,7 +354,7 @@ def _parse_worker_payload(
     if raw_worker_id in PROTECTED_STOCK_WORKER_IDS and not allow_protected_worker_id:
         _raise_if_protected_worker_mutation(raw_worker_id)
 
-    # Reject connections nested under exec: — a common authoring mistake that
+    # #1230: reject connections nested under exec, a common authoring mistake that
     # silently ignores the connections list (WorkerContract only reads top-level
     # connections:). Catch it BEFORE Pydantic parsing so the error is clear.
     raw_exec_pre = raw.get("exec") if isinstance(raw.get("exec"), dict) else {}
@@ -363,7 +363,7 @@ def _parse_worker_payload(
             status_code=400,
             detail=(
                 "connections: must be a top-level field, not nested under exec:. "
-                "Move it to the top level."
+                "Move it to the top-level sibling of exec. No worker was saved."
             ),
         )
 
