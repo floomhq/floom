@@ -15,6 +15,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_POST_FINISH_TEARDOWN_GRACE_SECONDS = 5.0
+
 # ---------------------------------------------------------------------------
 # Maximum inbound webhook body size (applies to all channels).
 # Reject payloads larger than this before any parsing or HMAC work.
@@ -795,21 +797,34 @@ def bound_user_is_valid(user_id: str) -> bool:
         return True
 
 
-async def collect_agent_reply(
+class AgentReplyError(RuntimeError):
+    """The workspace agent stream reported a failure before completing.
+
+    ``str(exc)`` is the client-safe message emitted by chat_service (already
+    passed through ``safe_llm_error_message``), so callers may surface it.
+    Subclasses RuntimeError for backwards compatibility with existing
+    ``except RuntimeError`` channel handlers.
+    """
+
+
+async def collect_agent_reply_details(
     *,
     message: str,
     user_id: str,
     conversation_id: Optional[str],
     source: str = "slack",
     system_suffix: str = "",
-) -> str:
-    """Stream the workspace-agent reply for an inbound channel message.
+) -> dict:
+    """Stream the workspace-agent reply and return reply details.
 
-    Drives ``chat_service.stream_chat`` over an asyncio Queue and returns the
-    concatenated text reply (em-dashes stripped).  Named ``collect_agent_reply``
-    here (channel-neutral); main.py re-exports it as
-    ``_collect_workspace_agent_reply_for_slack`` for backwards compatibility with
-    tests that monkeypatch that name directly.
+    Drives ``chat_service.stream_chat`` over an asyncio Queue and returns
+    ``{"reply", "conversation_id", "message_id"}`` where ``conversation_id`` is
+    the REAL persisted id from the finish event (#2269 — callers need it to
+    resume the same thread).
+
+    #2266: once the finish event has been consumed the reply is complete; a
+    late exception from the stream task (client teardown, provider close) is
+    logged and ignored instead of converting a completed run into a failure.
     """
     from chat_service import stream_chat, strip_em_dashes  # lazy — avoids circular import
 
@@ -826,17 +841,135 @@ async def collect_agent_reply(
         )
     )
     text_parts: list[str] = []
+    finish_part: dict = {}
+    queue_get_task: Optional[asyncio.Task] = None
+    task_outcome_retrieved = False
+    task_failure_logged = False
     try:
         while True:
-            part = await queue.get()
+            # stream_chat can fail before it reaches the try block that emits
+            # error/finish events. Drain any already-queued parts first, then
+            # race the next part against stream completion so such a failure
+            # cannot leave this collector blocked on queue.get() forever.
+            if task.done():
+                try:
+                    part = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    try:
+                        await task  # Propagate a pre-finish stream exception.
+                    finally:
+                        task_outcome_retrieved = True
+                    raise AgentReplyError(
+                        "workspace agent stream ended before emitting a finish event"
+                    )
+            else:
+                queue_get_task = asyncio.create_task(queue.get())
+                done, _ = await asyncio.wait(
+                    {queue_get_task, task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if queue_get_task in done:
+                    part = queue_get_task.result()
+                    queue_get_task = None
+                else:
+                    # The stream completed while no queue part was ready. Cancel
+                    # this receive, then loop once more to drain an event queued
+                    # immediately before task completion.
+                    queue_get_task.cancel()
+                    try:
+                        await queue_get_task
+                    except asyncio.CancelledError:
+                        pass
+                    queue_get_task = None
+                    continue
             if part.get("type") == "text":
                 text_parts.append(str(part.get("text") or ""))
             if part.get("type") == "error":
-                raise RuntimeError(str(part.get("error") or "workspace agent failed"))
+                raise AgentReplyError(str(part.get("error") or "workspace agent failed"))
             if part.get("type") == "finish":
+                finish_part = part
                 break
-        await task
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=_POST_FINISH_TEARDOWN_GRACE_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "workspace agent reply already complete for conversation %s; "
+                "returning it while teardown was still pending",
+                finish_part.get("conversation_id"),
+            )
+        except Exception:
+            logger.exception(
+                "workspace agent stream task failed after finish for conversation %s; "
+                "reply already complete — returning it",
+                finish_part.get("conversation_id"),
+            )
+            task_failure_logged = True
     finally:
+        if queue_get_task is not None and not queue_get_task.done():
+            queue_get_task.cancel()
+            try:
+                await queue_get_task
+            except asyncio.CancelledError:
+                pass
+        def _log_late_stream_failure(finished_task: asyncio.Task) -> None:
+            try:
+                if (
+                    finished_task.cancelled()
+                    or task_outcome_retrieved
+                    or task_failure_logged
+                ):
+                    return
+                exc = finished_task.exception()
+                if exc is not None:
+                    logger.exception(
+                        "workspace agent stream task failed during cancellation "
+                        "for conversation %s",
+                        finish_part.get("conversation_id"),
+                        exc_info=(type(exc), exc, exc.__traceback__),
+                    )
+            except BaseException:
+                try:
+                    logger.exception(
+                        "failed to inspect cancelled workspace agent stream task "
+                        "for conversation %s",
+                        finish_part.get("conversation_id"),
+                    )
+                except BaseException:
+                    pass
+
+        task.add_done_callback(_log_late_stream_failure)
         if not task.done():
             task.cancel()
-    return strip_em_dashes("".join(text_parts).strip())
+    return {
+        "reply": strip_em_dashes("".join(text_parts).strip()),
+        "conversation_id": finish_part.get("conversation_id"),
+        "message_id": finish_part.get("message_id"),
+    }
+
+
+async def collect_agent_reply(
+    *,
+    message: str,
+    user_id: str,
+    conversation_id: Optional[str],
+    source: str = "slack",
+    system_suffix: str = "",
+) -> str:
+    """Stream the workspace-agent reply for an inbound channel message.
+
+    Returns the concatenated text reply (em-dashes stripped).  Named
+    ``collect_agent_reply`` here (channel-neutral); main.py re-exports it as
+    ``_collect_workspace_agent_reply_for_slack`` for backwards compatibility with
+    tests that monkeypatch that name directly.
+    """
+    details = await collect_agent_reply_details(
+        message=message,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        source=source,
+        system_suffix=system_suffix,
+    )
+    return str(details.get("reply") or "")

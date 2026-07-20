@@ -638,7 +638,7 @@ def _tool_runs_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 
 def _tool_runs_cancel(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    from db import get_repositories, now_iso
+    from db import get_db, get_repositories, now_iso
     from models import RunStatus
     from run_service import update_run_status
     run_id = str(args.get("run_id") or "")
@@ -649,34 +649,38 @@ def _tool_runs_cancel(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         run = repos.runs.get(user_id=user_id, run_id=run_id)
         if not run:
             return {"ok": False, "error": f"Run not found: {run_id}"}
-        status = str(run.get("status") or "").lower()
-        if status in {"completed", "failed", "cancelled"}:
-            return {"ok": False, "error": f"Run not found: {run_id}"}
-        repos.runs.cancel(user_id=user_id, run_id=run_id, cancelled_at=now_iso())
-        if status == RunStatus.QUEUED.value:
-            update_run_status(
-                run_id,
-                RunStatus.FAILED.value,
-                error="Run was cancelled before execution started.",
-                error_code="cancelled_queued",
-                user_id=user_id,
-                repos=repos,
-            )
-        else:
-            try:
-                from runner_sandbox.e2b_driver import cancel_sandbox
+        with get_db():
+            # Re-read under the write transaction so a terminal transition after
+            # the ownership check cannot be overwritten by this cancellation.
+            run = repos.runs.get(user_id=user_id, run_id=run_id)
+            status = str((run or {}).get("status") or "").lower()
+            if not run or status in {"completed", "failed", "cancelled"}:
+                return {"ok": False, "error": f"Run not found: {run_id}"}
+            repos.runs.cancel(user_id=user_id, run_id=run_id, cancelled_at=now_iso())
+            if status == RunStatus.QUEUED.value:
+                update_run_status(
+                    run_id,
+                    RunStatus.FAILED.value,
+                    error="Run was cancelled before execution started.",
+                    error_code="cancelled_queued",
+                    user_id=user_id,
+                    repos=repos,
+                )
+            else:
+                try:
+                    from runner_sandbox.e2b_driver import cancel_sandbox
 
-                cancel_sandbox(run_id, reason="User requested cancellation.")
-            except Exception:
-                logger.debug("Failed to cancel E2B sandbox for run %s", run_id, exc_info=True)
-            update_run_status(
-                run_id,
-                RunStatus.CANCELLED.value,
-                error="Run was cancelled by the user.",
-                error_code="user_cancel",
-                user_id=user_id,
-                repos=repos,
-            )
+                    cancel_sandbox(run_id, reason="User requested cancellation.")
+                except Exception:
+                    logger.debug("Failed to cancel E2B sandbox for run %s", run_id, exc_info=True)
+                update_run_status(
+                    run_id,
+                    RunStatus.CANCELLED.value,
+                    error="Run was cancelled by the user.",
+                    error_code="user_cancel",
+                    user_id=user_id,
+                    repos=repos,
+                )
         return {"ok": True, "message": f"Cancelled run '{run_id}'."}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
