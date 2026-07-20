@@ -13,6 +13,7 @@ import {
   useWorkerDetailQuery,
   useWorkerRunsQuery,
   useWorkerVersionsQuery,
+  useWorkerSpendQuery,
   workerDetailQueryOptions,
   workerRunsQueryOptions,
   workerVersionsQueryOptions,
@@ -423,6 +424,12 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
   const stats = d?.recent_stats ?? w.recent_stats;
   const lastRun = d?.last_run ?? w.last_run;
   const scheduleState = scheduleStateLabel(w, d);
+  // #1201: month-to-date spend for this worker, next to the other at-a-glance
+  // stats. Fetched separately (not part of WorkerDetail) so it stays cheap
+  // and cache-first; omitted from the row entirely until it resolves rather
+  // than showing a placeholder "Loading" tile.
+  const spendQuery = useWorkerSpendQuery(w.id);
+  const spend = spendQuery.data;
   const summaryItems = [
     {
       key: "last-run",
@@ -442,6 +449,15 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
         : "Not set",
     },
     ...(scheduleState ? [{ key: "schedule", label: "Schedule", value: scheduleState }] : []),
+    ...(spend
+      ? [{
+          key: "spend",
+          label: "Spend (mo)",
+          value: spend.monthly_cap_usd != null
+            ? `$${spend.month_spend_usd.toFixed(2)} / $${spend.monthly_cap_usd.toFixed(2)}`
+            : `$${spend.month_spend_usd.toFixed(2)}`,
+        }]
+      : []),
   ];
   return (
     <div>
