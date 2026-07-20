@@ -98,6 +98,7 @@ def test_running_run_cancel_kills_e2b_sandbox(monkeypatch, tmp_path):
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
+    assert resp.json()["cancelled"] is True
     assert calls == [("run-cancel", "User requested cancellation.")]
 
     row = repos.runs.get(user_id="local-user", run_id="run-cancel")
@@ -129,6 +130,7 @@ def test_running_run_cancel_still_records_request_when_no_e2b_sandbox(monkeypatc
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
+    assert resp.json()["cancelled"] is True
     assert calls == ["run-cancel"]
 
     row = repos.runs.get(user_id="local-user", run_id="run-cancel")
@@ -160,6 +162,7 @@ def test_queued_run_cancel_does_not_call_e2b_sandbox(monkeypatch, tmp_path):
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
+    assert resp.json()["cancelled"] is True
     assert calls == []
 
     row = repos.runs.get(user_id="local-user", run_id="run-cancel")
@@ -181,7 +184,11 @@ def test_terminal_run_cancel_is_idempotent_success(monkeypatch, tmp_path):
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"status": "completed", "run_id": "run-cancel"}
+    assert resp.json() == {
+        "status": "completed",
+        "run_id": "run-cancel",
+        "cancelled": False,
+    }
     row = repos.runs.get(user_id="local-user", run_id="run-cancel")
     assert row["status"] == "completed"
     assert row["cancel_requested"] == 0

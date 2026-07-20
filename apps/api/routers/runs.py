@@ -651,7 +651,7 @@ def cancel_run(
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row["status"] in _TERMINAL_RUN_STATUSES:
-        return ActionResponse(status=row["status"], run_id=run_id)
+        return ActionResponse(status=row["status"], run_id=run_id, cancelled=False)
 
     cancelled_at = now_iso()
     repos.runs.cancel(
@@ -673,7 +673,7 @@ def cancel_run(
             repos=repos,
         )
         logger.info("Cancelled queued run %s before dispatch", run_id)
-        return ActionResponse(status="cancelled", run_id=run_id)
+        return ActionResponse(status="cancelled", run_id=run_id, cancelled=True)
 
     try:
         from runner_sandbox.e2b_driver import cancel_sandbox
@@ -691,7 +691,7 @@ def cancel_run(
         repos=repos,
     )
     logger.info("Cancelled running run %s", run_id)
-    return ActionResponse(status="cancelled", run_id=run_id)
+    return ActionResponse(status="cancelled", run_id=run_id, cancelled=True)
 
 
 # ---------------------------------------------------------------------------

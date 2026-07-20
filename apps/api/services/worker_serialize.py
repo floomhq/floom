@@ -44,6 +44,7 @@ from services.worker_access import (
 logger = logging.getLogger("floom.api")
 
 if TYPE_CHECKING:
+    from auth import AuthContext
     from db import Repositories
 
 
@@ -580,6 +581,7 @@ def _build_worker_detail(
     include_grants: bool = False,
     owner_aliases: Optional[set[str]] = None,
     shape: Optional[str] = None,
+    auth: Optional[AuthContext] = None,
 ) -> WorkerDetail:
     # shape="run" (the standalone /run/{id} run-form page) only needs the
     # worker's identity + config (name, description, connections, inputs,
@@ -598,7 +600,15 @@ def _build_worker_detail(
         worker_id, user_id=user_id, repos=repos, role=role, include_grants=include_grants
     )
     if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found")
+        detail = "Worker not found"
+        if auth is not None:
+            from routers.workspace import _workspace_info_id, _workspace_info_name
+
+            workspace_id = _workspace_info_id(auth)
+            name = _workspace_info_name(workspace_id, auth)
+            label = f"{name} ({workspace_id})" if name != workspace_id else workspace_id
+            detail = f"Worker not found in workspace {label}"
+        raise HTTPException(status_code=404, detail=detail)
 
     recent_runs = (
         []

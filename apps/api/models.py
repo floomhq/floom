@@ -2575,6 +2575,7 @@ class ReloadResponse(BaseModel):
 class ActionResponse(BaseModel):
     status: str
     run_id: Optional[str] = None
+    cancelled: Optional[bool] = None
 
 
 class McpToolItem(BaseModel):
