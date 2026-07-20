@@ -25,6 +25,9 @@ class FakeStreamingResult:
         return []
 
     async def stream_events(self):
+        hooks = getattr(self.agent, "hooks", None)
+        if hooks is not None:
+            await hooks.on_llm_start(None, self.agent, None, [])
         for event in self.events:
             kind = event["kind"]
             if kind == "text":
@@ -69,6 +72,9 @@ class FakeStreamingResult:
                 )
             elif kind == "raise":
                 raise event["error"]
+        if hooks is not None:
+            response = SimpleNamespace(usage=self.context_wrapper.usage)
+            await hooks.on_llm_end(None, self.agent, response)
 
 
 class ScriptedAgentDriverMixin:
