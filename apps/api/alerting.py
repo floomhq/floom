@@ -40,11 +40,18 @@ NEVER logs secret values.
 import json
 import logging
 import os
+import queue
+import re
 import smtplib
 import socket
+import threading
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any, Optional
+
+from models import UnsafeOutboundUrlError, assert_safe_outbound_url
+from services.run_notifications import _open_pinned_webhook
 
 logger = logging.getLogger("floom.alerting")
 
@@ -69,6 +76,534 @@ _SUCCESS_STATUSES = {"completed", "approved", "success", "succeeded"}
 # How many scheduler ticks to skip between alerting checks (0 = every tick)
 _ALERT_POLL_EVERY_N_TICKS: int = int(os.environ.get("WORKEROS_ALERT_POLL_TICKS", "5"))
 _tick_counter: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Platform OPS alerts
+# ---------------------------------------------------------------------------
+
+_OPS_ALERT_WINDOW = timedelta(minutes=10)
+_OPS_COUNT_WINDOW = timedelta(minutes=15)
+_OPS_THROTTLE_WORKSPACE = "__floom_ops__"
+_OPS_THROTTLE_WORKER = "platform"
+_OPS_WATCHDOG_ERROR_CODE = "worker_service_self_watchdog"
+_OPS_DISPATCH_QUEUE_MAX = 256
+_OPS_PLATFORM_ERROR_CODES = {
+    "e2b_quota_exhausted",
+    "e2b_sandbox_error",
+    "executor_lost_mid_run",
+    "executor_thread_pre_sandbox_exception",
+    "interrupted_by_restart",
+    "llm_provider_capacity",
+    "llm_provider_capacity_retry_exhausted",
+    "missing_e2b_key",
+    "orphaned",
+    "run_abandoned_server_restart",
+    "run_claimed_without_dispatch",
+    "run_execution_exception",
+    "sandbox_crash",
+    "sandbox_transport_retry_exhausted",
+    "schedule_missed",
+    "scheduler_missed",
+    "scheduler_row_error",
+    "transient_network_error",
+    "transient_network_retry_exhausted",
+    "unknown",
+    "unknown_error",
+    "warm_sandbox_cleanup_failed",
+    _OPS_WATCHDOG_ERROR_CODE,
+}
+
+# Frozen at the point OPS alerting was introduced. A future code absent from
+# both sets is treated as new and alerts on its first persisted occurrence.
+_KNOWN_NON_OPS_ERROR_CODES = {
+    "agent_runtime_error",
+    "approval_loop_killed",
+    "approval_proposal_config_error",
+    "cancelled",
+    "cancelled_before_start",
+    "cancelled_queued",
+    "connection_rejected",
+    "context_mount_failed",
+    "execution_error",
+    "file_input_resolution_failed",
+    "install_failed",
+    "invalid_outputs_shape",
+    "invalid_result_json",
+    "invalid_worker",
+    "llm_auth_error",
+    "llm_model_not_configured",
+    "llm_provider_error",
+    "llm_quota_exceeded",
+    "llm_rate_limited",
+    "mcp_connect_failed",
+    "missing_connection",
+    "missing_required_input",
+    "missing_result",
+    "missing_secret",
+    "output_token_limit",
+    "output_too_large",
+    "quality_gate_failed",
+    "sandbox_oom",
+    "schema_violation",
+    "self_hosted_runner_unavailable",
+    "spend_cap_exceeded",
+    "timeout",
+    "token_cap_exceeded",
+    "tool_iteration_cap_exceeded",
+    "upstream_http_4xx",
+    "upstream_http_5xx",
+    "user_cancel",
+    "worker_deleted",
+    "worker_disabled",
+    "worker_error",
+    "worker_not_found",
+    "worker_reported_error",
+}
+_OPS_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9_]{0,79}$")
+_EMAIL_LIKE_RE = re.compile(r"[^\s@]+@[^\s@]+")
+_ops_state_lock = threading.Lock()
+_ops_seen_unknown_codes: set[str] = set()
+_ops_fallback_last_sent: dict[str, datetime] = {}
+_ops_suppressed_counts: dict[str, int] = {}
+_ops_queued_codes: set[str] = set()
+_ops_dispatch_queue: queue.Queue[tuple[str, str, dict[str, Any]]] = queue.Queue(
+    maxsize=_OPS_DISPATCH_QUEUE_MAX
+)
+_ops_dispatch_thread: threading.Thread | None = None
+
+
+def _normalize_ops_error_code(error_code: str | None) -> str:
+    code = str(error_code or "unknown_error").strip().lower()
+    return code if _OPS_CODE_RE.fullmatch(code) else "invalid_error_code"
+
+
+def _ops_identifier(value: object, *, fallback: str) -> str:
+    """Keep opaque ids compact and prevent an email address entering payloads."""
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    if _EMAIL_LIKE_RE.search(text):
+        return "redacted"
+    return text[:160]
+
+
+def _ops_workspace_id(*, repos: Any, worker_id: str) -> str:
+    try:
+        worker = repos.workers.get_any(worker_id=worker_id)
+        return _ops_identifier((worker or {}).get("workspace_id"), fallback="local-default")
+    except Exception:
+        return "local-default"
+
+
+def _ops_error_code_stats(
+    *,
+    repos: Any,
+    user_id: str | None,
+    error_code: str,
+    run_id: str,
+    since_iso: str,
+) -> tuple[int, bool]:
+    """Return recent same-code failures and whether this code predates the run."""
+    method = getattr(getattr(repos, "runs", None), "ops_error_code_stats", None)
+    if callable(method):
+        try:
+            stats = method(
+                error_code=error_code,
+                since_iso=since_iso,
+                exclude_run_id=run_id,
+            )
+            return max(1, int(stats.get("count_since") or 0)), bool(stats.get("seen_before"))
+        except Exception:
+            logger.warning(
+                "OPS alert error-code stats failed for code=%s; using bounded fallback",
+                error_code,
+                exc_info=True,
+            )
+
+    # Compatibility path for downstream repositories that have not adopted the
+    # aggregate yet. It is owner-scoped and bounded; the cloud bump implements
+    # the exact global aggregate before production deployment.
+    if user_id:
+        try:
+            rows, _ = repos.runs.list(
+                user_id=user_id,
+                statuses=["failed"],
+                limit=1000,
+                offset=0,
+                include_total=False,
+            )
+            matching = [
+                row
+                for row in rows
+                if _normalize_ops_error_code(row.get("error_code")) == error_code
+            ]
+            recent = sum(
+                1
+                for row in matching
+                if str(row.get("completed_at") or row.get("started_at") or row.get("created_at") or "")
+                >= since_iso
+            )
+            seen_before = any(str(row.get("id") or row.get("run_id") or "") != run_id for row in matching)
+            return max(1, recent), seen_before
+        except Exception:
+            logger.debug("OPS alert bounded stats fallback failed", exc_info=True)
+    return 1, False
+
+
+def _ops_is_alertable_code(*, error_code: str, seen_before: bool) -> bool:
+    if error_code in _OPS_PLATFORM_ERROR_CODES:
+        return True
+    if error_code in _KNOWN_NON_OPS_ERROR_CODES:
+        return False
+    if seen_before:
+        return False
+    with _ops_state_lock:
+        if error_code in _ops_seen_unknown_codes:
+            return False
+        _ops_seen_unknown_codes.add(error_code)
+        # This cache prevents repeated DB reads inside one process. Clearing a
+        # full cache is safe because the repository remains the durable fallback.
+        if len(_ops_seen_unknown_codes) > 256:
+            _ops_seen_unknown_codes.clear()
+            _ops_seen_unknown_codes.add(error_code)
+    return True
+
+
+def _release_ops_alert_reservation(
+    *,
+    repos: Any,
+    error_code: str,
+    reserved_at: datetime,
+) -> None:
+    """Release a throttle claim when no webhook was delivered."""
+    signature = f"ops:{error_code}"
+    repo = getattr(repos, "alert_throttle", None) if repos is not None else None
+    if repo is not None:
+        release = getattr(repo, "release", None)
+        if callable(release):
+            try:
+                release(
+                    workspace_id=_OPS_THROTTLE_WORKSPACE,
+                    worker_id=_OPS_THROTTLE_WORKER,
+                    signature=signature,
+                    sent_at_iso=reserved_at.isoformat(),
+                )
+            except Exception:
+                logger.warning(
+                    "OPS alert throttle release failed for code=%s",
+                    error_code,
+                    exc_info=True,
+                )
+    with _ops_state_lock:
+        if _ops_fallback_last_sent.get(error_code) == reserved_at:
+            _ops_fallback_last_sent.pop(error_code, None)
+
+
+def _reserve_ops_alert(
+    *,
+    repos: Any,
+    error_code: str,
+    now: datetime,
+) -> tuple[bool, int]:
+    """Reserve one per-code alert slot and return prior suppressed occurrences."""
+    signature = f"ops:{error_code}"
+    since = (now - _OPS_ALERT_WINDOW).isoformat()
+    repo = getattr(repos, "alert_throttle", None) if repos is not None else None
+
+    with _ops_state_lock:
+        allowed = False
+        if repo is not None:
+            try:
+                reserve = getattr(repo, "reserve", None)
+                if callable(reserve):
+                    allowed = bool(
+                        reserve(
+                            since_iso=since,
+                            workspace_id=_OPS_THROTTLE_WORKSPACE,
+                            worker_id=_OPS_THROTTLE_WORKER,
+                            signature=signature,
+                            sent_at_iso=now.isoformat(),
+                        )
+                    )
+                else:
+                    recent = repo.count_since(
+                        since_iso=since,
+                        workspace_id=_OPS_THROTTLE_WORKSPACE,
+                        worker_id=_OPS_THROTTLE_WORKER,
+                        signature=signature,
+                    )
+                    if not recent:
+                        repo.record(
+                            workspace_id=_OPS_THROTTLE_WORKSPACE,
+                            worker_id=_OPS_THROTTLE_WORKER,
+                            signature=signature,
+                            sent_at_iso=now.isoformat(),
+                        )
+                        allowed = True
+            except Exception:
+                logger.warning(
+                    "OPS alert throttle persistence failed for code=%s; using in-process fallback",
+                    error_code,
+                    exc_info=True,
+                )
+                repo = None
+
+        if repo is None:
+            last_sent = _ops_fallback_last_sent.get(error_code)
+            if last_sent is None or now - last_sent >= _OPS_ALERT_WINDOW:
+                _ops_fallback_last_sent[error_code] = now
+                allowed = True
+
+        if not allowed:
+            _ops_suppressed_counts[error_code] = _ops_suppressed_counts.get(error_code, 0) + 1
+            return False, _ops_suppressed_counts[error_code]
+        return True, _ops_suppressed_counts.pop(error_code, 0)
+
+
+def _ops_sink() -> tuple[str | None, bool]:
+    webhook = (os.environ.get("WORKEROS_OPS_ALERT_WEBHOOK") or "").strip()
+    if webhook:
+        return webhook, False
+    slack_webhook = (os.environ.get("WORKEROS_OPS_SLACK_WEBHOOK") or "").strip()
+    if slack_webhook:
+        return slack_webhook, True
+    return None, False
+
+
+def _post_ops_webhook(*, url: str, payload: dict[str, Any], slack: bool) -> None:
+    assert_safe_outbound_url(url, label="OPS alert webhook URL")
+    body: dict[str, Any]
+    if slack:
+        body = {
+            "text": (
+                "Floom OPS alert\n"
+                f"error_code: {payload['error_code']}\n"
+                f"worker_id: {payload['worker_id']}\n"
+                f"workspace_id: {payload['workspace_id']}\n"
+                f"run_id: {payload['run_id']}\n"
+                f"count_same_code_last_15m: {payload['count_same_code_last_15m']}\n"
+                f"ts: {payload['ts']}"
+            )
+        }
+    else:
+        body = payload
+    encoded = json.dumps(body, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=encoded,
+        headers={"Content-Type": "application/json", "User-Agent": "Floom-OPS-Alert/1"},
+        method="POST",
+    )
+    with _open_pinned_webhook(request, timeout=5):
+        pass
+
+
+def _emit_ops_alert(
+    *,
+    repos: Any,
+    error_code: str,
+    worker_id: str,
+    workspace_id: str,
+    run_id: str,
+    count_same_code_last_15m: int,
+    now: datetime,
+    reservation: tuple[bool, int] | None = None,
+) -> dict[str, Any]:
+    allowed, suppressed = reservation or _reserve_ops_alert(
+        repos=repos,
+        error_code=error_code,
+        now=now,
+    )
+    if not allowed:
+        logger.info("OPS alert suppressed by per-code throttle code=%s", error_code)
+        return {"sent": False, "suppressed": True, "error_code": error_code}
+
+    payload = {
+        "error_code": error_code,
+        "worker_id": _ops_identifier(worker_id, fallback="unknown-worker"),
+        "workspace_id": _ops_identifier(workspace_id, fallback="local-default"),
+        "run_id": _ops_identifier(run_id, fallback=""),
+        "ts": now.isoformat(),
+        "count_same_code_last_15m": max(1, count_same_code_last_15m, suppressed + 1),
+    }
+    url, slack = _ops_sink()
+    if not url:
+        logger.warning("OPS_ALERT sink=log-only payload=%s", json.dumps(payload, separators=(",", ":")))
+        return {"sent": False, "logged": True, "payload": payload}
+    try:
+        _post_ops_webhook(url=url, payload=payload, slack=slack)
+        logger.warning(
+            "OPS alert delivered code=%s count_same_code_last_15m=%s",
+            error_code,
+            payload["count_same_code_last_15m"],
+        )
+        return {"sent": True, "payload": payload}
+    except UnsafeOutboundUrlError:
+        logger.error("OPS alert webhook URL rejected by outbound safety policy code=%s", error_code)
+    except Exception as exc:
+        # Webhook URLs commonly contain secret path tokens. Do not log the
+        # exception message or traceback because urllib errors can echo the URL.
+        logger.error(
+            "OPS alert delivery failed code=%s error_type=%s",
+            error_code,
+            type(exc).__name__,
+        )
+        _release_ops_alert_reservation(
+            repos=repos,
+            error_code=error_code,
+            reserved_at=now,
+        )
+    return {"sent": False, "delivery_failed": True, "payload": payload}
+
+
+def alert_ops_run_failure(
+    *,
+    run_id: str,
+    worker_id: str,
+    error_code: str | None,
+    user_id: str | None,
+    repos: Any,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Evaluate and synchronously deliver one terminal run failure OPS alert."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    code = _normalize_ops_error_code(error_code)
+    if code in _KNOWN_NON_OPS_ERROR_CODES:
+        return {"sent": False, "eligible": False, "error_code": code}
+
+    reservation: tuple[bool, int] | None = None
+    if code in _OPS_PLATFORM_ERROR_CODES:
+        reservation = _reserve_ops_alert(repos=repos, error_code=code, now=now)
+        if not reservation[0]:
+            logger.info("OPS alert suppressed by per-code throttle code=%s", code)
+            return {"sent": False, "suppressed": True, "error_code": code}
+
+    recent, seen_before = _ops_error_code_stats(
+        repos=repos,
+        user_id=user_id,
+        error_code=code,
+        run_id=run_id,
+        since_iso=(now - _OPS_COUNT_WINDOW).isoformat(),
+    )
+    if reservation is None and not _ops_is_alertable_code(
+        error_code=code,
+        seen_before=seen_before,
+    ):
+        return {"sent": False, "eligible": False, "error_code": code}
+    return _emit_ops_alert(
+        repos=repos,
+        error_code=code,
+        worker_id=worker_id,
+        workspace_id=_ops_workspace_id(repos=repos, worker_id=worker_id),
+        run_id=run_id,
+        count_same_code_last_15m=recent,
+        now=now,
+        reservation=reservation,
+    )
+
+
+def dispatch_ops_run_failure(**kwargs: Any) -> None:
+    """Deliver a terminal run failure OPS alert without blocking finalization."""
+    code = _normalize_ops_error_code(kwargs.get("error_code"))
+    if code in _KNOWN_NON_OPS_ERROR_CODES:
+        return
+    _enqueue_ops_dispatch(kind="run", error_code=code, kwargs=kwargs)
+
+
+def alert_ops_watchdog_trip(
+    *,
+    repos: Any | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Deliver the cloud worker-service self-watchdog trip alert."""
+    if repos is None:
+        from db.factory import get_repositories
+
+        repos = get_repositories()
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return _emit_ops_alert(
+        repos=repos,
+        error_code=_OPS_WATCHDOG_ERROR_CODE,
+        worker_id="floom-worker-service",
+        workspace_id="platform",
+        run_id="",
+        count_same_code_last_15m=1,
+        now=now,
+    )
+
+
+def dispatch_ops_watchdog_trip(**kwargs: Any) -> None:
+    _enqueue_ops_dispatch(
+        kind="watchdog",
+        error_code=_OPS_WATCHDOG_ERROR_CODE,
+        kwargs=kwargs,
+    )
+
+
+def _ops_dispatch_worker() -> None:
+    while True:
+        kind, error_code, kwargs = _ops_dispatch_queue.get()
+        try:
+            if kind == "watchdog":
+                alert_ops_watchdog_trip(**kwargs)
+            else:
+                alert_ops_run_failure(**kwargs)
+        except Exception:
+            logger.exception(
+                "OPS alert background evaluation failed kind=%s code=%s",
+                kind,
+                error_code,
+            )
+        finally:
+            with _ops_state_lock:
+                _ops_queued_codes.discard(error_code)
+            _ops_dispatch_queue.task_done()
+
+
+def _ensure_ops_dispatch_worker() -> None:
+    global _ops_dispatch_thread
+    with _ops_state_lock:
+        if _ops_dispatch_thread is not None and _ops_dispatch_thread.is_alive():
+            return
+        _ops_dispatch_thread = threading.Thread(
+            target=_ops_dispatch_worker,
+            daemon=True,
+            name="floom-ops-alert-dispatch",
+        )
+        _ops_dispatch_thread.start()
+
+
+def _enqueue_ops_dispatch(
+    *,
+    kind: str,
+    error_code: str,
+    kwargs: dict[str, Any],
+) -> None:
+    """Coalesce same-code bursts behind one bounded background worker."""
+    _ensure_ops_dispatch_worker()
+    with _ops_state_lock:
+        coalesce = error_code in _OPS_PLATFORM_ERROR_CODES
+        if coalesce and error_code in _ops_queued_codes:
+            _ops_suppressed_counts[error_code] = _ops_suppressed_counts.get(error_code, 0) + 1
+            return
+        if coalesce:
+            _ops_queued_codes.add(error_code)
+        try:
+            _ops_dispatch_queue.put_nowait((kind, error_code, kwargs))
+        except queue.Full:
+            if coalesce:
+                _ops_queued_codes.discard(error_code)
+            _ops_suppressed_counts[error_code] = _ops_suppressed_counts.get(error_code, 0) + 1
+            logger.error(
+                "OPS alert dispatch queue full kind=%s code=%s; retained in suppressed count",
+                kind,
+                error_code,
+            )
 
 
 def _smtp_available() -> bool:

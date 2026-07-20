@@ -2031,6 +2031,59 @@ class SqliteRunRepository:
     _OUTCOME_STATUSES = ("completed", "approved", "success")
     _TERMINAL_STATUSES = _COMPLETED_STATUSES + _FAILED_STATUSES
 
+    def ops_error_code_stats(
+        self,
+        *,
+        error_code: str,
+        since_iso: str,
+        exclude_run_id: str | None = None,
+    ) -> dict[str, Any]:
+        normalized = str(error_code or "").strip().lower()
+        with get_db() as conn:
+            count_row = conn.execute(
+                """
+                SELECT COUNT(*) AS count_since
+                FROM runs
+                WHERE status = ?
+                  AND LOWER(TRIM(COALESCE(error_code, ''))) = ?
+                  AND COALESCE(completed_at, started_at, created_at) >= ?
+                """,
+                (
+                    RunStatus.FAILED.value,
+                    normalized,
+                    since_iso,
+                ),
+            ).fetchone()
+            seen_before = False
+            if exclude_run_id:
+                seen_row = conn.execute(
+                    """
+                    SELECT 1
+                    FROM runs prior
+                    JOIN runs current ON current.id = ?
+                    WHERE prior.status = ?
+                      AND LOWER(TRIM(COALESCE(prior.error_code, ''))) = ?
+                      AND (
+                        COALESCE(prior.completed_at, prior.started_at, prior.created_at)
+                          < COALESCE(current.completed_at, current.started_at, current.created_at)
+                        OR (
+                          COALESCE(prior.completed_at, prior.started_at, prior.created_at)
+                            = COALESCE(current.completed_at, current.started_at, current.created_at)
+                          AND prior.id < current.id
+                        )
+                      )
+                    LIMIT 1
+                    """,
+                    (exclude_run_id, RunStatus.FAILED.value, normalized),
+                ).fetchone()
+                seen_before = seen_row is not None
+            else:
+                seen_before = bool(count_row and int(count_row["count_since"] or 0) > 0)
+        return {
+            "count_since": int(count_row["count_since"] or 0) if count_row else 0,
+            "seen_before": seen_before,
+        }
+
     @staticmethod
     def _has_actor_user_id_column(conn) -> bool:
         try:
@@ -4604,6 +4657,62 @@ class SqliteAlertThrottleRepository:
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO alert_throttle (workspace_id, worker_id, signature, sent_at) VALUES (?, ?, ?, ?)",
+                (workspace_id, worker_id, signature, sent_at_iso),
+            )
+
+    def reserve(
+        self,
+        *,
+        since_iso: str,
+        workspace_id: str,
+        worker_id: str,
+        signature: str,
+        sent_at_iso: str,
+    ) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO alert_throttle (workspace_id, worker_id, signature, sent_at)
+                SELECT ?, ?, ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM alert_throttle
+                    WHERE workspace_id = ?
+                      AND worker_id = ?
+                      AND signature = ?
+                      AND sent_at >= ?
+                )
+                """,
+                (
+                    workspace_id,
+                    worker_id,
+                    signature,
+                    sent_at_iso,
+                    workspace_id,
+                    worker_id,
+                    signature,
+                    since_iso,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def release(
+        self,
+        *,
+        workspace_id: str,
+        worker_id: str,
+        signature: str,
+        sent_at_iso: str,
+    ) -> None:
+        with get_db() as conn:
+            conn.execute(
+                """
+                DELETE FROM alert_throttle
+                WHERE workspace_id = ?
+                  AND worker_id = ?
+                  AND signature = ?
+                  AND sent_at = ?
+                """,
                 (workspace_id, worker_id, signature, sent_at_iso),
             )
 
