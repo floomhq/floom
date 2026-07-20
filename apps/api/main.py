@@ -6447,8 +6447,27 @@ async def _workspace_agent_mcp_cloud_auth_context(request: Request) -> Optional[
     return ctx
 
 
-def _workspace_agent_mcp_conversation_id(raw: Any) -> str:
-    value = str(raw or "default").strip() or "default"
+def _workspace_agent_mcp_conversation_id(raw: Any) -> Optional[str]:
+    """Map the MCP ``conversation_id`` argument to a chat-service conversation ref.
+
+    #2269 semantics:
+      - Absent/empty -> ``None``: stream_chat starts a fresh conversation. The
+        old ``"langdock:default"`` fallback funneled every no-id call from
+        every client session into one shared per-user thread, silently
+        appending unrelated sessions into the same conversation.
+      - Internal ids (``conv_...``, including the previously returned
+        ``conv_client_...`` mappings and ids from conversations.list) pass
+        through untouched so the caller resumes that exact conversation. The
+        old prefix+hash mapping silently forked a brand-new empty thread.
+      - Anything else keeps the legacy deterministic client-thread mapping
+        (``langdock:<safe>``) so existing Langdock-style stable thread ids
+        keep continuing the threads they already created.
+    """
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    if value.startswith("conv_"):
+        return value
     safe = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", value)[:160].strip("._:-")
     return f"langdock:{safe or 'default'}"
 
@@ -6516,13 +6535,84 @@ async def _collect_workspace_agent_reply_for_langdock(
     message: str,
     user_id: str,
     conversation_id: Optional[str],
-) -> str:
-    return await _collect_workspace_agent_reply_for_slack(
+) -> Dict[str, Any]:
+    """Run the workspace agent for an MCP call and return reply details.
+
+    Returns ``{"reply", "conversation_id", "message_id"}`` — the
+    conversation_id is the REAL persisted conversation id from the finish
+    event, so MCP callers can round-trip it to continue the thread (#2269).
+    """
+    from channels.common import collect_agent_reply_details
+
+    return await collect_agent_reply_details(
         message=message,
         user_id=user_id,
         conversation_id=conversation_id,
         source="mcp",
     )
+
+
+# TODO(#follow-up): workspace.chat accepts timeout_ms but does not enforce it end-to-end.
+async def _mcp_workspace_chat_result(arguments: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    """Shared workspace.chat handler for both MCP dispatchers (#2266/#2269).
+
+    - Validates a supplied ``conv_...`` id up front and returns a clear tool
+      error when it does not exist for this workspace, instead of silently
+      forking a new conversation.
+    - Returns the real persisted conversation id so callers can resume.
+    - A chat failure surfaces as an actionable ``isError`` tool result, never
+      as a bare JSON-RPC -32603 that hides an already-completed run.
+    """
+    message = str(arguments.get("message") or "").strip()
+    if not message:
+        return _mcp_tool_error("Tool argument 'message' is required")
+    if len(message) > 20000:
+        return _mcp_tool_error("Tool argument 'message' is too long")
+
+    requested = _workspace_agent_mcp_conversation_id(arguments.get("conversation_id"))
+    if requested is not None and requested.startswith("conv_"):
+        from services.chat_conversations import get_conversation, resolve_conversation_id
+
+        internal = resolve_conversation_id(requested, user_id)
+        if not internal or not get_conversation(internal, user_id):
+            return _mcp_tool_error(
+                f"Conversation '{requested}' was not found in this workspace. "
+                "Pass an id returned by conversations.list (or by a previous "
+                "workspace.chat reply), or omit conversation_id to start a new conversation."
+            )
+
+    try:
+        details = await _collect_workspace_agent_reply_for_langdock(
+            message=message,
+            user_id=user_id,
+            conversation_id=requested,
+        )
+    except Exception as exc:
+        # Full detail is logged; the caller gets the client-safe message
+        # instead of an opaque internal error.
+        logger.exception(
+            "workspace.chat agent run failed (user=%s conversation_id=%r)",
+            user_id, requested,
+        )
+        from channels.common import AgentReplyError
+        from llm import safe_llm_error_message
+
+        safe = str(exc) if isinstance(exc, AgentReplyError) else safe_llm_error_message(exc, action="Chat")
+        return _mcp_tool_error(f"workspace.chat failed: {safe}")
+
+    if isinstance(details, dict):
+        reply = str(details.get("reply") or "")
+        conversation_id = details.get("conversation_id") or requested
+        message_id = details.get("message_id")
+    else:  # defensive: legacy string contract
+        reply = str(details or "")
+        conversation_id = requested
+        message_id = None
+    return {
+        "content": [{"type": "text", "text": reply or "(No reply)"}],
+        "structuredContent": {"conversation_id": conversation_id, "message_id": message_id},
+        "isError": False,
+    }
 
 
 def _mcp_result(request_id: Any, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -6691,7 +6781,11 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             },
             "conversation_id": {
                 "type": "string",
-                "description": "Optional stable client thread or chat id for continuity.",
+                "description": (
+                    "Optional. Omit to start a new conversation. Pass a conv_... id "
+                    "(from a previous reply or conversations.list) to continue that "
+                    "conversation, or a stable client thread id for continuity."
+                ),
             },
         },
         ["message"],
@@ -7001,23 +7095,8 @@ def _internal_asgi_request() -> Request:
 
 
 async def _mcp_call_workspace_agent(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    message = str(arguments.get("message") or "").strip()
-    if not message:
-        return _mcp_tool_error("Tool argument 'message' is required")
-    if len(message) > 20000:
-        return _mcp_tool_error("Tool argument 'message' is too long")
-
-    conversation_id = _workspace_agent_mcp_conversation_id(arguments.get("conversation_id"))
-    reply = await _collect_workspace_agent_reply_for_langdock(
-        message=message,
-        user_id=current_auth_user_id() or _workspace_agent_mcp_auth_context().user_id,
-        conversation_id=conversation_id,
-    )
-    return {
-        "content": [{"type": "text", "text": reply or "(No reply)"}],
-        "structuredContent": {"conversation_id": conversation_id},
-        "isError": False,
-    }
+    user_id = current_auth_user_id() or _workspace_agent_mcp_auth_context().user_id
+    return await _mcp_workspace_chat_result(arguments, user_id)
 
 
 _MCP_WORKER_LIST_HEAVY_FIELDS = frozenset({
@@ -8075,7 +8154,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "approvals.approve", "description": "Approve a pending run so it continues executing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
     {"name": "approvals.reject", "description": "Reject a pending run, stopping it from continuing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
     # --- workspace ---
-    {"name": "workspace.chat", "description": "Send a message to the Floom workspace agent and receive a reply.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
+    {"name": "workspace.chat", "description": "Send a message to the Floom workspace agent and receive a reply. Omit conversation_id to start a new conversation; pass a conv_... id from a previous reply or conversations.list to continue that conversation.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string", "description": "Optional. Omit for a new conversation; pass a conv_... id to continue an existing one."}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
     {"name": "workspace.instructions.get", "description": "Read the current workspace agent instructions.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "workspace.info", "description": "Get the active workspace identity and authenticated principal.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "workspace.instructions.set", "description": "Update the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
@@ -8424,24 +8503,10 @@ async def _mcp_dispatch(
 
     # --- workspace ---
     if name == "workspace.chat":
-        message = str(a.get("message") or "").strip()
-        if not message:
-            return _mcp_content("Tool argument 'message' is required", is_error=True)
-        if len(message) > 20000:
-            return _mcp_content("Tool argument 'message' is too long", is_error=True)
-        conversation_id = _workspace_agent_mcp_conversation_id(a.get("conversation_id"))
-        reply = await _collect_workspace_agent_reply_for_langdock(
-            message=message,
-            user_id=auth.user_id,
-            conversation_id=conversation_id,
-        )
-        return _mcp_call_result(
-            {
-                "reply": reply or "(No reply)",
-                "conversation_id": conversation_id,
-            },
-            "Workspace agent reply.",
-        )
+        # #2266/#2269: shared handler — fresh conversation when no id, real
+        # resume (with validation) when an id is supplied, and chat failures
+        # surfaced as actionable tool errors instead of -32603.
+        return await _mcp_workspace_chat_result(a, auth.user_id)
     if name == "workspace.instructions.get":
         data, s = await _api_call("GET", "/workspace", request)
         return _mcp_api_result(data, s)
