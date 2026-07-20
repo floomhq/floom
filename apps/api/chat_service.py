@@ -2168,10 +2168,42 @@ async def stream_chat(
     # Langdock, custom clients) are mapped to deterministic owner-scoped internal
     # ids so the same caller id continues the same thread without becoming
     # guessable across users.
+    # #2269 (race -> silent fork): when the caller EXPLICITLY supplied an
+    # internal conversation id ("conv_..."), the resume path is fail-closed. If
+    # it cannot be re-resolved and re-verified as owned right here (it may have
+    # been deleted or reassigned since any endpoint preflight ran), surface a
+    # not-found error instead of silently CREATING a new conversation under a
+    # remapped id, which would fork the thread. Only caller thread ids (Slack /
+    # Langdock / stable client ids) and the no-id path may create-on-first-use.
+    requested_conversation_id = conversation_id
+    require_existing_conversation = bool(
+        requested_conversation_id
+        and str(requested_conversation_id).strip().startswith("conv_")
+    )
     conversation_id = resolve_conversation_id(conversation_id, user_id)
     if conversation_id:
         conv = get_conversation(conversation_id, user_id)
         if not conv:
+            if require_existing_conversation:
+                await part_queue.put({
+                    "type": "error",
+                    "version": CHAT_EVENT_VERSION,
+                    "error": (
+                        f"Conversation '{str(requested_conversation_id).strip()}' "
+                        "was not found or is not accessible in this workspace."
+                    ),
+                    "conversation_id": None,
+                    "message_id": None,
+                })
+                await part_queue.put({
+                    "type": "finish",
+                    "version": CHAT_EVENT_VERSION,
+                    "conversation_id": None,
+                    "message_id": None,
+                    "assistant_message_id": None,
+                    "cards": [],
+                })
+                return
             conv_title = message[:60] + ("..." if len(message) > 60 else "")
             conversation_id = create_conversation(
                 user_id,
@@ -2183,7 +2215,11 @@ async def stream_chat(
         title = message[:60] + ("..." if len(message) > 60 else "")
         conversation_id = create_conversation(user_id, title=title)
 
-    assistant_message_id = f"msg_pending_{uuid.uuid4().hex[:16]}"
+    # Stable, real assistant message id assigned up-front and used both as the
+    # streaming-correlation id in every emitted part AND as the durable row id
+    # at persist time; never a msg_pending_ placeholder (a caller must never
+    # be handed a non-durable id).
+    assistant_message_id = f"msg_{uuid.uuid4().hex[:16]}"
 
     logger.debug(
         "stream_chat start conversation=%s user=%s surface=%s",
@@ -2215,8 +2251,11 @@ async def stream_chat(
     history_summary_parts: List[str] = []
     for h in history[:-1]:  # Exclude the just-inserted user message
         role = h["role"]
-        if role == "tool":
-            continue  # Skip raw tool results — too verbose
+        # #2266/#2269 resume safety: a resumed run MUST see that a side-
+        # effecting tool already ran, or it may REPEAT the operation. Replay
+        # tool RESULTS too (already capped at persist time, then clipped and
+        # labelled as untrusted transcript by _format_history_for_model), not
+        # just user/assistant text.
         history_summary_parts.append(_format_history_for_model(role, h["content"]))
 
     input_messages: List[Dict[str, Any]] = []
@@ -2412,6 +2451,17 @@ async def stream_chat(
     mcp_servers: List[Any] = []
     conversation_token = _current_chat_conversation_id.set(conversation_id)
 
+    def _persist_side_effect(label: str, fn, *args, **kwargs):
+        """#2266: tool-card/transcript persistence is a side effect of the run;
+        a DB hiccup here must not abort a run whose actual work succeeded."""
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            logger.exception(
+                "%s failed (non-fatal) for conversation %s", label, conversation_id
+            )
+            return None
+
     try:
         # Dial registered MCP servers (workspace-agent policy ? require_approval=always).
         # SSRF + auth-header injection carry over from the shared module. A failed
@@ -2513,7 +2563,10 @@ async def stream_chat(
                     args=raw_args,
                     phase="call",
                 )
-                _persist_tool_card(conversation_id, user_id, call_id, tool_name_raw, metadata)
+                _persist_side_effect(
+                    "tool card persistence",
+                    _persist_tool_card, conversation_id, user_id, call_id, tool_name_raw, metadata,
+                )
                 card_summaries[metadata["card"]["id"]] = {
                     "id": metadata["card"]["id"],
                     "callId": call_id,
@@ -2567,7 +2620,10 @@ async def stream_chat(
                     result=parsed_output,
                     phase="result",
                 )
-                _persist_tool_card(conversation_id, user_id, call_id, tool_name, metadata)
+                _persist_side_effect(
+                    "tool card persistence",
+                    _persist_tool_card, conversation_id, user_id, call_id, tool_name, metadata,
+                )
                 card_summaries[metadata["card"]["id"]] = {
                     "id": metadata["card"]["id"],
                     "callId": call_id,
@@ -2622,7 +2678,14 @@ async def stream_chat(
                     })
                 if not decoded.is_error and isinstance(safe_result, dict) and safe_result.get("ok") is True:
                     successful_tool_results.append((tool_name, safe_result))
-                # Persist tool message
+                # Persist tool RESULT into durable conversation history.
+                # #2266 over-correction fix: unlike the best-effort UI tool-card
+                # writes above, this durable transcript row is what a RESUMED run
+                # replays. Suppressing a failure here would report success with an
+                # incomplete transcript, and a resume could REPEAT an already-
+                # performed side-effecting tool call. So it stays FATAL during the
+                # active run: a failure propagates to the outer handler and
+                # surfaces as an error, never a phantom success.
                 content_str = json.dumps(safe_result, default=str) if not isinstance(safe_result, str) else safe_result
                 insert_message(conversation_id, "tool", content_str, tool_call_id=call_id)
 
@@ -2651,13 +2714,31 @@ async def stream_chat(
                     "message_id": assistant_message_id,
                     "text": full_reply,
                 })
-        full_reply = _sanitize_preview_text(full_reply)
-        full_reply = _ensure_bare_greeting_identity(message, full_reply)
-        if full_reply:
-            final_message_id = insert_message(conversation_id, "assistant", full_reply)
+        # ------------------------------------------------------------------
+        # #2266: the agent run is complete — everything below is post-run
+        # bookkeeping. A failure here must not convert the finished reply
+        # into an error part (which MCP callers see as a false failure);
+        # log it and still emit the finish event with the reply.
+        # ------------------------------------------------------------------
+        try:
+            full_reply = _sanitize_preview_text(full_reply)
+            full_reply = _ensure_bare_greeting_identity(message, full_reply)
+        except Exception:
+            logger.exception(
+                "post-run reply sanitization failed (non-fatal) for conversation %s",
+                conversation_id,
+            )
 
-        # Evict if needed
-        _maybe_evict_conversation(conversation_id, user_id)
+        # #2266: emit the finish event with the completed reply BEFORE any
+        # post-run persistence/bookkeeping runs, so a slow or stalled durable
+        # write (assistant row, eviction) can never block delivery of an already-
+        # completed reply. Reuse the stable assistant id (assigned up-front) as
+        # the durable row id, so every part and the finish event expose a single
+        # real msg_ id, never a placeholder and never a second, different id.
+        # Mid-run tool-RESULT persistence stays strict/fatal above; only this
+        # post-finish bookkeeping is best-effort.
+        if full_reply:
+            final_message_id = assistant_message_id
 
         await part_queue.put({
             "type": "finish",
@@ -2667,6 +2748,34 @@ async def stream_chat(
             "assistant_message_id": assistant_message_id,
             "cards": list(card_summaries.values()),
         })
+
+        # Post-finish durable persistence + bookkeeping. The reply has already
+        # been returned to the caller, so failures or stalls here must never
+        # convert a completed run into a caller-visible failure (#2266). Run the
+        # blocking DB writes OFF the event loop so a stalled write cannot pin the
+        # loop and defeat the collector's post-finish grace period.
+        if full_reply and final_message_id:
+            try:
+                await asyncio.to_thread(
+                    insert_message,
+                    conversation_id,
+                    "assistant",
+                    full_reply,
+                    message_id=final_message_id,
+                )
+            except Exception:
+                logger.exception(
+                    "assistant reply persistence failed (non-fatal) for conversation %s; "
+                    "streamed reply already returned",
+                    conversation_id,
+                )
+        try:
+            await asyncio.to_thread(_maybe_evict_conversation, conversation_id, user_id)
+        except Exception:
+            logger.exception(
+                "conversation eviction failed (non-fatal) for conversation %s",
+                conversation_id,
+            )
 
         # #844: distill durable facts into the owner's memory brain pack.
         # Best-effort background task; rate-limited per conversation inside.
@@ -2694,7 +2803,9 @@ async def stream_chat(
                 message,
                 _sanitize_preview_text(strip_em_dashes(fallback_reply)),
             )
-            final_message_id = insert_message(conversation_id, "assistant", fallback_reply)
+            final_message_id = insert_message(
+                conversation_id, "assistant", fallback_reply, message_id=assistant_message_id
+            )
             await part_queue.put({
                 "type": "text",
                 "version": CHAT_EVENT_VERSION,
@@ -2729,8 +2840,17 @@ async def stream_chat(
         })
     finally:
         # Tear down MCP servers (best-effort) before releasing the OpenAI client.
+        # #2266: teardown runs after the finish event has been emitted; nothing
+        # here may raise out of the coroutine, or a caller awaiting the task
+        # would report failure for an already-completed reply.
         _current_chat_conversation_id.reset(conversation_token)
         if mcp_servers:
-            await agent_capabilities.cleanup_mcp_servers(mcp_servers, _cap_log)
+            try:
+                await agent_capabilities.cleanup_mcp_servers(mcp_servers, _cap_log)
+            except Exception:
+                logger.exception("MCP server teardown failed (non-fatal)")
         # Release the per-stream OpenAI + httpx client on this loop.
-        await loop_local_provider.aclose()
+        try:
+            await loop_local_provider.aclose()
+        except Exception:
+            logger.exception("chat model client close failed (non-fatal)")

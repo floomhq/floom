@@ -25,6 +25,7 @@ const BRAND_COLORS: Record<string, string> = {
   apify: "text-[#FF9013]",
   apollo: "text-[#5C2D91]",
   stripe: "text-[#635BFF]",
+  posthog: "text-[#F54E00]",
 };
 
 // Composio returns lower-no-hyphen app slugs (googlecalendar, googledrive);
@@ -83,6 +84,7 @@ export const KNOWN_BRAND_SLUGS = new Set([
   "apollo",
   "stripe",
   "docusign",
+  "posthog",
 ]);
 
 export function normalizeBrandSlug(slug: string): string {

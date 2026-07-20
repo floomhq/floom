@@ -118,6 +118,7 @@ provider's credentials.
 | Env var | Role | Default |
 | --- | --- | --- |
 | `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `bedrock/us.anthropic.claude-sonnet-4-6` |
+| `WORKEROS_AGENT_FALLBACK_MODEL` | agent fallback for capacity and quota failures | `bedrock/us.anthropic.claude-sonnet-4-6` |
 | `WORKEROS_CHAT_MODEL` | Emily chat assistant | `gpt-5.4-mini` |
 | `WORKEROS_CHAT_MODEL_FALLBACK` | Emily fallback for quota/auth failures | unset |
 | `WORKEROS_CODEGEN_MODEL` | worker codegen, draft, and repair | `gpt-5.5` |
@@ -127,6 +128,7 @@ Example Bedrock configuration:
 
 ```bash
 WORKEROS_WORKER_AGENT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+WORKEROS_AGENT_FALLBACK_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
 WORKEROS_CHAT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
 WORKEROS_CHAT_MODEL_FALLBACK=gpt-5.4-mini
 WORKEROS_CODEGEN_MODEL=bedrock/us.anthropic.claude-sonnet-4-6

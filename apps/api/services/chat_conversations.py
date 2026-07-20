@@ -221,8 +221,9 @@ def insert_message(
     role: str,
     content: str,
     tool_call_id: Optional[str] = None,
+    message_id: Optional[str] = None,
 ) -> str:
-    msg_id = f"msg_{uuid.uuid4().hex[:16]}"
+    msg_id = message_id or f"msg_{uuid.uuid4().hex[:16]}"
     ts = now_iso()
     with get_db() as conn:
         conn.execute(

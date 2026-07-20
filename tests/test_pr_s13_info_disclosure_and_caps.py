@@ -1121,7 +1121,7 @@ def test_cancel_completed_owned_run_is_idempotent_but_missing_stays_404(monkeypa
     missing = client.post("/runs/run_missing_cancel_probe/cancel", headers=_AUTH_HEADER)
 
     assert existing.status_code == 200, existing.text
-    assert existing.json() == {"status": "completed", "run_id": run_id}
+    assert existing.json() == {"status": "completed", "run_id": run_id, "cancelled": False}
     assert missing.status_code == 404, missing.text
     assert missing.json() == {"detail": "Run not found"}
 

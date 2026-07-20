@@ -6091,7 +6091,11 @@ app.include_router(asset_access_router)
 # because the /search and workspace-agent MCP routes call it directly.
 from routers.contexts import (
     contexts_router,
+    delete_context,
+    delete_context_file,
+    get_context,
     list_contexts,
+    list_context_versions,
     _record_candidate_feedback_event,
 )
 app.include_router(contexts_router)
@@ -6409,10 +6413,22 @@ def _workspace_agent_mcp_user_id() -> str:
     ).strip() or _bootstrap_user_id()
 
 
-def _workspace_agent_mcp_auth_context() -> AuthContext:
+def _workspace_agent_mcp_auth_context(request: Request | None = None) -> AuthContext:
     existing = current_auth_context()
-    if existing is not None:
+    if request is None and existing is not None:
         return existing
+    if request is not None and os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
+        header_user = (request.headers.get("x-floom-user") or "").strip()
+        if not header_user:
+            raise HTTPException(
+                status_code=401,
+                detail="x-floom-user header required when user-header scope is enabled",
+            )
+        if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,128}", header_user):
+            raise HTTPException(status_code=400, detail="invalid x-floom-user")
+        ctx = AuthContext(user_id=header_user, email=None, scopes=("admin", "mcp"))
+        set_current_auth_context(ctx)
+        return ctx
     user_id = _workspace_agent_mcp_user_id()
     if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local":
         user_id = local_workspace_user_id(local_workspace_base_user_id(user_id), DEFAULT_WORKSPACE_ID)
@@ -6447,8 +6463,27 @@ async def _workspace_agent_mcp_cloud_auth_context(request: Request) -> Optional[
     return ctx
 
 
-def _workspace_agent_mcp_conversation_id(raw: Any) -> str:
-    value = str(raw or "default").strip() or "default"
+def _workspace_agent_mcp_conversation_id(raw: Any) -> Optional[str]:
+    """Map the MCP ``conversation_id`` argument to a chat-service conversation ref.
+
+    #2269 semantics:
+      - Absent/empty -> ``None``: stream_chat starts a fresh conversation. The
+        old ``"langdock:default"`` fallback funneled every no-id call from
+        every client session into one shared per-user thread, silently
+        appending unrelated sessions into the same conversation.
+      - Internal ids (``conv_...``, including the previously returned
+        ``conv_client_...`` mappings and ids from conversations.list) pass
+        through untouched so the caller resumes that exact conversation. The
+        old prefix+hash mapping silently forked a brand-new empty thread.
+      - Anything else keeps the legacy deterministic client-thread mapping
+        (``langdock:<safe>``) so existing Langdock-style stable thread ids
+        keep continuing the threads they already created.
+    """
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    if value.startswith("conv_"):
+        return value
     safe = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", value)[:160].strip("._:-")
     return f"langdock:{safe or 'default'}"
 
@@ -6516,13 +6551,84 @@ async def _collect_workspace_agent_reply_for_langdock(
     message: str,
     user_id: str,
     conversation_id: Optional[str],
-) -> str:
-    return await _collect_workspace_agent_reply_for_slack(
+) -> Dict[str, Any]:
+    """Run the workspace agent for an MCP call and return reply details.
+
+    Returns ``{"reply", "conversation_id", "message_id"}`` — the
+    conversation_id is the REAL persisted conversation id from the finish
+    event, so MCP callers can round-trip it to continue the thread (#2269).
+    """
+    from channels.common import collect_agent_reply_details
+
+    return await collect_agent_reply_details(
         message=message,
         user_id=user_id,
         conversation_id=conversation_id,
         source="mcp",
     )
+
+
+# TODO(#follow-up): workspace.chat accepts timeout_ms but does not enforce it end-to-end.
+async def _mcp_workspace_chat_result(arguments: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    """Shared workspace.chat handler for both MCP dispatchers (#2266/#2269).
+
+    - Validates a supplied ``conv_...`` id up front and returns a clear tool
+      error when it does not exist for this workspace, instead of silently
+      forking a new conversation.
+    - Returns the real persisted conversation id so callers can resume.
+    - A chat failure surfaces as an actionable ``isError`` tool result, never
+      as a bare JSON-RPC -32603 that hides an already-completed run.
+    """
+    message = str(arguments.get("message") or "").strip()
+    if not message:
+        return _mcp_tool_error("Tool argument 'message' is required")
+    if len(message) > 20000:
+        return _mcp_tool_error("Tool argument 'message' is too long")
+
+    requested = _workspace_agent_mcp_conversation_id(arguments.get("conversation_id"))
+    if requested is not None and requested.startswith("conv_"):
+        from services.chat_conversations import get_conversation, resolve_conversation_id
+
+        internal = resolve_conversation_id(requested, user_id)
+        if not internal or not get_conversation(internal, user_id):
+            return _mcp_tool_error(
+                f"Conversation '{requested}' was not found in this workspace. "
+                "Pass an id returned by conversations.list (or by a previous "
+                "workspace.chat reply), or omit conversation_id to start a new conversation."
+            )
+
+    try:
+        details = await _collect_workspace_agent_reply_for_langdock(
+            message=message,
+            user_id=user_id,
+            conversation_id=requested,
+        )
+    except Exception as exc:
+        # Full detail is logged; the caller gets the client-safe message
+        # instead of an opaque internal error.
+        logger.exception(
+            "workspace.chat agent run failed (user=%s conversation_id=%r)",
+            user_id, requested,
+        )
+        from channels.common import AgentReplyError
+        from llm import safe_llm_error_message
+
+        safe = str(exc) if isinstance(exc, AgentReplyError) else safe_llm_error_message(exc, action="Chat")
+        return _mcp_tool_error(f"workspace.chat failed: {safe}")
+
+    if isinstance(details, dict):
+        reply = str(details.get("reply") or "")
+        conversation_id = details.get("conversation_id") or requested
+        message_id = details.get("message_id")
+    else:  # defensive: legacy string contract
+        reply = str(details or "")
+        conversation_id = requested
+        message_id = None
+    return {
+        "content": [{"type": "text", "text": reply or "(No reply)"}],
+        "structuredContent": {"conversation_id": conversation_id, "message_id": message_id},
+        "isError": False,
+    }
 
 
 def _mcp_result(request_id: Any, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -6657,6 +6763,15 @@ def _mcp_validate_arguments_against_schema(
     for name in required:
         if name not in arguments:
             return f"Invalid params: missing {name}"
+        prop = properties.get(name)
+        if (
+            name == "id"
+            and isinstance(prop, dict)
+            and prop.get("type") == "string"
+            and isinstance(arguments[name], str)
+            and not arguments[name].strip()
+        ):
+            return f"Invalid params: {name} must not be empty"
     for name, value in arguments.items():
         prop = properties.get(name)
         if not isinstance(prop, dict):
@@ -6691,7 +6806,11 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             },
             "conversation_id": {
                 "type": "string",
-                "description": "Optional stable client thread or chat id for continuity.",
+                "description": (
+                    "Optional. Omit to start a new conversation. Pass a conv_... id "
+                    "(from a previous reply or conversations.list) to continue that "
+                    "conversation, or a stable client thread id for continuity."
+                ),
             },
         },
         ["message"],
@@ -6822,6 +6941,32 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             }, ["id"]),
         },
         {
+            "name": "approvals.approve",
+            "description": (
+                "Approve a pending run so it continues executing and releases "
+                "its gated side effect. Only approvals owned by your own "
+                "workspace are visible, and the run must currently be awaiting "
+                "approval."
+            ),
+            "inputSchema": _mcp_json_schema({
+                "run_id": {"type": "string", "description": "Id of the run awaiting approval."},
+                "approval_id": {"type": "string", "description": "Optional approval id to disambiguate."},
+            }, ["run_id"]),
+        },
+        {
+            "name": "approvals.reject",
+            "description": (
+                "Reject a pending run so it stops instead of releasing its "
+                "gated side effect. Only approvals owned by your own workspace "
+                "are visible, and the run must currently be awaiting approval."
+            ),
+            "inputSchema": _mcp_json_schema({
+                "run_id": {"type": "string", "description": "Id of the run awaiting approval."},
+                "approval_id": {"type": "string", "description": "Optional approval id to disambiguate."},
+                "reason": {"type": "string", "description": "Optional reason recorded with the rejection."},
+            }, ["run_id"]),
+        },
+        {
             "name": "secrets.list",
             "description": "List configured secret names and status. Values are never returned.",
             "inputSchema": _mcp_json_schema({}),
@@ -6875,6 +7020,28 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
                 "path": {"type": "string"},
                 "content": {"type": "string"},
             }, ["name", "path", "content"]),
+        },
+        {
+            "name": "contexts.files",
+            "description": "List file paths inside a Floom brain pack.",
+            "inputSchema": _mcp_json_schema({"name": {"type": "string"}}, ["name"]),
+        },
+        {
+            "name": "contexts.delete",
+            "description": "Delete a brain pack, or one file when path is supplied.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "path": {"type": "string"},
+                "force": {"type": "boolean", "default": False},
+            }, ["name"]),
+        },
+        {
+            "name": "contexts.versions",
+            "description": "List saved versions of a non-sensitive brain pack, newest first.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            }, ["name"]),
         },
         {
             "name": "workspace.info",
@@ -6975,23 +7142,8 @@ def _internal_asgi_request() -> Request:
 
 
 async def _mcp_call_workspace_agent(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    message = str(arguments.get("message") or "").strip()
-    if not message:
-        return _mcp_tool_error("Tool argument 'message' is required")
-    if len(message) > 20000:
-        return _mcp_tool_error("Tool argument 'message' is too long")
-
-    conversation_id = _workspace_agent_mcp_conversation_id(arguments.get("conversation_id"))
-    reply = await _collect_workspace_agent_reply_for_langdock(
-        message=message,
-        user_id=current_auth_user_id() or _workspace_agent_mcp_auth_context().user_id,
-        conversation_id=conversation_id,
-    )
-    return {
-        "content": [{"type": "text", "text": reply or "(No reply)"}],
-        "structuredContent": {"conversation_id": conversation_id},
-        "isError": False,
-    }
+    user_id = current_auth_user_id() or _workspace_agent_mcp_auth_context().user_id
+    return await _mcp_workspace_chat_result(arguments, user_id)
 
 
 _MCP_WORKER_LIST_HEAVY_FIELDS = frozenset({
@@ -7300,6 +7452,66 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(result, message)
 
 
+def _mcp_call_contexts_files(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    detail = get_context(_mcp_arg(arguments, "name"), auth=auth, repos=repos)
+    return _mcp_call_result({
+        "name": detail.name,
+        "paths": [item.path for item in detail.files],
+        "files": detail.files,
+    })
+
+
+def _mcp_call_contexts_delete(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    name = _mcp_arg(arguments, "name")
+    path = str(arguments.get("path") or "").strip()
+    if path:
+        data = delete_context_file(name, path, auth=auth, repos=repos)
+        return _mcp_call_result(data, "Context file deleted.")
+    data = delete_context(name, force=bool(arguments.get("force", False)), auth=auth, repos=repos)
+    return _mcp_call_result(data, "Context deleted.")
+
+
+def _mcp_call_contexts_versions(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    rows = list_context_versions(
+        _mcp_arg(arguments, "name"),
+        limit=min(max(int(arguments.get("limit", 50)), 1), 100),
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(rows)
+
+
+def _mcp_remote_approval_decision(
+    decision: str, arguments: Dict[str, Any], auth: AuthContext
+) -> Dict[str, Any]:
+    """approvals.approve / approvals.reject for the workspace-agent remote MCP
+    surface (#2271). Delegates to the SAME owner-scoped decision path the chat
+    tool and the POST /runs/{id}/approve REST endpoint use
+    (services.chat_approvals -> approve_run/reject_run), so tenant isolation
+    (owner_id must equal auth.user_id) and the awaiting_approval status guard
+    are enforced identically here. The target is resolved ONLY within the
+    actor's own pending approvals; a caller-supplied owner is never trusted, so
+    an actor authenticated for one workspace can never decide a run belonging
+    to another workspace."""
+    from services.chat_approvals import _tool_approvals_approve, _tool_approvals_reject
+    args: Dict[str, Any] = {
+        "run_id": arguments.get("run_id"),
+        "approval_id": arguments.get("approval_id"),
+    }
+    if decision == "approved":
+        result = _tool_approvals_approve(args, auth.user_id)
+    else:
+        args["reason"] = arguments.get("reason")
+        result = _tool_approvals_reject(args, auth.user_id)
+    if not isinstance(result, dict) or not result.get("ok"):
+        message = str(result.get("error") or "") if isinstance(result, dict) else ""
+        return _mcp_tool_error(message or "Approval decision failed")
+    status = str(result.get("status") or "decided")
+    run_id = str(result.get("run_id") or "")
+    summary = f"Approval {status}" + (f" for run {run_id}" if run_id else "")
+    return _mcp_call_result(result, summary)
+
+
 async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     auth = _workspace_agent_mcp_auth_context()
     repos = get_repositories()
@@ -7349,8 +7561,18 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_contexts_read(arguments, auth)
         if tool_name == "contexts.write":
             return _mcp_call_contexts_write(arguments, auth, repos)
+        if tool_name == "contexts.files":
+            return _mcp_call_contexts_files(arguments, auth, repos)
+        if tool_name == "contexts.delete":
+            return _mcp_call_contexts_delete(arguments, auth, repos)
+        if tool_name == "contexts.versions":
+            return _mcp_call_contexts_versions(arguments, auth, repos)
         if tool_name == "workspace.info":
             return _mcp_call_workspace_info(auth)
+        if tool_name == "approvals.approve":
+            return _mcp_remote_approval_decision("approved", arguments, auth)
+        if tool_name == "approvals.reject":
+            return _mcp_remote_approval_decision("rejected", arguments, auth)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
     except ValidationError:
         raise
@@ -7444,7 +7666,7 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
     # holder of the single cloud-wide secret). Force cloud callers down the
     # per-tenant PAT path. Static token stays valid only on OSS/local.
     if deploy != "cloud" and _verify_workspace_agent_mcp_auth(request):
-        _workspace_agent_mcp_auth_context()
+        _workspace_agent_mcp_auth_context(request)
     else:
         cloud_ctx = await _workspace_agent_mcp_cloud_auth_context(request)
         if cloud_ctx is None:
@@ -8003,7 +8225,8 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
     {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
-    {"name": "contexts.delete", "description": "Delete a brain pack context and all its files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
+    {"name": "contexts.files", "description": "List file paths inside a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "contexts.delete", "description": "Delete a brain pack context, or one file when path is supplied.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
     {"name": "contexts.delete_file", "description": "Delete a specific file from a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
     {"name": "contexts.rollback", "description": "Restore a brain pack context to a previous version.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "version_id": {"type": "string"}}, "required": ["name", "version_id"]}},
@@ -8014,7 +8237,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "approvals.approve", "description": "Approve a pending run so it continues executing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
     {"name": "approvals.reject", "description": "Reject a pending run, stopping it from continuing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
     # --- workspace ---
-    {"name": "workspace.chat", "description": "Send a message to the Floom workspace agent and receive a reply.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
+    {"name": "workspace.chat", "description": "Send a message to the Floom workspace agent and receive a reply. Omit conversation_id to start a new conversation; pass a conv_... id from a previous reply or conversations.list to continue that conversation.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string", "description": "Optional. Omit for a new conversation; pass a conv_... id to continue an existing one."}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
     {"name": "workspace.instructions.get", "description": "Read the current workspace agent instructions.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "workspace.info", "description": "Get the active workspace identity and authenticated principal.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "workspace.instructions.set", "description": "Update the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
@@ -8331,12 +8554,22 @@ async def _mcp_dispatch(
         data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
         return _mcp_api_result(data, s)
     if name == "contexts.delete":
-        qs = "?force=true" if a.get("force") else ""
-        data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
+        if a.get("path"):
+            encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
+            data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        else:
+            qs = "?force=true" if a.get("force") else ""
+            data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
         return _mcp_api_result(data, s)
     if name == "contexts.delete_file":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        return _mcp_api_result(data, s)
+    if name == "contexts.files":
+        data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}", request)
+        if s < 400 and isinstance(data, dict):
+            files = data.get("files") if isinstance(data.get("files"), list) else []
+            data = {"name": data.get("name", a["name"]), "paths": [f.get("path") for f in files if isinstance(f, dict) and f.get("path")], "files": files}
         return _mcp_api_result(data, s)
     if name == "contexts.versions":
         data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/versions", request, params={"limit": a.get("limit", 50)})
@@ -8363,24 +8596,10 @@ async def _mcp_dispatch(
 
     # --- workspace ---
     if name == "workspace.chat":
-        message = str(a.get("message") or "").strip()
-        if not message:
-            return _mcp_content("Tool argument 'message' is required", is_error=True)
-        if len(message) > 20000:
-            return _mcp_content("Tool argument 'message' is too long", is_error=True)
-        conversation_id = _workspace_agent_mcp_conversation_id(a.get("conversation_id"))
-        reply = await _collect_workspace_agent_reply_for_langdock(
-            message=message,
-            user_id=auth.user_id,
-            conversation_id=conversation_id,
-        )
-        return _mcp_call_result(
-            {
-                "reply": reply or "(No reply)",
-                "conversation_id": conversation_id,
-            },
-            "Workspace agent reply.",
-        )
+        # #2266/#2269: shared handler — fresh conversation when no id, real
+        # resume (with validation) when an id is supplied, and chat failures
+        # surfaced as actionable tool errors instead of -32603.
+        return await _mcp_workspace_chat_result(a, auth.user_id)
     if name == "workspace.instructions.get":
         data, s = await _api_call("GET", "/workspace", request)
         return _mcp_api_result(data, s)

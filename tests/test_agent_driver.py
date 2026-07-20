@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 import runner_sandbox.agent_driver as agent_module
 from models import WorkerConfig
 from runner_sandbox.agent_driver import AgentDriver
-from agent_driver_sdk_fakes import ScriptedAgentDriverMixin
+from agent_driver_sdk_fakes import FakeStreamingResult, ScriptedAgentDriverMixin
 
 
 class ScriptedAgentDriver(ScriptedAgentDriverMixin, AgentDriver):
@@ -25,7 +25,15 @@ def final_response(tokens=5):
     return {"kind": "message", "text": "done", "tokens": tokens}
 
 
-def make_config(tmp_path, *, limits=None, outputs=None, secrets=None, connections=None):
+def make_config(
+    tmp_path,
+    *,
+    limits=None,
+    outputs=None,
+    secrets=None,
+    connections=None,
+    model=None,
+):
     workers_root = tmp_path / "workers"
     bundle = tmp_path / "bundle"
     artifacts = tmp_path / "artifacts"
@@ -45,6 +53,7 @@ def make_config(tmp_path, *, limits=None, outputs=None, secrets=None, connection
             "entrypoint": "SKILL.md",
             "runner": "e2b",
             "mode": "agent",
+            "model": model,
             "bundle_path": str(bundle),
             "system_prompt": "Override prompt.",
             "limits": limits or {
@@ -120,6 +129,191 @@ def test_multi_iteration_tool_loop_reads_file_then_writes_output(tmp_path):
     assert result.status == "success"
     assert result.outputs["summary"] == "from notes"
     assert len(driver.calls) == 1
+
+
+class _ProviderModel:
+    def __init__(self, *, error=None, response=None):
+        self.error = error
+        self.response = response
+        self.calls = 0
+        self.last_model_settings = None
+
+    def get_retry_advice(self, _request):
+        return None
+
+    async def get_response(self, *_args, **_kwargs):
+        self.calls += 1
+        self.last_model_settings = _args[2]
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+    async def stream_response(self, *_args, **_kwargs):
+        self.calls += 1
+        self.last_model_settings = _args[2]
+        if self.error is not None:
+            raise self.error
+        if self.response is not None:
+            yield self.response
+
+
+class _ProviderExercisingAgentDriver(AgentDriver):
+    async def _run_streamed(self, agent, run_input, max_turns, run_config):
+        model = run_config.model_provider.get_model(agent.model)
+        async for _event in model.stream_response(
+            None, [], agent.model_settings, [], None, [], None
+        ):
+            pass
+        return FakeStreamingResult(
+            agent,
+            [
+                tool_response(
+                    "finish_with_outputs",
+                    {"summary": "completed on fallback"},
+                ),
+                final_response(),
+            ],
+        )
+
+
+class _WorkerErrorAgentDriver(AgentDriver):
+    async def _run_streamed(self, agent, run_input, max_turns, run_config):
+        raise ValueError("invalid worker output")
+
+
+def _install_fake_multi_provider(monkeypatch, models):
+    class FakeMultiProvider:
+        def get_model(self, model_name):
+            return models[model_name]
+
+    import agents.models.multi_provider as multi_provider
+
+    monkeypatch.setattr(multi_provider, "MultiProvider", FakeMultiProvider)
+    monkeypatch.setattr(agent_module._llm, "provider_credentials_present", lambda _model: True)
+
+
+def test_gemini_agent_capacity_error_completes_on_bedrock_fallback(tmp_path, monkeypatch):
+    primary_name = "litellm/gemini/gemini-3.5-flash"
+    fallback_name = "litellm/bedrock/us.anthropic.claude-sonnet-4-6"
+    primary = _ProviderModel(error=RuntimeError("RESOURCE_EXHAUSTED: quota exceeded"))
+    fallback = _ProviderModel(response="bedrock response")
+    _install_fake_multi_provider(
+        monkeypatch,
+        {primary_name: primary, fallback_name: fallback},
+    )
+    monkeypatch.delenv("WORKEROS_AGENT_FALLBACK_MODEL", raising=False)
+    config = make_config(
+        tmp_path,
+        model="gemini/gemini-3.5-flash",
+        limits={
+            "max_tool_iterations": 6,
+            "max_output_tokens": 1_000_000,
+            "max_total_tokens": 1_000_000,
+            "timeout_seconds": 30,
+        },
+    )
+    entries, log_fn = logs()
+
+    result = _ProviderExercisingAgentDriver().run(
+        "agent-test", "run_capacity_fallback", {}, {}, log_fn, "trace", config=config
+    )
+
+    assert result.status == "success"
+    assert result.error_code is None
+    assert result.outputs == {"summary": "completed on fallback"}
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert fallback.last_model_settings.max_tokens == agent_module._BEDROCK_MAX_OUTPUT_CAP
+    assert any("retrying model call" in message.lower() for _level, message in entries)
+
+
+def test_genuine_worker_error_does_not_use_cross_provider_fallback(tmp_path, monkeypatch):
+    primary_name = "litellm/gemini/gemini-3.5-flash"
+    fallback_name = "litellm/bedrock/us.anthropic.claude-sonnet-4-6"
+    primary = _ProviderModel(response="must not be called")
+    fallback = _ProviderModel(response="must not be called")
+    _install_fake_multi_provider(
+        monkeypatch,
+        {primary_name: primary, fallback_name: fallback},
+    )
+    config = make_config(tmp_path, model="gemini/gemini-3.5-flash")
+    _entries, log_fn = logs()
+
+    result = _WorkerErrorAgentDriver().run(
+        "agent-test", "run_worker_error", {}, {}, log_fn, "trace", config=config
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "agent_runtime_error"
+    assert primary.calls == 0
+    assert fallback.calls == 0
+
+
+def test_non_capacity_provider_error_keeps_existing_behavior(tmp_path, monkeypatch):
+    primary_name = "litellm/gemini/gemini-3.5-flash"
+    fallback_name = "litellm/bedrock/us.anthropic.claude-sonnet-4-6"
+    primary = _ProviderModel(error=RuntimeError("Gemini API connection reset"))
+    fallback = _ProviderModel(response="must not be called")
+    _install_fake_multi_provider(
+        monkeypatch,
+        {primary_name: primary, fallback_name: fallback},
+    )
+    config = make_config(tmp_path, model="gemini/gemini-3.5-flash")
+    _entries, log_fn = logs()
+
+    result = _ProviderExercisingAgentDriver().run(
+        "agent-test", "run_provider_error", {}, {}, log_fn, "trace", config=config
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "llm_provider_error"
+    assert primary.calls == 1
+    assert fallback.calls == 0
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("RESOURCE_EXHAUSTED"),
+        RuntimeError("quota exceeded"),
+        RuntimeError("429 too many requests"),
+        RuntimeError("provider throttling"),
+    ],
+)
+def test_agent_capacity_classifier_allows_cross_provider_fallback(error):
+    assert agent_module._should_retry_agent_with_fallback(error)
+
+
+def test_agent_capacity_classifier_uses_structured_429_status():
+    class EmptyRateLimitError(RuntimeError):
+        status_code = 429
+
+    assert agent_module._should_retry_agent_with_fallback(EmptyRateLimitError())
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("Gemini API connection reset"),
+        RuntimeError("authentication failed"),
+        ValueError("invalid worker output"),
+    ],
+)
+def test_agent_non_capacity_classifier_blocks_cross_provider_fallback(error):
+    assert not agent_module._should_retry_agent_with_fallback(error)
+
+
+def test_agent_fallback_model_is_configurable_and_never_retries_same_model(monkeypatch):
+    monkeypatch.setattr(agent_module._llm, "provider_credentials_present", lambda _model: True)
+    monkeypatch.setenv("WORKEROS_AGENT_FALLBACK_MODEL", " anthropic/claude-test ")
+    assert (
+        agent_module._resolve_agent_fallback_model("gemini/gemini-3.5-flash")
+        == "anthropic/claude-test"
+    )
+    assert agent_module._resolve_agent_fallback_model("anthropic/claude-test") is None
+
+    monkeypatch.setenv("WORKEROS_AGENT_FALLBACK_MODEL", "gemini/gemini-other")
+    assert agent_module._resolve_agent_fallback_model("gemini/gemini-3.5-flash") is None
 
 
 def test_cost_caps_stop_agent_loop(tmp_path):

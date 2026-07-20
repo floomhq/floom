@@ -47,6 +47,20 @@ def test_is_litellm_model():
     assert llm.is_litellm_model("anthropic/claude-sonnet-4-6") is True
 
 
+@pytest.mark.parametrize(
+    ("model", "provider"),
+    [
+        ("gpt-5.5", "openai"),
+        ("openai/gpt-5.5", "openai"),
+        ("litellm/gemini/gemini-3.5-flash", "gemini"),
+        ("bedrock/us.anthropic.claude-sonnet-4-6", "bedrock"),
+        ("vertex_ai/gemini-3.5-flash", "vertex_ai"),
+    ],
+)
+def test_model_provider_name(model, provider):
+    assert llm.model_provider_name(model) == provider
+
+
 def test_agent_model_normalization():
     # Bare / openai-prefixed run on the native OpenAI provider unchanged.
     assert llm.agent_model("gpt-5.5") == "gpt-5.5"

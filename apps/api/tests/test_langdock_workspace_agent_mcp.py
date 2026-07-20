@@ -278,7 +278,11 @@ def test_langdock_mcp_tool_call_forwards_to_workspace_agent(monkeypatch, tmp_pat
 
     async def fake_collect(*, message, user_id, conversation_id):
         calls.append((message, user_id, conversation_id))
-        return "workspace agent answer"
+        return {
+            "reply": "workspace agent answer",
+            "conversation_id": "conv_real12345678",
+            "message_id": "msg_abc123",
+        }
 
     monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_langdock", fake_collect)
 
@@ -306,7 +310,12 @@ def test_langdock_mcp_tool_call_forwards_to_workspace_agent(monkeypatch, tmp_pat
     body = response.json()
     assert body["id"] == "call-1"
     assert body["result"]["content"] == [{"type": "text", "text": "workspace agent answer"}]
-    assert body["result"]["structuredContent"] == {"conversation_id": "langdock:chat_123"}
+    # #2269: the surfaced conversation_id is the REAL persisted id from the
+    # chat service, so the caller can round-trip it to resume the thread.
+    assert body["result"]["structuredContent"] == {
+        "conversation_id": "conv_real12345678",
+        "message_id": "msg_abc123",
+    }
     assert body["result"]["isError"] is False
 
 

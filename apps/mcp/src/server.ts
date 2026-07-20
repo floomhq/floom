@@ -1358,6 +1358,22 @@ export function createServer(): McpServer {
   );
 
   server.registerTool(
+    "contexts.files",
+    {
+      title: "List Context Files",
+      description: "List file paths inside a context so they can be discovered before reading.",
+      inputSchema: { name: z.string().min(1).describe("Context name.") },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ name }) =>
+      callTool(async () => {
+        const detail = await request("GET", `/contexts/${encodeURIComponent(name)}`) as JsonObject;
+        const files = Array.isArray(detail.files) ? detail.files : [];
+        return jsonResult({ name: detail.name ?? name, paths: files.map((file) => (file as JsonObject).path), files });
+      }),
+  );
+
+  server.registerTool(
     "contexts.upload",
     {
       title: "Upload Context File",
@@ -1701,18 +1717,24 @@ export function createServer(): McpServer {
     "contexts.delete",
     {
       title: "Delete Context",
-      description: "Delete a brain pack context and all its files.",
+      description: "Delete a brain pack context, or one file when path is supplied.",
       inputSchema: {
         name: z.string().min(1).describe("Context name."),
+        path: z.string().min(1).optional().describe("Optional file path inside the context."),
         force: z.boolean().default(false).describe("Force delete even if referenced by workers."),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
-    async ({ name, force }) =>
+    async ({ name, path, force }) =>
       callTool(async () =>
         jsonResult(
-          await request("DELETE", `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`),
-          "Context deleted.",
+          await request(
+            "DELETE",
+            path
+              ? `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`
+              : `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
+          ),
+          path ? "Context file deleted." : "Context deleted.",
         ),
       ),
   );

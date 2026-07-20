@@ -133,7 +133,7 @@ def test_tools_list_defaults_to_lean_audit_surface(monkeypatch, tmp_path):
 
     tools = _list_tools(main, _admin(main))
 
-    assert len(tools) == 16  # +workspace.info, +files.upload
+    assert len(tools) == 21  # +contexts.files/delete/versions (#2272)
     assert {
         "workers.list",
         "files.upload",
@@ -144,6 +144,8 @@ def test_tools_list_defaults_to_lean_audit_surface(monkeypatch, tmp_path):
         "secrets.list",
         "contexts.read",
         "workspace.info",
+        "approvals.approve",
+        "approvals.reject",
     } <= tools
     assert "workers.delete" not in tools
     assert "tools.register" not in tools
@@ -155,7 +157,7 @@ def test_full_tools_env_restores_complete_default_registry(monkeypatch, tmp_path
 
     tools = _list_tools(main, _admin(main))
 
-    assert len(tools) == 63  # +workspace.info, +files.upload
+    assert len(tools) == 64  # net +contexts.files; delete/versions already existed (#2272)
     assert "workers.delete" in tools
     assert "workers.reload" in tools
     assert "tools.register" in tools

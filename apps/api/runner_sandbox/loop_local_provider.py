@@ -75,6 +75,10 @@ class _FallbackModel:
         fallback_name: str,
         should_fallback: Callable[[BaseException], bool],
         fallback_extra_args: dict[str, Any] | None = None,
+        fallback_max_tokens: int | None = None,
+        operation_name: str = "Chat",
+        exhausted_marker: str | None = "chat model fallback exhausted",
+        on_fallback: Callable[[str, str], None] | None = None,
     ) -> None:
         self._primary = primary
         self._fallback_factory = fallback_factory
@@ -84,6 +88,10 @@ class _FallbackModel:
         self._fallback_name = fallback_name
         self._should_fallback = should_fallback
         self._fallback_extra_args = fallback_extra_args
+        self._fallback_max_tokens = fallback_max_tokens
+        self._operation_name = operation_name
+        self._exhausted_marker = exhausted_marker
+        self._on_fallback = on_fallback
 
     def _get_fallback(self) -> Any:
         if self._fallback is None:
@@ -105,12 +113,36 @@ class _FallbackModel:
         fallback_args = list(args)
         fallback_kwargs = dict(kwargs)
         if len(fallback_args) > 2 and fallback_args[2] is not None:
-            fallback_args[2] = replace(fallback_args[2], extra_args=self._fallback_extra_args)
+            fallback_args[2] = self._fallback_model_settings(fallback_args[2])
         elif fallback_kwargs.get("model_settings") is not None:
-            fallback_kwargs["model_settings"] = replace(
-                fallback_kwargs["model_settings"], extra_args=self._fallback_extra_args
+            fallback_kwargs["model_settings"] = self._fallback_model_settings(
+                fallback_kwargs["model_settings"]
             )
         return tuple(fallback_args), fallback_kwargs
+
+    def _fallback_model_settings(self, model_settings: Any) -> Any:
+        replacements: dict[str, Any] = {"extra_args": self._fallback_extra_args}
+        if self._fallback_max_tokens is not None:
+            primary_max_tokens = getattr(model_settings, "max_tokens", None)
+            replacements["max_tokens"] = (
+                min(primary_max_tokens, self._fallback_max_tokens)
+                if primary_max_tokens is not None
+                else self._fallback_max_tokens
+            )
+        return replace(model_settings, **replacements)
+
+    def _raise_fallback_error(self, fallback_exc: BaseException) -> None:
+        if self._exhausted_marker is None:
+            raise fallback_exc
+        raise RuntimeError(self._exhausted_marker) from fallback_exc
+
+    def _activate_fallback(self) -> None:
+        self._fallback_active = True
+        if self._on_fallback is not None:
+            try:
+                self._on_fallback(self._primary_name, self._fallback_name)
+            except Exception:
+                logger.debug("Fallback activation callback failed", exc_info=True)
 
     async def get_response(self, *args: Any, **kwargs: Any) -> Any:
         if self._fallback_active:
@@ -118,18 +150,19 @@ class _FallbackModel:
             try:
                 return await self._get_fallback().get_response(*fallback_args, **fallback_kwargs)
             except Exception as fallback_exc:
-                raise RuntimeError("chat model fallback exhausted") from fallback_exc
+                self._raise_fallback_error(fallback_exc)
         try:
             return await self._primary.get_response(*args, **kwargs)
         except Exception as exc:
             if not self._should_fallback(exc):
                 raise
             logger.warning(
-                "Chat model %s failed with a quota/auth error; retrying model call on %s",
+                "%s model %s failed with a retryable provider error; retrying model call on %s",
+                self._operation_name,
                 self._primary_name,
                 self._fallback_name,
             )
-            self._fallback_active = True
+            self._activate_fallback()
             fallback_args, fallback_kwargs = self._fallback_call(args, kwargs)
             try:
                 return await self._get_fallback().get_response(*fallback_args, **fallback_kwargs)
@@ -140,7 +173,7 @@ class _FallbackModel:
                     self._primary_name,
                     exc_info=True,
                 )
-                raise RuntimeError("chat model fallback exhausted") from fallback_exc
+                self._raise_fallback_error(fallback_exc)
 
     async def stream_response(self, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         buffered: list[Any] = []
@@ -152,7 +185,7 @@ class _FallbackModel:
                 ):
                     buffered.append(event)
             except Exception as fallback_exc:
-                raise RuntimeError("chat model fallback exhausted") from fallback_exc
+                self._raise_fallback_error(fallback_exc)
             for event in buffered:
                 yield event
             return
@@ -163,11 +196,12 @@ class _FallbackModel:
             if not self._should_fallback(exc):
                 raise
             logger.warning(
-                "Chat model %s stream failed with a quota/auth error; restarting model call on %s",
+                "%s model %s stream failed with a retryable provider error; restarting model call on %s",
+                self._operation_name,
                 self._primary_name,
                 self._fallback_name,
             )
-            self._fallback_active = True
+            self._activate_fallback()
             fallback_args, fallback_kwargs = self._fallback_call(args, kwargs)
             buffered = []
             try:
@@ -182,7 +216,7 @@ class _FallbackModel:
                     self._primary_name,
                     exc_info=True,
                 )
-                raise RuntimeError("chat model fallback exhausted") from fallback_exc
+                self._raise_fallback_error(fallback_exc)
         for event in buffered:
             yield event
 
@@ -207,6 +241,10 @@ class LoopLocalModelProvider:
         fallback_model_name: str | None = None,
         should_fallback: Callable[[BaseException], bool] | None = None,
         fallback_extra_args: dict[str, Any] | None = None,
+        fallback_max_tokens: int | None = None,
+        fallback_operation_name: str = "Chat",
+        fallback_exhausted_marker: str | None = "chat model fallback exhausted",
+        on_fallback: Callable[[str, str], None] | None = None,
     ) -> None:
         self._provider: Any = None
         self._openai_client: Any = None
@@ -214,6 +252,10 @@ class LoopLocalModelProvider:
         self._fallback_model_name = fallback_model_name
         self._should_fallback = should_fallback
         self._fallback_extra_args = fallback_extra_args
+        self._fallback_max_tokens = fallback_max_tokens
+        self._fallback_operation_name = fallback_operation_name
+        self._fallback_exhausted_marker = fallback_exhausted_marker
+        self._on_fallback = on_fallback
         self._fallback_models: dict[str | None, Any] = {}
 
     def _ensure_provider(self, *, needs_openai_client: bool) -> Any:
@@ -272,6 +314,10 @@ class LoopLocalModelProvider:
             fallback_name=fallback_name,
             should_fallback=self._should_fallback,
             fallback_extra_args=self._fallback_extra_args,
+            fallback_max_tokens=self._fallback_max_tokens,
+            operation_name=self._fallback_operation_name,
+            exhausted_marker=self._fallback_exhausted_marker,
+            on_fallback=self._on_fallback,
         )
         self._fallback_models[model_name] = model
         return model
