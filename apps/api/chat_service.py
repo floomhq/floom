@@ -2209,7 +2209,11 @@ async def stream_chat(
         title = message[:60] + ("..." if len(message) > 60 else "")
         conversation_id = create_conversation(user_id, title=title)
 
-    assistant_message_id = f"msg_pending_{uuid.uuid4().hex[:16]}"
+    # Stable, real assistant message id assigned up-front and used both as the
+    # streaming-correlation id in every emitted part AND as the durable row id
+    # at persist time; never a msg_pending_ placeholder (a caller must never
+    # be handed a non-durable id).
+    assistant_message_id = f"msg_{uuid.uuid4().hex[:16]}"
 
     logger.debug(
         "stream_chat start conversation=%s user=%s surface=%s",
@@ -2722,12 +2726,13 @@ async def stream_chat(
         # #2266: emit the finish event with the completed reply BEFORE any
         # post-run persistence/bookkeeping runs, so a slow or stalled durable
         # write (assistant row, eviction) can never block delivery of an already-
-        # completed reply. The durable assistant id is pre-assigned here (a real
-        # msg_ id, never the msg_pending_ placeholder) so finish still carries a
-        # stable message id. Mid-run tool-RESULT persistence stays strict/fatal
-        # above; only this post-finish bookkeeping is best-effort.
+        # completed reply. Reuse the stable assistant id (assigned up-front) as
+        # the durable row id, so every part and the finish event expose a single
+        # real msg_ id, never a placeholder and never a second, different id.
+        # Mid-run tool-RESULT persistence stays strict/fatal above; only this
+        # post-finish bookkeeping is best-effort.
         if full_reply:
-            final_message_id = f"msg_{uuid.uuid4().hex[:16]}"
+            final_message_id = assistant_message_id
 
         await part_queue.put({
             "type": "finish",
@@ -2792,7 +2797,9 @@ async def stream_chat(
                 message,
                 _sanitize_preview_text(strip_em_dashes(fallback_reply)),
             )
-            final_message_id = insert_message(conversation_id, "assistant", fallback_reply)
+            final_message_id = insert_message(
+                conversation_id, "assistant", fallback_reply, message_id=assistant_message_id
+            )
             await part_queue.put({
                 "type": "text",
                 "version": CHAT_EVENT_VERSION,

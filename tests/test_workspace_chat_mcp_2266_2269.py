@@ -860,3 +860,38 @@ def test_completed_reply_returns_when_post_finish_assistant_persist_stalls(
     result, elapsed = asyncio.run(asyncio.wait_for(_collect(), timeout=5.0))
     assert "Completed before the stalled write." in result["reply"], result
     assert elapsed < 2.0, f"stalled post-finish persist blocked the reply: {elapsed:.2f}s"
+
+
+def test_stream_events_never_expose_pending_message_id(monkeypatch, tmp_path):
+    """Codex re-review: every emitted stream part (chat.meta, text, tool-*,
+    finish) must carry the real, stable assistant message id, never a
+    msg_pending_ placeholder; and the streaming id must equal the durable
+    finish.message_id."""
+    _load_api(monkeypatch, tmp_path)
+    _FakeAgentRuntime(monkeypatch, reply_text="Stable id reply.")
+    chat_service = importlib.import_module("chat_service")
+
+    async def _drive():
+        queue: asyncio.Queue = asyncio.Queue()
+        await chat_service.stream_chat(
+            message="hello",
+            user_id="mcp-test-user",
+            conversation_id=None,
+            part_queue=queue,
+            source="mcp",
+        )
+        parts = []
+        while not queue.empty():
+            parts.append(queue.get_nowait())
+        return parts
+
+    parts = asyncio.run(asyncio.wait_for(_drive(), timeout=3.0))
+    for part in parts:
+        for key in ("message_id", "assistant_message_id"):
+            val = part.get(key)
+            assert not (isinstance(val, str) and val.startswith("msg_pending")), (key, part)
+    meta = next(p for p in parts if p.get("type") == "chat.meta")
+    finish = next(p for p in parts if p.get("type") == "finish")
+    assert meta["assistant_message_id"].startswith("msg_"), meta
+    assert finish["assistant_message_id"] == meta["assistant_message_id"], finish
+    assert finish["message_id"] == meta["assistant_message_id"], finish
