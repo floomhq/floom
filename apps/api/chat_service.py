@@ -2241,8 +2241,11 @@ async def stream_chat(
     history_summary_parts: List[str] = []
     for h in history[:-1]:  # Exclude the just-inserted user message
         role = h["role"]
-        if role == "tool":
-            continue  # Skip raw tool results — too verbose
+        # #2266/#2269 resume safety: a resumed run MUST see that a side-
+        # effecting tool already ran, or it may REPEAT the operation. Replay
+        # tool RESULTS too (already capped at persist time, then clipped and
+        # labelled as untrusted transcript by _format_history_for_model), not
+        # just user/assistant text.
         history_summary_parts.append(_format_history_for_model(role, h["content"]))
 
     input_messages: List[Dict[str, Any]] = []
@@ -2715,24 +2718,16 @@ async def stream_chat(
                 "post-run reply sanitization failed (non-fatal) for conversation %s",
                 conversation_id,
             )
-        if full_reply:
-            try:
-                final_message_id = insert_message(conversation_id, "assistant", full_reply)
-            except Exception:
-                logger.exception(
-                    "assistant reply persistence failed (non-fatal) for conversation %s; "
-                    "streamed reply is still returned",
-                    conversation_id,
-                )
 
-        # Evict if needed
-        try:
-            _maybe_evict_conversation(conversation_id, user_id)
-        except Exception:
-            logger.exception(
-                "conversation eviction failed (non-fatal) for conversation %s",
-                conversation_id,
-            )
+        # #2266: emit the finish event with the completed reply BEFORE any
+        # post-run persistence/bookkeeping runs, so a slow or stalled durable
+        # write (assistant row, eviction) can never block delivery of an already-
+        # completed reply. The durable assistant id is pre-assigned here (a real
+        # msg_ id, never the msg_pending_ placeholder) so finish still carries a
+        # stable message id. Mid-run tool-RESULT persistence stays strict/fatal
+        # above; only this post-finish bookkeeping is best-effort.
+        if full_reply:
+            final_message_id = f"msg_{uuid.uuid4().hex[:16]}"
 
         await part_queue.put({
             "type": "finish",
@@ -2742,6 +2737,34 @@ async def stream_chat(
             "assistant_message_id": assistant_message_id,
             "cards": list(card_summaries.values()),
         })
+
+        # Post-finish durable persistence + bookkeeping. The reply has already
+        # been returned to the caller, so failures or stalls here must never
+        # convert a completed run into a caller-visible failure (#2266). Run the
+        # blocking DB writes OFF the event loop so a stalled write cannot pin the
+        # loop and defeat the collector's post-finish grace period.
+        if full_reply and final_message_id:
+            try:
+                await asyncio.to_thread(
+                    insert_message,
+                    conversation_id,
+                    "assistant",
+                    full_reply,
+                    message_id=final_message_id,
+                )
+            except Exception:
+                logger.exception(
+                    "assistant reply persistence failed (non-fatal) for conversation %s; "
+                    "streamed reply already returned",
+                    conversation_id,
+                )
+        try:
+            await asyncio.to_thread(_maybe_evict_conversation, conversation_id, user_id)
+        except Exception:
+            logger.exception(
+                "conversation eviction failed (non-fatal) for conversation %s",
+                conversation_id,
+            )
 
         # #844: distill durable facts into the owner's memory brain pack.
         # Best-effort background task; rate-limited per conversation inside.

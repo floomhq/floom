@@ -785,3 +785,78 @@ def test_workspace_chat_empty_reply_does_not_return_pending_message_id(
     assert result["isError"] is False, result
     sc = result["structuredContent"]
     assert sc["message_id"] is None or not str(sc["message_id"]).startswith("msg_pending"), sc
+
+
+def test_resume_replays_tool_result_so_agent_sees_completed_side_effect(
+    monkeypatch, tmp_path
+):
+    """Blocker B (resume safety): a resumed run must SEE that a side-effecting
+    tool already ran (its result replayed in the model context) so it does not
+    REPEAT the operation. Previously role='tool' rows were skipped on replay,
+    which defeated the durable tool-result persistence fix."""
+    main = _load_api(monkeypatch, tmp_path)
+    runtime = _FakeAgentRuntime(monkeypatch)
+    chat_service = importlib.import_module("chat_service")
+
+    user_id = main._workspace_agent_mcp_auth_context().user_id
+    conv_id = chat_service.create_conversation(user_id, title="Side-effect thread")
+    chat_service.insert_message(conv_id, "user", "Send the launch email to the board.")
+    chat_service.insert_message(
+        conv_id,
+        "tool",
+        json.dumps({"ok": True, "data": "launch email dispatched, message_id=email-98765"}),
+        tool_call_id="call_send_email",
+    )
+    chat_service.insert_message(conv_id, "assistant", "Done, the email is sent.")
+
+    with TestClient(main.app) as client:
+        response = _chat_call(client, "Did the email go out?", conversation_id=conv_id)
+
+    result = _tool_result(response)
+    assert result["isError"] is False, result
+    assert runtime.captured_inputs, "agent was never invoked"
+    model_input = json.dumps(runtime.captured_inputs[0])
+    assert "email-98765" in model_input, \
+        "resumed run did not see the completed tool result -> could repeat the side effect"
+    assert "TOOL_TRANSCRIPT" in model_input, model_input
+
+
+def test_completed_reply_returns_when_post_finish_assistant_persist_stalls(
+    monkeypatch, tmp_path
+):
+    """Blocker A: post-finish durable writes run OFF the event loop and AFTER the
+    finish event, so a stalled assistant-row persist cannot block delivery of an
+    already-completed reply (bounded by the collector's post-finish grace)."""
+    _load_api(monkeypatch, tmp_path)
+    _FakeAgentRuntime(monkeypatch, reply_text="Completed before the stalled write.")
+    chat_service = importlib.import_module("chat_service")
+    common = importlib.import_module("channels.common")
+    import threading
+
+    monkeypatch.setattr(common, "_POST_FINISH_TEARDOWN_GRACE_SECONDS", 0.3)
+    real_insert = chat_service.insert_message
+    release = threading.Event()
+
+    def _stalling_insert(conv_id, role, content, *a, **k):
+        if role == "assistant":
+            release.wait(timeout=5.0)  # stall the durable write in its worker thread
+        return real_insert(conv_id, role, content, *a, **k)
+
+    monkeypatch.setattr(chat_service, "insert_message", _stalling_insert)
+
+    async def _collect():
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        result = await common.collect_agent_reply_details(
+            message="hi",
+            user_id="mcp-test-user",
+            conversation_id=None,
+            source="mcp",
+        )
+        elapsed = loop.time() - started
+        release.set()  # let the stalled worker thread finish so teardown is quick
+        return result, elapsed
+
+    result, elapsed = asyncio.run(asyncio.wait_for(_collect(), timeout=5.0))
+    assert "Completed before the stalled write." in result["reply"], result
+    assert elapsed < 2.0, f"stalled post-finish persist blocked the reply: {elapsed:.2f}s"
