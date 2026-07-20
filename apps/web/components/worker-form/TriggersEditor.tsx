@@ -37,7 +37,7 @@ export function makeTriggerRow(spec?: TriggerSpec): TriggerRow {
   return {
     id: Math.random().toString(36).slice(2),
     type: normalizeTriggerType(spec?.type),
-    cronExpr: spec?.cron || "0 9 * * MON",
+    cronExpr: spec?.cron || "",
     cronTimezone: spec?.timezone || "Europe/Berlin",
     composioEvent: spec?.composio?.event || "",
     composioConnectionId: spec?.composio?.connection_id || "",
@@ -54,10 +54,16 @@ function yamlString(value: string): string {
   return JSON.stringify(value);
 }
 
+function scheduleCron(row: TriggerRow): string {
+  const cron = row.cronExpr.trim();
+  if (!cron) throw new Error("Schedule triggers require a cron expression before saving.");
+  return cron;
+}
+
 function buildSingleTriggerYaml(row: TriggerRow): string {
   const lines = [`  - type: ${row.type}`];
   if (row.type === "schedule") {
-    lines.push(`    cron: ${yamlString(row.cronExpr || "0 9 * * *")}`);
+    lines.push(`    cron: ${yamlString(scheduleCron(row))}`);
     lines.push(`    timezone: ${yamlString(row.cronTimezone || "Europe/Berlin")}`);
   }
   if (row.type === "webhook") {
@@ -79,7 +85,7 @@ export function buildTriggersYaml(rows: TriggerRow[]): string {
     const row = rows[0];
     const lines = [`trigger:`, `  type: ${row.type}`];
     if (row.type === "schedule") {
-      lines.push(`  cron: ${yamlString(row.cronExpr || "0 9 * * *")}`);
+      lines.push(`  cron: ${yamlString(scheduleCron(row))}`);
       lines.push(`  timezone: ${yamlString(row.cronTimezone || "Europe/Berlin")}`);
     }
     if (row.type === "webhook") {
@@ -140,7 +146,8 @@ function kindMeta(type: TriggerType) {
 // callers can surface it as a tooltip for power users.
 function triggerSummaryLine(row: TriggerRow): { text: string; title?: string } {
   if (row.type === "schedule") {
-    const cron = row.cronExpr || "0 9 * * *";
+    const cron = row.cronExpr.trim();
+    if (!cron) return { text: "Missing cron expression" };
     const tz = row.cronTimezone || "UTC";
     return { text: humanizeCron(cron, tz), title: `${cron} ${tz}` };
   }

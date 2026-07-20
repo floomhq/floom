@@ -34,6 +34,10 @@ interface MarkdownCodeProps extends MarkdownChildProps {
 interface MarkdownAnchorProps extends MarkdownChildProps {
   href?: string;
 }
+interface MarkdownImgProps {
+  src?: string;
+  alt?: string;
+}
 
 const markdownComponents = {
   h1: ({ children }: MarkdownChildProps) => <h1 className="text-lg font-semibold mt-4 mb-2 first:mt-0">{children}</h1>,
@@ -65,6 +69,27 @@ const markdownComponents = {
       {children}
     </a>
   ),
+  // #1183 hardening: Markdown `img` is intentionally NOT rendered as a live
+  // <img> tag. Artifact content is untrusted worker output -- an
+  // auto-loading external image is a tracking-pixel / IP-leak vector that
+  // fires the instant the Output tab renders, with no user action and no
+  // confirmation. Surface it as an explicit, sanitized, opt-in link instead
+  // (same treatment as `a` above) so nothing loads until the viewer
+  // deliberately clicks through.
+  img: ({ src, alt }: MarkdownImgProps) => {
+    const safeSrc = sanitizeHref(src);
+    if (!safeSrc) return null;
+    return (
+      <a
+        href={safeSrc}
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground underline decoration-muted-foreground/40 underline-offset-4 hover:text-foreground hover:decoration-foreground"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        [image: {alt || "view"}]
+      </a>
+    );
+  },
   table: ({ children }: MarkdownChildProps) => (
     <div className="overflow-x-auto rounded-[var(--radius-button)] [border:var(--bd-card)] my-3">
       <table className="w-full border-collapse text-sm">{children}</table>

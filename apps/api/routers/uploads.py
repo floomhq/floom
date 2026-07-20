@@ -38,7 +38,6 @@ async def upload_file(
     auth: AuthContext = Depends(get_auth_context),
 ) -> Dict[str, Any]:
     return await _store_uploaded_blob(
-        request,
         file,
         auth.user_id or "anonymous",
         max_size_mb=max_size_mb,

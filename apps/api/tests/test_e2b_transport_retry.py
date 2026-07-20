@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import httpcore
+import pytest
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -12,12 +15,35 @@ if str(API_DIR) not in sys.path:
 from models import WorkerResult
 from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import (
+    E2B_CREATE_REQUEST_TIMEOUT_SECONDS,
     E2BSandboxDriver,
     E2BTransportDroppedError,
     _create_sandbox_with_key_fallback,
     _is_transient_e2b_transport_error,
     _pace_sandbox_create,
+    _read_result_json,
 )
+
+
+def test_e2b_sync_transport_pool_is_isolated_per_thread():
+    from e2b.api.client_sync import get_envd_transport, get_transport
+    from e2b.connection_config import ConnectionConfig
+
+    config = ConnectionConfig(api_key="e2b-test")
+    barrier = threading.Barrier(2)
+
+    def transport_ids() -> tuple[int, int, int]:
+        barrier.wait(timeout=5)
+        api_transport = get_transport(config)
+        envd_transport = get_envd_transport(config)
+        return threading.get_ident(), id(api_transport.pool), id(envd_transport.pool)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: transport_ids(), range(2)))
+
+    assert len({result[0] for result in results}) == 2
+    assert len({result[1] for result in results}) == 2
+    assert len({result[2] for result in results}) == 2
 
 
 def test_transient_transport_classifier_matches_observed_errors():
@@ -25,6 +51,8 @@ def test_transient_transport_classifier_matches_observed_errors():
     assert _is_transient_e2b_transport_error(RuntimeError("[Errno 32] Broken pipe")) is True
     assert _is_transient_e2b_transport_error(RuntimeError("StreamIDTooLowError: 2383 is lower than 2383")) is True
     assert _is_transient_e2b_transport_error(RuntimeError("deque mutated during iteration")) is True
+    assert _is_transient_e2b_transport_error(RuntimeError("Request timed out")) is True
+    assert _is_transient_e2b_transport_error(httpcore.ReadTimeout("read stalled")) is True
 
     class ConnectionTerminated(Exception):
         def __str__(self) -> str:
@@ -181,6 +209,47 @@ def test_header_block_create_failure_retries_with_fresh_lifecycle(monkeypatch):
 
     assert Sandbox.calls == 2
     assert result.status == "success"
+
+
+def test_sandbox_create_has_bounded_request_timeout(monkeypatch):
+    monkeypatch.setenv("WORKEROS_E2B_CREATE_MIN_INTERVAL_SECONDS", "0")
+
+    class Sandbox:
+        create_kwargs = None
+
+        @classmethod
+        def create(cls, **kwargs):
+            cls.create_kwargs = kwargs
+            return object()
+
+    _create_sandbox_with_key_fallback(
+        Sandbox,
+        api_keys=["test-key"],
+        timeout=300,
+        envs={},
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+
+    assert Sandbox.create_kwargs["request_timeout"] == E2B_CREATE_REQUEST_TIMEOUT_SECONDS
+
+
+def test_result_read_timeout_enters_transport_retry_path():
+    class Files:
+        @staticmethod
+        def read(*_args, **_kwargs):
+            raise RuntimeError("Request timed out")
+
+    class Sandbox:
+        files = Files()
+
+    with pytest.raises(E2BTransportDroppedError) as exc_info:
+        _read_result_json(
+            Sandbox(),
+            "/home/user/worker/result.json",
+            lambda *_args, **_kwargs: None,
+        )
+
+    assert exc_info.value.phase == "result_read"
 
 
 def test_header_block_create_failure_is_bounded_to_three_total_creates(monkeypatch):

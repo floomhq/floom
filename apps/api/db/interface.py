@@ -22,6 +22,12 @@ DURABLE_EXECUTION_LOG_PREFIXES = (
     "[e2b] Running worker",
 )
 
+# Internal row appended after every terminal transition. It lets a separate
+# HTTP process distinguish "run is complete" from "all asynchronous log rows
+# are visible" without changing the public run or log response shape.
+RUN_LOG_DRAIN_MARKER_LEVEL = "__floom_internal__"
+RUN_LOG_DRAIN_MARKER_MESSAGE = "__floom_run_logs_drained__"
+
 
 class WorkerRepository(Protocol):
     def list(self, *, user_id: str, role: str | None = None) -> list[RowDict]: ...
@@ -452,6 +458,8 @@ class RunRepository(Protocol):
 
     def add_logs(self, *, rows: Iterable[RowDict]) -> None: ...
 
+    def logs_drained(self, *, user_id: str, run_id: str) -> bool: ...
+
     def list_logs(
         self,
         *,
@@ -658,6 +666,7 @@ class ApprovalRepository(Protocol):
         owner_id: str,
         run_id: str,
         decided_at: str,
+        approval_id: str | None = None,
         edited_output_json: str | None = None,
         follow_up_run_id: str | None = None,
         annotations_json: str | None = None,
@@ -692,6 +701,7 @@ class ApprovalRepository(Protocol):
         owner_id: str,
         run_id: str,
         decided_at: str,
+        approval_id: str | None = None,
         reason: str | None = None,
         annotations_json: str | None = None,
     ) -> RowDict | None:

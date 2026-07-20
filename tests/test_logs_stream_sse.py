@@ -11,6 +11,8 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+import threading
+import time
 import types
 from pathlib import Path
 
@@ -148,6 +150,51 @@ def test_logs_stream_replays_existing_logs_for_terminal_run(monkeypatch, tmp_pat
     assert done_events[0]["status"] == "completed"
 
 
+def test_logs_stream_waits_for_late_rows_after_terminal_status(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_RUN_LOG_DRAIN_POLL_INTERVAL", "0.05")
+    main = _load_api(monkeypatch, tmp_path)
+    run_id = "run-ls-late-drain"
+    _insert_worker_and_run(main, run_id, status="running")
+
+    def finish_then_drain():
+        time.sleep(0.1)
+        completed_at = main.now_iso()
+        with main.get_db() as conn:
+            conn.execute(
+                "UPDATE runs SET status = 'completed', completed_at = ? WHERE id = ?",
+                (completed_at, run_id),
+            )
+        time.sleep(0.1)
+        with main.get_db() as conn:
+            conn.execute(
+                "INSERT INTO logs (run_id, level, message, timestamp) VALUES (?, 'info', 'late row', ?)",
+                (run_id, main.now_iso()),
+            )
+            conn.execute(
+                "INSERT INTO logs (run_id, level, message, timestamp) VALUES (?, ?, ?, ?)",
+                (
+                    run_id,
+                    "__floom_internal__",
+                    "__floom_run_logs_drained__",
+                    main.now_iso(),
+                ),
+            )
+
+    thread = threading.Thread(target=finish_then_drain)
+    thread.start()
+    try:
+        client = TestClient(main.app)
+        with client.stream("GET", f"/runs/{run_id}/logs/stream", headers=AUTH) as resp:
+            assert resp.status_code == 200
+            body = "".join(resp.iter_text())
+    finally:
+        thread.join(timeout=2)
+
+    events = _parse_sse_events(body)
+    assert [event["message"] for event in events if event.get("type") == "log"].count("late row") == 1
+    assert events[-1] == {"type": "done", "status": "completed"}
+
+
 def test_logs_stream_treats_rejected_as_terminal(monkeypatch, tmp_path):
     """For a rejected run all log rows are replayed and a done event is emitted."""
     main = _load_api(monkeypatch, tmp_path)
@@ -166,6 +213,20 @@ def test_logs_stream_treats_rejected_as_terminal(monkeypatch, tmp_path):
     assert len(log_events) == 2, f"expected 2 log events, got {log_events}"
     assert len(done_events) == 1, f"expected 1 done event, got {done_events}"
     assert done_events[0]["status"] == "rejected"
+
+
+def test_logs_stream_treats_cancelled_as_terminal(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    run_id = "run-ls-cancelled"
+    _insert_worker_and_run(main, run_id, status="cancelled")
+
+    client = TestClient(main.app)
+    with client.stream("GET", f"/runs/{run_id}/logs/stream", headers=AUTH) as resp:
+        assert resp.status_code == 200, resp.text
+        body = "".join(resp.iter_text())
+
+    events = _parse_sse_events(body)
+    assert events[-1] == {"type": "done", "status": "cancelled"}
 
 
 def test_logs_stream_returns_404_for_unknown_run(monkeypatch, tmp_path):

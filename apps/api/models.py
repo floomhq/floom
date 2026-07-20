@@ -1697,6 +1697,7 @@ class WorkerContract(BaseModel):
     resources: WorkerResources = Field(default_factory=WorkerResources)
     csv_required_columns: Optional[List[str]] = None
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
+    notify: Optional["NotifyConfig"] = None
     calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
 
     @model_validator(mode="before")
@@ -2025,6 +2026,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
+        notify=contract.notify,
         capabilities=_model_data(contract.capabilities),
         calls=list(contract.calls),
     )
@@ -2149,6 +2151,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         contexts=[_model_data(context) for context in config.contexts],
         memory=config.memory,
         csv_required_columns=config.csv_required_columns,
+        notify=config.notify,
     )
 
 
@@ -2449,6 +2452,9 @@ class WorkerDetail(BaseModel):
     trigger_type: str
     runner: str
     config: WorkerConfig
+    # Advisory messages returned by manifest save endpoints. Saves remain
+    # successful; callers can surface these without parsing server logs.
+    warnings: List[str] = Field(default_factory=list)
     last_run: Optional[DetailLastRun] = None
     recent_stats: Optional[RecentStats] = None
     recent_runs: List[RunSummary] = Field(default_factory=list)
@@ -2755,6 +2761,25 @@ class NotifyConfig(BaseModel):
     secret: Optional[str] = None
     # Optional custom email subject (supports {worker_name} and {status} placeholders)
     email_subject: Optional[str] = None
+    # Slack channel that receives approval cards. The cloud wrapper resolves the
+    # channel against the workspace's Slack installation before sending.
+    slack_channel_id: Optional[str] = Field(default=None, pattern=r"^[CG][A-Z0-9]{8,31}$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_yaml_11_on_key(cls, value: Any) -> Any:
+        """Preserve an unquoted YAML ``on:`` key parsed by PyYAML as ``True``.
+
+        PyYAML's safe loader follows YAML 1.1 boolean rules, where ``on`` is a
+        boolean synonym. Worker manifests commonly use the idiomatic unquoted
+        form, so normalize only this notification key before field validation.
+        An explicitly quoted ``on`` field remains authoritative if both forms
+        are present.
+        """
+        if isinstance(value, dict) and "on" not in value and True in value:
+            value = {**value, "on": value[True]}
+            value.pop(True, None)
+        return value
 
 
 # ---------------------------------------------------------------------------
@@ -3241,6 +3266,7 @@ class DraftAndCreateRequest(BaseModel):
 
 class DraftAndCreateResponse(BaseModel):
     worker_id: str
+    warnings: List[str] = Field(default_factory=list)
     # FIX 4 (2026-05-29): both creation paths run the smoke+repair safety net.
     # smoke_status: "passed" | "failed" | "skipped" | None. When "failed" the
     # worker is created but DISABLED (stays editable) — surface the reason so

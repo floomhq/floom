@@ -29,11 +29,11 @@ class _Files:
     def _host_path(self, sandbox_path: str) -> Path:
         return self.host_root / sandbox_path.removeprefix("/")
 
-    def make_dir(self, sandbox_path: str):
+    def make_dir(self, sandbox_path: str, **_kwargs):
         self.dirs.add(sandbox_path)
         self._host_path(sandbox_path).mkdir(parents=True, exist_ok=True)
 
-    def write(self, sandbox_path: str, content):
+    def write(self, sandbox_path: str, content, **_kwargs):
         if isinstance(content, str):
             content = content.encode("utf-8")
         data = bytes(content)
@@ -62,6 +62,12 @@ class _Commands:
     def run(self, command: str, **kwargs):
         self.run_calls.append((command, kwargs))
         cwd = self.files._host_path(kwargs.get("cwd") or "/home/user/worker")
+        sandbox_tmp = self.files._host_path("/tmp")
+        sandbox_tmp.mkdir(parents=True, exist_ok=True)
+        command = command.replace(
+            "find /tmp ",
+            f"find {shlex.quote(str(sandbox_tmp))} ",
+        )
         envs = kwargs.get("envs") or {}
         env = {**os.environ, **envs}
         if envs:
@@ -108,10 +114,10 @@ class _Sandbox:
         cls.last_create_kwargs = kwargs
         return cls()
 
-    def kill(self):
+    def kill(self, **_kwargs):
         self.killed = True
 
-    def set_timeout(self, timeout: int):
+    def set_timeout(self, timeout: int, **_kwargs):
         self.set_timeout_calls.append(timeout)
 
 
@@ -429,6 +435,57 @@ with open("result.json", "w", encoding="utf-8") as handle:
     commands = [command for command, _kwargs in _Sandbox.instances[-1].commands.run_calls]
     assert not any("pip install -q -r" in command for command in commands)
     assert any("template marks Python deps as baked" in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_python_template_warns_when_exact_pin_differs(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_DEPS_BAKED", "1")
+
+    worker_dir = tmp_path / "worker-pin-warning"
+    worker_dir.mkdir()
+    (worker_dir / "requirements.txt").write_text("requests==0.0.1\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text(
+        "import json\njson.dump({'status': 'success', 'outputs': {}, 'artifacts': []}, open('result.json', 'w'))\n",
+        encoding="utf-8",
+    )
+    config = WorkerConfig(
+        id="pin-warning-worker",
+        name="Pin Warning Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="pin-warning-worker",
+        run_id="run-pin-warning-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-pin-warning-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert any(
+        level == "warning"
+        and "requirements.txt pins requests==0.0.1" in message
+        and "baked template provides requests==" in message
+        for message, level in logs
+    ), logs
 
     if _Sandbox.host_root:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)

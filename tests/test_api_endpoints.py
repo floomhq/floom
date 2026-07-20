@@ -383,6 +383,26 @@ class TestPatchWorker(unittest.TestCase):
         r_after = client.get(f"/workers/{self.worker_id}")
         self.assertEqual(r_after.json()["trigger_type"], original_trigger_type)
 
+    def test_patch_schedule_without_cron_returns_clear_400_and_no_write(self):
+        r = client.patch(
+            f"/workers/{self.worker_id}",
+            json={"trigger_type": "schedule"},
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("require a cron expression", r.json()["detail"].lower())
+
+        after = client.get(f"/workers/{self.worker_id}")
+        self.assertEqual(after.status_code, 200)
+        self.assertEqual(after.json()["trigger_type"], "manual")
+
+    def test_patch_schedule_with_cron_is_accepted(self):
+        r = client.patch(
+            f"/workers/{self.worker_id}",
+            json={"trigger_type": "schedule", "cron_expr": "0 9 * * *"},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["trigger_type"], "schedule")
+
     def test_patch_trigger_type_updates_worker(self):
         r = client.patch(
             f"/workers/{self.worker_id}",

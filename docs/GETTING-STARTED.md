@@ -119,6 +119,7 @@ provider's credentials.
 | --- | --- | --- |
 | `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `bedrock/us.anthropic.claude-sonnet-4-6` |
 | `WORKEROS_CHAT_MODEL` | Emily chat assistant | `gpt-5.4-mini` |
+| `WORKEROS_CHAT_MODEL_FALLBACK` | Emily fallback for quota/auth failures | unset |
 | `WORKEROS_CODEGEN_MODEL` | worker codegen, draft, and repair | `gpt-5.5` |
 | `WORKEROS_SUGGEST_MODEL` | worker-edit conflict check | codegen model |
 
@@ -127,6 +128,7 @@ Example Bedrock configuration:
 ```bash
 WORKEROS_WORKER_AGENT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
 WORKEROS_CHAT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+WORKEROS_CHAT_MODEL_FALLBACK=gpt-5.4-mini
 WORKEROS_CODEGEN_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...

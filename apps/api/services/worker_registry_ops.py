@@ -326,6 +326,30 @@ def _parse_worker_payload(
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}")
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
+
+    declared_triggers: list[Any] = []
+    if isinstance(raw.get("triggers"), list):
+        declared_triggers.extend(raw["triggers"])
+    raw_trigger = raw.get("trigger")
+    if isinstance(raw_trigger, list):
+        declared_triggers.extend(raw_trigger)
+    elif isinstance(raw_trigger, dict):
+        declared_triggers.append(raw_trigger)
+    for trigger in declared_triggers:
+        if not isinstance(trigger, dict):
+            continue
+        trigger_type = str(trigger.get("type") or "manual").strip().lower()
+        if trigger_type in {"schedule", "cron", "scheduled"} and not str(
+            trigger.get("cron") or ""
+        ).strip():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Schedule triggers require a cron expression. "
+                    "Set trigger.cron before saving."
+                ),
+            )
+
     raw_worker_id = str(raw.get("id") or raw.get("name") or "").strip()
     if raw_worker_id in PROTECTED_STOCK_WORKER_IDS and not allow_protected_worker_id:
         _raise_if_protected_worker_mutation(raw_worker_id)

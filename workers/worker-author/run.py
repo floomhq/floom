@@ -375,6 +375,25 @@ def _validate_worker_yml(yml_string: str, *, prompt: str = "", suggested_id: str
         if entry and not (entry.endswith(".md") or entry.endswith(".py") or
                           entry.endswith(".sh") or entry.endswith(".js")):
             return f"exec.entry must end in .md, .py, .sh, or .js; got {entry!r}"
+        declared_triggers: List[Any] = []
+        if isinstance(manifest.get("triggers"), list):
+            declared_triggers.extend(manifest["triggers"])
+        raw_trigger = manifest.get("trigger")
+        if isinstance(raw_trigger, list):
+            declared_triggers.extend(raw_trigger)
+        elif isinstance(raw_trigger, dict):
+            declared_triggers.append(raw_trigger)
+        for trigger in declared_triggers:
+            if not isinstance(trigger, dict):
+                continue
+            trigger_type = str(trigger.get("type") or "manual").strip().lower()
+            if trigger_type in {"schedule", "cron", "scheduled"} and not str(
+                trigger.get("cron") or ""
+            ).strip():
+                return (
+                    "Schedule triggers require a cron expression. "
+                    "Ask the operator for the missing schedule instead of inventing one."
+                )
         return None
     except Exception as exc:
         return f"YAML parse error: {exc}"
@@ -1549,6 +1568,9 @@ Script-mode run.py rules (these EXACT mistakes crash generated workers — never
 - is_example must be false
 - system_worker must be false or absent
 - trigger.type: "manual" unless the prompt explicitly describes a schedule or webhook
+- trigger.cron is REQUIRED for schedule triggers and must come from timing the
+  operator explicitly requested. Never invent a default cron. If timing is
+  incomplete, report that the schedule needs clarification.
 - trigger MUST be a single YAML mapping, never a list. Use `trigger:\n  type: "schedule"` not `trigger:\n- type: "schedule"`.
 - if you include "use_cases", it MUST contain EXACTLY 3 to 5 short items; otherwise omit the field entirely
 - if you include "tags", it MUST contain 8 or fewer flat (no "/") non-empty strings; otherwise omit it

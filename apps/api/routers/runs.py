@@ -23,6 +23,7 @@ import os
 import time
 import uuid as _uuid_mod
 import zipfile
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -121,6 +122,16 @@ def _run_part_log_poll_interval_seconds() -> float:
         return 2.0
 
 
+def _run_log_drain_poll_interval_seconds() -> float:
+    try:
+        return max(
+            0.05,
+            float(os.environ.get("WORKEROS_RUN_LOG_DRAIN_POLL_INTERVAL", "0.5")),
+        )
+    except (TypeError, ValueError):
+        return 0.5
+
+
 def _run_part_log_key(part: Dict[str, Any]) -> tuple[str, str, str]:
     return (
         str(part.get("timestamp") or ""),
@@ -161,6 +172,53 @@ def _public_run_log_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
     if event.get("trace_id"):
         log_event["trace_id"] = event["trace_id"]
     return log_event
+
+
+def _run_log_event_key(event: Dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(event.get("timestamp") or ""),
+        str(event.get("level") or "info"),
+        str(event.get("message") or ""),
+        str(event.get("trace_id") or ""),
+    )
+
+
+def _unseen_persisted_log_events(
+    events: List[Dict[str, Any]],
+    seen: Counter[tuple[str, str, str, str]],
+) -> List[Dict[str, Any]]:
+    occurrences: Counter[tuple[str, str, str, str]] = Counter()
+    unseen: List[Dict[str, Any]] = []
+    for event in events:
+        key = _run_log_event_key(event)
+        occurrences[key] += 1
+        if occurrences[key] > seen[key]:
+            unseen.append(event)
+    for key, count in occurrences.items():
+        if count > seen[key]:
+            seen[key] = count
+    return unseen
+
+
+def _run_logs_are_drained(repos: Repositories, *, user_id: str, run_id: str) -> bool:
+    check = getattr(repos.runs, "logs_drained", None)
+    if not callable(check):
+        return True
+    try:
+        return bool(check(user_id=user_id, run_id=run_id))
+    except Exception:
+        logger.exception("Failed to check run-log drain marker for run %s", run_id)
+        return False
+
+
+def _terminal_row_uses_drain_marker(row: Dict[str, Any] | None) -> bool:
+    """Only fresh terminal rows wait; legacy rows predate the marker contract."""
+    if not row or not row.get("completed_at"):
+        return False
+    completed_at = _parse_iso8601(row.get("completed_at"))
+    if completed_at is None:
+        return False
+    return time.time() - completed_at.timestamp() < 300
 
 
 def _run_total_cost_usd(raw: Any) -> Optional[float]:
@@ -1720,46 +1778,83 @@ async def stream_run_logs(
         try:
             # Always replay persisted log rows first so the client gets the
             # full history on connect without a separate GET /runs/{id}/logs call.
-            for event in _log_replay_events(repos, auth.user_id, run_id):
+            seen: Counter[tuple[str, str, str, str]] = Counter()
+            initial_events = _log_replay_events(repos, auth.user_id, run_id)
+            for event in initial_events:
+                seen[_run_log_event_key(event)] += 1
                 yield f"data: {json.dumps(event)}\n\n"
 
-            # If the run is already terminal, emit a done event and close.
+            terminal_status: str | None = None
+            terminal_row: Dict[str, Any] | None = None
             if already_terminal:
-                done_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
-                done_status = (done_row or {}).get("status", initial_status)
-                yield f"data: {json.dumps({'type': 'done', 'status': done_status})}\n\n"
-                return
+                terminal_row = _get_run_by_explicit_id(
+                    run_id, user_id=auth.user_id, repos=repos
+                )
+                terminal_status = str((terminal_row or {}).get("status") or initial_status)
+            else:
+                # Subscribe to live SSE events for this run.
+                q: asyncio.Queue = asyncio.Queue(maxsize=512)
+                loop = asyncio.get_running_loop()
+                with _sse_lock:
+                    _sse_queues.setdefault(run_id, []).append((q, loop))
 
-            # Subscribe to live SSE events for this run.
-            q: asyncio.Queue = asyncio.Queue(maxsize=512)
-            loop = asyncio.get_running_loop()
-            with _sse_lock:
-                _sse_queues.setdefault(run_id, []).append((q, loop))
+                try:
+                    while terminal_status is None:
+                        if await request.is_disconnected():
+                            return
 
-            try:
-                while True:
+                        try:
+                            event = await asyncio.wait_for(
+                                q.get(), timeout=_run_log_drain_poll_interval_seconds()
+                            )
+                        except asyncio.TimeoutError:
+                            polled_row = _get_run_by_explicit_id(
+                                run_id, user_id=auth.user_id, repos=repos
+                            )
+                            polled_status = str((polled_row or {}).get("status") or "")
+                            if polled_status in _TERMINAL_STATUSES:
+                                terminal_status = polled_status
+                                terminal_row = polled_row
+                                continue
+                            yield ": keepalive\n\n"
+                            continue
+
+                        evt_type = event.get("type")
+
+                        if evt_type == "log":
+                            log_event = _public_run_log_sse_event(event)
+                            seen[_run_log_event_key(log_event)] += 1
+                            yield f"data: {json.dumps(log_event)}\n\n"
+
+                        evt_status = str(event.get("status") or "")
+                        if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
+                            terminal_status = evt_status or "unknown"
+                            terminal_row = _get_run_by_explicit_id(
+                                run_id, user_id=auth.user_id, repos=repos
+                            )
+                finally:
+                    _sse_cleanup(run_id, q)
+
+            # Terminal status is deliberately independent from log persistence.
+            # Keep this existing stream open until the ordered marker arrives,
+            # replaying rows persisted by another process in the meantime.
+            if _terminal_row_uses_drain_marker(terminal_row):
+                while not _run_logs_are_drained(
+                    repos, user_id=auth.user_id, run_id=run_id
+                ):
                     if await request.is_disconnected():
-                        break
+                        return
+                    for event in _unseen_persisted_log_events(
+                        _log_replay_events(repos, auth.user_id, run_id), seen
+                    ):
+                        yield f"data: {json.dumps(event)}\n\n"
+                    await asyncio.sleep(_run_log_drain_poll_interval_seconds())
 
-                    try:
-                        event = await asyncio.wait_for(q.get(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        yield ": keepalive\n\n"
-                        continue
-
-                    evt_type = event.get("type")
-
-                    if evt_type == "log":
-                        # Forward log events with trace_id when present.
-                        log_event = _public_run_log_sse_event(event)
-                        yield f"data: {json.dumps(log_event)}\n\n"
-
-                    evt_status = event.get("status", "")
-                    if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
-                        yield f"data: {json.dumps({'type': 'done', 'status': evt_status or 'unknown'})}\n\n"
-                        break
-            finally:
-                _sse_cleanup(run_id, q)
+            for event in _unseen_persisted_log_events(
+                _log_replay_events(repos, auth.user_id, run_id), seen
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'status': terminal_status or 'unknown'})}\n\n"
         finally:
             _sse_stream_release(stream_slot)
 

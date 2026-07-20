@@ -36,7 +36,11 @@ from models import (
 )
 
 from ._legacy_sqlite import _row_dict, get_db, now_iso
-from .interface import DURABLE_EXECUTION_LOG_PREFIXES
+from .interface import (
+    DURABLE_EXECUTION_LOG_PREFIXES,
+    RUN_LOG_DRAIN_MARKER_LEVEL,
+    RUN_LOG_DRAIN_MARKER_MESSAGE,
+)
 
 
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
@@ -2046,17 +2050,26 @@ class SqliteRunRepository:
         offset: int,
     ) -> list[dict[str, Any]]:
         with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+            scope_sql = (
+                "(COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"
+                if has_actor_user_id
+                else "w.owner_id = ?"
+            )
+            scope_params: tuple[Any, ...] = (
+                (user_id, user_id) if has_actor_user_id else (user_id,)
+            )
             rows = conn.execute(
-                """
+                f"""
                 SELECT r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
                        r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ? AND r.worker_id = ?
+                WHERE {scope_sql} AND r.worker_id = ?
                 ORDER BY r.created_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                (user_id, worker_id, limit, offset),
+                (*scope_params, worker_id, limit, offset),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -2524,24 +2537,22 @@ class SqliteRunRepository:
                 raise ValueError(f"worker {worker_id} not found")
             # Allow workspace-visible workers to be run by any authenticated user.
             # Non-workspace private workers can only be run by their owner.
-            # When a non-owner runs a workspace worker, attribute the run to the
-            # worker's owner so existing owner-scoped run queries keep working.
+            # effective_user_id is the scope used to read the inserted row back;
+            # actor_user_id separately records the authenticated run initiator.
             #
             # Runnable-by-attribution carve-out: curated catalog/stock workers
             # (PUBLIC_STOCK_WORKER_IDS) ship with the product and may be run by
             # ANY authenticated user. They are seed-owned and `private`, so the
             # owner/visibility checks below would reject a fresh tenant with
-            # "Worker not found"/"Invalid request". Attribute the run to the
-            # CALLER's scope so the catalog worker runs without leaking another
-            # tenant's authored worker (only this curated set is widened).
+            # "Worker not found"/"Invalid request". Only this curated set gets
+            # the widened run permission.
             if worker["owner_id"] == user_id:
                 effective_user_id = user_id
             elif worker["visibility"] == "workspace":
                 effective_user_id = worker["owner_id"]
             elif worker_id in _public_stock_worker_ids():
-                # Curated catalog worker: attribute the run to the worker's owner
-                # (same as the workspace path) so the owner-scoped run JOIN
-                # (w.owner_id) resolves and get()/list() keep working.
+                # Read the inserted row back through its worker-owner scope. The
+                # caller remains independently recorded in actor_user_id.
                 effective_user_id = worker["owner_id"]
             else:
                 # Genuine cross-tenant ownership denial. Raise a typed error the
@@ -2643,8 +2654,17 @@ class SqliteRunRepository:
             else:
                 params.append(value)
         if updates:
-            params.extend([run_id, user_id])
             with get_db() as conn:
+                has_actor_user_id = self._has_actor_user_id_column(conn)
+                scope_sql = (
+                    "(COALESCE(runs.actor_user_id, workers.owner_id) = ? "
+                    "OR workers.owner_id = ?)"
+                    if has_actor_user_id
+                    else "workers.owner_id = ?"
+                )
+                scope_params: tuple[Any, ...] = (
+                    (user_id, user_id) if has_actor_user_id else (user_id,)
+                )
                 conn.execute(
                     f"""
                     UPDATE runs
@@ -2653,10 +2673,10 @@ class SqliteRunRepository:
                       AND EXISTS (
                           SELECT 1 FROM workers
                           WHERE workers.id = runs.worker_id
-                            AND workers.owner_id = ?
+                            AND {scope_sql}
                       )
                     """,
-                    tuple(params),
+                    (*params, run_id, *scope_params),
                 )
         return self.get(user_id=user_id, run_id=run_id)
 
@@ -2847,6 +2867,27 @@ class SqliteRunRepository:
                 batch,
             )
 
+    def logs_drained(self, *, user_id: str, run_id: str) -> bool:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM logs l
+                JOIN runs r ON r.id = l.run_id
+                JOIN workers w ON w.id = r.worker_id
+                WHERE l.run_id = ? AND w.owner_id = ?
+                  AND l.level = ? AND l.message = ?
+                LIMIT 1
+                """,
+                (
+                    run_id,
+                    user_id,
+                    RUN_LOG_DRAIN_MARKER_LEVEL,
+                    RUN_LOG_DRAIN_MARKER_MESSAGE,
+                ),
+            ).fetchone()
+        return row is not None
+
     def list_logs(
         self,
         *,
@@ -2877,11 +2918,11 @@ class SqliteRunRepository:
                 FROM logs l
                 JOIN runs r ON r.id = l.run_id
                 JOIN workers w ON w.id = r.worker_id
-                WHERE {scope_sql}
-                ORDER BY l.timestamp
+                WHERE {scope_sql} AND l.level != ?
+                ORDER BY l.timestamp, l.id
                 LIMIT ?
                 """,
-                params,
+                (*params[:-1], RUN_LOG_DRAIN_MARKER_LEVEL, params[-1]),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -2895,7 +2936,7 @@ class SqliteRunRepository:
         limit: int = 200,
     ) -> list[dict[str, Any]]:
         """Cross-run logs for a worker, scoped to user_id, optionally filtered by level/since."""
-        params: list[Any] = [user_id, worker_id]
+        params: list[Any] = [user_id, worker_id, RUN_LOG_DRAIN_MARKER_LEVEL]
         level_clause = ""
         since_clause = ""
         if level:
@@ -2912,7 +2953,7 @@ class SqliteRunRepository:
                 FROM logs l
                 JOIN runs r ON r.id = l.run_id
                 JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ? AND r.worker_id = ?
+                WHERE w.owner_id = ? AND r.worker_id = ? AND l.level != ?
                   {level_clause} {since_clause}
                 ORDER BY l.timestamp DESC
                 LIMIT ?

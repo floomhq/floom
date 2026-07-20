@@ -163,7 +163,6 @@ async def public_drop_upload(
     )
     _claim_drop_rate_limit(token, owner_id)
     stored = await _store_uploaded_blob(
-        request,
         file,
         owner_id,
         max_size_mb=effective_max_size_mb,

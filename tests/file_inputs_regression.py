@@ -11,7 +11,9 @@ Scenarios covered:
   - 10 same-loop async uploads: all succeed and dedup by SHA
   - 5 concurrent runs of same worker with different file SHAs: each sees only its own file
   - Optional file omitted in run 2 after run 1: run 2 inputs dir is clean
-  - POST /runs with non-SHA file input values: 400 and no worker execution
+  - POST /runs with non-SHA string file input values: inline content is
+    transparently uploaded (#2265) and the run executes on the literal text
+  - POST /runs with a hex-like typo'd SHA: 400 and no run row (#2265 guard)
   - Bind non-existent SHA: 404 and no orphan queued run
   - File-size revalidation: upload over worker limit, bind rejected with 400
 """
@@ -360,10 +362,13 @@ def _main_body() -> int:
         bad_bind_response.text[:300],
     )
 
-    # --- Non-SHA file input values are rejected before worker execution ---
-    print("\n[section] Non-SHA file input rejection")
+    # --- #2265: non-SHA string values are inline content, not a 400 ---
+    # workers.sample_input hands agents inline text for file inputs; run
+    # creation now transparently uploads such values through the same
+    # /uploads pipeline and stages the literal text for the worker.
+    print("\n[section] Inline file input content (#2265)")
     for raw_value in ("/etc/hosts", "not-a-sha"):
-        trigger = f"non_sha_{raw_value.replace('/', '_').replace('-', '_')}"
+        trigger = f"inline_{raw_value.replace('/', '_').replace('-', '_')}"
         response = client.post(
             f"/workers/{TEST_WORKER_ID}/runs",
             json={
@@ -372,25 +377,51 @@ def _main_body() -> int:
             },
         )
         check(
-            f"non-SHA value {raw_value!r} rejected with 400",
-            response.status_code == 400,
+            f"inline value {raw_value!r} accepted as content",
+            response.status_code == 200,
             response.text[:300],
         )
-        row = db_row(
-            """
-            SELECT status, output_json, error
-            FROM runs
-            WHERE trigger_source = ?
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            (trigger,),
-        )
-        check(
-            f"non-SHA value {raw_value!r} did not execute worker",
-            row is None,
-            dict(row) if row else "no run row",
-        )
+        if response.status_code == 200:
+            inline_run_id = response.json()["run_id"]
+            inline_run = wait_for_run(inline_run_id)
+            check(
+                f"inline value {raw_value!r} run completed",
+                inline_run["status"] == "completed",
+                inline_run["status"],
+            )
+            staged_inline = ARTIFACTS_DIR / inline_run_id / "inputs" / "upload.csv"
+            check(
+                f"inline value {raw_value!r} staged as literal content",
+                staged_inline.is_file() and staged_inline.read_text() == raw_value,
+                str(staged_inline),
+            )
+
+    # A hex-like typo'd SHA must NOT silently become file content — rejected
+    # with 400 before any run row is created.
+    typo_trigger = "typo_sha_2265"
+    typo_response = client.post(
+        f"/workers/{TEST_WORKER_ID}/runs",
+        json={
+            "inputs": {"upload": "f" * 63},
+            "trigger_source": typo_trigger,
+        },
+    )
+    check(
+        "hex-like typo'd SHA rejected with 400",
+        typo_response.status_code == 400 and "malformed SHA-256" in typo_response.text,
+        typo_response.text[:300],
+    )
+    typo_row = db_row(
+        """
+        SELECT status FROM runs WHERE trigger_source = ? LIMIT 1
+        """,
+        (typo_trigger,),
+    )
+    check(
+        "typo'd SHA did not create a run",
+        typo_row is None,
+        dict(typo_row) if typo_row else "no run row",
+    )
 
     # --- Bind non-existent SHA: 404 ---
     print("\n[section] Bind non-existent SHA")

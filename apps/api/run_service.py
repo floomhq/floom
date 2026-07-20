@@ -11,8 +11,10 @@ import time
 import queue
 import sqlite3
 import inspect
+import tempfile
+import itertools
 from html import escape
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime, timedelta, timezone
@@ -147,6 +149,7 @@ from dotenv import load_dotenv
 
 from contexts import context_scope_for_user, use_context_scope
 from db.factory import Repositories, get_repositories
+from db.interface import RUN_LOG_DRAIN_MARKER_LEVEL, RUN_LOG_DRAIN_MARKER_MESSAGE
 from runner_utils import ARTIFACTS_DIR, DEFAULT_TIMEOUT_SECONDS, _validate_output_schema
 from worker_registry import WORKERS_DIR, get_worker_config
 from runner_sandbox import get_driver as get_sandbox_driver
@@ -283,9 +286,92 @@ class _PendingLog:
     message: str
     timestamp: str
     trace_id: str | None
+    ingest_id: str = ""
+
+
+class _LogSpool:
+    """Length-prefixed overflow spool with bounded RAM and ordered acknowledgement."""
+
+    def __init__(self, *, max_memory_bytes: int = 1024 * 1024) -> None:
+        self._file = tempfile.SpooledTemporaryFile(max_size=max_memory_bytes, mode="w+b")
+        self._read_offset = 0
+        self._pending = 0
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _encode(item: _PendingLog) -> bytes:
+        return json.dumps(
+            {
+                "user_id": item.user_id,
+                "run_id": item.run_id,
+                "level": item.level,
+                "message": item.message,
+                "timestamp": item.timestamp,
+                "trace_id": item.trace_id,
+                "ingest_id": item.ingest_id,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    @staticmethod
+    def _decode(raw: bytes) -> _PendingLog:
+        row = json.loads(raw.decode("utf-8"))
+        return _PendingLog(
+            user_id=row["user_id"],
+            run_id=row["run_id"],
+            level=row["level"],
+            message=row["message"],
+            timestamp=row["timestamp"],
+            trace_id=row.get("trace_id"),
+            ingest_id=row["ingest_id"],
+        )
+
+    def append(self, item: _PendingLog) -> None:
+        raw = self._encode(item)
+        with self._lock:
+            self._file.seek(0, os.SEEK_END)
+            self._file.write(len(raw).to_bytes(8, "big"))
+            self._file.write(raw)
+            self._pending += 1
+
+    def peek(self, limit: int) -> tuple[list[_PendingLog], int, int]:
+        rows: list[_PendingLog] = []
+        with self._lock:
+            self._file.seek(self._read_offset)
+            while len(rows) < limit:
+                prefix = self._file.read(8)
+                if not prefix:
+                    break
+                if len(prefix) != 8:
+                    raise RuntimeError("run-log spool contains a truncated length prefix")
+                size = int.from_bytes(prefix, "big")
+                raw = self._file.read(size)
+                if len(raw) != size:
+                    raise RuntimeError("run-log spool contains a truncated record")
+                rows.append(self._decode(raw))
+            return rows, self._file.tell(), len(rows)
+
+    def ack(self, offset: int, count: int) -> None:
+        with self._lock:
+            self._read_offset = offset
+            self._pending = max(0, self._pending - count)
+            if self._pending == 0:
+                self._file.seek(0)
+                self._file.truncate(0)
+                self._read_offset = 0
+
+    def pending_count(self) -> int:
+        with self._lock:
+            return self._pending
 
 
 _log_queue: "queue.Queue[_PendingLog | None]" = queue.Queue(maxsize=10000)
+_log_spool = _LogSpool()
+_log_enqueue_lock = threading.Lock()
+_log_spill_active = False
+_log_ingest_epoch_ns = time.time_ns()
+_log_ingest_sequence = itertools.count()
 _log_flush_thread: Optional[threading.Thread] = None
 _log_flush_lock = threading.Lock()
 _log_flush_stop = threading.Event()
@@ -1300,6 +1386,7 @@ def create_run(
     *,
     status: str | None = None,
     user_id: str | None = None,
+    actor_user_id: str | None = None,
     trigger_ref: str | None = None,
     retry_of_run_id: str | None = None,
     retry_attempt: int = 0,
@@ -1344,6 +1431,7 @@ def create_run(
                 trigger_ref=trigger_ref,
                 retry_of_run_id=retry_of_run_id,
                 retry_attempt=retry_attempt,
+                actor_user_id=actor_user_id,
             )
             last_exc = None
             break
@@ -1446,6 +1534,7 @@ def _persist_log_batch(batch: list[_PendingLog], repos: Repositories | None = No
                 "message": item.message,
                 "timestamp": item.timestamp,
                 "trace_id": item.trace_id,
+                "ingest_id": item.ingest_id,
             }
             for item in batch
         ])
@@ -1461,67 +1550,141 @@ def _persist_log_batch(batch: list[_PendingLog], repos: Repositories | None = No
         )
 
 
+def _log_spool_pending_count() -> int:
+    return _log_spool.pending_count()
+
+
+def _enqueue_pending_log(item: _PendingLog) -> None:
+    """Queue a row without ever waiting on the remote repository.
+
+    RAM stays bounded by ``_log_queue`` plus the spool's in-memory threshold.
+    Once the queue fills, all newer rows use the ordered local spool until the
+    flusher has drained both sources, preventing a later queue row from
+    overtaking an earlier overflow row.
+    """
+    global _log_spill_active
+    start_log_flush_loop()
+    with _log_enqueue_lock:
+        if not item.ingest_id:
+            item = replace(
+                item,
+                ingest_id=(
+                    f"{_log_ingest_epoch_ns:020d}-"
+                    f"{next(_log_ingest_sequence):020d}-"
+                    f"{uuid.uuid4().hex}"
+                ),
+            )
+        if _log_spill_active:
+            _log_spool.append(item)
+            return
+        try:
+            _log_queue.put_nowait(item)
+        except queue.Full:
+            _log_spill_active = True
+            _log_spool.append(item)
+            logger.warning(
+                "Async run-log queue full; spilling locally until persistence catches up"
+            )
+
+
+def _clear_log_spill_if_drained() -> None:
+    global _log_spill_active
+    with _log_enqueue_lock:
+        if _log_queue.empty() and _log_spool.pending_count() == 0:
+            _log_spill_active = False
+
+
+def _take_queued_log_batch(
+    *, batch_size: int, interval: float
+) -> tuple[list[_PendingLog], int]:
+    rows: list[_PendingLog] = []
+    queue_tasks = 0
+    deadline = time.monotonic() + interval
+    while len(rows) < batch_size:
+        timeout = max(0.0, deadline - time.monotonic())
+        if timeout <= 0:
+            break
+        try:
+            item = _log_queue.get(timeout=timeout)
+        except queue.Empty:
+            break
+        if item is None:
+            _log_queue.task_done()
+            if rows:
+                break
+            continue
+        rows.append(item)
+        queue_tasks += 1
+    return rows, queue_tasks
+
+
 def _log_flush_loop() -> None:
     logger.info("Async run-log flush loop started")
     batch_size = _log_flush_batch_size()
     interval = _log_flush_interval_seconds()
-    pending: list[_PendingLog] = []
-    while not _log_flush_stop.is_set():
-        try:
-            item = _log_queue.get(timeout=interval)
-        except queue.Empty:
-            # Idle timeout: nothing was dequeued, so we must NOT call task_done().
-            # Doing so drives the queue's unfinished-task counter negative and raises
-            # "task_done() called too many times", which kills this daemon thread and
-            # silently breaks run-log/result persistence. Just flush what we have.
-            if pending:
-                try:
-                    _persist_log_batch(pending)
-                except Exception as exc:
-                    logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
-                pending = []
-            continue
-        # An item was dequeued (a real row, or the None shutdown/flush sentinel):
-        # exactly one task_done() is owed for it, regardless of branch.
-        try:
-            if item is None:
-                if pending:
-                    try:
-                        _persist_log_batch(pending)
-                    except Exception as exc:
-                        logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
-                    pending = []
-            else:
-                pending.append(item)
-                if len(pending) >= batch_size:
-                    try:
-                        _persist_log_batch(pending)
-                    except Exception as exc:
-                        logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
-                    pending = []
-        finally:
-            _log_queue.task_done()
-
-    # Final best-effort drain on shutdown.
+    retry_delay = 0.05
     while True:
-        try:
-            item = _log_queue.get_nowait()
-        except queue.Empty:
-            break
-        if item is not None:
-            pending.append(item)
-        _log_queue.task_done()
-        if len(pending) >= batch_size:
-            try:
-                _persist_log_batch(pending)
-            except Exception as exc:
-                logger.warning("Async run-log shutdown flush failed for %d row(s): %s", len(pending), exc)
-            pending = []
-    if pending:
+        if _log_spool.pending_count() and _log_queue.empty():
+            pending, queue_tasks = [], 0
+        else:
+            pending, queue_tasks = _take_queued_log_batch(
+                batch_size=batch_size,
+                interval=interval,
+            )
+        spool_offset = 0
+        spool_count = 0
+        if not pending and _log_spool.pending_count():
+            pending, spool_offset, spool_count = _log_spool.peek(batch_size)
+        if not pending:
+            _clear_log_spill_if_drained()
+            if (
+                _log_flush_stop.is_set()
+                and _log_queue.empty()
+                and _log_spool.pending_count() == 0
+            ):
+                break
+            continue
+
         try:
             _persist_log_batch(pending)
         except Exception as exc:
-            logger.warning("Async run-log shutdown flush failed for %d row(s): %s", len(pending), exc)
+            logger.warning(
+                "Async run-log flush failed for %d row(s); retrying without loss: %s",
+                len(pending),
+                exc,
+            )
+            # Queue rows have already been removed. Put them into the ordered
+            # local spool before retrying so RAM remains bounded during an
+            # extended database outage. Because spill mode prevents newer rows
+            # from re-entering the queue, their relative order is retained.
+            if queue_tasks:
+                global _log_spill_active
+                with _log_enqueue_lock:
+                    _log_spill_active = True
+                    for item in pending:
+                        _log_spool.append(item)
+                    # Rows accepted while the failed network request was in
+                    # flight are newer than ``pending``. Move them behind the
+                    # failed batch before releasing producers into spill mode.
+                    while True:
+                        try:
+                            queued_item = _log_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        if queued_item is not None:
+                            _log_spool.append(queued_item)
+                        _log_queue.task_done()
+                for _ in range(queue_tasks):
+                    _log_queue.task_done()
+            time.sleep(retry_delay)
+            retry_delay = min(1.0, retry_delay * 2)
+            continue
+        retry_delay = 0.05
+        for _ in range(queue_tasks):
+            _log_queue.task_done()
+        if spool_count:
+            _log_spool.ack(spool_offset, spool_count)
+        _clear_log_spill_if_drained()
 
 
 def start_log_flush_loop() -> None:
@@ -1554,7 +1717,7 @@ def stop_log_flush_loop(timeout: float = 5.0) -> None:
 
 
 def flush_run_logs(run_id: str | None = None, *, timeout: float = 2.0) -> None:
-    """Best-effort barrier for tests/terminal transitions when async logging is on."""
+    """Explicit best-effort barrier for tests and graceful shutdown callers."""
     if not _async_log_flush_enabled():
         return
     start_log_flush_loop()
@@ -1564,9 +1727,36 @@ def flush_run_logs(run_id: str | None = None, *, timeout: float = 2.0) -> None:
         pass
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _log_queue.unfinished_tasks == 0:
+        if _log_queue.unfinished_tasks == 0 and _log_spool.pending_count() == 0:
             return
         time.sleep(0.01)
+
+
+def _enqueue_log_drain_marker(
+    run_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> None:
+    marker = _PendingLog(
+        user_id=user_id,
+        run_id=run_id,
+        level=RUN_LOG_DRAIN_MARKER_LEVEL,
+        message=RUN_LOG_DRAIN_MARKER_MESSAGE,
+        timestamp=_now_iso(),
+        trace_id=None,
+    )
+    if _async_log_flush_enabled():
+        _enqueue_pending_log(marker)
+    else:
+        repos.runs.add_log(
+            user_id=marker.user_id,
+            run_id=marker.run_id,
+            level=marker.level,
+            message=marker.message,
+            timestamp=marker.timestamp,
+            trace_id=None,
+        )
 
 
 def add_log(
@@ -1588,26 +1778,14 @@ def add_log(
         owner_id, _worker_id = scope
     ts = _now_iso()
     if _async_log_flush_enabled():
-        start_log_flush_loop()
-        try:
-            _log_queue.put_nowait(_PendingLog(
-                user_id=owner_id,
-                run_id=run_id,
-                level=level,
-                message=message,
-                timestamp=ts,
-                trace_id=trace_id,
-            ))
-        except queue.Full:
-            logger.warning("Async run-log queue full; writing log synchronously for run %s", run_id)
-            repos_obj.runs.add_log(
-                user_id=owner_id,
-                run_id=run_id,
-                level=level,
-                message=message,
-                timestamp=ts,
-                trace_id=trace_id,
-            )
+        _enqueue_pending_log(_PendingLog(
+            user_id=owner_id,
+            run_id=run_id,
+            level=level,
+            message=message,
+            timestamp=ts,
+            trace_id=trace_id,
+        ))
     else:
         repos_obj.runs.add_log(
             user_id=owner_id,
@@ -2129,9 +2307,16 @@ def update_run_status(
         RunStatus.COMPLETED.value,
         RunStatus.FAILED.value,
         RunStatus.CANCELLED.value,
-        RunStatus.PENDING_APPROVAL.value,
+        RunStatus.REJECTED.value,
     }:
-        flush_run_logs(run_id)
+        # The terminal status above is authoritative immediately. The marker is
+        # queued behind every prior row, allowing log persistence and the run
+        # detail stream to finish asynchronously without extending run time.
+        _enqueue_log_drain_marker(
+            run_id,
+            user_id=owner_id,
+            repos=repos_obj,
+        )
 
     if worker_id and status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
         # #793/#795: persist per-run cost at terminal status (best-effort) so
@@ -2755,6 +2940,10 @@ _drain_thread: Optional[threading.Thread] = None
 _drain_lock = threading.Lock()
 
 _DRAIN_POLL_INTERVAL = 0.5  # seconds between polls when runs are queued
+_DRAIN_HEARTBEAT_STALE_AFTER_SECONDS = max(30.0, _DRAIN_POLL_INTERVAL * 3)
+_DRAIN_HEARTBEAT_LOG_INTERVAL_SECONDS = 30.0
+_drain_last_heartbeat_monotonic: float | None = None
+_drain_last_heartbeat_log_monotonic: float | None = None
 
 _run_reaper_stop = threading.Event()
 _run_reaper_thread: Optional[threading.Thread] = None
@@ -2766,6 +2955,43 @@ def _wake_drain() -> None:
     _drain_event.set()
 
 
+def _record_drain_heartbeat() -> None:
+    global _drain_last_heartbeat_monotonic, _drain_last_heartbeat_log_monotonic
+    now = time.monotonic()
+    _drain_last_heartbeat_monotonic = now
+    last_log = _drain_last_heartbeat_log_monotonic
+    if last_log is None or now - last_log >= _DRAIN_HEARTBEAT_LOG_INTERVAL_SECONDS:
+        logger.info("Queue drain heartbeat")
+        _drain_last_heartbeat_log_monotonic = now
+
+
+def drain_loop_status(*, now_monotonic: float | None = None) -> dict[str, Any]:
+    """Return queue-drain thread and monotonic heartbeat readiness."""
+    thread = _drain_thread
+    alive = bool(thread is not None and thread.is_alive())
+    running = alive and not _drain_stop.is_set()
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    last_heartbeat = _drain_last_heartbeat_monotonic
+    heartbeat_age = (
+        max(0.0, now - last_heartbeat)
+        if last_heartbeat is not None
+        else None
+    )
+    stale = running and (
+        heartbeat_age is None
+        or heartbeat_age > _DRAIN_HEARTBEAT_STALE_AFTER_SECONDS
+    )
+    return {
+        "ok": running and not stale,
+        "running": running,
+        "thread": thread.name if thread is not None else None,
+        "stopping": _drain_stop.is_set(),
+        "heartbeat_age_seconds": heartbeat_age,
+        "stale_after_seconds": _DRAIN_HEARTBEAT_STALE_AFTER_SECONDS,
+        "stale": stale,
+    }
+
+
 def _drain_loop() -> None:
     """Background thread: drain the queued-runs table as execution slots free up."""
     logger.info("Queue drain loop started (max_concurrent=%d)", _max_concurrent_runs())
@@ -2775,6 +3001,7 @@ def _drain_loop() -> None:
         _drain_event.clear()
         if _drain_stop.is_set():
             break
+        _record_drain_heartbeat()
         _drain_one_batch()
 
 
@@ -2913,7 +3140,7 @@ def _drain_one_batch() -> None:
 
 def start_drain_loop() -> None:
     """Start the background queue drain thread (idempotent)."""
-    global _drain_thread
+    global _drain_thread, _drain_last_heartbeat_monotonic
     if not execution_role_enabled():
         logger.info("Skipping queue drain loop start because WORKEROS_ROLE=%s", workeros_role())
         return
@@ -2921,6 +3148,7 @@ def start_drain_loop() -> None:
         if _drain_thread is not None and _drain_thread.is_alive():
             return
         _drain_stop.clear()
+        _drain_last_heartbeat_monotonic = time.monotonic()
         _drain_thread = threading.Thread(
             target=_drain_loop,
             daemon=True,

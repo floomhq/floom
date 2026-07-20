@@ -82,6 +82,12 @@ describe("W-02 editable triggers", () => {
     expect(out).toContain("runtime: skill");
   });
 
+  it("rejects a cronless schedule instead of inventing a default", () => {
+    const row = makeTriggerRow({ type: "schedule", timezone: "Europe/Berlin" });
+    expect(row.cronExpr).toBe("");
+    expect(() => buildTriggersYaml([row])).toThrow(/require a cron expression/i);
+  });
+
   it("writes a schedule trigger block with cron + timezone", () => {
     const yaml = ["name: w", "trigger:", "  type: manual", "exec:", "  runtime: skill"].join("\n");
     const next = buildTriggersYaml([

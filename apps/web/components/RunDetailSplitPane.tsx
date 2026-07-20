@@ -790,6 +790,30 @@ function WorkerAuthorOutputFallback({ run, fileFields }: { run: RunDetail; fileF
   );
 }
 
+// #1183: cap for INLINE rendering in the Output tab. Small text/markdown
+// artifacts (e.g. out/report.md) render their content directly instead of
+// forcing a download to read them; anything larger, or not text-shaped, stays
+// a download-only stub (never fetched, never inlined).
+const INLINE_ARTIFACT_MAX_BYTES = 256 * 1024;
+
+type InlineKind = "markdown" | "text";
+
+function inlineKindForArtifact(artifact: RunDetail["artifacts"][number] | undefined): InlineKind | null {
+  if (!artifact) return null;
+  if (artifact.size_bytes == null || artifact.size_bytes > INLINE_ARTIFACT_MAX_BYTES) return null;
+  const mime = (artifact.type || "").toLowerCase();
+  const name = (artifact.name || "").toLowerCase();
+  if (mime === "text/markdown" || mime === "text/x-markdown" || /\.(md|markdown)$/.test(name)) return "markdown";
+  if (
+    mime.startsWith("text/") ||
+    mime === "application/json" ||
+    /\.(txt|json|csv|log|ya?ml|xml|ini|cfg)$/.test(name)
+  ) {
+    return "text";
+  }
+  return null;
+}
+
 function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; path: string }) {
   const normalizedPath = normalizeRunPath(path);
   const artifact = run.artifacts.find((candidate) => {
@@ -798,21 +822,65 @@ function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; p
     return normalizedPath === artifactPath || artifactPath.endsWith(`/${normalizedPath}`) || normalizedPath.endsWith(`/${name}`);
   });
   const href = artifact ? api.runs.artifactUrl(run.id, artifact.id) : api.runs.bundleUrl(run.id, path);
+  const inlineKind = inlineKindForArtifact(artifact);
+  const [inlineContent, setInlineContent] = useState<string | null>(null);
+  const [inlineFailed, setInlineFailed] = useState(false);
+
+  const artifactId = artifact?.id;
+
+  useEffect(() => {
+    if (!inlineKind || !artifactId) return;
+    let cancelled = false;
+    setInlineContent(null);
+    setInlineFailed(false);
+    api.runs
+      .artifactText(run.id, artifactId, { maxBytes: INLINE_ARTIFACT_MAX_BYTES })
+      .then((text) => {
+        if (!cancelled) setInlineContent(text);
+      })
+      .catch(() => {
+        if (!cancelled) setInlineFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // artifactId (captured above) is the stable identity the effect closes
+    // over -- no reference to the whole artifact object here, so this
+    // dependency array is exhaustive-deps clean by construction, not just by
+    // suppression. run.id rarely changes without a remount but is included
+    // for correctness.
+  }, [inlineKind, artifactId, run.id]);
+
   return (
-    <a
-      href={href}
-      download
-      className="flex min-w-0 items-center justify-between gap-3 rounded-lg [border:var(--bd-card)] bg-[var(--bg-card)] px-3 py-2 text-sm hover:bg-[var(--active-nav-bg)] transition-colors"
-    >
-      <span className="flex min-w-0 items-center gap-2">
-        <FileText className="size-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0">
-          <span className="block truncate font-medium">{label}</span>
-          <span className="block truncate font-mono text-xs text-muted-foreground">{path}</span>
+    <div className="min-w-0 space-y-2">
+      <a
+        href={href}
+        download
+        className="flex min-w-0 items-center justify-between gap-3 rounded-lg [border:var(--bd-card)] bg-[var(--bg-card)] px-3 py-2 text-sm hover:bg-[var(--active-nav-bg)] transition-colors"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <FileText className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0">
+            <span className="block truncate font-medium">{label}</span>
+            <span className="block truncate font-mono text-xs text-muted-foreground">{path}</span>
+          </span>
         </span>
-      </span>
-      <Download className="size-4 shrink-0 text-muted-foreground" />
-    </a>
+        <Download className="size-4 shrink-0 text-muted-foreground" />
+      </a>
+      {/* Inline preview: SANITIZED via GenericOutput (same renderer already used
+          for non-file schema output: no dangerouslySetInnerHTML, no rehype-raw,
+          worker text/markdown is treated as untrusted throughout). Silently
+          falls back to the download-only stub above on fetch failure. */}
+      {inlineKind && !inlineFailed && (
+        <div className="min-w-0 max-h-[480px] overflow-auto rounded-lg [border:var(--bd-card)] bg-[var(--bg-card)] p-3">
+          {inlineContent == null ? (
+            <p className="text-xs text-muted-foreground">Loading preview…</p>
+          ) : (
+            <GenericOutput type={inlineKind} value={inlineContent} />
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

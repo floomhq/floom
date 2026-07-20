@@ -145,6 +145,12 @@ def _default_chat_model() -> str:
         or os.environ.get("WORKEROS_WORKER_AGENT_MODEL")
         or DEFAULT_WORKSPACE_AGENT_MODEL
     )
+
+
+def _fallback_chat_model() -> Optional[str]:
+    return (os.environ.get("WORKEROS_CHAT_MODEL_FALLBACK") or "").strip() or None
+
+
 def _workspace_root() -> Path:
     custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
     if custom:
@@ -2341,8 +2347,20 @@ async def stream_chat(
     # client with "Event loop is closed". A dedicated client per chat stream
     # isolates this path from concurrent worker-run loops.
     from runner_sandbox.loop_local_provider import LoopLocalModelProvider
+    import llm as _llm
 
-    loop_local_provider = LoopLocalModelProvider()
+    _emily_model = _llm.agent_model(_default_chat_model())
+    fallback_chat_model = _fallback_chat_model()
+    _fallback_model = _llm.agent_model(fallback_chat_model) if fallback_chat_model else None
+    loop_local_provider = LoopLocalModelProvider(
+        fallback_model_name=_fallback_model,
+        should_fallback=_llm.should_retry_chat_with_fallback,
+        fallback_extra_args=(
+            _llm.cache_control_extra_args(_fallback_model)
+            if _fallback_model
+            else None
+        ),
+    )
     run_config = RunConfig(
         workflow_name="workeros:workspace-agent",
         trace_id=f"trace_chat_{uuid.uuid4().hex[:16]}",
@@ -2412,9 +2430,6 @@ async def stream_chat(
             _cap_log(f"MCP unavailable, continuing without it: {exc}", "warning")
             mcp_servers = []
 
-        import llm as _llm
-
-        _emily_model = _llm.agent_model(_default_chat_model())
         agent = Agent(
             name=WORKSPACE_AGENT_ID,
             instructions=system_prompt,

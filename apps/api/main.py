@@ -2658,6 +2658,172 @@ def _validate_file_input_references(
             raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
 
 
+# #2265: inline values that look like a truncated / uppercased / oversized hex
+# digest are rejected instead of being silently uploaded as literal content —
+# a typo'd SHA must not become a file body.
+_HEX_LIKE_FILE_INPUT_RE = re.compile(r"^[0-9a-fA-F]{40,128}$")
+
+
+def _inline_file_input_filename(inp: Any, provided: Optional[str]) -> str:
+    """Default filename for inline file-input content.
+
+    The extension is derived from the input's first ``accepts`` media type so
+    inline content satisfies the input's own accepts constraint (e.g. a
+    ``text/csv`` input stores inline text as ``<name>.csv``).
+    """
+    if provided:
+        return provided
+    accepts = getattr(inp, "accepts", None) or []
+    media_type = accepts[0] if accepts else "text/plain"
+    ext = extension_for_file(None, media_type)
+    if ext == ".bin":
+        ext = ".txt"
+    return f"{inp.name}{ext}"
+
+
+def _resolve_inline_file_inputs(
+    run_config: Optional[WorkerConfig],
+    inputs: Dict[str, Any],
+    request: Optional[Request],
+    uploaded_by: str,
+) -> Dict[str, Any]:
+    """#2265 bridge: accept inline content for ``type: file`` inputs.
+
+    Root cause: ``workers.sample_input`` returns inline example text for file
+    inputs, but run creation only accepted SHA-256 references minted by the
+    browser-only ``POST /uploads`` form — MCP had no upload path at all, so
+    every file-input worker was unrunnable over MCP and the documented
+    sample_input → run happy path was a guaranteed dead-end.
+
+    Inline values (a plain string, or ``{"content"|"content_base64",
+    "filename"?}``, or a list of either) are transparently stored through the
+    SAME upload pipeline as ``POST /uploads`` — extension/media-type
+    allowlists, per-input accepts + max_size_mb, global size caps, hourly
+    quota, and ownership rows all still apply — and are replaced with their
+    SHA-256 reference. The existing validation and staging logic then runs
+    unchanged, so the security contract is not weakened. SHA-256 references
+    pass through untouched.
+    """
+    if not run_config:
+        return inputs
+    file_inputs = [
+        inp for inp in (getattr(run_config, "inputs", []) or [])
+        if getattr(inp, "type", None) == "file"
+    ]
+    if not file_inputs:
+        return inputs
+
+    from async_bridge import run_coro_sync
+    from services.uploads import (
+        _reject_oversized_plaintext,
+        resolve_upload_max_bytes,
+        store_inline_upload,
+    )
+
+    def _to_ref(inp: Any, item: Any) -> Any:
+        if is_sha256(item):
+            return item
+        content_bytes: Optional[bytes] = None
+        provided_name: Optional[str] = None
+        if isinstance(item, str):
+            if _HEX_LIKE_FILE_INPUT_RE.fullmatch(item):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File input '{inp.name}': value looks like a malformed SHA-256 "
+                        "reference (expected 64 lowercase hex characters from POST /uploads "
+                        "or the files.upload MCP tool). Refusing to treat it as inline "
+                        "content; pass {\"content\": ...} to force inline upload."
+                    ),
+                )
+            _reject_oversized_plaintext(
+                item,
+                resolve_upload_max_bytes(getattr(inp, "max_size_mb", None)),
+            )
+            content_bytes = item.encode("utf-8")
+        elif isinstance(item, dict) and (
+            item.get("content") is not None or item.get("content_base64") is not None
+        ):
+            raw_text = item.get("content")
+            raw_b64 = item.get("content_base64")
+            if raw_text is not None and raw_b64 is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File input '{inp.name}': provide either 'content' or "
+                        "'content_base64', not both"
+                    ),
+                )
+            if raw_text is not None:
+                if not isinstance(raw_text, str):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File input '{inp.name}': 'content' must be a string",
+                    )
+                _reject_oversized_plaintext(
+                    raw_text,
+                    resolve_upload_max_bytes(getattr(inp, "max_size_mb", None)),
+                )
+                content_bytes = raw_text.encode("utf-8")
+            else:
+                if not isinstance(raw_b64, str):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File input '{inp.name}': 'content_base64' must be a string",
+                    )
+                from services.uploads import (
+                    _reject_oversized_base64,
+                )
+
+                try:
+                    _reject_oversized_base64(
+                        raw_b64,
+                        resolve_upload_max_bytes(getattr(inp, "max_size_mb", None)),
+                    )
+                    content_bytes = base64.b64decode(raw_b64, validate=True)
+                except (ValueError, TypeError) as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File input '{inp.name}': 'content_base64' is not valid base64",
+                    ) from exc
+            raw_name = item.get("filename")
+            if raw_name is not None and not isinstance(raw_name, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File input '{inp.name}': 'filename' must be a string",
+                )
+            provided_name = raw_name or None
+        else:
+            # Unknown shape — let _validate_file_input_references produce the
+            # canonical error for it.
+            return item
+        filename = _inline_file_input_filename(inp, provided_name)
+        accepts_param = (
+            json.dumps(inp.accepts) if getattr(inp, "accepts", None) else None
+        )
+        stored = run_coro_sync(
+            store_inline_upload(
+                data=content_bytes,
+                filename=filename,
+                uploaded_by=uploaded_by,
+                max_size_mb=getattr(inp, "max_size_mb", None),
+                accepts=accepts_param,
+            )
+        )
+        return stored["sha256"]
+
+    resolved = dict(inputs)
+    for inp in file_inputs:
+        value = resolved.get(inp.name)
+        if value in (None, "", []):
+            continue
+        if isinstance(value, list):
+            resolved[inp.name] = [_to_ref(inp, item) for item in value]
+        else:
+            resolved[inp.name] = _to_ref(inp, value)
+    return resolved
+
+
 def _gc_orphan_blobs(*, limit: int = 500) -> int:
     """Sweep ``ref_count = 0`` blobs that also have NO owners, deleting the row
     and the on-disk blob. Returns the number of blobs reclaimed.
@@ -3005,6 +3171,33 @@ def update_worker(
                        "or 'America/New_York'.",
             )
 
+    base_trigger = (worker.get("config") or {}).get("trigger") or {}
+    previous_type = str(
+        worker.get("trigger_type") or base_trigger.get("type") or "manual"
+    ).strip().lower()
+    previous_type = "schedule" if previous_type == "cron" else previous_type
+    effective_type = (
+        payload.trigger_type
+        or worker.get("trigger_type")
+        or base_trigger.get("type")
+        or "manual"
+    )
+    effective_type = "schedule" if effective_type == "cron" else effective_type
+    effective_cron = (
+        new_cron_expr
+        if new_cron_expr is not None
+        else (worker.get("cron_expr") or base_trigger.get("cron"))
+    )
+    if (
+        payload.trigger_type is not None
+        or new_cron_expr is not None
+        or payload.cron_timezone is not None
+    ) and effective_type == "schedule" and not str(effective_cron or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Schedule triggers require a cron expression. Set cron_expr before saving.",
+        )
+
     updates: Dict[str, Any] = {}
 
     if payload.trigger_type is not None:
@@ -3075,26 +3268,6 @@ def update_worker(
         or payload.cron_timezone is not None
     )
     if trigger_changed:
-        base_trigger = (worker.get("config") or {}).get("trigger") or {}
-        previous_type = str(
-            worker.get("trigger_type")
-            or base_trigger.get("type")
-            or "manual"
-        ).strip().lower()
-        if previous_type == "cron":
-            previous_type = "schedule"
-        effective_type = (
-            payload.trigger_type
-            or worker.get("trigger_type")
-            or base_trigger.get("type")
-            or "manual"
-        )
-        effective_type = "schedule" if effective_type == "cron" else effective_type
-        effective_cron = (
-            new_cron_expr
-            if new_cron_expr is not None
-            else (worker.get("cron_expr") or base_trigger.get("cron"))
-        )
         effective_tz = (
             payload.cron_timezone
             if payload.cron_timezone is not None
@@ -3102,7 +3275,7 @@ def update_worker(
         )
         declared_trigger: Dict[str, Any] = {"type": effective_type}
         if effective_type == "schedule":
-            declared_trigger["cron"] = effective_cron or "0 9 * * *"
+            declared_trigger["cron"] = effective_cron
             declared_trigger["timezone"] = effective_tz or "UTC"
         declared_triggers = [declared_trigger]
         repos.workers.update(
@@ -3122,7 +3295,7 @@ def update_worker(
                 emit_worker_scheduled(
                     owner_id=auth.user_id,
                     worker_id=worker_id,
-                    cadence=str(effective_cron or "0 9 * * *"),
+                    cadence=str(effective_cron),
                     workspace_id=derive_workspace_id(auth.user_id),
                 )
             except Exception:
@@ -3135,7 +3308,7 @@ def update_worker(
                 existing_yml = worker_yml_path.read_text(encoding='utf-8')
                 trigger_lines = ["trigger:", f"  type: {effective_type}"]
                 if effective_type == "schedule":
-                    cron_val = effective_cron or "0 9 * * *"
+                    cron_val = effective_cron
                     tz_val = effective_tz or "UTC"
                     trigger_lines.append(f'  cron: "{cron_val}"')
                     trigger_lines.append(f'  timezone: "{tz_val}"')
@@ -3686,6 +3859,23 @@ async def draft_and_create_worker(
         *,
         allow_code_repair: bool,
     ) -> DraftAndCreateResponse:
+        from services.worker_timeout_guidance import warnings_for_saved_worker
+
+        save_warnings: List[str] = []
+        try:
+            saved_config = get_worker_config_for_run(created_worker_id)
+            if saved_config is not None:
+                save_warnings = warnings_for_saved_worker(
+                    saved_config,
+                    worker_id=created_worker_id,
+                )
+        except Exception:
+            logger.warning(
+                "Could not evaluate timeout guidance for saved worker %s",
+                created_worker_id,
+                exc_info=True,
+            )
+
         # Wedge safety net (FIX 4, 2026-05-29): unify the raw create path with the
         # UI worker-author path. Prove the SCRIPT-mode worker actually RUNS,
         # validate it produces real output, and gate it: a smoke-failed worker is
@@ -3726,6 +3916,7 @@ async def draft_and_create_worker(
         if isinstance(smoke_result, dict) and smoke_result.get("status") == "failed":
             return DraftAndCreateResponse(
                 worker_id=created_worker_id,
+                warnings=save_warnings,
                 smoke_status="failed",
                 smoke_reason=(
                     humanize_smoke_reason(smoke_result.get("reason"))
@@ -3734,6 +3925,7 @@ async def draft_and_create_worker(
             )
         return DraftAndCreateResponse(
             worker_id=created_worker_id,
+            warnings=save_warnings,
             smoke_status=(smoke_result.get("status") if isinstance(smoke_result, dict) else None),
         )
 
@@ -4103,13 +4295,17 @@ def update_worker(
                 skill_path.unlink()
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return _build_worker_detail(
-        worker_id,
-        user_id=auth.user_id,
-        repos=repos,
-        # donation model: an admin editing a workspace-owned worker is not its
-        # owner, so the detail fetch needs the admin-role path.
-        role="admin" if auth.is_admin else None,
+    from services.worker_timeout_guidance import attach_save_warnings
+
+    return attach_save_warnings(
+        _build_worker_detail(
+            worker_id,
+            user_id=auth.user_id,
+            repos=repos,
+            # donation model: an admin editing a workspace-owned worker is not its
+            # owner, so the detail fetch needs the admin-role path.
+            role="admin" if auth.is_admin else None,
+        )
     )
 
 
@@ -4376,10 +4572,14 @@ def update_worker_files(
         author_name, author_email = _git_author(auth)
         _git_commit_worker(worker_id, message=f"worker: save files for {worker_id}", author_name=author_name, author_email=author_email)
 
-        return _build_worker_detail(
-            worker_id,
-            user_id=auth.user_id,
-            repos=repos,
+        from services.worker_timeout_guidance import attach_save_warnings
+
+        return attach_save_warnings(
+            _build_worker_detail(
+                worker_id,
+                user_id=auth.user_id,
+                repos=repos,
+            )
         )
 
     except HTTPException:
@@ -4561,7 +4761,6 @@ async def upload_worker_inbox(
     uploader = auth.user_id or "anonymous"
     for file in files:
         stored = await _store_uploaded_blob(
-            request,
             file,
             uploader,
             accepts=accepted,
@@ -4690,6 +4889,12 @@ def create_worker_run(
     # both DB-backed and filesystem-discovered workers into the same shape.
     run_config = get_worker_config_for_run(worker_id)
     if run_config is not None:
+        # #2265: transparently upload inline content supplied for file inputs
+        # (e.g. the workers.sample_input example values) BEFORE validation, so
+        # the documented sample_input → run happy path works over MCP/API.
+        payload.inputs = _resolve_inline_file_inputs(
+            run_config, payload.inputs, request, auth.user_id or "anonymous"
+        )
         declared_inputs = getattr(run_config, "inputs", []) or []
         missing = [
             inp.name for inp in declared_inputs
@@ -4709,12 +4914,30 @@ def create_worker_run(
     from run_service import SpendCapExceeded
 
     try:
+        # Execute with the worker owner's recipe/secrets. Attribute non-owner MCP
+        # runs to their initiator based on how the run was started, not a worker-ID
+        # allowlist: an admin git-import can re-upsert a listed ID under another
+        # owner, so worker IDs are not a sound trust boundary. Although
+        # trigger_source is client-set, this only lets the caller observe the run
+        # they triggered: _get_visible_worker already requires permission to run
+        # the worker, and run scope joins each run to its own worker and matches
+        # only that run's actor or that worker's owner. The owner remains able to
+        # view and cancel the run through the scope predicate's OR w.owner_id term.
+        # Non-owner manual/session runs retain the established owner attribution.
+        run_actor_user_id = true_owner_id
+        if (
+            auth.user_id
+            and auth.user_id != true_owner_id
+            and trigger_source == "mcp"
+        ):
+            run_actor_user_id = auth.user_id
         run_id = create_run(
             worker_id,
             payload.inputs,
             trigger_source,
             status=RunStatus.RUNNING.value,
             user_id=true_owner_id,
+            actor_user_id=run_actor_user_id,
             trigger_ref=trigger_ref,
             repos=repos,
         )
@@ -6632,11 +6855,41 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
         },
         {
             "name": "workers.run",
-            "description": "Start a manual Floom worker run.",
+            "description": (
+                "Start a manual Floom worker run. File-type inputs accept a "
+                "SHA-256 upload reference (mint one with files.upload), inline "
+                "text content, or {content|content_base64, filename} — inline "
+                "content is uploaded transparently."
+            ),
             "inputSchema": _mcp_json_schema({
                 "id": {"type": "string"},
                 "inputs": {"type": "object", "default": {}},
             }, ["id"]),
+        },
+        {
+            "name": "files.upload",
+            "description": (
+                "Upload file content (UTF-8 text or base64) and get back the "
+                "SHA-256 reference to pass as a file-type input value in "
+                "workers.run."
+            ),
+            "inputSchema": _mcp_json_schema({
+                "filename": {
+                    "type": "string",
+                    "description": (
+                        "Filename with extension, e.g. notes.txt or data.csv. "
+                        "The extension determines the stored media type."
+                    ),
+                },
+                "content": {
+                    "type": "string",
+                    "description": "UTF-8 text content. Provide exactly one of content or content_base64.",
+                },
+                "content_base64": {
+                    "type": "string",
+                    "description": "Base64-encoded binary content. Provide exactly one of content or content_base64.",
+                },
+            }, ["filename"]),
         },
         {
             "name": "runs.list",
@@ -6894,6 +7147,66 @@ def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: R
     return _mcp_call_result(data, "Worker run started.")
 
 
+async def _mcp_call_files_upload(
+    arguments: Dict[str, Any],
+    auth: AuthContext,
+    request: Optional[Request] = None,
+) -> Dict[str, Any]:
+    """#2265: MCP-native upload → SHA-256 reference for workers.run file inputs.
+
+    Shared by /mcp-tools/serve, the cloud /mcp/{workspace_id} surface, and the
+    in-process remote MCP dispatcher. Stores through the same pipeline as
+    ``POST /uploads`` (services.uploads.store_inline_upload), so every
+    allowlist, size cap, and quota applies unchanged.
+    """
+    from services.uploads import (
+        _reject_oversized_base64,
+        _reject_oversized_plaintext,
+        resolve_upload_max_bytes,
+        store_inline_upload,
+    )
+
+    try:
+        filename = _mcp_arg(arguments, "filename")
+    except ValueError as exc:
+        return _mcp_tool_error(str(exc))
+    content = arguments.get("content")
+    content_b64 = arguments.get("content_base64")
+    if (content is None) == (content_b64 is None):
+        return _mcp_tool_error("Provide exactly one of 'content' or 'content_base64'")
+    if content is not None:
+        if not isinstance(content, str):
+            return _mcp_tool_error("'content' must be a string")
+        try:
+            _reject_oversized_plaintext(content, resolve_upload_max_bytes())
+        except HTTPException as exc:
+            return _mcp_http_error_result(exc)
+        data = content.encode("utf-8")
+    else:
+        if not isinstance(content_b64, str):
+            return _mcp_tool_error("'content_base64' must be a string")
+        try:
+            _reject_oversized_base64(content_b64, resolve_upload_max_bytes())
+            data = base64.b64decode(content_b64, validate=True)
+        except HTTPException as exc:
+            return _mcp_http_error_result(exc)
+        except (ValueError, TypeError):
+            return _mcp_tool_error("'content_base64' is not valid base64")
+    try:
+        stored = await store_inline_upload(
+            data=data,
+            filename=filename,
+            uploaded_by=auth.user_id or "anonymous",
+        )
+    except HTTPException as exc:
+        return _mcp_http_error_result(exc)
+    stored = dict(stored)
+    stored["usage"] = (
+        "Pass this sha256 value as the file input's value in workers.run inputs."
+    )
+    return _mcp_call_result(stored, "File uploaded.")
+
+
 def _mcp_request_for_runs_list(arguments: Dict[str, Any]) -> Request:
     from urllib.parse import urlencode
 
@@ -7093,6 +7406,8 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_workers_update(arguments, auth, repos)
         if tool_name == "workers.run":
             return _mcp_call_workers_run(arguments, auth, repos)
+        if tool_name == "files.upload":
+            return await _mcp_call_files_upload(arguments, auth)
         if tool_name == "runs.list":
             return _mcp_call_runs_list(arguments, auth, repos)
         if tool_name == "runs.get":
@@ -7730,7 +8045,8 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py or run_ts. For agent/skill-mode workers supply skill_md.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "run_ts": {"type": "string", "description": "TypeScript source for run.ts."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Optional complete worker bundle files. Must include worker.yml when supplied."}}, "required": ["worker_yml"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
     {"name": "workers.delete", "description": "Delete a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
-    {"name": "workers.run", "description": "Start a Floom worker run through MCP.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run."}}, "required": ["id"]}},
+    {"name": "workers.run", "description": "Start a Floom worker run through MCP. File-type inputs accept a SHA-256 upload reference (mint one with files.upload), inline text content, or {content|content_base64, filename} — inline content is uploaded transparently.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run. For file-type inputs pass a SHA-256 reference from files.upload, inline text content, or {content|content_base64, filename}."}}, "required": ["id"]}},
+    {"name": "files.upload", "description": "Upload file content (UTF-8 text or base64) and get back the SHA-256 reference to pass as a file-type input value in workers.run. This is the MCP upload path — no browser form needed.", "inputSchema": {"type": "object", "properties": {"filename": {"type": "string", "description": "Filename with extension, e.g. notes.txt or data.csv. The extension determines the stored media type and must be on the upload allowlist."}, "content": {"type": "string", "description": "UTF-8 text content. Provide exactly one of content or content_base64."}, "content_base64": {"type": "string", "description": "Base64-encoded binary content. Provide exactly one of content or content_base64."}}, "required": ["filename"]}},
     {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, run.ts, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
     {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
     {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
@@ -7740,7 +8056,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "workers.archive", "description": "Archive a worker so it no longer appears in the active list or runs on schedule.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.restore", "description": "Restore an archived worker back to active status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.reload", "description": "Reload all workers from disk. Use after manually editing worker files on an OSS self-hosted deployment.", "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "workers.sample_input", "description": "Get example input values for a worker's input fields.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.sample_input", "description": "Get example input values for a worker's input fields. The returned values are directly runnable with workers.run — for file-type inputs the example is inline text content, which workers.run uploads transparently (or mint a SHA-256 reference with files.upload).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.alerts.list", "description": "List configured alerts for a worker (email/webhook on failure, success, etc.).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.alerts.create", "description": "Add an alert to a worker — fires on specified events via webhook or email.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "on": {"type": "array", "items": {"type": "string"}, "description": "Events to alert on, e.g. ['failed', 'approval_required']."}, "url": {"type": "string"}, "email_to": {"type": "array", "items": {"type": "string"}}}, "required": ["id", "on"]}},
     {"name": "workers.alerts.delete", "description": "Remove a worker alert by its ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "alert_id": {"type": "string"}}, "required": ["id", "alert_id"]}},
@@ -8004,6 +8320,10 @@ async def _mcp_dispatch(
     if name == "workers.alerts.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}/alerts/{_enc(a['alert_id'])}", request)
         return _mcp_api_result(data, s)
+
+    # --- files ---
+    if name == "files.upload":
+        return await _mcp_call_files_upload(a, auth, request)
 
     # --- runs ---
     if name == "runs.list":

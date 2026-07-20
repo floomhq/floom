@@ -573,7 +573,10 @@ class AgentDriver(SandboxDriver):
                     )
             return WorkerResult(
                 status="error",
-                error=f"Agent run exceeded timeout of {timeout_seconds}s",
+                error=(
+                    f"Agent run exceeded timeout of {timeout_seconds}s. "
+                    "Raise limits.timeout_seconds in worker.yml (max 3600)."
+                ),
                 error_code="timeout",
             )
 
@@ -2344,6 +2347,33 @@ class AgentDriver(SandboxDriver):
             logger.warning(
                 "request_approval: WhatsApp notify failed for run %s", run_id, exc_info=True
             )
+
+        # Cloud startup replaces this shared hook with the workspace-aware
+        # channel implementation. Local installs retain the existing owner-DM
+        # approval path, whose callback semantics are run-approval only.
+        if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
+            try:
+                from channels.common import notify_pending_approval_via_slack
+                _worker_name_slack: str = worker_id
+                try:
+                    _w_row_slack = repos.workers.get_any(worker_id=worker_id)
+                    _worker_name_slack = (_w_row_slack or {}).get("name") or worker_id
+                except Exception:
+                    pass
+                await asyncio.to_thread(
+                    notify_pending_approval_via_slack,
+                    owner_id=user_id,
+                    run_id=run_id,
+                    worker_name=_worker_name_slack,
+                    label=label,
+                    approval_id=approval_id,
+                )
+            except Exception:
+                logger.warning(
+                    "request_approval: Slack notify failed for run %s",
+                    run_id,
+                    exc_info=True,
+                )
 
         # Poll DB every 3 seconds until decided or timeout
         deadline = _time.monotonic() + timeout_seconds

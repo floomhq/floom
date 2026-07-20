@@ -990,6 +990,23 @@ class TestEmailNotifications:
         assert cfg.url == "https://hooks.example.com/hook"
         assert cfg.email_to is None
 
+    def test_notify_config_model_accepts_slack_channel_id(self):
+        import models
+
+        cfg = models.NotifyConfig(
+            slack_channel_id="C0123456789",
+            on=["pending_approval"],
+        )
+
+        assert cfg.slack_channel_id == "C0123456789"
+
+    def test_notify_config_rejects_invalid_slack_channel_id(self):
+        import pytest
+        import models
+
+        with pytest.raises(ValueError):
+            models.NotifyConfig(slack_channel_id="general")
+
     def test_worker_alert_create_model_requires_at_least_one_channel(self):
         """WorkerAlertCreate has optional url and optional email_to."""
         if "models" not in sys.modules:
