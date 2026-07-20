@@ -273,6 +273,42 @@ def list_worker_edit_requests(
     return [dict(r) for r in rows]
 
 
+class WorkerSpendResponse(BaseModel):
+    """#1201: a single worker's month-to-date spend + its configured monthly
+    cap (if any), so an operator can see which worker is driving cost."""
+
+    worker_id: str
+    month_spend_usd: float
+    monthly_cap_usd: Optional[float] = None
+
+
+@worker_admin_router.get("/workers/{worker_id}/spend", response_model=WorkerSpendResponse)
+def get_worker_spend(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerSpendResponse:
+    """#1201: worker month-to-date spend, read-only. Reuses the same
+    aggregation + cap resolution that already gates worker-level spend caps
+    (services.run_cost / run_service.get_worker_config_for_run) so the number
+    shown here always agrees with what actually blocks a run. 404s for a
+    worker the caller can't see (same visibility check as GET
+    /workers/{worker_id})."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    from run_service import get_worker_config_for_run
+    from services.run_cost import _spend_cap_for_config, _worker_month_to_date_cost_usd
+
+    owner_id = str(worker.get("owner_id") or auth.user_id)
+    spend = _worker_month_to_date_cost_usd(worker_id, repos=repos, user_id=owner_id)
+    config = get_worker_config_for_run(worker_id, repos=repos, user_id=owner_id)
+    cap = _spend_cap_for_config(config)
+    return WorkerSpendResponse(worker_id=worker_id, month_spend_usd=spend, monthly_cap_usd=cap)
+
+
 @worker_admin_router.get("/workers/{worker_id}/bundle.zip")
 def download_worker_bundle(
     worker_id: str,
