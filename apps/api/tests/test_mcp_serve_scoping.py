@@ -133,7 +133,7 @@ def test_tools_list_defaults_to_lean_audit_surface(monkeypatch, tmp_path):
 
     tools = _list_tools(main, _admin(main))
 
-    assert len(tools) == 16  # +workspace.info, +files.upload
+    assert len(tools) == 18  # +workspace.info, +files.upload, +approvals.approve/reject (#2271)
     assert {
         "workers.list",
         "files.upload",
@@ -144,6 +144,8 @@ def test_tools_list_defaults_to_lean_audit_surface(monkeypatch, tmp_path):
         "secrets.list",
         "contexts.read",
         "workspace.info",
+        "approvals.approve",
+        "approvals.reject",
     } <= tools
     assert "workers.delete" not in tools
     assert "tools.register" not in tools
