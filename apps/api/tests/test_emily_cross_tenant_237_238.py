@@ -390,6 +390,89 @@ class TestC1380RunCancelCrossUser:
         assert row["error_code"] == "cancelled_queued"
         assert row["completed_at"]
 
+    def test_failed_status_update_rolls_back_cancel_request(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        impls = _impls(main)
+        repos = main.get_repositories()
+        with main.get_db() as conn:
+            now = main.now_iso()
+            _seed_worker(
+                conn,
+                now,
+                worker_id="atomic-cancel-worker",
+                name="Atomic Cancel Worker",
+                owner_id="alice",
+                workspace_id="ws_alice",
+            )
+        run_id = main.create_run(
+            "atomic-cancel-worker", {}, trigger_source="manual", user_id="alice", repos=repos
+        )
+        with main.get_db() as conn:
+            before = tuple(conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone())
+
+        def fail_status_update(*args, **kwargs):
+            raise RuntimeError("injected status failure")
+
+        monkeypatch.setattr(sys.modules["run_service"], "update_run_status", fail_status_update)
+
+        result = impls._tool_runs_cancel({"run_id": run_id}, user_id="alice")
+
+        assert result == {"ok": False, "error": "injected status failure"}
+        with main.get_db() as conn:
+            after = tuple(conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone())
+        assert after == before
+
+    def test_terminal_transition_before_cancel_transaction_is_preserved(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        impls = _impls(main)
+        repos = main.get_repositories()
+        with main.get_db() as conn:
+            now = main.now_iso()
+            _seed_worker(
+                conn,
+                now,
+                worker_id="terminal-race-worker",
+                name="Terminal Race Worker",
+                owner_id="alice",
+                workspace_id="ws_alice",
+            )
+        run_id = main.create_run(
+            "terminal-race-worker", {}, trigger_source="manual", user_id="alice", repos=repos
+        )
+        real_get = repos.runs.get
+        reads = 0
+
+        def get_with_terminal_transition(*, user_id, run_id):
+            nonlocal reads
+            reads += 1
+            row = real_get(user_id=user_id, run_id=run_id)
+            if reads == 1:
+                repos.runs.update(
+                    user_id=user_id,
+                    run_id=run_id,
+                    status="completed",
+                    output_json={"result": "won race"},
+                    completed_at=main.now_iso(),
+                )
+            return row
+
+        monkeypatch.setattr(repos.runs, "get", get_with_terminal_transition)
+
+        result = impls._tool_runs_cancel({"run_id": run_id}, user_id="alice")
+
+        assert result["ok"] is False
+        with main.get_db() as conn:
+            row = conn.execute(
+                "SELECT status, output_json, cancel_requested, cancelled_at FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        assert dict(row) == {
+            "status": "completed",
+            "output_json": '{"result":"won race"}',
+            "cancel_requested": 0,
+            "cancelled_at": None,
+        }
+
 
 class TestC238SecretCrossUser:
     def test_member_cannot_overwrite_another_users_secret(self, monkeypatch, tmp_path):
