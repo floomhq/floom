@@ -699,7 +699,7 @@ class AgentDriver(SandboxDriver):
         model_override: str | None = None,
     ) -> WorkerResult:
         disable_openai_agents_tracing()
-        from agents import Agent, ModelSettings, RunConfig
+        from agents import Agent, AgentHooks, ModelSettings, RunConfig
 
         limits = config.runtime.limits
         resolved_model = model_override or _resolve_agent_model(config)
@@ -887,6 +887,66 @@ class AgentDriver(SandboxDriver):
         )
         ai_outcome = {"succeeded": False}
 
+        driver = self
+
+        class _ModelCallLoggingHooks(AgentHooks):
+            def __init__(self) -> None:
+                self.call_number = 0
+                self.active_call_number: int | None = None
+                self.active_call_started_at: float | None = None
+
+            async def on_llm_start(
+                self,
+                context: Any,
+                agent: Any,
+                system_prompt: str | None,
+                input_items: list[Any],
+            ) -> None:
+                try:
+                    self.call_number += 1
+                    self.active_call_number = self.call_number
+                    self.active_call_started_at = _time.perf_counter()
+                    log_fn(f"Model call {self.call_number} started", "info")
+                    part = {"type": "step-start", "stepNumber": self.call_number}
+                    driver._emit_part(run_id, part)
+                    transcript.append(part)
+                except Exception:
+                    logger.warning(
+                        "Model call start logging failed for run %s",
+                        run_id,
+                        exc_info=True,
+                    )
+
+            async def on_llm_end(
+                self,
+                context: Any,
+                agent: Any,
+                response: Any,
+            ) -> None:
+                if self.active_call_number is None or self.active_call_started_at is None:
+                    return
+                try:
+                    elapsed = _time.perf_counter() - self.active_call_started_at
+                    tokens = driver._usage_tokens(getattr(response, "usage", None))
+                    details = f"{elapsed:.1f}s"
+                    if tokens:
+                        details += f", {tokens:,} tokens"
+                    log_fn(
+                        f"Model call {self.active_call_number} finished ({details})",
+                        "info",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Model call finish logging failed for run %s",
+                        run_id,
+                        exc_info=True,
+                    )
+                finally:
+                    self.active_call_number = None
+                    self.active_call_started_at = None
+
+        model_call_hooks = _ModelCallLoggingHooks()
+
         try:
             mcp_servers = await self._connect_mcp_servers(config, secrets, log_fn)
             for server in mcp_servers:
@@ -927,13 +987,11 @@ class AgentDriver(SandboxDriver):
                         tool_choice="finish_with_outputs" if force_finish else None,
                         extra_args=_llm.cache_control_extra_args(_agent_model),
                     ),
+                    hooks=model_call_hooks,
                     tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
                 )
 
                 log_fn(f"Agent SDK run {run_number}", "debug")
-                log_fn(f"Model call {run_number} started", "info")
-                self._emit_part(run_id, {"type": "step-start", "stepNumber": run_number})
-                transcript.append({"type": "step-start", "stepNumber": run_number})
 
                 try:
                     result = await self._run_streamed(
