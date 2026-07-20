@@ -12,18 +12,44 @@ export function isSystemWorker(w: Pick<WorkerSummary, "system" | "id">): boolean
   return w.system === true || SYSTEM_WORKER_ID_FALLBACK.has(w.id);
 }
 
+/** #1208: human-readable explanation of WHY a worker's pill is in an
+ *  attention-worthy state, so the pill is never a dead end. Mirrors the
+ *  backend's honesty ladder exactly (worker_serialize._resolve_worker_status):
+ *  missing-secret is its own status; otherwise a failed last run always wins
+ *  over "disabled" (the backend only reaches the disabled branch when the
+ *  worker's last run did NOT fail), so a worker can only ever match one
+ *  branch below. Returns null for states that don't need an explanation. */
+export function workerStatusReason(w: WorkerSummary): string | null {
+  if (w.status === "missing_secret") {
+    const missing = w.missing_secrets ?? [];
+    if (missing.length === 1) return `Missing secret: ${missing[0]}`;
+    if (missing.length > 1) return `Missing secrets: ${missing.join(", ")}`;
+    return "Missing a required secret";
+  }
+  if (w.status === "needs_attention") {
+    if (w.last_run?.status === "failed") return "Last run failed";
+    // Not a failed-run case, so per the backend ladder this is the
+    // durably-disabled branch (enabled === false). Prefer the specific
+    // auto-pause explanation already stored on the worker when present,
+    // instead of inventing a distinction the backend doesn't make.
+    if (w.enabled === false) return w.archive_reason || "Worker is disabled";
+    return "Needs attention";
+  }
+  return null;
+}
+
 /** Worker status → outlined pill (mirrors the old footerStatus).
  *  v4 vocab: lowercase, employee-model labels (ok/running/failed/needs attention). */
-export function workerStatusPill(w: WorkerSummary): { tone: PillTone; label: string } {
+export function workerStatusPill(w: WorkerSummary): { tone: PillTone; label: string; reason?: string } {
   // Check if the worker is currently running
   if (w.last_run?.status === "running") return { tone: "run", label: "running" };
   switch (w.status) {
     case "error":
       return { tone: "err", label: "failed" };
     case "needs_attention":
-      return { tone: "warn", label: "needs attention" };
+      return { tone: "warn", label: "needs attention", reason: workerStatusReason(w) ?? undefined };
     case "missing_secret":
-      return { tone: "warn", label: "missing secret" };
+      return { tone: "warn", label: "missing secret", reason: workerStatusReason(w) ?? undefined };
     case "healthy":
       return { tone: "ok", label: "ok" };
     default:

@@ -424,3 +424,46 @@ def test_resume_preserves_canonical_embedded_bundle_when_disk_differs(client_and
 def test_pause_unknown_worker_404(client_and_main):
     client, _ = client_and_main
     assert client.post("/workers/does-not-exist/pause").status_code == 404
+
+
+def _find(rows, worker_id):
+    return next(row for row in rows if row["id"] == worker_id)
+
+
+def test_list_endpoint_exposes_enabled_field(client_and_main):
+    """#1208: the workers LIST payload (WorkerSummary) must carry `enabled`
+    too, not just the detail payload, so the web UI can tell a durably-
+    disabled worker (needs_attention via the pause branch) apart from one
+    whose last run simply failed (needs_attention via the failed-run branch)
+    without re-deriving the backend's status ladder from scratch."""
+    client, _ = client_and_main
+    initial = _find(client.get("/workers").json(), "pausable")
+    assert initial["enabled"] is True
+
+    client.post("/workers/pausable/pause")
+    paused = _find(client.get("/workers").json(), "pausable")
+    assert paused["enabled"] is False
+    assert paused["status"] == "needs_attention"
+
+    client.post("/workers/pausable/resume")
+    resumed = _find(client.get("/workers").json(), "pausable")
+    assert resumed["enabled"] is True
+
+
+def test_list_endpoint_reflects_auto_pause_reason(client_and_main):
+    """#1208: auto-pause (services.run_pause_policy) stores a specific
+    archive_reason ("Paused automatically after repeated scheduled setup
+    failures.") on the worker manifest; the list endpoint must surface it
+    (already wired via worker_listing.py's archive_reason field) alongside
+    enabled=False so the UI's pill tooltip can show the real reason instead
+    of a generic "disabled" message."""
+    client, main = client_and_main
+    repos = main.get_repositories()
+    from services.run_pause_policy import _persist_worker_paused_flag
+
+    _persist_worker_paused_flag("pausable", repos=repos, user_id="local-user")
+
+    paused = _find(client.get("/workers").json(), "pausable")
+    assert paused["enabled"] is False
+    assert paused["status"] == "needs_attention"
+    assert paused["archive_reason"] == "Paused automatically after repeated scheduled setup failures."

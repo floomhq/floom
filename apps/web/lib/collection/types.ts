@@ -56,6 +56,11 @@ export type PillTone = "ok" | "run" | "err" | "warn" | "pending" | "idle";
 export interface StatusPillSpec {
   tone: PillTone;
   label: string;
+  /** #1208: human-readable explanation of WHY the pill is in this state (e.g.
+   *  "Last run failed", "Missing secret: OPENAI_API_KEY"). When present, the
+   *  rendered pill becomes a tooltip trigger so the pill is never a dead end.
+   *  Optional and collection-specific: most collections leave this unset. */
+  reason?: string;
 }
 
 /** One rendered list row (SPEC §2a canonical row). */

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isSystemWorker,
   workerStatusPill,
+  workerStatusReason,
   workerStatusKey,
   workerStageKey,
   workerStageLabel,
@@ -40,6 +41,61 @@ describe("workerStatusPill", () => {
     expect(workerStatusPill(w({ status: "needs_attention" })).tone).toBe("warn");
     expect(workerStatusPill(w({ status: "missing_secret" })).tone).toBe("warn");
     expect(workerStatusPill(w({ status: "healthy" })).tone).toBe("ok");
+  });
+});
+
+describe("workerStatusReason (#1208)", () => {
+  it("explains a failed last run, taking priority over disabled", () => {
+    expect(
+      workerStatusReason(
+        w({ status: "needs_attention", enabled: false, last_run: { id: "r1", worker_id: "w1", status: "failed", trigger_source: "manual" } }),
+      ),
+    ).toBe("Last run failed");
+  });
+
+  it("prefers the stored auto-pause reason when the worker is durably disabled", () => {
+    expect(
+      workerStatusReason(
+        w({
+          status: "needs_attention",
+          enabled: false,
+          archive_reason: "Paused automatically after repeated scheduled setup failures.",
+        }),
+      ),
+    ).toBe("Paused automatically after repeated scheduled setup failures.");
+  });
+
+  it("falls back to a generic disabled reason with no archive_reason", () => {
+    expect(workerStatusReason(w({ status: "needs_attention", enabled: false }))).toBe("Worker is disabled");
+  });
+
+  it("names a single missing secret", () => {
+    expect(workerStatusReason(w({ status: "missing_secret", missing_secrets: ["OPENAI_API_KEY"] }))).toBe(
+      "Missing secret: OPENAI_API_KEY",
+    );
+  });
+
+  it("lists multiple missing secrets", () => {
+    expect(
+      workerStatusReason(w({ status: "missing_secret", missing_secrets: ["A_KEY", "B_KEY"] })),
+    ).toBe("Missing secrets: A_KEY, B_KEY");
+  });
+
+  it("returns null for healthy/ready/error workers (no explanation needed)", () => {
+    expect(workerStatusReason(w({ status: "healthy" }))).toBeNull();
+    expect(workerStatusReason(w({ status: "ready" }))).toBeNull();
+    expect(workerStatusReason(w({ status: "error" }))).toBeNull();
+  });
+});
+
+describe("workerStatusPill reason wiring (#1208)", () => {
+  it("carries the reason through onto the pill spec", () => {
+    const pill = workerStatusPill(w({ status: "missing_secret", missing_secrets: ["X"] }));
+    expect(pill.reason).toBe("Missing secret: X");
+  });
+
+  it("omits reason for healthy workers", () => {
+    expect(workerStatusPill(w({ status: "healthy" })).reason).toBeUndefined();
   });
 });
 
