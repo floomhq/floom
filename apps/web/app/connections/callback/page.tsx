@@ -5,18 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
+import { refetchConnectionReads } from "@/lib/query/connection-status";
 
-// #1209/#1206: invalidate the same connection-status read path the
-// /connections/redirect poll invalidates. This page is the OTHER live
+// #1209/#1206: refetch the same connection-status read path the
+// /connections/redirect poll refetches. This page is the OTHER live
 // completion point (the OAuth provider's actual redirect_uri, set server-side
 // to {base}/connections/callback), and it lands in its own window/tab with
 // the SAME localStorage-persisted TanStack cache, so it needs the same fix,
-// not a per-surface patch.
-function invalidateConnectionReads(queryClient: ReturnType<typeof useQueryClient>): void {
-  queryClient.invalidateQueries({ queryKey: ["connections"] });
-  queryClient.invalidateQueries({ queryKey: ["worker-detail"] });
-  queryClient.invalidateQueries({ queryKey: ["system", "overview"] });
-}
+// not a per-surface patch. The shared helper includes inactive persisted reads.
 
 function CallbackInner() {
   const router = useRouter();
@@ -43,7 +39,7 @@ function CallbackInner() {
       if (window.opener) {
         window.close();
       } else {
-        invalidateConnectionReads(queryClient);
+        void refetchConnectionReads(queryClient);
         const qs = new URLSearchParams();
         const cid = params.get("connection_id");
         const sel = params.get("sel") || cid;
@@ -137,7 +133,7 @@ function CallbackInner() {
           // connected state; on failure the query simply refetches and
           // confirms the (unchanged) not-connected state. Either way this tab
           // never renders a stale pre-callback read.
-          invalidateConnectionReads(queryClient);
+          void refetchConnectionReads(queryClient);
           router.replace(dest);
         }
       }

@@ -11,6 +11,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
 import { getSupportedApp } from "@/components/connections/connection-data";
+import { refetchConnectionReads } from "@/lib/query/connection-status";
 
 type RedirectPhase =
   | "preparing"
@@ -89,12 +90,11 @@ function RedirectInner() {
           // still be serving the pre-connection read to whatever surface we
           // route back to next (worker detail's missing-connections banner,
           // Overview's connected-apps list, the connections page itself).
-          // Invalidate the connection-status read path ONCE, here, at the one
+          // Refetch the connection-status read path ONCE, here, at the one
           // place that actually knows the state changed, instead of patching
-          // every surface that reads it.
-          queryClient.invalidateQueries({ queryKey: ["connections"] });
-          queryClient.invalidateQueries({ queryKey: ["worker-detail"] });
-          queryClient.invalidateQueries({ queryKey: ["system", "overview"] });
+          // every surface that reads it. refetchType "all" includes inactive
+          // views restored from the persisted cache.
+          void refetchConnectionReads(queryClient);
           pollRef.current = setTimeout(() => {
             if (!cancelledRef.current) router.replace(returnTo);
           }, 1200);
