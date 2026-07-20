@@ -77,7 +77,11 @@ def client_and_main(monkeypatch, tmp_path):
         status=main.RunStatus.COMPLETED.value,
         trigger_source="manual",
         runner="e2b",
-        input_json={"mandate": "find Berlin platform engineers", "limit": 12},
+        input_json={
+            "mandate": "find Berlin platform engineers",
+            "limit": 12,
+            "dry_run": True,
+        },
         output_json={"ok": True},
     )
 
@@ -97,6 +101,7 @@ def test_run_inputs_are_exposed_in_list_and_detail(client_and_main):
     expected_input = {
         "mandate": "find Berlin platform engineers",
         "limit": 12,
+        "dry_run": True,
     }
     assert run_summary["input"] == expected_input
     assert run_summary["inputs"] == expected_input
@@ -106,6 +111,7 @@ def test_run_inputs_are_exposed_in_list_and_detail(client_and_main):
     body = detail.json()
     assert body["input"] == expected_input
     assert body["inputs"] == body["input"]
+    assert body["dry_run"] is True
 
 
 def test_secret_shaped_run_inputs_are_redacted_in_list_and_detail(client_and_main):
