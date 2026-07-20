@@ -10,8 +10,11 @@ import yaml
 from fastapi import HTTPException
 
 from models import parse_worker_manifest
-from services.worker_codegen import _DRAFT_SYSTEM_PROMPT
-from services.worker_registry_ops import _parse_worker_payload
+from services.worker_codegen import _DRAFT_SYSTEM_PROMPT, _repair_generated_worker_manifest
+from services.worker_registry_ops import (
+    _normalize_worker_yml_connections,
+    _parse_worker_payload,
+)
 
 
 _CANONICAL_WORKER_YML = """\
@@ -46,16 +49,17 @@ def test_codegen_example_places_connections_at_worker_contract_top_level() -> No
 
     assert manifest["connections"] == ["hubspot"]
     assert "connections" not in manifest["exec"]
+    assert "Never put `connections` inside `exec` or `capabilities`" in _DRAFT_SYSTEM_PROMPT
 
 
-def test_emily_create_guidance_explicitly_forbids_exec_connections() -> None:
+def test_emily_create_guidance_forbids_nested_connections() -> None:
     chat_source = (
         Path(__file__).resolve().parents[1] / "chat_service.py"
     ).read_text(encoding="utf-8")
     create_tool = chat_source.split('"workers__create"', 1)[1].split('"workers__update"', 1)[0]
 
-    assert "Never put connections inside exec" in create_tool
-    assert "top-level sibling of exec" in create_tool
+    assert "Never put connections inside either block" in create_tool
+    assert "top-level sibling of exec and capabilities" in create_tool
 
 
 def test_save_validation_rejects_connections_nested_under_exec() -> None:
@@ -88,6 +92,56 @@ def test_contract_parser_rejects_misplaced_connections_for_all_parse_paths() -> 
 
     with pytest.raises(ValueError, match="top-level sibling of exec"):
         parse_worker_manifest(misplaced)
+
+
+def test_codegen_repairs_capabilities_connections_to_top_level() -> None:
+    misplaced = yaml.safe_load(_CANONICAL_WORKER_YML)
+    connections = misplaced.pop("connections")
+    misplaced["capabilities"] = {
+        "network": {"egress": True},
+        "connections": connections,
+    }
+
+    repaired = _repair_generated_worker_manifest(misplaced)
+
+    assert repaired["connections"] == connections
+    assert repaired["capabilities"] == {"network": {"egress": True}}
+
+
+def test_save_normalization_persists_capabilities_connections_at_top_level() -> None:
+    misplaced = _CANONICAL_WORKER_YML.replace(
+        "connections:\n  - app: gmail\n    allowed_tools:\n      - GMAIL_FETCH_EMAILS\n",
+        "capabilities:\n  network:\n    egress: true\n  connections:\n"
+        "    - app: gmail\n      allowed_tools:\n        - GMAIL_FETCH_EMAILS\n",
+    )
+
+    normalized_yml = _normalize_worker_yml_connections(misplaced)
+    normalized = yaml.safe_load(normalized_yml)
+    worker_id, config = _parse_worker_payload(normalized_yml)
+
+    assert worker_id == "connection-placement-test"
+    assert normalized["connections"] == [
+        {"app": "gmail", "allowed_tools": ["GMAIL_FETCH_EMAILS"]}
+    ]
+    assert normalized["capabilities"] == {"network": {"egress": True}}
+    assert config.connections[0].app == "gmail"
+
+
+def test_conflicting_capabilities_and_top_level_connections_are_rejected() -> None:
+    conflicting = yaml.safe_load(_CANONICAL_WORKER_YML)
+    conflicting["capabilities"] = {"connections": ["slack"]}
+
+    with pytest.raises(ValueError, match="declared both at top level"):
+        _repair_generated_worker_manifest(conflicting)
+
+
+def test_explicit_empty_top_level_connections_cannot_be_widened() -> None:
+    conflicting = yaml.safe_load(_CANONICAL_WORKER_YML)
+    conflicting["connections"] = []
+    conflicting["capabilities"] = {"connections": ["gmail"]}
+
+    with pytest.raises(ValueError, match="declared both at top level"):
+        _repair_generated_worker_manifest(conflicting)
 
 
 def test_canonical_connections_pass_validation_and_resolve_at_runtime(
