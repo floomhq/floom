@@ -6659,7 +6659,8 @@ def _mcp_validate_arguments_against_schema(
             return f"Invalid params: missing {name}"
         prop = properties.get(name)
         if (
-            isinstance(prop, dict)
+            name == "id"
+            and isinstance(prop, dict)
             and prop.get("type") == "string"
             and isinstance(arguments[name], str)
             and not arguments[name].strip()

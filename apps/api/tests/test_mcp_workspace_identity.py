@@ -256,6 +256,26 @@ def test_get_tools_reject_empty_id_on_both_mcp_surfaces(
         assert error["message"] == "Invalid params: id must not be empty"
 
 
+def test_validator_allows_empty_required_non_id_string(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    tools = [
+        {
+            "name": "example.set",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            },
+        }
+    ]
+
+    error = main._mcp_validate_arguments_against_schema(
+        tools, "example.set", {"value": ""}
+    )
+
+    assert error is None
+
+
 def test_runs_get_404_names_only_current_workspace_for_cross_workspace_runs(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     from auth.local_workspaces import create_local_workspace, local_workspace_user_id
