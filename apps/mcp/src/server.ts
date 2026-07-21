@@ -518,7 +518,7 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
 }
 
 async function listTriggers(workerId?: string, app?: string, limit = 50, offset = 0, verbose = false): Promise<unknown> {
-  const query = { limit, offset, verbose: verbose ? 1 : 0 };
+  const query = { limit, offset, verbose: verbose ? 1 : 0, mcp: 1 };
   if (app) {
     return request("GET", "/integrations/triggers", undefined, { app, ...query });
   }
@@ -554,6 +554,7 @@ async function listTriggers(workerId?: string, app?: string, limit = 50, offset 
         limit: 100,
         offset: appOffset,
         verbose: query.verbose,
+        mcp: query.mcp,
       }) as JsonObject;
       const items = Array.isArray(payload.items) ? payload.items : [];
       for (const item of items) {

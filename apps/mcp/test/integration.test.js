@@ -133,6 +133,7 @@ function makeWorkerDetail(id, overrides = {}) {
 async function startMockApi() {
   const seen = [];
   const bodies = [];
+  const triggerQueries = [];
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     seen.push(`${request.method} ${url.pathname}`);
@@ -246,6 +247,7 @@ async function startMockApi() {
     if (request.method === "GET" && url.pathname === "/integrations/triggers") {
       const app = url.searchParams.get("app");
       const offset = Number(url.searchParams.get("offset") || 0);
+      triggerQueries.push(Object.fromEntries(url.searchParams));
       const catalogs = {
         gmail: [
           { id: "gmail-a", name: "Gmail A", toolkit: "gmail" },
@@ -440,6 +442,7 @@ async function startMockApi() {
     server,
     seen,
     bodies,
+    triggerQueries,
     baseUrl: `http://127.0.0.1:${address.port}`,
   };
 }
@@ -688,6 +691,23 @@ test("worker-scoped triggers paginate the globally merged catalog", async (t) =>
       total_items: 4,
       next_offset: 3,
     });
+
+    const last = await client.callTool({
+      name: "triggers.list",
+      arguments: { worker_id: "trigger-pagination-worker", offset: 3, limit: 2 },
+    });
+    assert.deepEqual(last.structuredContent, {
+      items: [{ id: "slack-d", name: "Slack D", toolkit: "slack" }],
+      limit: 2,
+      offset: 3,
+      total_items: 4,
+      next_offset: null,
+    });
+    assert.deepEqual(
+      [...new Set(mock.triggerQueries.map((query) => query.app))].sort(),
+      ["gmail", "slack"],
+    );
+    assert.equal(mock.triggerQueries.every((query) => query.mcp === "1"), true);
   });
 });
 

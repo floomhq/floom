@@ -8234,7 +8234,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
     {"name": "contexts.rollback", "description": "Restore a brain pack context to a previous version.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "version_id": {"type": "string"}}, "required": ["name", "version_id"]}},
     # --- triggers ---
-    {"name": "triggers.list", "description": "List integration triggers, globally or filtered by worker/app. Returns compact results by default.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "app": {"type": "string"}, "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 100}, "offset": {"type": "integer", "default": 0, "minimum": 0}, "verbose": {"type": "boolean", "default": False, "description": "Include full trigger objects and embedded JSON schemas."}}}},
+    {"name": "triggers.list", "description": "List integration triggers globally or filtered by app. Returns compact results by default.", "inputSchema": {"type": "object", "properties": {"app": {"type": "string"}, "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 100}, "offset": {"type": "integer", "default": 0, "minimum": 0}, "verbose": {"type": "boolean", "default": False, "description": "Include full trigger objects and embedded JSON schemas."}}}},
     # --- approvals ---
     {"name": "approvals.list", "description": "List pending approval requests.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}},
     {"name": "approvals.approve", "description": "Approve a pending run so it continues executing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
@@ -8583,7 +8583,7 @@ async def _mcp_dispatch(
 
     # --- triggers ---
     if name == "triggers.list":
-        data, s = await _api_call("GET", "/integrations/triggers", request, params={"worker_id": a.get("worker_id"), "app": a.get("app"), "limit": a.get("limit", 50), "offset": a.get("offset", 0), "verbose": a.get("verbose", False)})
+        data, s = await _api_call("GET", "/integrations/triggers", request, params={"app": a.get("app"), "limit": a.get("limit", 50), "offset": a.get("offset", 0), "verbose": a.get("verbose", False), "mcp": True})
         return _mcp_api_result(data, s)
 
     # --- approvals ---

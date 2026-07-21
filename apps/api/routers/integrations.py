@@ -242,6 +242,7 @@ def list_integration_triggers(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     verbose: bool = Query(False, description="Include full trigger objects and JSON schemas"),
+    mcp: bool = Query(False, description="Return the paginated MCP discovery projection"),
     auth: AuthContext = Depends(get_auth_context),
 ):
     """Proxy Composio's trigger catalog, cached for one hour.
@@ -260,15 +261,7 @@ def list_integration_triggers(
                     item for item in items
                     if _trigger_item_app_slug(item) == app_lower
                 ]
-            total_items = len(items)
-            page_items = items[offset : offset + limit]
-            return {
-                "items": page_items if verbose else [_compact_trigger_item(item) for item in page_items],
-                "limit": limit,
-                "offset": offset,
-                "total_items": total_items,
-                "next_offset": offset + limit if offset + limit < total_items else None,
-            }
+            return _trigger_catalog_response(items, limit=limit, offset=offset, verbose=verbose, mcp=mcp)
 
     try:
         from composio_client import list_triggers
@@ -282,15 +275,7 @@ def list_integration_triggers(
             if app:
                 app_lower = app.lower()
                 items = [item for item in items if _trigger_item_app_slug(item) == app_lower]
-            total_items = len(items)
-            page_items = items[offset : offset + limit]
-            return {
-                "items": page_items if verbose else [_compact_trigger_item(item) for item in page_items],
-                "limit": limit,
-                "offset": offset,
-                "total_items": total_items,
-                "next_offset": offset + limit if offset + limit < total_items else None,
-            }
+            return _trigger_catalog_response(items, limit=limit, offset=offset, verbose=verbose, mcp=mcp)
         logger.exception("Failed to fetch Composio trigger catalog")
         _raise_composio_unavailable(exc)
 
@@ -301,6 +286,16 @@ def list_integration_triggers(
     if app:
         app_lower = app.lower()
         items = [item for item in items if _trigger_item_app_slug(item) == app_lower]
+    return _trigger_catalog_response(items, limit=limit, offset=offset, verbose=verbose, mcp=mcp)
+
+
+def _trigger_catalog_response(
+    items: List[Dict[str, Any]], *, limit: int, offset: int, verbose: bool, mcp: bool
+) -> Dict[str, Any]:
+    """Keep REST compatibility unless the caller explicitly requests MCP projection."""
+    if not mcp:
+        return {"items": items}
+
     total_items = len(items)
     page_items = items[offset : offset + limit]
     return {

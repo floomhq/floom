@@ -2,6 +2,7 @@
 
 import asyncio
 
+from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 import main
@@ -12,7 +13,8 @@ def _reset_trigger_cache() -> None:
     integrations._trigger_catalog_cache.update({"expires_at": 0.0, "items": None})
 
 
-def test_triggers_list_default_is_compact_paginated_and_filterable(monkeypatch):
+def test_triggers_rest_default_is_full_and_mcp_projection_is_paginated(monkeypatch):
+    monkeypatch.setenv("WORKEROS_DEV", "1")
     triggers = [
         {
             "id": "gmail-new-message",
@@ -39,10 +41,20 @@ def test_triggers_list_default_is_compact_paginated_and_filterable(monkeypatch):
     monkeypatch.setattr("composio_client.list_triggers", lambda: triggers)
     _reset_trigger_cache()
 
-    first = integrations.list_integration_triggers(app="gmail", limit=1, offset=0, verbose=False, auth=None)
-    second = integrations.list_integration_triggers(app="gmail", limit=1, offset=1, verbose=False, auth=None)
+    with TestClient(main.app) as client:
+        default = client.get("/integrations/triggers?app=gmail")
+        first = client.get("/integrations/triggers?app=gmail&mcp=true&limit=1&offset=0")
+        second = client.get("/integrations/triggers?app=gmail&mcp=true&limit=1&offset=1")
+        verbose = client.get("/integrations/triggers?app=gmail&mcp=true&limit=1&verbose=true")
 
-    assert first == {
+    assert default.status_code == 200
+    assert default.json() == {"items": [triggers[0], triggers[2]]}
+    assert len(default.json()["items"]) == 2
+    assert default.json()["items"][0]["toolkit"] == {"slug": "gmail"}
+    assert default.json()["items"][0]["config"]["properties"]["mailbox"]["type"] == "string"
+
+    assert first.status_code == 200
+    assert first.json() == {
         "items": [{
             "id": "gmail-new-message",
             "name": "New message",
@@ -54,12 +66,11 @@ def test_triggers_list_default_is_compact_paginated_and_filterable(monkeypatch):
         "total_items": 2,
         "next_offset": 1,
     }
-    assert second["items"][0]["id"] == "gmail-new-thread"
-    assert second["next_offset"] is None
-    assert "config" not in first["items"][0]
+    assert second.json()["items"][0]["id"] == "gmail-new-thread"
+    assert second.json()["next_offset"] is None
+    assert "config" not in first.json()["items"][0]
 
-    verbose = integrations.list_integration_triggers(app="gmail", limit=1, offset=0, verbose=True, auth=None)
-    assert verbose["items"][0]["config"]["properties"]["mailbox"]["type"] == "string"
+    assert verbose.json()["items"][0]["config"]["properties"]["mailbox"]["type"] == "string"
 
 
 def test_integrations_catalog_reaches_page_two_and_searches(monkeypatch):
@@ -106,6 +117,7 @@ def test_mcp_discovery_schemas_and_dispatch_forward_parameters(monkeypatch):
     trigger_props = tools["triggers.list"]["inputSchema"]["properties"]
     catalog_props = tools["integrations.catalog"]["inputSchema"]["properties"]
     assert {"app", "limit", "offset", "verbose"} <= trigger_props.keys()
+    assert "worker_id" not in trigger_props
     assert {"page", "limit", "search", "category"} <= catalog_props.keys()
 
     calls = []
@@ -135,7 +147,7 @@ def test_mcp_discovery_schemas_and_dispatch_forward_parameters(monkeypatch):
 
     assert calls == [
         ("GET", "/integrations/triggers", {
-            "worker_id": None, "app": "gmail", "limit": 7, "offset": 14, "verbose": True,
+            "app": "gmail", "limit": 7, "offset": 14, "verbose": True, "mcp": True,
         }),
         ("GET", "/integrations/catalog", {
             "page": 2, "limit": 30, "search": "notion", "category": "productivity",
