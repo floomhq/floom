@@ -9,7 +9,7 @@ import pytest
 import yaml
 from fastapi import HTTPException
 
-from models import parse_worker_manifest
+from models import WorkerContract, parse_worker_manifest
 from services.worker_codegen import _DRAFT_SYSTEM_PROMPT, _repair_generated_worker_manifest
 from services.worker_registry_ops import (
     _normalize_worker_yml_connections,
@@ -127,12 +127,17 @@ def test_save_normalization_persists_capabilities_connections_at_top_level() -> 
     assert config.connections[0].app == "gmail"
 
 
-def test_conflicting_capabilities_and_top_level_connections_are_rejected() -> None:
+def test_conflicting_capabilities_connections_prefer_top_level() -> None:
     conflicting = yaml.safe_load(_CANONICAL_WORKER_YML)
     conflicting["capabilities"] = {"connections": ["slack"]}
 
-    with pytest.raises(ValueError, match="declared both at top level"):
-        _repair_generated_worker_manifest(conflicting)
+    with pytest.warns(UserWarning, match="capabilities.connections was ignored"):
+        repaired = _repair_generated_worker_manifest(conflicting)
+
+    assert repaired["connections"] == [
+        {"app": "gmail", "allowed_tools": ["GMAIL_FETCH_EMAILS"]}
+    ]
+    assert repaired["capabilities"] == {}
 
 
 def test_explicit_empty_top_level_connections_cannot_be_widened() -> None:
@@ -140,8 +145,35 @@ def test_explicit_empty_top_level_connections_cannot_be_widened() -> None:
     conflicting["connections"] = []
     conflicting["capabilities"] = {"connections": ["gmail"]}
 
-    with pytest.raises(ValueError, match="declared both at top level"):
-        _repair_generated_worker_manifest(conflicting)
+    with pytest.warns(UserWarning, match="capabilities.connections was ignored"):
+        repaired = _repair_generated_worker_manifest(conflicting)
+
+    assert repaired["connections"] == []
+    assert repaired["capabilities"] == {}
+
+
+def test_alesoda_dual_declared_worker_contract_parses_with_top_level_gmail() -> None:
+    worker_manifest = yaml.safe_load(_CANONICAL_WORKER_YML)
+    worker_manifest["name"] = "gmail-summary-agent"
+    worker_manifest["title"] = "Gmail summary agent"
+    worker_manifest["connections"] = [
+        {"app": "gmail", "allowed_tools": ["GMAIL_FETCH_EMAILS"]}
+    ]
+    worker_manifest["capabilities"] = {
+        "network": {"egress": True},
+        "connections": [
+            {"app": "gmail", "allowed_tools": ["GMAIL_SEND_EMAIL"]}
+        ],
+    }
+
+    with pytest.warns(UserWarning, match="capabilities.connections was ignored"):
+        contract = parse_worker_manifest(worker_manifest)
+
+    assert isinstance(contract, WorkerContract)
+    assert len(contract.connections) == 1
+    assert contract.connections[0].app == "gmail"
+    assert contract.connections[0].allowed_tools == ["GMAIL_FETCH_EMAILS"]
+    assert contract.capabilities.network.egress is True
 
 
 def test_canonical_connections_pass_validation_and_resolve_at_runtime(
