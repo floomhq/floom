@@ -1296,7 +1296,7 @@ export function createServer(): McpServer {
     "connections.list",
     {
       title: "List Connections",
-      description: "List configured app connections.",
+      description: "List configured app connections. status/configuration_status describe configuration, while health_status and last_check_* report only recorded health evidence; never_checked means no health claim is available.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -2008,15 +2008,16 @@ export function createServer(): McpServer {
     "connections.test",
     {
       title: "Test Connection",
-      description: "Run a live connectivity check on a configured connection to verify the auth token is still valid.",
+      description: "Run a live connectivity probe. Non-mutating by default; set record=true to persist the result as shared health state.",
       inputSchema: {
         connection_id: z.string().min(1).describe("Connection ID."),
+        record: z.boolean().optional().default(false).describe("Persist this probe as the connection's shared health state."),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ connection_id }) =>
+    async ({ connection_id, record }) =>
       callTool(async () =>
-        jsonResult(await request("POST", `/connections/${encodeURIComponent(connection_id)}/test`)),
+        jsonResult(await request("POST", `/connections/${encodeURIComponent(connection_id)}/test?record=${record ? "true" : "false"}`)),
       ),
   );
 

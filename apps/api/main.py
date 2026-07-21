@@ -8323,11 +8323,11 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "secrets.delete", "description": "Delete a secret by key.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}},
     {"name": "secrets.test", "description": "Verify a secret exists and is reachable without revealing its value.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}},
     # --- connections ---
-    {"name": "connections.list", "description": "List configured app connections.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "connections.list", "description": "List configured app connections. status/configuration_status describe configuration; health_status and last_check_* contain only recorded health evidence.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "connections.add_mcp", "description": "Save an MCP server connection. Supports streamable_http, sse, and stdio transports.", "inputSchema": {"type": "object", "properties": {"label": {"type": "string"}, "transport": {"type": "string", "enum": ["streamable_http", "sse", "stdio"], "default": "streamable_http"}, "url": {"type": "string"}, "command": {"type": "string"}, "args": {"type": "array", "items": {"type": "string"}, "default": []}, "env": {"type": "object", "default": {}}, "cwd": {"type": "string"}, "auth_secret": {"type": "string"}, "allowed_tools": {"type": "array", "items": {"type": "string"}, "default": []}}, "required": ["label"]}},
     {"name": "connections.delete", "description": "Remove a configured app connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
     {"name": "connections.status", "description": "Check the health and auth status of a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
-    {"name": "connections.test", "description": "Run a live connectivity check on a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
+    {"name": "connections.test", "description": "Run a live connectivity probe. Non-mutating by default; set record=true to persist shared health state.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}, "record": {"type": "boolean", "default": False}}, "required": ["connection_id"]}},
     # --- contexts ---
     {"name": "contexts.list", "description": "List Floom context folders.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
@@ -8636,7 +8636,8 @@ async def _mcp_dispatch(
         data, s = await _api_call("GET", f"/connections/{_enc(a['connection_id'])}/status", request)
         return _mcp_api_result(data, s)
     if name == "connections.test":
-        data, s = await _api_call("POST", f"/connections/{_enc(a['connection_id'])}/test", request)
+        record = "true" if a.get("record", False) else "false"
+        data, s = await _api_call("POST", f"/connections/{_enc(a['connection_id'])}/test?record={record}", request)
         return _mcp_api_result(data, s)
 
     # --- contexts ---
