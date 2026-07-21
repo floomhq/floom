@@ -4415,7 +4415,7 @@ def update_worker_files(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
-    """Replace all files in a worker's directory atomically.
+    """Merge files into a worker's directory atomically.
 
     Accepts a list of {path, content} objects and writes them to disk.
     The write is atomic: files are written to a temp directory first, then
@@ -4429,11 +4429,11 @@ def update_worker_files(
     if request is not None:
         _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
-    if not worker:
-        # Donation model: admins edit workspace-shared workers (workspace-actor
-        # owned; the owner-scoped fetch above can no longer see them).
-        worker = _worker_for_mutation(worker_id, auth, get_repositories())
+    _raise_if_protected_worker_mutation(worker_id)
+    # File writes are mutations, so visibility alone is insufficient: ordinary
+    # workspace members may view shared workers but only the owner or an active
+    # workspace admin may change their bundles.
+    worker = _worker_for_mutation(worker_id, auth, repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4448,8 +4448,6 @@ def update_worker_files(
         if item.path in seen_paths:
             raise HTTPException(status_code=400, detail=f"duplicate file path: {item.path!r}")
         seen_paths.add(item.path)
-
-    _raise_if_protected_worker_mutation(worker_id)
 
     config_dict = worker.get("config") or {}
     try:
@@ -4494,13 +4492,32 @@ def update_worker_files(
     import shutil
 
     tmp_dir: Optional[Path] = None
+    request_token = _uuid_mod.uuid4().hex
     backed_up: List[tuple] = []  # list of (original_path, backup_path)
+    created_files: List[Path] = []
+
+    def rollback_files() -> None:
+        # A destination without a backup did not exist before this update. It
+        # must be removed as well as restoring overwritten files, otherwise a
+        # failed persistence step leaves a partially updated bundle on disk.
+        for created in reversed(created_files):
+            try:
+                created.unlink(missing_ok=True)
+            except Exception:
+                pass
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                if bak.exists():
+                    bak.rename(orig)
+            except Exception:
+                pass
+        invalidate_worker_cache()
 
     try:
         # Stage new files to a temp dir
-        tmp_dir = WORKERS_DIR / f".{worker_id}.tmp.{os.getpid()}"
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
+        tmp_dir = WORKERS_DIR / f".{worker_id}.tmp.{request_token}"
         tmp_dir.mkdir(parents=True)
 
         for item in payload.files:
@@ -4508,28 +4525,17 @@ def update_worker_files(
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(item.content, encoding="utf-8")
 
-        # Remove any existing files NOT in the new payload (keep backups)
-        existing_files = list(target_dir.rglob("*"))
-        new_paths = {item.path for item in payload.files}
-        for existing in existing_files:
-            if not existing.is_file():
-                continue
-            try:
-                rel = existing.relative_to(target_dir).as_posix()
-            except ValueError:
-                continue
-            if rel not in new_paths and not _should_ignore_worker_file(rel):
-                bak = existing.with_suffix(existing.suffix + f".bak{os.getpid()}")
-                existing.rename(bak)
-                backed_up.append((existing, bak))
-
         # Write new files from staging dir into target dir, backing up existing ones
         for item in payload.files:
             dest = target_dir / item.path
             if dest.exists():
-                bak = dest.with_suffix(dest.suffix + f".bak{os.getpid()}")
+                bak = dest.with_suffix(dest.suffix + f".bak.{request_token}")
                 dest.rename(bak)
                 backed_up.append((dest, bak))
+            else:
+                # Record this before copy2 so even a partially copied file is
+                # removed if copying or any later operation fails.
+                created_files.append(dest)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(tmp_dir / item.path, dest)
 
@@ -4548,23 +4554,23 @@ def update_worker_files(
                     conn, this_worker_list, user_id=auth.user_id, raise_on_skip=True
                 )
             except Exception as exc:
-                # Roll back: restore backups. Catch any persist failure
-                # (IntegrityError, ValidationError, RuntimeError) so a bad save
-                # never leaves the worker files half-written.
-                for orig, bak in reversed(backed_up):
-                    try:
-                        if orig.exists():
-                            orig.unlink()
-                        bak.rename(orig)
-                    except Exception:
-                        pass
-                invalidate_worker_cache()
+                # Catch any persist failure (IntegrityError, ValidationError,
+                # RuntimeError) so the outer rollback restores the full bundle.
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        # Remove backups on success
-        for _orig, bak in backed_up:
-            bak.unlink(missing_ok=True)
+        # The DB persist above is the commit point. From here onward, failures
+        # must not roll the bundle back behind the committed DB state.
+        backups_to_remove = list(backed_up)
         backed_up.clear()
+        created_files.clear()
+
+        # Backup cleanup is best-effort after commit. In particular, a failure
+        # after deleting only some backups must not trigger a partial rollback.
+        for _orig, bak in backups_to_remove:
+            try:
+                bak.unlink(missing_ok=True)
+            except Exception:
+                logger.warning("Failed to remove worker backup %s", bak, exc_info=True)
 
         try:
             _embed_files_in_skill_version(worker_id, target_dir)
@@ -4586,17 +4592,11 @@ def update_worker_files(
         )
 
     except HTTPException:
+        rollback_files()
         raise
     except Exception as exc:
         logger.exception("update_worker_files failed for %s", worker_id)
-        # Restore backups on unexpected error
-        for orig, bak in reversed(backed_up):
-            try:
-                if orig.exists():
-                    orig.unlink()
-                bak.rename(orig)
-            except Exception:
-                pass
+        rollback_files()
         raise HTTPException(status_code=500, detail=f"Failed to update worker files: {exc}") from exc
     finally:
         if tmp_dir is not None and tmp_dir.exists():
@@ -6882,6 +6882,44 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             }, ["id"]),
         },
         {
+            "name": "workers.pause",
+            "description": "Pause a Floom worker so scheduled and manual runs are disabled.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.resume",
+            "description": "Resume a paused Floom worker.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.delete",
+            "description": "Delete a Floom worker when the caller has delete permission.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.write_file",
+            "description": "Merge source-file updates into a worker bundle; omitted files are preserved.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                        "required": ["path", "content"],
+                    },
+                },
+            }, ["id", "files"]),
+        },
+        {
+            "name": "workers.versions",
+            "description": "List saved versions of a worker, newest first.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            }, ["id"]),
+        },
+        {
             "name": "workers.run",
             "description": (
                 "Start a manual Floom worker run. File-type inputs accept a "
@@ -7214,6 +7252,40 @@ def _mcp_call_workers_update(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(data, "Worker updated.")
 
 
+def _mcp_call_worker_lifecycle(
+    action: str, arguments: Dict[str, Any], auth: AuthContext, repos: Repositories
+) -> Dict[str, Any]:
+    worker_id = _mcp_arg(arguments, "id")
+    request = _internal_asgi_request()
+    if action == "pause":
+        return _mcp_call_result(pause_worker(worker_id, request, auth=auth, repos=repos), "Worker paused.")
+    if action == "resume":
+        return _mcp_call_result(resume_worker(worker_id, request, auth=auth, repos=repos), "Worker resumed.")
+    delete_worker(worker_id, request, auth=auth, repos=repos)
+    return _mcp_call_result({"id": worker_id, "deleted": True}, "Worker deleted.")
+
+
+def _mcp_call_workers_write_file(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    files = arguments.get("files")
+    if not isinstance(files, list):
+        raise ValueError("Tool argument 'files' is required")
+    payload = WorkerFilesUpdateRequest(files=files)
+    data = update_worker_files(
+        _mcp_arg(arguments, "id"), payload, _internal_asgi_request(), auth=auth, repos=repos
+    )
+    return _mcp_call_result(data, "Worker files updated.")
+
+
+def _mcp_call_workers_versions(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_worker_versions(
+        _mcp_arg(arguments, "id"),
+        limit=min(max(int(arguments.get("limit") or 50), 1), 100),
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(data)
+
+
 def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     payload = RunCreate(
         inputs=arguments.get("inputs") if isinstance(arguments.get("inputs"), dict) else {},
@@ -7540,6 +7612,12 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_workers_create(arguments, auth, repos)
         if tool_name == "workers.update":
             return _mcp_call_workers_update(arguments, auth, repos)
+        if tool_name in {"workers.pause", "workers.resume", "workers.delete"}:
+            return _mcp_call_worker_lifecycle(tool_name.split(".", 1)[1], arguments, auth, repos)
+        if tool_name == "workers.write_file":
+            return _mcp_call_workers_write_file(arguments, auth, repos)
+        if tool_name == "workers.versions":
+            return _mcp_call_workers_versions(arguments, auth, repos)
         if tool_name == "workers.run":
             return _mcp_call_workers_run(arguments, auth, repos)
         if tool_name == "files.upload":
@@ -8190,10 +8268,12 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "workers.get", "description": "Get a Floom worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py or run_ts. For agent/skill-mode workers supply skill_md.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "run_ts": {"type": "string", "description": "TypeScript source for run.ts."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Optional complete worker bundle files. Must include worker.yml when supplied."}}, "required": ["worker_yml"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
+    {"name": "workers.pause", "description": "Pause a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.resume", "description": "Resume a paused Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.delete", "description": "Delete a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.run", "description": "Start a Floom worker run through MCP. File-type inputs accept a SHA-256 upload reference (mint one with files.upload), inline text content, or {content|content_base64, filename} — inline content is uploaded transparently.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run. For file-type inputs pass a SHA-256 reference from files.upload, inline text content, or {content|content_base64, filename}."}}, "required": ["id"]}},
     {"name": "files.upload", "description": "Upload file content (UTF-8 text or base64) and get back the SHA-256 reference to pass as a file-type input value in workers.run. This is the MCP upload path — no browser form needed.", "inputSchema": {"type": "object", "properties": {"filename": {"type": "string", "description": "Filename with extension, e.g. notes.txt or data.csv. The extension determines the stored media type and must be on the upload allowlist."}, "content": {"type": "string", "description": "UTF-8 text content. Provide exactly one of content or content_base64."}, "content_base64": {"type": "string", "description": "Base64-encoded binary content. Provide exactly one of content or content_base64."}}, "required": ["filename"]}},
-    {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, run.ts, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
+    {"name": "workers.write_file", "description": "Merge source-file updates into a worker directory (worker.yml, SKILL.md, run.py, run.ts, requirements.txt). Omitted files are preserved. Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to merge. Must include worker.yml."}}, "required": ["id", "files"]}},
     {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
     {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.timeseries", "description": "Get daily run counts and success/failure breakdown for a worker over the last N days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "days": {"type": "integer", "default": 30, "description": "Days of history (1–90)."}}, "required": ["id"]}},
@@ -8419,6 +8499,10 @@ async def _mcp_dispatch(
     if name == "workers.update":
         body = {k: a[k] for k in a if k != "id"}
         data, s = await _api_call("PATCH", f"/workers/{_enc(a['id'])}", request, body=body)
+        return _mcp_api_result(data, s)
+    if name in {"workers.pause", "workers.resume"}:
+        action = name.split(".", 1)[1]
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/{action}", request)
         return _mcp_api_result(data, s)
     if name == "workers.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}", request)

@@ -81,6 +81,7 @@ def app_ctx(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    monkeypatch.setenv("WORKSPACE_AGENT_MCP_TOKEN", "worker-mgmt-mcp-token")
 
     for name in [
         "db",
@@ -173,6 +174,276 @@ def test_worker_create_accepts_full_file_bundle(app_ctx):
     assert body["id"] == "bundle-worker"
     file_paths = {item["path"] for item in body["files"]}
     assert "lib/helper.py" in file_paths
+
+
+def test_worker_file_update_merges_and_preserves_omitted_files(app_ctx):
+    client, main, _scheduler = app_ctx
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    requirements = worker_dir / "requirements.txt"
+    requirements.write_text("httpx==0.28.1\n", encoding="utf-8")
+    nested = worker_dir / "lib" / "preserved" / "helper.py"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("VALUE = 'nested'\n", encoding="utf-8")
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+
+    response = client.put(
+        "/workers/sales-summary/files",
+        json={"files": [
+            {"path": "worker.yml", "content": worker_yml},
+            {"path": "run.py", "content": "print('changed')\n"},
+        ]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert requirements.read_text(encoding="utf-8") == "httpx==0.28.1\n"
+    assert nested.read_text(encoding="utf-8") == "VALUE = 'nested'\n"
+
+
+def test_worker_file_update_persistence_failure_restores_entire_bundle(app_ctx, monkeypatch):
+    client, main, _scheduler = app_ctx
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    nested = worker_dir / "lib" / "existing.py"
+    nested.parent.mkdir(parents=True)
+    nested.write_bytes(b"ORIGINAL NESTED\n")
+    before = {
+        path.relative_to(worker_dir): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+
+    def fail_persistence(*args, **kwargs):
+        raise RuntimeError("injected persistence failure")
+
+    monkeypatch.setattr(main, "_persist_discovered_workers", fail_persistence)
+    response = client.put(
+        "/workers/sales-summary/files",
+        json={"files": [
+            {"path": "worker.yml", "content": worker_yml},
+            {"path": "run.py", "content": "print('must roll back')\n"},
+            {"path": "new/deep/file.py", "content": "print('must disappear')\n"},
+        ]},
+    )
+
+    after = {
+        path.relative_to(worker_dir): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    assert response.status_code == 502, response.text
+    assert after == before
+    assert not (worker_dir / "new" / "deep" / "file.py").exists()
+
+
+def test_worker_versions_returns_history_after_file_edit(app_ctx):
+    client, main, _scheduler = app_ctx
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+
+    edited = client.put(
+        "/workers/sales-summary/files",
+        json={"files": [
+            {"path": "worker.yml", "content": worker_yml},
+            {"path": "run.py", "content": "print('versioned')\n"},
+        ]},
+    )
+    versions = client.get("/workers/sales-summary/versions")
+
+    assert edited.status_code == 200, edited.text
+    assert versions.status_code == 200, versions.text
+    assert len(versions.json()) >= 1
+    # The edit path commits the worker bundle. This must be a real git-backed
+    # version, not only the synthetic fallback used for never-edited workers.
+    assert versions.json()[0]["id"] not in {"", "current"}
+
+
+def test_worker_pause_and_resume_toggle_enabled(app_ctx):
+    client, _main, _scheduler = app_ctx
+
+    paused = client.post("/workers/sales-summary/pause")
+    resumed = client.post("/workers/sales-summary/resume")
+
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["enabled"] is False
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["enabled"] is True
+
+
+def test_worker_management_tools_are_exposed_on_all_mcp_surfaces(app_ctx):
+    _client, main, _scheduler = app_ctx
+    required = {"workers.delete", "workers.pause", "workers.resume", "workers.write_file", "workers.versions"}
+    cloud = {tool["name"] for tool in main._MCP_DEFAULT_TOOLS}
+    remote = {tool["name"] for tool in main._workeros_remote_mcp_tool_definitions()}
+    server_source = (Path(__file__).parents[2] / "mcp" / "src" / "server.ts").read_text(encoding="utf-8")
+
+    assert required <= cloud
+    assert required <= remote
+    assert all(f'"{name}"' in server_source for name in required - {"workers.pause", "workers.resume"})
+    assert '`workers.${action}`' in server_source
+
+
+@pytest.mark.parametrize("endpoint", ["/api/mcp", "/mcp-tools/serve"])
+def test_mcp_dispatch_executes_worker_mutations(app_ctx, monkeypatch, endpoint):
+    client, main, _scheduler = app_ctx
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
+    if endpoint == "/mcp-tools/serve":
+        monkeypatch.delenv("WORKEROS_ENABLE_USER_HEADER_SCOPE")
+        monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
+        from fastapi.testclient import TestClient
+
+        client = TestClient(main.app, headers={"x-floom-secret": "worker-mgmt-secret"})
+    headers = (
+        {"Authorization": "Bearer worker-mgmt-mcp-token"}
+        if endpoint == "/api/mcp"
+        else {"x-floom-secret": "worker-mgmt-secret"}
+    )
+
+    def call(operation, arguments):
+        response = client.post(
+            endpoint,
+            json={
+                "jsonrpc": "2.0",
+                "id": operation,
+                "method": "tools/call",
+                "params": {"name": operation, "arguments": arguments},
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert "error" not in body, body
+        result = body["result"]
+        assert result.get("isError") is not True, result
+        return result["structuredContent"]
+
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+    original_run = (worker_dir / "run.py").read_text(encoding="utf-8")
+
+    written = call(
+        "workers.write_file",
+        {
+            "id": "sales-summary",
+            "files": [
+                {"path": "worker.yml", "content": worker_yml},
+                {"path": "new.py", "content": "print('written through MCP')\n"},
+            ],
+        },
+    )
+    assert written["id"] == "sales-summary"
+    assert (worker_dir / "new.py").read_text(encoding="utf-8") == "print('written through MCP')\n"
+    assert (worker_dir / "run.py").read_text(encoding="utf-8") == original_run
+
+    paused = call("workers.pause", {"id": "sales-summary"})
+    resumed = call("workers.resume", {"id": "sales-summary"})
+    assert paused["enabled"] is False
+    assert resumed["enabled"] is True
+
+    deleted = call("workers.delete", {"id": "sales-summary"})
+    if endpoint == "/api/mcp":
+        assert deleted == {"id": "sales-summary", "deleted": True}
+    assert client.get("/workers/sales-summary").status_code == 404
+
+
+@pytest.mark.parametrize("endpoint", ["/api/mcp", "/mcp-tools/serve"])
+def test_mcp_dispatch_denies_shared_worker_mutations_to_ordinary_member(
+    app_ctx, monkeypatch, endpoint
+):
+    client, main, _scheduler = app_ctx
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
+    monkeypatch.setenv("WORKSPACE_AGENT_MCP_USER_ID", "member-user")
+
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+    before_files = {
+        path.relative_to(worker_dir).as_posix(): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    with main.get_db() as conn:
+        conn.execute(
+            "UPDATE workers SET visibility = 'workspace', workspace_id = 'local-default' "
+            "WHERE id = 'sales-summary'"
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_members
+                (workspace_id, user_id, role, status, created_at, updated_at)
+            VALUES ('local-default', 'member-user', 'member', 'active', ?, ?)
+            """,
+            (now, now),
+        )
+        before_row = dict(
+            conn.execute("SELECT * FROM workers WHERE id = 'sales-summary'").fetchone()
+        )
+
+    from fastapi.testclient import TestClient
+
+    if endpoint == "/mcp-tools/serve":
+        member_client = TestClient(
+            main.app,
+            headers={
+                "x-floom-secret": "worker-mgmt-secret",
+                "x-floom-user": "member-user",
+            },
+        )
+        headers = {}
+    else:
+        member_client = client
+        headers = {"Authorization": "Bearer worker-mgmt-mcp-token"}
+        # The local remote-MCP surface uses its authenticated context directly.
+        # Seed the same ordinary member identity with MCP scope. Admin-gated
+        # delete is rejected by the dispatcher; the other calls reach handlers.
+        from auth.context import AuthContext, set_current_auth_context
+
+        set_current_auth_context(
+            AuthContext(user_id="member-user", role="member", scopes=("mcp",))
+        )
+
+    operations = [
+        (
+            "workers.write_file",
+            {
+                "id": "sales-summary",
+                "files": [
+                    {"path": "worker.yml", "content": worker_yml},
+                    {"path": "member-write.py", "content": "print('forbidden')\n"},
+                ],
+            },
+        ),
+        ("workers.pause", {"id": "sales-summary"}),
+        ("workers.resume", {"id": "sales-summary"}),
+        ("workers.delete", {"id": "sales-summary"}),
+    ]
+    for operation, arguments in operations:
+        response = member_client.post(
+            endpoint,
+            json={
+                "jsonrpc": "2.0",
+                "id": operation,
+                "method": "tools/call",
+                "params": {"name": operation, "arguments": arguments},
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()["result"]
+        assert result.get("isError") is True, result
+        if "structuredContent" in result:
+            assert result["structuredContent"]["status"] == 404, result
+
+    after_files = {
+        path.relative_to(worker_dir).as_posix(): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    with main.get_db() as conn:
+        after_row = dict(
+            conn.execute("SELECT * FROM workers WHERE id = 'sales-summary'").fetchone()
+        )
+    assert after_row == before_row
+    assert after_files == before_files
 
 
 def test_worker_create_rejects_oversized_json_file_bundle(app_ctx):
