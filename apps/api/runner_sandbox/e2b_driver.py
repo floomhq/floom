@@ -1451,7 +1451,15 @@ def _read_result_json(
             )
             continue
 
-        invalid_artifact = (f"artifacts[{index}]", artifact)
+        location = f"artifacts[{index}]"
+        if worker_reported_failure:
+            log_fn(
+                f"[e2b] Ignoring invalid {_json_shape_name(artifact)} '{location}' "
+                "value on worker-reported failure",
+                "warning",
+            )
+            continue
+        invalid_artifact = (location, artifact)
         break
 
     if invalid_artifact is not None:

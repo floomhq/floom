@@ -441,12 +441,19 @@ def test_invalid_artifact_shape_is_permanent_and_not_retried():
     assert decision.retryable is False
 
 
-def test_invalid_artifacts_do_not_mask_worker_reported_failure():
+def test_invalid_artifacts_do_not_mask_failure_or_discard_valid_diagnostics(
+    tmp_path, monkeypatch
+):
+    before = {
+        "name": "before.log",
+        "relative_path": "out/before.log",
+        "type": "text/plain",
+    }
     result_data, parse_error, logs = _read_result_payload(
         {
             "status": "error",
             "outputs": {},
-            "artifacts": [None],
+            "artifacts": [before, None, "out/after.json"],
             "error": "Upstream vendor rejected the request.",
             "error_code": "vendor_rejected",
         }
@@ -454,10 +461,43 @@ def test_invalid_artifacts_do_not_mask_worker_reported_failure():
 
     assert parse_error is None
     assert result_data is not None
-    assert result_data["artifacts"] == []
+    assert result_data["artifacts"] == [
+        before,
+        {
+            "name": "out/after.json",
+            "relative_path": "out/after.json",
+            "type": "application/octet-stream",
+        },
+    ]
     assert result_data["error"] == "Upstream vendor rejected the request."
     assert result_data["error_code"] == "vendor_rejected"
     assert any("worker-reported failure" in message for _level, message in logs)
+
+    monkeypatch.setattr(e2b_driver, "ARTIFACTS_DIR", tmp_path)
+    collected = E2BSandboxDriver()._collect_sandbox_artifacts(
+        sandbox=FakeSandbox(
+            {
+                "/home/user/worker/out/before.log": b"before failure\n",
+                "/home/user/worker/out/after.json": b'{"after":true}\n',
+            }
+        ),
+        workdir="/home/user/worker",
+        run_id="run_failed_diagnostics",
+        result_artifacts=result_data["artifacts"],
+        config=None,
+        outputs={},
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+    merged = e2b_driver._merge_artifacts(result_data["artifacts"], collected)
+
+    assert [artifact["relative_path"] for artifact in merged] == [
+        "out/before.log",
+        "out/after.json",
+    ]
+    assert [Path(artifact["path"]).read_bytes() for artifact in merged] == [
+        b"before failure\n",
+        b'{"after":true}\n',
+    ]
 
 
 def test_string_artifact_shorthand_still_uses_path_traversal_guard():
