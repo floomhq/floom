@@ -1526,7 +1526,7 @@ export const api = {
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),
     triggersForApp: (app: string) =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>(
-        `/integrations/triggers?app=${encodeURIComponent(app)}`
+        `/integrations/triggers?app=${encodeURIComponent(app)}&verbose=true`
       ),
     catalog: (params?: { page?: number; limit?: number; search?: string; category?: string }) => {
       const qs = new URLSearchParams();

@@ -133,6 +133,7 @@ function makeWorkerDetail(id, overrides = {}) {
 async function startMockApi() {
   const seen = [];
   const bodies = [];
+  const triggerQueries = [];
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     seen.push(`${request.method} ${url.pathname}`);
@@ -233,6 +234,39 @@ async function startMockApi() {
 
     if (request.method === "GET" && url.pathname === "/workers/mcp-test-worker") {
       json(response, 200, makeWorkerDetail("mcp-test-worker"));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workers/trigger-pagination-worker") {
+      json(response, 200, makeWorkerDetail("trigger-pagination-worker", {
+        config: { connections: ["slack", "gmail"] },
+      }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/integrations/triggers") {
+      const app = url.searchParams.get("app");
+      const offset = Number(url.searchParams.get("offset") || 0);
+      triggerQueries.push(Object.fromEntries(url.searchParams));
+      const catalogs = {
+        gmail: [
+          { id: "gmail-a", name: "Gmail A", toolkit: "gmail" },
+          { id: "gmail-c", name: "Gmail C", toolkit: "gmail" },
+        ],
+        slack: [
+          { id: "slack-b", name: "Slack B", toolkit: "slack" },
+          { id: "slack-d", name: "Slack D", toolkit: "slack" },
+        ],
+      };
+      const catalog = catalogs[app] || [];
+      const items = catalog.slice(offset, offset + 1);
+      json(response, 200, {
+        items,
+        limit: 100,
+        offset,
+        total_items: catalog.length,
+        next_offset: offset + 1 < catalog.length ? offset + 1 : null,
+      });
       return;
     }
 
@@ -408,6 +442,7 @@ async function startMockApi() {
     server,
     seen,
     bodies,
+    triggerQueries,
     baseUrl: `http://127.0.0.1:${address.port}`,
   };
 }
@@ -635,6 +670,45 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     "GET /runs/run_test/events",
     "DELETE /workers/mcp-test-worker",
   ]);
+});
+
+test("worker-scoped triggers paginate the globally merged catalog", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const result = await client.callTool({
+      name: "triggers.list",
+      arguments: { worker_id: "trigger-pagination-worker", offset: 1, limit: 2 },
+    });
+    assert.deepEqual(result.structuredContent, {
+      items: [
+        { id: "gmail-c", name: "Gmail C", toolkit: "gmail" },
+        { id: "slack-b", name: "Slack B", toolkit: "slack" },
+      ],
+      limit: 2,
+      offset: 1,
+      total_items: 4,
+      next_offset: 3,
+    });
+
+    const last = await client.callTool({
+      name: "triggers.list",
+      arguments: { worker_id: "trigger-pagination-worker", offset: 3, limit: 2 },
+    });
+    assert.deepEqual(last.structuredContent, {
+      items: [{ id: "slack-d", name: "Slack D", toolkit: "slack" }],
+      limit: 2,
+      offset: 3,
+      total_items: 4,
+      next_offset: null,
+    });
+    assert.deepEqual(
+      [...new Set(mock.triggerQueries.map((query) => query.app))].sort(),
+      ["gmail", "slack"],
+    );
+    assert.equal(mock.triggerQueries.every((query) => query.mcp === "1"), true);
+  });
 });
 
 test("stdio MCP emits sanitized tool telemetry", async (t) => {

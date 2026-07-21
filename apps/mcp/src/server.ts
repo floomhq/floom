@@ -517,12 +517,13 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
   };
 }
 
-async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
+async function listTriggers(workerId?: string, app?: string, limit = 50, offset = 0, verbose = false): Promise<unknown> {
+  const query = { limit, offset, verbose: verbose ? 1 : 0, mcp: 1 };
   if (app) {
-    return request("GET", "/integrations/triggers", undefined, { app });
+    return request("GET", "/integrations/triggers", undefined, { app, ...query });
   }
   if (!workerId) {
-    return request("GET", "/integrations/triggers");
+    return request("GET", "/integrations/triggers", undefined, query);
   }
   const worker = await request("GET", `/workers/${encodeURIComponent(workerId)}`) as JsonObject;
   const config = (worker.config && typeof worker.config === "object") ? worker.config as JsonObject : {};
@@ -541,27 +542,59 @@ async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
       })
     : [];
   if (!connections.length) {
-    return { items: [] };
+    return { items: [], limit, offset, total_items: 0, next_offset: null };
   }
   const merged: JsonObject[] = [];
   const seen = new Set<string>();
   for (const connection of connections) {
-    const payload = await request("GET", "/integrations/triggers", undefined, { app: connection }) as JsonObject;
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    for (const item of items) {
-      if (!item || typeof item !== "object") {
-        continue;
+    let appOffset = 0;
+    while (true) {
+      const payload = await request("GET", "/integrations/triggers", undefined, {
+        app: connection,
+        limit: 100,
+        offset: appOffset,
+        verbose: query.verbose,
+        mcp: query.mcp,
+      }) as JsonObject;
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      for (const item of items) {
+        if (!item || typeof item !== "object") {
+          continue;
+        }
+        const record = item as JsonObject;
+        const eventName = String(record.event || record.slug || record.id || record.name || JSON.stringify(item));
+        const dedupeKey = `${connection.toLowerCase()}:${eventName}`;
+        if (seen.has(dedupeKey)) {
+          continue;
+        }
+        seen.add(dedupeKey);
+        merged.push(record);
       }
-      const eventName = String((item as JsonObject).name || (item as JsonObject).slug || JSON.stringify(item));
-      const dedupeKey = `${connection}:${eventName}`;
-      if (seen.has(dedupeKey)) {
-        continue;
+      const nextOffset = typeof payload.next_offset === "number" ? payload.next_offset : null;
+      if (nextOffset === null || nextOffset <= appOffset) {
+        break;
       }
-      seen.add(dedupeKey);
-      merged.push(item as JsonObject);
+      appOffset = nextOffset;
     }
   }
-  return { items: merged };
+  merged.sort((left, right) => {
+    const key = (item: JsonObject) => {
+      const toolkit = typeof item.toolkit === "string"
+        ? item.toolkit
+        : (item.toolkit && typeof item.toolkit === "object" ? String((item.toolkit as JsonObject).slug || "") : "");
+      return `${toolkit}\u0000${String(item.event || item.slug || item.id || item.name || "")}`.toLowerCase();
+    };
+    return key(left).localeCompare(key(right));
+  });
+  const totalItems = merged.length;
+  const items = merged.slice(offset, offset + limit);
+  return {
+    items,
+    limit,
+    offset,
+    total_items: totalItems,
+    next_offset: offset + limit < totalItems ? offset + limit : null,
+  };
 }
 
 async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObject> {
@@ -1426,11 +1459,14 @@ export function createServer(): McpServer {
       inputSchema: {
         worker_id: z.string().optional().describe("Optional worker id to scope triggers by worker connections."),
         app: z.string().optional().describe("Optional app slug filter."),
+        limit: z.number().int().min(1).max(100).default(50).describe("Maximum triggers to return."),
+        offset: z.number().int().min(0).default(0).describe("Number of matching triggers to skip."),
+        verbose: z.boolean().default(false).describe("Include full trigger objects and embedded JSON schemas."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ worker_id, app }) =>
-      callTool(async () => jsonResult(await listTriggers(worker_id, app))),
+    async ({ worker_id, app, limit, offset, verbose }) =>
+      callTool(async () => jsonResult(await listTriggers(worker_id, app, limit, offset, verbose))),
   );
 
   server.registerTool(
@@ -2030,10 +2066,16 @@ export function createServer(): McpServer {
     {
       title: "List Integrations Catalog",
       description: "Browse available integrations (apps, triggers, actions) supported by Floom.",
-      inputSchema: {},
+      inputSchema: {
+        page: z.number().int().min(1).default(1).describe("Catalog page number."),
+        limit: z.number().int().min(1).max(100).default(30).describe("Integrations per page."),
+        search: z.string().max(120).optional().describe("Search integration names and descriptions."),
+        category: z.string().max(200).optional().describe("Optional category slug filter."),
+      },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async () => callTool(async () => jsonResult(await request("GET", "/integrations/catalog"))),
+    async ({ page, limit, search, category }) =>
+      callTool(async () => jsonResult(await request("GET", "/integrations/catalog", undefined, { page, limit, search, category }))),
   );
 
   // ---------------------------------------------------------------------------
