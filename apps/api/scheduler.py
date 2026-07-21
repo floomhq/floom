@@ -449,13 +449,82 @@ def _effective_scheduled_inputs(
     return inputs, missing
 
 
-def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
+def _sync_legacy_schedule_state(repos, rows: list[dict[str, Any]]) -> None:
+    """Mirror normalized schedule state onto legacy worker observability fields.
+
+    ``worker_triggers`` is authoritative for scheduling, while worker detail and
+    older operational tooling still read ``workers.next_run_at`` and
+    ``workers.last_scheduled_run_at``. Keep those scalar fields aligned without
+    letting an observability write interrupt scheduling.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        worker_id = row.get("worker_id")
+        if worker_id:
+            grouped.setdefault(str(worker_id), []).append(row)
+
+    get_state = getattr(repos.workers, "get_schedule_state", None)
+    set_next = getattr(repos.workers, "set_next_run_at", None)
+    mark_scheduled = getattr(repos.workers, "mark_scheduled_run", None)
+    if not callable(get_state) or not callable(set_next):
+        return
+
+    for worker_id, worker_rows in grouped.items():
+        next_values = [
+            str(row["next_run_at"])
+            for row in worker_rows
+            if row.get("next_run_at")
+        ]
+        last_values = [
+            str(row["last_fired_at"])
+            for row in worker_rows
+            if row.get("last_fired_at")
+        ]
+        next_run_at = min(next_values) if next_values else None
+        last_scheduled_run_at = max(last_values) if last_values else None
+        try:
+            state = get_state(worker_id=worker_id) or {}
+            next_is_stale = state.get("next_run_at") != next_run_at
+            last_is_stale = (
+                "last_scheduled_run_at" in state
+                and state.get("last_scheduled_run_at") != last_scheduled_run_at
+            )
+            if last_scheduled_run_at and callable(mark_scheduled) and (
+                next_is_stale or last_is_stale
+            ):
+                mark_scheduled(
+                    worker_id=worker_id,
+                    last_scheduled_run_at=last_scheduled_run_at,
+                    next_run_at=next_run_at,
+                )
+            elif next_is_stale:
+                set_next(worker_id=worker_id, next_run_at=next_run_at)
+        except Exception:
+            logger.warning(
+                "Failed to sync legacy schedule state for worker %s",
+                worker_id,
+                exc_info=True,
+            )
+
+
+def _tick_trigger_rows(
+    repos,
+    now: datetime,
+    now_iso_str: str,
+    normalized_worker_ids: set[str] | None = None,
+) -> int:
     """Iterate normalized schedule trigger ROWS and fire any that are due.
 
     Returns the number of schedule trigger rows considered (used to decide
     whether to fall back to the legacy worker-scalar path).
     """
     rows = repos.workers.list_due_schedule_triggers(now_iso=now_iso_str)
+    if normalized_worker_ids is not None:
+        normalized_worker_ids.update(
+            str(row["worker_id"])
+            for row in rows
+            if row.get("worker_id")
+        )
     for row in rows:
         trigger_id = row["id"]
         worker_id = row["worker_id"]
@@ -482,6 +551,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             next_at_str = compute_next_run_at(cron_expr, now, cron_timezone)
             if next_at_str:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=next_at_str)
+                row["next_run_at"] = next_at_str
             continue  # never fire on the same tick we initialized
 
         try:
@@ -532,6 +602,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
         if running_count:
             if new_next:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                row["next_run_at"] = new_next
             logger.info(
                 "Skipping schedule trigger %s (worker %s) — previous run still running",
                 trigger_id,
@@ -562,6 +633,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 )
                 if new_next:
                     repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                    row["next_run_at"] = new_next
                 logger.warning(
                     "Skipping schedule trigger %s for worker %s: missing required scheduled input(s): %s",
                     trigger_id,
@@ -590,6 +662,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 )
                 if new_next:
                     repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                    row["next_run_at"] = new_next
                 logger.warning(
                     "Skipping schedule trigger %s for worker %s: missing secret(s): %s",
                     trigger_id, worker_id, ", ".join(_sched_missing_secrets),
@@ -614,6 +687,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 )
                 if new_next:
                     repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                    row["next_run_at"] = new_next
                 logger.warning(
                     "Skipping schedule trigger %s for worker %s: missing connection(s): %s",
                     trigger_id, worker_id, ", ".join(_sched_missing_conns),
@@ -641,6 +715,8 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                     last_fired_at=now_iso_str,
                     next_run_at=new_next,
                 )
+                row["last_fired_at"] = now_iso_str
+                row["next_run_at"] = new_next
                 _emit_trigger_fired(
                     owner_id=user_id,
                     worker_id=worker_id,
@@ -651,9 +727,17 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 # Keep the worker-scalar bookkeeping roughly in sync for any legacy
                 # readers of workers.last_scheduled_run_at.
                 try:
-                    repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+                    repos.workers.mark_scheduled_run(
+                        worker_id=worker_id,
+                        last_scheduled_run_at=now_iso_str,
+                        next_run_at=new_next,
+                    )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Failed to sync fired schedule state for worker %s",
+                        worker_id,
+                        exc_info=True,
+                    )
                 logger.info(
                     "Schedule trigger %s started run %s for worker %s, next at %s",
                     trigger_id,
@@ -668,6 +752,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                     trigger_id=trigger_id,
                     next_run_at=new_next,
                 )
+                row["next_run_at"] = new_next
                 logger.exception(
                     "Failed to fire schedule trigger %s for worker %s: %s",
                     trigger_id,
@@ -677,6 +762,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 if new_next:
                     try:
                         repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                        row["next_run_at"] = new_next
                     except Exception:
                         pass
         except Exception as row_exc:
@@ -717,6 +803,8 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 trigger_id=trigger_id,
                 next_run_at=new_next,
             )
+            row["next_run_at"] = new_next
+    _sync_legacy_schedule_state(repos, rows)
     return len(rows)
 
 
@@ -729,12 +817,19 @@ def _tick() -> None:
     now_iso_str = now.isoformat()
 
     # Primary path: iterate normalized worker_triggers schedule rows, so ALL
-    # declared schedule triggers fire (multi-trigger). If the DB has any
-    # schedule trigger rows at all, this path is authoritative.
+    # declared schedule triggers fire (multi-trigger). The legacy pass below
+    # still processes workers that have no enabled normalized schedule row.
+    # A global early return here stranded an unreconciled worker as soon as any
+    # other worker in the database had a normalized schedule.
+    normalized_worker_ids: set[str] = set()
     try:
         if repos.workers.count_schedule_trigger_rows() > 0:
-            _tick_trigger_rows(repos, now, now_iso_str)
-            return
+            _tick_trigger_rows(
+                repos,
+                now,
+                now_iso_str,
+                normalized_worker_ids,
+            )
     except Exception:
         logger.exception("Schedule trigger-row tick failed; falling back to worker-scalar path")
 
@@ -743,6 +838,8 @@ def _tick() -> None:
     workers = _list_scheduled_worker_instances()
     for w in workers:
         worker_id = w["id"]
+        if worker_id in normalized_worker_ids:
+            continue
         user_id = w.get("owner_id")
         workspace_id = w.get("workspace_id")
         cron_expr = w.get("cron_expr")
