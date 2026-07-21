@@ -270,6 +270,17 @@ def current_context_scope() -> Optional[str]:
     return _current_scope()
 
 
+def context_scope_for_execution(user_id: str | None) -> str | None:
+    """Preserve an active workspace scope, with user scope as the fallback.
+
+    Hosted run execution binds the run's workspace through the platform scope
+    resolver before entering the engine. Runtime code must keep that canonical
+    workspace scope instead of replacing it with the account ID, which would
+    create a parallel context tree invisible to workspace reads.
+    """
+    return current_context_scope() or context_scope_for_user(user_id)
+
+
 def current_contexts_root() -> Path:
     """Return the active CONTEXTS_DIR root for the current request.
 
