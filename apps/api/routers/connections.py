@@ -162,6 +162,8 @@ class ConnectionItem(BaseModel):
     id: str
     app_name: str
     status: str
+    configuration_status: str
+    health_status: Literal["healthy", "unhealthy", "unknown", "never_checked"]
     created_at: str
     updated_at: str
     kind: str = "composio"
@@ -865,6 +867,19 @@ def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     except Exception:
         item["mcp_env"] = {}
     item["mcp_transport"] = item.get("mcp_transport") or "streamable_http"
+    # ``status`` is the durable configuration/lifecycle state, not evidence of
+    # live connectivity. Keep it for compatibility while making that distinction
+    # explicit and exposing health derived only from an actual recorded check.
+    item["configuration_status"] = str(item.get("status") or "unknown")
+    last_check = str(item.get("last_check_status") or "").lower()
+    if not item.get("last_checked_at") or not last_check:
+        item["health_status"] = "never_checked"
+    elif last_check == "valid":
+        item["health_status"] = "healthy"
+    elif last_check in {"failed", "expired", "error"}:
+        item["health_status"] = "unhealthy"
+    else:
+        item["health_status"] = "unknown"
     return ConnectionItem(**item)
 
 
@@ -2195,10 +2210,11 @@ def _extract_auth_config_scopes(body: Any) -> List[str]:
 @connections_router.post("/connections/{connection_id}/test", response_model=ConnectionTestResult)
 def test_connection(
     connection_id: str,
+    record: bool = False,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ConnectionTestResult:
-    """Test whether a connection's token is still valid by calling Composio."""
+    """Probe a connection live; persist its health only when ``record`` is true."""
     row = _connection_row_for_user(
         connection_id,
         auth.user_id,
@@ -2208,6 +2224,10 @@ def test_connection(
 
     composio_conn_id = row["composio_connection_id"]
     tested_at = now_iso()
+
+    def _record_connection_check(*args: Any, **kwargs: Any) -> None:
+        if record:
+            _write_connection_check(*args, **kwargs)
 
     if (row.get("kind") or "composio") != "composio":
         # #599: actually test MCP connections by attempting to initialize the
@@ -2258,7 +2278,7 @@ def test_connection(
                     )
                     headers.update(pinned_headers)
                 except Exception as _ssrf_exc:
-                    _write_connection_check(
+                    _record_connection_check(
                         connection_id,
                         "failed",
                         str(_ssrf_exc),
@@ -2301,7 +2321,7 @@ def test_connection(
                             reason = "MCP server returned 404. Verify the server URL is correct."
                         else:
                             reason = f"MCP server returned HTTP {init_resp.status_code}."
-                        _write_connection_check(
+                        _record_connection_check(
                             connection_id,
                             "failed",
                             f"HTTP {init_resp.status_code}",
@@ -2336,7 +2356,7 @@ def test_connection(
                             f"MCP server reachable but authentication failed (HTTP {tools_resp.status_code}). "
                             "Check your API key / token."
                         )
-                        _write_connection_check(
+                        _record_connection_check(
                             connection_id,
                             "failed",
                             f"HTTP {tools_resp.status_code}",
@@ -2364,7 +2384,7 @@ def test_connection(
                                 reason = "MCP server returned 404. Verify the server URL is correct."
                             else:
                                 reason = f"MCP server returned HTTP {legacy_resp.status_code}."
-                            _write_connection_check(
+                            _record_connection_check(
                                 connection_id,
                                 "failed",
                                 f"HTTP {legacy_resp.status_code}",
@@ -2375,7 +2395,7 @@ def test_connection(
                             return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
                     else:
                         reason = f"MCP server returned HTTP {tools_resp.status_code}."
-                        _write_connection_check(
+                        _record_connection_check(
                             connection_id,
                             "failed",
                             f"HTTP {tools_resp.status_code}",
@@ -2397,7 +2417,7 @@ def test_connection(
                         f"MCP server reachable — {tool_count} tools. "
                         f"Allowed-tool mismatch: missing {', '.join(missing_allowed)}."
                     )
-                    _write_connection_check(
+                    _record_connection_check(
                         connection_id,
                         "failed",
                         f"tool mismatch: {', '.join(missing_allowed)}",
@@ -2407,7 +2427,7 @@ def test_connection(
                     )
                     return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
 
-                _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
+                _record_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
                 extra_tools = f" — {tool_count} tools" if tool_count is not None else ""
                 allowed_tools_note = f" (allowlist: {len(allowed_tools)} tools)" if allowed_tools else ""
                 return ConnectionTestResult(
@@ -2417,14 +2437,14 @@ def test_connection(
                     tools=tool_names,  # #789: live tool list
                 )
             except Exception as exc:
-                _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
+                _record_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
                 return ConnectionTestResult(
                     status="failed",
                     reason=f"Could not reach MCP server: {exc}",
                     tested_at=tested_at,
                 )
         # No URL stored — connection is saved but untestable without a URL
-        _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
+        _record_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
         return ConnectionTestResult(
             status="valid",
             reason="MCP connection saved. Add a server URL to enable live testing.",
@@ -2435,7 +2455,7 @@ def test_connection(
         from composio_client import check_status
         remote_status = _normalize_composio_connection_status(check_status(composio_conn_id))
     except Exception as exc:
-        _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
+        _record_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
         return ConnectionTestResult(
             status="failed",
             reason=f"Upstream check failed: {exc}",
@@ -2443,7 +2463,7 @@ def test_connection(
         )
 
     if remote_status == "not_found":
-        _write_connection_check(
+        _record_connection_check(
             connection_id,
             "failed",
             "Connection not found in upstream",
@@ -2457,7 +2477,7 @@ def test_connection(
             tested_at=tested_at,
         )
     if remote_status in ("expired", "failed"):
-        _write_connection_check(
+        _record_connection_check(
             connection_id,
             remote_status,
             f"Status: {remote_status}",
@@ -2471,14 +2491,15 @@ def test_connection(
             tested_at=tested_at,
         )
     if remote_status == "active":
-        _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
-        _cache_connection_account_info(
-            repos=repos,
-            user_id=auth.user_id,
-            connection_id=connection_id,
-            composio_connection_id=composio_conn_id,
-            now=tested_at,
-        )
+        _record_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
+        if record:
+            _cache_connection_account_info(
+                repos=repos,
+                user_id=auth.user_id,
+                connection_id=connection_id,
+                composio_connection_id=composio_conn_id,
+                now=tested_at,
+            )
         return ConnectionTestResult(
             status="valid",
             reason="Connection is active",
@@ -2486,7 +2507,7 @@ def test_connection(
         )
 
     # Unknown status: treat as valid but note it
-    _write_connection_check(
+    _record_connection_check(
         connection_id,
         "valid",
         f"Status: {remote_status}",
@@ -2494,13 +2515,14 @@ def test_connection(
         status="active",
         repos=repos,
     )
-    _cache_connection_account_info(
-        repos=repos,
-        user_id=auth.user_id,
-        connection_id=connection_id,
-        composio_connection_id=composio_conn_id,
-        now=tested_at,
-    )
+    if record:
+        _cache_connection_account_info(
+            repos=repos,
+            user_id=auth.user_id,
+            connection_id=connection_id,
+            composio_connection_id=composio_conn_id,
+            now=tested_at,
+        )
     return ConnectionTestResult(
         status="valid",
         reason=f"Connection status: {remote_status}",
@@ -2525,7 +2547,8 @@ def _write_connection_check(
     status: Optional[str] = None,
     repos: Repositories | None = None,
 ) -> None:
-    """Persist health-check result to the DB row."""
+    """Persist health evidence without changing configuration lifecycle state."""
+    _ = status  # Kept for compatibility with existing probe call sites.
     repos_obj = repos or get_repositories()
     row = _connection_by_id(connection_id, repos_obj)
     if row is None:
@@ -2534,10 +2557,7 @@ def _write_connection_check(
         "last_checked_at": checked_at,
         "last_check_status": check_status,
         "last_check_error": error,
-        "updated_at": checked_at,
     }
-    if status:
-        updates["status"] = status
     repos_obj.connections.update(user_id=row["user_id"], composio_id=connection_id, **updates)
     _invalidate_connections_cache(str(row["user_id"]))
 
