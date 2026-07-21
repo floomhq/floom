@@ -2737,7 +2737,8 @@ class SqliteRunRepository:
         self,
         *,
         run_id: str,
-        total_tokens: int,
+        authorized_run_id: str,
+        total_tokens: int | None,
         total_cost_usd: float | None,
     ) -> None:
         """Atomically accumulate usage from a run-scoped managed LLM call."""
@@ -2745,14 +2746,31 @@ class SqliteRunRepository:
             conn.execute(
                 """
                 UPDATE runs
-                SET total_tokens = COALESCE(total_tokens, 0) + ?,
+                SET proxy_total_tokens = CASE
+                        WHEN ? IS NULL THEN proxy_total_tokens
+                        ELSE COALESCE(proxy_total_tokens, 0) + ?
+                    END,
+                    proxy_total_cost_usd = CASE
+                        WHEN ? IS NULL THEN proxy_total_cost_usd
+                        ELSE COALESCE(proxy_total_cost_usd, 0.0) + ?
+                    END,
+                    total_tokens = CASE
+                        WHEN ? IS NULL THEN total_tokens
+                        ELSE COALESCE(total_tokens, 0) + ?
+                    END,
                     total_cost_usd = CASE
                         WHEN ? IS NULL THEN total_cost_usd
                         ELSE COALESCE(total_cost_usd, 0.0) + ?
                     END
-                WHERE id = ?
+                WHERE id = ? AND id = ?
                 """,
-                (total_tokens, total_cost_usd, total_cost_usd, run_id),
+                (
+                    total_tokens, total_tokens,
+                    total_cost_usd, total_cost_usd,
+                    total_tokens, total_tokens,
+                    total_cost_usd, total_cost_usd,
+                    run_id, authorized_run_id,
+                ),
             )
 
     def delete(self, *, user_id: str, run_id: str) -> bool:

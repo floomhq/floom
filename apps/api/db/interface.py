@@ -444,7 +444,8 @@ class RunRepository(Protocol):
         self,
         *,
         run_id: str,
-        total_tokens: int,
+        authorized_run_id: str,
+        total_tokens: int | None,
         total_cost_usd: float | None,
     ) -> None:
         """Atomically add provider-reported LLM usage to a run."""

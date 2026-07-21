@@ -4,6 +4,7 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -165,6 +166,63 @@ def test_managed_llm_partial_usage_does_not_fabricate_total(monkeypatch, tmp_pat
     assert response.status_code == 200, response.text
     stored = db.get_repositories().runs.get_any(run_id="run-managed")
     assert stored["total_tokens"] is None
+    assert stored["total_cost_usd"] == 0.0042
+
+
+@pytest.mark.parametrize(
+    ("usage", "cost"),
+    [
+        ({"total_tokens": 12.9}, 0.001),
+        ({"total_tokens": -1}, 0.001),
+        ({"total_tokens": 12}, float("nan")),
+        ({"total_tokens": 12}, float("inf")),
+        ({"total_tokens": 12}, -0.001),
+    ],
+)
+def test_managed_llm_invalid_usage_values_are_not_persisted(monkeypatch, tmp_path, usage, cost):
+    db, main = _load_app(monkeypatch, tmp_path)
+    _seed_running_run(db)
+    monkeypatch.setattr(
+        "llm.completion",
+        lambda **_kwargs: {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": usage,
+            "_hidden_params": {"response_cost": cost},
+        },
+    )
+
+    response = TestClient(main.app).post(
+        "/runs/run-managed/llm",
+        headers=_run_headers("run-managed"),
+        json={"messages": [{"role": "user", "content": "score"}]},
+    )
+
+    assert response.status_code == 200, response.text
+    stored = db.get_repositories().runs.get_any(run_id="run-managed")
+    if usage["total_tokens"] in (12,):
+        assert stored["total_tokens"] == 12
+    else:
+        assert stored["total_tokens"] is None
+    if cost == 0.001:
+        assert stored["total_cost_usd"] == 0.001
+    else:
+        assert stored["total_cost_usd"] is None
+
+
+def test_add_usage_rejects_mismatched_run_capability(monkeypatch, tmp_path):
+    db, _main = _load_app(monkeypatch, tmp_path)
+    _seed_running_run(db, run_id="run-owner-a")
+
+    db.get_repositories().runs.add_usage(
+        run_id="run-owner-a",
+        authorized_run_id="run-other-tenant",
+        total_tokens=42,
+        total_cost_usd=0.0015,
+    )
+
+    stored = db.get_repositories().runs.get_any(run_id="run-owner-a")
+    assert stored["total_tokens"] is None
+    assert stored["total_cost_usd"] is None
 
 
 def test_run_token_can_call_workspace_managed_embeddings(monkeypatch, tmp_path):
@@ -335,7 +393,12 @@ def test_terminal_cost_combines_transcript_and_managed_proxy_usage(monkeypatch, 
     db, _main = _load_app(monkeypatch, tmp_path)
     _seed_running_run(db)
     repos = db.get_repositories()
-    repos.runs.add_usage(run_id="run-managed", total_tokens=42, total_cost_usd=0.0015)
+    repos.runs.add_usage(
+        run_id="run-managed",
+        authorized_run_id="run-managed",
+        total_tokens=42,
+        total_cost_usd=0.0015,
+    )
 
     import cost
     from services.run_cost import _persist_run_cost
@@ -348,6 +411,11 @@ def test_terminal_cost_combines_transcript_and_managed_proxy_usage(monkeypatch, 
     stored = repos.runs.get_any(run_id="run-managed")
     assert stored["total_tokens"] == 142
     assert stored["total_cost_usd"] == 0.004
+
+    _persist_run_cost("run-managed", user_id="owner-a", repos=repos)
+    stored_again = repos.runs.get_any(run_id="run-managed")
+    assert stored_again["total_tokens"] == 142
+    assert stored_again["total_cost_usd"] == 0.004
 
 
 def test_managed_llm_rejects_terminal_run(monkeypatch, tmp_path):

@@ -5205,11 +5205,24 @@ def _usage_value(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
-def _managed_llm_usage(response: Any) -> tuple[int, Optional[float]] | None:
+def _non_negative_integer(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        return None
+    return int(value) if value >= 0 else None
+
+
+def _finite_non_negative_float(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = float(value)
+    return result if math.isfinite(result) and result >= 0 else None
+
+
+def _managed_llm_usage(response: Any) -> tuple[Optional[int], Optional[float]] | None:
     """Extract real usage returned by LiteLLM without inventing missing data."""
     usage = _usage_value(response, "usage")
-    if usage is None:
-        return None
 
     prompt_tokens = _usage_value(usage, "prompt_tokens")
     if prompt_tokens is None:
@@ -5222,17 +5235,14 @@ def _managed_llm_usage(response: Any) -> tuple[int, Optional[float]] | None:
     # were actually reported; treating a missing component as zero fabricates
     # a deceptively complete usage value.
     reported_total = _usage_value(usage, "total_tokens")
-    try:
-        if reported_total is not None:
-            total_tokens = int(reported_total)
-        elif prompt_tokens is not None and completion_tokens is not None:
-            total_tokens = int(prompt_tokens) + int(completion_tokens)
-        else:
-            return None
-    except (TypeError, ValueError):
-        return None
-    if total_tokens <= 0:
-        return None
+    if reported_total is not None:
+        total_tokens = _non_negative_integer(reported_total)
+    elif prompt_tokens is not None and completion_tokens is not None:
+        prompt = _non_negative_integer(prompt_tokens)
+        completion = _non_negative_integer(completion_tokens)
+        total_tokens = prompt + completion if prompt is not None and completion is not None else None
+    else:
+        total_tokens = None
 
     # LiteLLM exposes the provider/model-priced response cost in hidden params.
     # Some adapters also put it directly on usage, so accept both real sources.
@@ -5242,11 +5252,8 @@ def _managed_llm_usage(response: Any) -> tuple[int, Optional[float]] | None:
         raw_cost = _usage_value(usage, "total_cost_usd")
     if raw_cost is None:
         raw_cost = _usage_value(usage, "cost")
-    try:
-        cost = float(raw_cost) if raw_cost is not None else None
-    except (TypeError, ValueError):
-        cost = None
-    return total_tokens, cost
+    cost = _finite_non_negative_float(raw_cost)
+    return (total_tokens, cost) if total_tokens is not None or cost is not None else None
 
 
 def _managed_llm_completion(body: _ManagedLLMRequest) -> tuple[Any, tuple[int, Optional[float]] | None]:
@@ -5292,6 +5299,7 @@ def managed_llm_proxy(
     if usage is not None:
         repos.runs.add_usage(
             run_id=run_id,
+            authorized_run_id=run_id,
             total_tokens=usage[0],
             total_cost_usd=usage[1],
         )
@@ -5317,6 +5325,7 @@ def managed_llm_batch_proxy(
         if usage is not None:
             repos.runs.add_usage(
                 run_id=run_id,
+                authorized_run_id=run_id,
                 total_tokens=usage[0],
                 total_cost_usd=usage[1],
             )
