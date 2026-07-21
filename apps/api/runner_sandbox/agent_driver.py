@@ -62,6 +62,7 @@ logger = logging.getLogger("floom.runner_sandbox.agent")
 _OPENAI_MAX_OUTPUT_CAP = 16_384
 _BEDROCK_MAX_OUTPUT_CAP = 64_000
 _DEFAULT_AGENT_FALLBACK_MODEL = "bedrock/us.anthropic.claude-sonnet-4-6"
+_AGENT_FALLBACK_EXHAUSTED_MARKER = "agent model provider capacity fallback chain exhausted"
 _AUTH_ERROR_RE = re.compile(
     r"authentication|unauthorized|forbidden|invalid[_ -]?api[_ -]?key|incorrect api key"
     r"|access denied|expired token|signaturedoesnotmatch|unrecognizedclient",
@@ -245,18 +246,28 @@ def _system_forced_agent_model() -> str | None:
     return (os.environ.get("WORKEROS_FORCE_AGENT_MODEL") or "").strip() or None
 
 
-def _agent_fallback_model(current: str | None = None) -> str | None:
-    """The alternate provider to swap to when ``current`` hits a capacity error.
+def _agent_fallback_models(current: str | None = None) -> list[str]:
+    """Parse the configured fallback value while preserving scalar compatibility."""
+    raw = os.environ.get("WORKEROS_AGENT_FALLBACK_MODEL") or ""
+    current_normalized = _llm.agent_model(current).lower() if current else None
+    fallbacks: list[str] = []
+    seen: set[str] = set()
+    for value in raw.split(","):
+        fallback = value.strip()
+        if not fallback:
+            continue
+        normalized = _llm.agent_model(fallback).lower()
+        if normalized == current_normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        fallbacks.append(fallback)
+    return fallbacks
 
-    ``WORKEROS_AGENT_FALLBACK_MODEL`` lets Bedrock and Gemini be exchanged: if
-    the primary model fails on provider capacity, the run retries once on this
-    model. Returns None when unset or identical to ``current`` (nothing to swap
-    to).
-    """
-    fallback = (os.environ.get("WORKEROS_AGENT_FALLBACK_MODEL") or "").strip() or None
-    if fallback and current and fallback.strip().lower() == current.strip().lower():
-        return None
-    return fallback
+
+def _agent_fallback_model(current: str | None = None) -> str | None:
+    """Backwards-compatible accessor for the first configured fallback model."""
+    fallbacks = _agent_fallback_models(current)
+    return fallbacks[0] if fallbacks else None
 
 
 def _resolve_agent_model(config: WorkerConfig) -> str:
@@ -269,29 +280,44 @@ def _resolve_agent_model(config: WorkerConfig) -> str:
     )
 
 
+def _resolve_agent_fallback_models(primary_model: str) -> list[str]:
+    """Resolve a validated ordered cross-provider fallback chain."""
+    raw = os.environ.get("WORKEROS_AGENT_FALLBACK_MODEL")
+    configured = raw or _DEFAULT_AGENT_FALLBACK_MODEL
+    candidates = [value.strip() for value in configured.split(",") if value.strip()]
+    seen = {_llm.agent_model(primary_model).lower()}
+    seen_providers = {_llm.model_provider_name(primary_model)}
+    fallbacks: list[str] = []
+
+    for fallback_model in candidates:
+        normalized = _llm.agent_model(fallback_model).lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        provider = _llm.model_provider_name(fallback_model)
+        if provider in seen_providers:
+            logger.warning(
+                "Agent fallback model %s revisits provider %s; skipping fallback",
+                fallback_model,
+                provider,
+            )
+            continue
+        if not _llm.provider_credentials_present(fallback_model):
+            logger.warning(
+                "Agent fallback model %s is not configured; skipping fallback",
+                fallback_model,
+            )
+            continue
+        fallbacks.append(fallback_model)
+        seen_providers.add(provider)
+
+    return fallbacks
+
+
 def _resolve_agent_fallback_model(primary_model: str) -> str | None:
-    """Resolve the runtime-only cross-provider fallback without changing manifests."""
-    fallback_model = (
-        os.environ.get("WORKEROS_AGENT_FALLBACK_MODEL")
-        or _DEFAULT_AGENT_FALLBACK_MODEL
-    ).strip()
-    if not fallback_model:
-        return None
-    if _llm.agent_model(fallback_model) == _llm.agent_model(primary_model):
-        return None
-    if _llm.model_provider_name(fallback_model) == _llm.model_provider_name(primary_model):
-        logger.warning(
-            "Agent fallback model %s uses the primary provider; cross-provider fallback is disabled",
-            fallback_model,
-        )
-        return None
-    if not _llm.provider_credentials_present(fallback_model):
-        logger.warning(
-            "Agent fallback model %s is not configured; capacity fallback is disabled",
-            fallback_model,
-        )
-        return None
-    return fallback_model
+    """Backwards-compatible accessor for the first validated fallback model."""
+    fallbacks = _resolve_agent_fallback_models(primary_model)
+    return fallbacks[0] if fallbacks else None
 
 
 def _should_retry_agent_with_fallback(exc: BaseException) -> bool:
@@ -345,6 +371,8 @@ def _classify_llm_provider_error(
             except (TypeError, ValueError):
                 continue
     haystack = f"{module} {class_name} {text}"
+    if _AGENT_FALLBACK_EXHAUSTED_MARKER in haystack.lower():
+        return "llm_provider_capacity"
     if _AUTH_ERROR_RE.search(haystack):
         return "llm_auth_error"
     if _MODEL_NOT_CONFIGURED_RE.search(haystack):
@@ -513,97 +541,63 @@ class AgentDriver(SandboxDriver):
         connection_ids: Optional[Dict[str, str]] = None,
         user_id: str | None = None,
     ) -> WorkerResult:
-        # Model exchange: try the resolved (system-forced or worker) model, then
-        # swap to the configured fallback provider once if the first hits a
-        # provider CAPACITY class error. This lets Bedrock and Gemini be
-        # exchanged at the system level so a capacity cap on one provider does
-        # not fail the run. Non-capacity errors (runtime, token limit) do not
-        # swap. See _agent_fallback_model / WORKEROS_AGENT_FALLBACK_MODEL.
+        # Provider exchange is handled inside LoopLocalModelProvider at the
+        # individual buffered model-call boundary. Keep one agent invocation so
+        # completed tool effects are never replayed by a whole-run retry.
         _CAPACITY_SWAP_CODES = {"llm_provider_capacity", "llm_provider_error", "llm_rate_limited"}
-        primary_model = _resolve_agent_model(config) if config and config.runtime else None
-        models_to_try: list[str | None] = [primary_model]
-        _fb = _agent_fallback_model(primary_model)
-        if _fb:
-            models_to_try.append(_fb)
-
-        for _attempt, _model in enumerate(models_to_try):
-            _has_next = _attempt < len(models_to_try) - 1
-            try:
-                return self._run_coro_sync(
-                    self._run_agent_async(
-                        worker_id=worker_id,
-                        run_id=run_id,
-                        inputs=inputs,
-                        secrets=secrets,
-                        log_fn=log_fn,
-                        trace_id=trace_id,
-                        timeout_seconds=timeout_seconds,
-                        config=config,
-                        connection_ids=connection_ids or {},
-                        user_id=user_id,
-                        model_override=_model,
-                    )
+        try:
+            return self._run_coro_sync(
+                self._run_agent_async(
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    inputs=inputs,
+                    secrets=secrets,
+                    log_fn=log_fn,
+                    trace_id=trace_id,
+                    timeout_seconds=timeout_seconds,
+                    config=config,
+                    connection_ids=connection_ids or {},
+                    user_id=user_id,
                 )
-            except Exception as exc:
-                exc_str = str(exc)
-                if "response.incomplete" in exc_str or "max_output_tokens" in exc_str.lower():
-                    log_fn(f"Output token limit reached: {exc}", "error")
-                    return WorkerResult(
-                        status="error",
-                        error=(
-                            "The model's response exceeded the per-turn output token limit. "
-                            "Increase max_output_tokens in the worker's limits or simplify the task."
-                        ),
-                        error_code="output_token_limit",
-                        retryable=False,
-                    )
-                llm_error_code = _classify_llm_provider_error(exc)
-                if llm_error_code:
-                    redacted = _redact_provider_message(exc_str, secrets)
-                    if llm_error_code in _CAPACITY_SWAP_CODES and _has_next:
-                        log_fn(
-                            f"Model {_model} hit {llm_error_code}; exchanging to fallback "
-                            f"{models_to_try[_attempt + 1]}",
-                            "warning",
-                        )
-                        logger.warning(
-                            "Agent model %s hit %s for worker %s run %s; exchanging to fallback %s",
-                            _model,
-                            llm_error_code,
-                            worker_id,
-                            run_id,
-                            models_to_try[_attempt + 1],
-                        )
-                        continue
-                    logger.warning(
-                        "Agent LLM provider failure for worker %s run %s classified as %s: %s",
-                        worker_id,
-                        run_id,
-                        llm_error_code,
-                        redacted,
-                    )
-                    log_fn(f"LLM provider error ({llm_error_code}): {redacted}", "error")
-                    return WorkerResult(
-                        status="error",
-                        error=_llm_error_message(llm_error_code),
-                        error_code=llm_error_code,
-                        retryable=llm_error_code in _CAPACITY_SWAP_CODES,
-                    )
-                logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
-                log_fn(f"Agent runtime error: {exc}", "error")
+            )
+        except Exception as exc:
+            exc_str = str(exc)
+            if "response.incomplete" in exc_str or "max_output_tokens" in exc_str.lower():
+                log_fn(f"Output token limit reached: {exc}", "error")
                 return WorkerResult(
                     status="error",
-                    error=str(exc),
-                    error_code="agent_runtime_error",
-                    retryable=True,
+                    error=(
+                        "The model's response exceeded the per-turn output token limit. "
+                        "Increase max_output_tokens in the worker's limits or simplify the task."
+                    ),
+                    error_code="output_token_limit",
+                    retryable=False,
                 )
-        # Unreachable in practice (loop always returns), but keep a safe default.
-        return WorkerResult(
-            status="error",
-            error=_llm_error_message("llm_provider_capacity"),
-            error_code="llm_provider_capacity",
-            retryable=True,
-        )
+            llm_error_code = _classify_llm_provider_error(exc)
+            if llm_error_code:
+                redacted = _redact_provider_message(exc_str, secrets)
+                logger.warning(
+                    "Agent LLM provider failure for worker %s run %s classified as %s: %s",
+                    worker_id,
+                    run_id,
+                    llm_error_code,
+                    redacted,
+                )
+                log_fn(f"LLM provider error ({llm_error_code}): {redacted}", "error")
+                return WorkerResult(
+                    status="error",
+                    error=_llm_error_message(llm_error_code),
+                    error_code=llm_error_code,
+                    retryable=llm_error_code in _CAPACITY_SWAP_CODES,
+                )
+            logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
+            log_fn(f"Agent runtime error: {exc}", "error")
+            return WorkerResult(
+                status="error",
+                error=str(exc),
+                error_code="agent_runtime_error",
+                retryable=True,
+            )
 
     def _run_coro_sync(self, coro: Any) -> WorkerResult:
         # #605: delegate to the shared async_bridge utility so the
@@ -712,7 +706,7 @@ class AgentDriver(SandboxDriver):
                 error_code="llm_model_not_configured",
                 retryable=False,
             )
-        fallback_model = _resolve_agent_fallback_model(resolved_model)
+        fallback_models = _resolve_agent_fallback_models(resolved_model)
         max_tool_iterations = _resolve_max_tool_iterations(limits, config)
         max_total_tokens = _resolve_max_total_tokens(limits, config)
         bundle_dir = _worker_dir_for_run(worker_id, config)
@@ -825,36 +819,35 @@ class AgentDriver(SandboxDriver):
         # client to THIS run's loop fully isolates concurrent runs.
         from .loop_local_provider import LoopLocalModelProvider
 
-        normalized_fallback_model = (
-            _llm.agent_model(fallback_model) if fallback_model else None
-        )
+        normalized_fallback_models = [
+            _llm.agent_model(fallback_model) for fallback_model in fallback_models
+        ]
         loop_local_provider = LoopLocalModelProvider(
-            fallback_model_name=normalized_fallback_model,
+            fallback_model_names=normalized_fallback_models,
             should_fallback=(
-                _should_retry_agent_with_fallback if normalized_fallback_model else None
+                _should_retry_agent_with_fallback if normalized_fallback_models else None
             ),
-            fallback_extra_args=(
-                _llm.cache_control_extra_args(normalized_fallback_model)
-                if normalized_fallback_model
-                else None
-            ),
-            fallback_max_tokens=(
+            fallback_extra_args_by_model=[
+                _llm.cache_control_extra_args(fallback_model)
+                for fallback_model in normalized_fallback_models
+            ],
+            fallback_max_tokens_by_model=[
                 _agent_effective_max_tokens(
-                    normalized_fallback_model,
+                    fallback_model,
                     _resolve_max_output_tokens(limits),
                 )
-                if normalized_fallback_model
-                else None
-            ),
+                for fallback_model in normalized_fallback_models
+            ],
             fallback_operation_name="Agent",
-            fallback_exhausted_marker=None,
+            fallback_exhausted_marker=_AGENT_FALLBACK_EXHAUSTED_MARKER,
+            fallback_exhausted_marker_requires_retryable=True,
             on_fallback=(
                 lambda primary, fallback: log_fn(
                     f"Agent model capacity reached on {primary}; retrying model call on {fallback}",
                     "warning",
                 )
             )
-            if normalized_fallback_model
+            if normalized_fallback_models
             else None,
         )
         run_config = RunConfig(
