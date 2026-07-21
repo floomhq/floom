@@ -33,7 +33,7 @@ from contexts import (
     CONTEXTS_DIR,
     context_mount_matches_inputs,
     context_tree_summary,
-    context_scope_for_user,
+    context_scope_for_execution,
     load_context_metadata,
     normalize_context_mount,
     use_context_scope,
@@ -1997,7 +1997,7 @@ def _warm_pool_context_key_entries(
     user_id: str | None,
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
-    with use_context_scope(context_scope_for_user(user_id)):
+    with use_context_scope(context_scope_for_execution(user_id)):
         metadata = load_context_metadata()
         for context in selected_contexts:
             source = context.get("source", "local")
@@ -2994,7 +2994,7 @@ class E2BSandboxDriver(SandboxDriver):
         contexts_root = f"{workdir}/context"
         made_context_root = False
 
-        with use_context_scope(context_scope_for_user(user_id)):
+        with use_context_scope(context_scope_for_execution(user_id)):
             ensure_memory_context_pack(config=config, user_id=user_id, log_fn=log_fn)
             selected_names = {context["name"] for context in selected_contexts}
             for raw_context in config.contexts:
@@ -3080,7 +3080,7 @@ class E2BSandboxDriver(SandboxDriver):
         if not config or not config.contexts:
             return
 
-        with use_context_scope(context_scope_for_user(user_id)) as context_scope:
+        with use_context_scope(context_scope_for_execution(user_id)) as context_scope:
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
@@ -3144,9 +3144,11 @@ class E2BSandboxDriver(SandboxDriver):
                         )
                     except Exception as sync_exc:
                         log_fn(
-                            f"[e2b] Failed to sync writeable context {name!r} after writeback: {sync_exc}",
+                            f"[e2b] Failed to sync writeable context {name!r} after local "
+                            f"writeback; durable persistence is not confirmed: {sync_exc}",
                             "warning",
                         )
+                        continue
                     log_fn(f"[e2b] Persisted writeable context {name!r}", "info")
                 except Exception as exc:
                     log_fn(f"[e2b] Failed to persist writeable context {name!r}: {exc}", "warning")

@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, Optional
 
 from contexts import (
     context_dir,
-    context_scope_for_user,
+    context_scope_for_execution,
     iter_context_files,
     normalize_context_mount,
     sync_refreshed_context_pack,
@@ -1340,7 +1340,7 @@ class AgentDriver(SandboxDriver):
         if not config or not config.contexts:
             return
 
-        with use_context_scope(context_scope_for_user(user_id)) as context_scope:
+        with use_context_scope(context_scope_for_execution(user_id)) as context_scope:
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
@@ -1388,9 +1388,11 @@ class AgentDriver(SandboxDriver):
                         )
                     except Exception as sync_exc:
                         log_fn(
-                            f"[agent] Failed to sync writeable context {name!r} after writeback: {sync_exc}",
+                            f"[agent] Failed to sync writeable context {name!r} after local "
+                            f"writeback; durable persistence is not confirmed: {sync_exc}",
                             "warning",
                         )
+                        continue
                     log_fn(f"[agent] Persisted writeable context {name!r}", "info")
                 except Exception as exc:
                     log_fn(f"[agent] Failed to persist writeable context {name!r}: {exc}", "warning")

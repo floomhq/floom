@@ -38,7 +38,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from contexts import (
     context_dir,
-    context_scope_for_user,
+    context_scope_for_execution,
     iter_context_files,
     normalize_context_mount,
     use_context_scope,
@@ -400,7 +400,7 @@ def stage_context_packs(
 ) -> List[str]:
     """Stage each attached brain pack into ``context_root/<name>/...`` (read).
 
-    Owner-scoped via ``use_context_scope(context_scope_for_user(user_id))`` so a
+    Workspace-scoped via ``use_context_scope(context_scope_for_execution(user_id))`` so a
     run/conversation only ever sees ITS owner's packs, never another tenant's.
     Git contexts are skipped (no sandboxed clone target locally). Returns the
     list of staged pack names.
@@ -409,7 +409,7 @@ def stage_context_packs(
         return []
 
     staged: List[str] = []
-    with use_context_scope(context_scope_for_user(user_id)):
+    with use_context_scope(context_scope_for_execution(user_id)):
         ensure_memory_context_pack(config=config, user_id=user_id, log_fn=log_fn)
         for raw_context in config.contexts:
             try:

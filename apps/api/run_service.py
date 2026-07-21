@@ -147,7 +147,7 @@ def _worker_is_llm_intensive(worker_id: str, repos: "Repositories") -> bool:
 
 from dotenv import load_dotenv
 
-from contexts import context_scope_for_user, use_context_scope
+from contexts import context_scope_for_execution, use_context_scope
 from db.factory import Repositories, get_repositories
 from db.interface import RUN_LOG_DRAIN_MARKER_LEVEL, RUN_LOG_DRAIN_MARKER_MESSAGE
 from runner_utils import ARTIFACTS_DIR, DEFAULT_TIMEOUT_SECONDS, _validate_output_schema
@@ -4185,7 +4185,7 @@ def execute_run(
         perf.log(log_fn, "run_service.pre_sandbox")
         execution_stage = "driver_run"
         _mark_active_run_stage(run_id, execution_stage)
-        with use_context_scope(context_scope_for_user(owner_id)):
+        with use_context_scope(context_scope_for_execution(owner_id)):
             result = driver.run(
                 worker_id=worker_id,
                 run_id=run_id,
