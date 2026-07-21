@@ -443,12 +443,12 @@ class RunRepository(Protocol):
     def add_usage(
         self,
         *,
+        user_id: str,
         run_id: str,
-        authorized_run_id: str,
         total_tokens: int | None,
         total_cost_usd: float | None,
     ) -> None:
-        """Atomically add provider-reported LLM usage to a run."""
+        """Atomically add provider-reported LLM usage to a tenant-owned run."""
         ...
 
     def delete(self, *, user_id: str, run_id: str) -> bool: ...

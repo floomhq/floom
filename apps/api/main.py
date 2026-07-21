@@ -5256,7 +5256,9 @@ def _managed_llm_usage(response: Any) -> tuple[Optional[int], Optional[float]] |
     return (total_tokens, cost) if total_tokens is not None or cost is not None else None
 
 
-def _managed_llm_completion(body: _ManagedLLMRequest) -> tuple[Any, tuple[int, Optional[float]] | None]:
+def _managed_llm_completion(
+    body: _ManagedLLMRequest,
+) -> tuple[Any, tuple[int | None, float | None] | None]:
     import llm as _llm
 
     model = body.model or _platform_managed_llm_model()
@@ -5294,12 +5296,14 @@ def managed_llm_proxy(
     repos: Repositories = Depends(get_repos),
 ) -> Any:
     _authorize_run_platform_proxy(request, run_id)
-    _require_running_run_for_platform_proxy(run_id, repos)
+    run_row = _require_running_run_for_platform_proxy(run_id, repos)
+    worker_row = repos.workers.get_any(worker_id=str(run_row["worker_id"])) or {}
+    owner_id = str(worker_row.get("owner_id") or "")
     response, usage = _managed_llm_completion(body)
     if usage is not None:
         repos.runs.add_usage(
+            user_id=owner_id,
             run_id=run_id,
-            authorized_run_id=run_id,
             total_tokens=usage[0],
             total_cost_usd=usage[1],
         )
@@ -5316,7 +5320,9 @@ def managed_llm_batch_proxy(
     from concurrent.futures import ThreadPoolExecutor
 
     _authorize_run_platform_proxy(request, run_id)
-    _require_running_run_for_platform_proxy(run_id, repos)
+    run_row = _require_running_run_for_platform_proxy(run_id, repos)
+    worker_row = repos.workers.get_any(worker_id=str(run_row["worker_id"])) or {}
+    owner_id = str(worker_row.get("owner_id") or "")
 
     def _complete_and_persist(item: _ManagedLLMRequest) -> Any:
         response, usage = _managed_llm_completion(item)
@@ -5324,8 +5330,8 @@ def managed_llm_batch_proxy(
         # failure in another future must not discard this real usage.
         if usage is not None:
             repos.runs.add_usage(
+                user_id=owner_id,
                 run_id=run_id,
-                authorized_run_id=run_id,
                 total_tokens=usage[0],
                 total_cost_usd=usage[1],
             )

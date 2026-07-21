@@ -2736,12 +2736,12 @@ class SqliteRunRepository:
     def add_usage(
         self,
         *,
+        user_id: str,
         run_id: str,
-        authorized_run_id: str,
         total_tokens: int | None,
         total_cost_usd: float | None,
     ) -> None:
-        """Atomically accumulate usage from a run-scoped managed LLM call."""
+        """Atomically accumulate usage for a run owned by the given tenant."""
         with get_db() as conn:
             conn.execute(
                 """
@@ -2762,14 +2762,18 @@ class SqliteRunRepository:
                         WHEN ? IS NULL THEN total_cost_usd
                         ELSE COALESCE(total_cost_usd, 0.0) + ?
                     END
-                WHERE id = ? AND id = ?
+                WHERE id = ?
+                  AND EXISTS (
+                      SELECT 1 FROM workers w
+                      WHERE w.id = runs.worker_id AND w.owner_id = ?
+                  )
                 """,
                 (
                     total_tokens, total_tokens,
                     total_cost_usd, total_cost_usd,
                     total_tokens, total_tokens,
                     total_cost_usd, total_cost_usd,
-                    run_id, authorized_run_id,
+                    run_id, user_id,
                 ),
             )
 

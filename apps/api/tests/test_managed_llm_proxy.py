@@ -209,13 +209,13 @@ def test_managed_llm_invalid_usage_values_are_not_persisted(monkeypatch, tmp_pat
         assert stored["total_cost_usd"] is None
 
 
-def test_add_usage_rejects_mismatched_run_capability(monkeypatch, tmp_path):
+def test_add_usage_rejects_cross_tenant_mutation(monkeypatch, tmp_path):
     db, _main = _load_app(monkeypatch, tmp_path)
     _seed_running_run(db, run_id="run-owner-a")
 
     db.get_repositories().runs.add_usage(
+        user_id="owner-b",
         run_id="run-owner-a",
-        authorized_run_id="run-other-tenant",
         total_tokens=42,
         total_cost_usd=0.0015,
     )
@@ -394,8 +394,8 @@ def test_terminal_cost_combines_transcript_and_managed_proxy_usage(monkeypatch, 
     _seed_running_run(db)
     repos = db.get_repositories()
     repos.runs.add_usage(
+        user_id="owner-a",
         run_id="run-managed",
-        authorized_run_id="run-managed",
         total_tokens=42,
         total_cost_usd=0.0015,
     )
