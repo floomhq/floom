@@ -1,6 +1,7 @@
 """Regression coverage for scalable MCP discovery tools (#2276)."""
 
 import asyncio
+import json
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -74,6 +75,7 @@ def test_triggers_rest_default_is_full_and_mcp_projection_is_paginated(monkeypat
 
 
 def test_integrations_catalog_reaches_page_two_and_searches(monkeypatch):
+    monkeypatch.setenv("WORKEROS_DEV", "1")
     calls = []
 
     def fake_list_catalog_apps(*, page, limit, search, category):
@@ -100,12 +102,17 @@ def test_integrations_catalog_reaches_page_two_and_searches(monkeypatch):
     monkeypatch.setattr("composio_client.list_catalog_apps", fake_list_catalog_apps)
     integrations._catalog_cache.clear()
 
-    page_two = integrations.integrations_catalog(page=2, limit=30, search="", category="", auth=None)
-    search = integrations.integrations_catalog(page=1, limit=30, search="notion", category="productivity", auth=None)
+    with TestClient(main.app) as client:
+        page_two = client.get("/integrations/catalog?page=2&limit=30")
+        search = client.get(
+            "/integrations/catalog?page=1&limit=30&search=notion&category=productivity"
+        )
 
-    assert page_two.page == 2
-    assert page_two.items[0].slug == "page-2"
-    assert search.items[0].slug == "notion"
+    assert page_two.status_code == 200
+    assert search.status_code == 200
+    assert page_two.json()["page"] == 2
+    assert page_two.json()["items"][0]["slug"] == "page-2"
+    assert search.json()["items"][0]["slug"] == "notion"
     assert calls == [
         {"page": 2, "limit": 30, "search": "", "category": ""},
         {"page": 1, "limit": 30, "search": "notion", "category": "productivity"},
@@ -116,8 +123,7 @@ def test_mcp_discovery_schemas_and_dispatch_forward_parameters(monkeypatch):
     tools = {tool["name"]: tool for tool in main._MCP_DEFAULT_TOOLS}
     trigger_props = tools["triggers.list"]["inputSchema"]["properties"]
     catalog_props = tools["integrations.catalog"]["inputSchema"]["properties"]
-    assert {"app", "limit", "offset", "verbose"} <= trigger_props.keys()
-    assert "worker_id" not in trigger_props
+    assert {"worker_id", "app", "limit", "offset", "verbose"} <= trigger_props.keys()
     assert {"page", "limit", "search", "category"} <= catalog_props.keys()
 
     calls = []
@@ -153,3 +159,50 @@ def test_mcp_discovery_schemas_and_dispatch_forward_parameters(monkeypatch):
             "page": 2, "limit": 30, "search": "notion", "category": "productivity",
         }),
     ]
+
+
+def test_python_mcp_worker_filter_paginates_after_merging_apps(monkeypatch):
+    async def fake_api_call(method, path, request, *, params=None, body=None):
+        if path == "/workers/worker-1":
+            return {"config": {"connections": ["slack", {"composio": {"app": "gmail"}}]}}, 200
+        catalogs = {
+            "gmail": [
+                {"id": "gmail-a", "name": "Gmail A", "toolkit": "gmail"},
+                {"id": "gmail-c", "name": "Gmail C", "toolkit": "gmail"},
+            ],
+            "slack": [
+                {"id": "slack-b", "name": "Slack B", "toolkit": "slack"},
+                {"id": "slack-d", "name": "Slack D", "toolkit": "slack"},
+            ],
+        }
+        items = catalogs[params["app"]]
+        offset = params["offset"]
+        page = items[offset : offset + 1]
+        return {
+            "items": page,
+            "total_items": len(items),
+            "next_offset": offset + 1 if offset + 1 < len(items) else None,
+        }, 200
+
+    monkeypatch.setattr(main, "_api_call", fake_api_call)
+    request = Request({"type": "http", "method": "POST", "path": "/mcp-tools/serve", "headers": []})
+    auth = main.AuthContext(user_id="owner", role="admin", auth_method="secret", scopes=("admin",))
+
+    result = asyncio.run(main._mcp_dispatch(
+        "triggers.list",
+        {"worker_id": "worker-1", "offset": 1, "limit": 2},
+        auth,
+        None,
+        request,
+    ))
+    payload = json.loads(result["content"][0]["text"])
+    assert payload == {
+        "items": [
+            {"id": "gmail-c", "name": "Gmail C", "toolkit": "gmail"},
+            {"id": "slack-b", "name": "Slack B", "toolkit": "slack"},
+        ],
+        "limit": 2,
+        "offset": 1,
+        "total_items": 4,
+        "next_offset": 3,
+    }
