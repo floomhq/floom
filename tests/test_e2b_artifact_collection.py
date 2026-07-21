@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tarfile
 import types
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 
@@ -1081,6 +1082,42 @@ def test_writeable_context_round_trip_across_workers_uses_active_workspace_scope
         "/home/user/worker/context/shared-research/handoff.md"
     ] == b"from writer\n"
     assert [scope for scope, *_rest in sync_scopes] == [workspace_id]
+
+
+def test_execution_context_scope_keeps_user_fallback_without_active_workspace(
+    monkeypatch,
+):
+    contexts_module.set_context_scope_resolver(None)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+
+    assert contexts_module.context_scope_for_execution(
+        "account-user"
+    ) == contexts_module.context_scope_for_user("account-user")
+    assert contexts_module.context_scope_for_execution(None) is None
+
+
+def test_execution_context_scope_is_isolated_between_concurrent_runs(tmp_path, monkeypatch):
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    contexts_module.set_context_scope_resolver(None)
+
+    def _resolve(scope):
+        with contexts_module.use_context_scope(scope):
+            return (
+                contexts_module.context_scope_for_execution("account-user"),
+                contexts_module.current_contexts_root(),
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(_resolve, "ws_concurrent_one")
+        second = pool.submit(_resolve, "ws_concurrent_two")
+        results = {first.result(), second.result()}
+
+    assert results == {
+        ("ws_concurrent_one", (contexts_root / "ws_concurrent_one").resolve()),
+        ("ws_concurrent_two", (contexts_root / "ws_concurrent_two").resolve()),
+    }
+    assert contexts_module.current_context_scope() is None
 
 
 def test_writeable_context_sync_failure_is_not_logged_as_persisted(tmp_path, monkeypatch):
