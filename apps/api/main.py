@@ -4427,6 +4427,7 @@ def update_worker_files(
     if request is not None:
         _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
     # File writes are mutations, so visibility alone is insufficient: ordinary
     # workspace members may view shared workers but only the owner or an active
     # workspace admin may change their bundles.
@@ -4445,8 +4446,6 @@ def update_worker_files(
         if item.path in seen_paths:
             raise HTTPException(status_code=400, detail=f"duplicate file path: {item.path!r}")
         seen_paths.add(item.path)
-
-    _raise_if_protected_worker_mutation(worker_id)
 
     config_dict = worker.get("config") or {}
     try:
