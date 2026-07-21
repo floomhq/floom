@@ -1024,6 +1024,14 @@ def _coerce_output_text(value: Any) -> str:
     return str(value)
 
 
+def _json_shape_name(value: Any) -> str:
+    """Return the JSON type name for a decoded value."""
+    return {
+        type(None): "null", bool: "boolean", dict: "object", list: "array",
+        str: "string", int: "number", float: "number",
+    }.get(type(value), type(value).__name__)
+
+
 def _exception_exit_code(exc: Exception) -> int | None:
     for attr in ("exit_code", "returncode", "code"):
         value = getattr(exc, attr, None)
@@ -1272,6 +1280,7 @@ def _read_result_json(
       * invalid/undecodable -> ``invalid_result_json``
       * non-object top-level-> ``invalid_result_json``
       * non-dict ``outputs``-> ``invalid_outputs_shape`` (was silently coerced to {})
+      * invalid ``artifacts``-> ``invalid_artifacts_shape``
 
     Operator detail (full sandbox path) is logged; user-facing messages never
     leak the sandbox internal path.
@@ -1402,6 +1411,73 @@ def _read_result_json(
             ),
             error_code="invalid_outputs_shape",
         )
+
+    # 6. `artifacts` must be a list of objects. Accept a string *inside* the
+    #    list as the legacy path shorthand produced by older/generated workers,
+    #    and normalize it before any artifact consumer calls `.get()`. The
+    #    previous partial guard skipped string entries while collecting files,
+    #    then `_merge_artifacts` iterated the original list and crashed with
+    #    AttributeError. Other malformed element shapes are contract errors,
+    #    not E2B infrastructure failures.
+    raw_artifacts = result_data.get("artifacts", [])
+    worker_reported_failure = str(result_data.get("status") or "").strip().lower() in {
+        "error",
+        "failed",
+    }
+    normalized_artifacts: list[dict[str, Any]] = []
+    invalid_artifact: tuple[str, Any] | None = None
+    artifacts_to_normalize = [] if raw_artifacts is None else raw_artifacts
+    if not isinstance(artifacts_to_normalize, list):
+        invalid_artifact = ("artifacts", artifacts_to_normalize)
+        artifacts_to_normalize = []
+
+    for index, artifact in enumerate(artifacts_to_normalize):
+        if isinstance(artifact, dict):
+            normalized_artifacts.append(artifact)
+            continue
+        if isinstance(artifact, str) and artifact.strip():
+            path = artifact.strip()
+            log_fn(
+                f"[e2b] result.json 'artifacts[{index}]' uses string path shorthand; "
+                "normalizing to an artifact object",
+                "warning",
+            )
+            normalized_artifacts.append(
+                {
+                    "name": path,
+                    "relative_path": path,
+                    "type": "application/octet-stream",
+                }
+            )
+            continue
+
+        invalid_artifact = (f"artifacts[{index}]", artifact)
+        break
+
+    if invalid_artifact is not None:
+        location, invalid_value = invalid_artifact
+        shape = _json_shape_name(invalid_value)
+        if worker_reported_failure:
+            log_fn(
+                f"[e2b] Ignoring invalid {shape} '{location}' value on "
+                "worker-reported failure",
+                "warning",
+            )
+            return {**result_data, "artifacts": []}, None
+        log_fn(
+            f"[e2b] result.json '{location}' has invalid {shape} artifact shape",
+            "error",
+        )
+        return None, WorkerResult(
+            status="error",
+            error=(
+                f"Worker '{location}' has invalid {shape} value. 'artifacts' must be "
+                "a JSON array of artifact objects or non-empty string paths."
+            ),
+            error_code="invalid_artifacts_shape",
+        )
+
+    result_data = {**result_data, "artifacts": normalized_artifacts}
 
     return result_data, None
 

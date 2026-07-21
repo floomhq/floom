@@ -588,6 +588,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
     "cancelled",
     "cancelled_before_start",
     "cancelled_queued",
+    "invalid_artifacts_shape",
     "invalid_outputs_shape",
     "invalid_worker",
     "llm_auth_error",
