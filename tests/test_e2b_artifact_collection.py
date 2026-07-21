@@ -993,6 +993,158 @@ def test_writeable_context_writeback_syncs_refresh_hook(tmp_path, monkeypatch):
     ]
 
 
+def test_writeable_context_round_trip_across_workers_uses_active_workspace_scope(
+    tmp_path, monkeypatch
+):
+    """A writer and reader in one workspace share the canonical context tree."""
+    contexts_root = tmp_path / "contexts"
+    workspace_id = "ws_testshared123"
+    user_id = "account-user"
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    contexts_module.set_context_scope_resolver(lambda: workspace_id)
+
+    canonical_pack = contexts_root / workspace_id / "shared-research"
+    canonical_pack.mkdir(parents=True)
+    (canonical_pack / "handoff.md").write_bytes(b"before\n")
+
+    class _WriterCommands:
+        def __init__(self, files):
+            self.files = files
+
+        def run(self, command, **_kwargs):
+            tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
+            buffer = BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w") as archive:
+                content = self.files._files[
+                    "/home/user/worker/context/shared-research/handoff.md"
+                ]
+                info = tarfile.TarInfo("handoff.md")
+                info.size = len(content)
+                archive.addfile(info, BytesIO(content))
+            self.files.write(tar_path, buffer.getvalue())
+            return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+    writer = FakeFullSandbox()
+    writer.files.dirs.add("/home/user/worker/context/shared-research")
+    writer.files.write(
+        "/home/user/worker/context/shared-research/handoff.md", b"from writer\n"
+    )
+    writer.commands = _WriterCommands(writer.files)
+    writer_config = WorkerConfig(
+        id="writer-worker",
+        name="Writer Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311", command="python run.py", mode="pure-script"
+        ),
+        contexts=[{"name": "shared-research", "writeable": True}],
+        outputs=[],
+    )
+    reader_config = writer_config.model_copy(
+        update={"id": "reader-worker", "name": "Reader Worker"}
+    )
+    sync_scopes = []
+
+    def _sync_hook(scope, name, source_dir, summary):
+        sync_scopes.append((scope, name, source_dir, summary))
+
+    contexts_module.set_context_refresh_hook(_sync_hook)
+    try:
+        E2BSandboxDriver()._persist_writeable_contexts(
+            sandbox=writer,
+            workdir="/home/user/worker",
+            run_id="run_writer",
+            config=writer_config,
+            log_fn=lambda *_args, **_kwargs: None,
+            user_id=user_id,
+        )
+
+        reader = FakeFullSandbox()
+        err = E2BSandboxDriver()._upload_contexts_to_sandbox(
+            sandbox=reader,
+            workdir="/home/user/worker",
+            config=reader_config,
+            made_dirs={"/home/user/worker"},
+            log_fn=lambda *_args, **_kwargs: None,
+            user_id=user_id,
+        )
+    finally:
+        contexts_module.set_context_refresh_hook(None)
+        contexts_module.set_context_scope_resolver(None)
+
+    assert err is None
+    assert (canonical_pack / "handoff.md").read_bytes() == b"from writer\n"
+    assert not (contexts_root / user_id).exists()
+    assert reader.files._files[
+        "/home/user/worker/context/shared-research/handoff.md"
+    ] == b"from writer\n"
+    assert [scope for scope, *_rest in sync_scopes] == [workspace_id]
+
+
+def test_writeable_context_sync_failure_is_not_logged_as_persisted(tmp_path, monkeypatch):
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    target = contexts_root / "history"
+    target.mkdir(parents=True)
+
+    class _ArchiveCommands:
+        def __init__(self, files):
+            self.files = files
+
+        def run(self, command, **_kwargs):
+            tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
+            buffer = BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w") as archive:
+                content = b"durable only if sync succeeds\n"
+                info = tarfile.TarInfo("state.md")
+                info.size = len(content)
+                archive.addfile(info, BytesIO(content))
+            self.files.write(tar_path, buffer.getvalue())
+            return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+    sandbox = FakeFullSandbox()
+    sandbox.files.dirs.add("/home/user/worker/context/history")
+    sandbox.commands = _ArchiveCommands(sandbox.files)
+    config = WorkerConfig(
+        id="context-sync-failure",
+        name="Context Sync Failure",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311", command="python run.py", mode="pure-script"
+        ),
+        contexts=[{"name": "history", "writeable": True}],
+        outputs=[],
+    )
+    logs = []
+
+    def _failed_sync(*_args, **_kwargs):
+        raise RuntimeError("remote storage unavailable")
+
+    contexts_module.set_context_refresh_hook(_failed_sync)
+    try:
+        E2BSandboxDriver()._persist_writeable_contexts(
+            sandbox=sandbox,
+            workdir="/home/user/worker",
+            run_id="run_sync_failure",
+            config=config,
+            log_fn=lambda message, level="info": logs.append((level, message)),
+        )
+    finally:
+        contexts_module.set_context_refresh_hook(None)
+
+    assert any(
+        level == "warning" and "Failed to sync writeable context" in message
+        for level, message in logs
+    )
+    assert not any(
+        level == "info" and "Persisted writeable context" in message
+        for level, message in logs
+    )
+
+
 def test_overlay_writeback_preserves_concurrent_external_context_files(tmp_path, monkeypatch):
     contexts_root = tmp_path / "contexts"
     monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
