@@ -1112,7 +1112,7 @@ class TestConnectionTestEndpoint:
         assert body["status"] == "failed"
 
     def test_test_updates_last_checked_at(self, monkeypatch, tmp_path):
-        """After a test, list shows last_checked_at + last_check_status."""
+        """After a recorded test, list shows last_checked_at + last_check_status."""
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
         conn = _seed_connection(client)
@@ -1120,7 +1120,7 @@ class TestConnectionTestEndpoint:
 
         with patch("composio_client.check_status", return_value="active"):
             client.post(
-                f"/connections/{local_id}/test",
+                f"/connections/{local_id}/test?record=true",
                 headers=AUTH_HEADERS,
             )
 
@@ -1145,7 +1145,10 @@ class TestConnectionTestEndpoint:
                 "scopes": ["gmail.readonly"],
                 "status": "enabled",
             }
-            resp = client.post(f"/connections/{local_id}/test", headers=AUTH_HEADERS)
+            resp = client.post(
+                f"/connections/{local_id}/test?record=true",
+                headers=AUTH_HEADERS,
+            )
 
         assert resp.status_code == 200
         assert resp.json()["status"] == "valid"
