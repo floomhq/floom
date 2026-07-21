@@ -1573,7 +1573,9 @@ class SqliteWorkerRepository:
     def get_schedule_state(self, *, worker_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
             row = conn.execute(
-                "SELECT owner_id, next_run_at, cron_expr, cron_timezone FROM workers WHERE id = ?",
+                """SELECT owner_id, next_run_at, last_scheduled_run_at,
+                          cron_expr, cron_timezone
+                   FROM workers WHERE id = ?""",
                 (worker_id,),
             ).fetchone()
         return _row_dict(row) if row else None

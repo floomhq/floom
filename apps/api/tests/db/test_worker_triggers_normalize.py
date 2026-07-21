@@ -570,3 +570,44 @@ def test_count_schedule_trigger_rows(repo_bundle):
     )
     # Only the schedule row counts.
     assert repos.workers.count_schedule_trigger_rows() == 1
+
+
+def test_scheduler_syncs_legacy_observability_from_normalized_rows(repo_bundle):
+    repos, _db, manifest = repo_bundle
+    _make_worker(repos, manifest)
+    scheduler = _fresh_scheduler()
+
+    rows = repos.workers.reconcile_triggers(
+        worker_id="w1",
+        triggers=[
+            {"type": "schedule", "cron": "0 9 * * *"},
+            {"type": "schedule", "cron": "0 12 * * *"},
+        ],
+    )
+    repos.workers.mark_trigger_fired(
+        trigger_id=rows[0]["id"],
+        last_fired_at="2026-07-20T09:00:00+00:00",
+        next_run_at="2026-07-22T09:00:00+00:00",
+    )
+    repos.workers.mark_trigger_fired(
+        trigger_id=rows[1]["id"],
+        last_fired_at="2026-07-21T12:00:00+00:00",
+        next_run_at="2026-07-21T12:00:00+00:00",
+    )
+
+    state_before = repos.workers.get_schedule_state(worker_id="w1")
+    assert state_before is not None
+    assert state_before["next_run_at"] is None
+    assert state_before["last_scheduled_run_at"] is None
+
+    scheduler._sync_legacy_schedule_state(
+        repos,
+        repos.workers.list_due_schedule_triggers(
+            now_iso="2026-07-21T10:00:00+00:00"
+        ),
+    )
+
+    state_after = repos.workers.get_schedule_state(worker_id="w1")
+    assert state_after is not None
+    assert state_after["next_run_at"] == "2026-07-21T12:00:00+00:00"
+    assert state_after["last_scheduled_run_at"] == "2026-07-21T12:00:00+00:00"

@@ -35,6 +35,7 @@ class _Workers:
         self.next_updates: list[tuple[str, str | None]] = []
         self.fired: list[dict] = []
         self.worker_next_updates: list[tuple[str, str | None]] = []
+        self.worker_scheduled_updates: list[dict] = []
 
     def list_due_schedule_triggers(self, *, now_iso: str):
         return list(self.rows)
@@ -57,6 +58,21 @@ class _Workers:
 
     def set_next_run_at(self, *, worker_id: str, next_run_at: str | None) -> None:
         self.worker_next_updates.append((worker_id, next_run_at))
+
+    def mark_scheduled_run(
+        self,
+        *,
+        worker_id: str,
+        last_scheduled_run_at: str,
+        next_run_at: str | None,
+    ) -> None:
+        self.worker_scheduled_updates.append(
+            {
+                "worker_id": worker_id,
+                "last_scheduled_run_at": last_scheduled_run_at,
+                "next_run_at": next_run_at,
+            }
+        )
 
 
 class _Repos:
@@ -112,6 +128,15 @@ def test_late_schedule_trigger_records_one_scheduler_missed_marker(monkeypatch):
     assert missed["error_code"] == "scheduler_missed"
     assert len(normal_runs) == 1
     assert started == ["run-normal"]
+    assert repos.workers.worker_scheduled_updates == [
+        {
+            "worker_id": "worker-a",
+            "last_scheduled_run_at": now.isoformat(),
+            "next_run_at": scheduler.compute_next_run_at(
+                "*/5 * * * *", now, "UTC"
+            ),
+        }
+    ]
 
 
 def test_preflight_missing_secret_records_failed_schedule_run(monkeypatch):

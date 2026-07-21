@@ -21,6 +21,7 @@ import unittest
 import uuid as _uuid_mod
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 # Point to the API source before importing
@@ -456,6 +457,145 @@ class TestPatchWorker(unittest.TestCase):
         r = client.patch(f"/workers/{self.worker_id}", json={})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["id"], self.worker_id)
+
+
+class TestSchedulerNormalizedState(unittest.TestCase):
+    class Workers:
+        def __init__(self):
+            self.marked = []
+            self.next_updates = []
+
+        def count_schedule_trigger_rows(self):
+            return 1
+
+        def list_due_schedule_triggers(self, *, now_iso):
+            return [
+                {
+                    "id": "trg_normalized_0",
+                    "worker_id": "normalized",
+                    "owner_id": "owner-a",
+                    "workspace_id": "ws-a",
+                    "config_json": json.dumps({"cron": "*/5 * * * *"}),
+                    "next_run_at": "2099-01-01T00:00:00+00:00",
+                    "last_fired_at": "2026-07-20T12:00:00+00:00",
+                }
+            ]
+
+        def list_scheduled(self):
+            return [
+                {
+                    "id": worker_id,
+                    "owner_id": "owner-a",
+                    "workspace_id": "ws-a",
+                    "cron_expr": "*/5 * * * *",
+                    "cron_timezone": "UTC",
+                }
+                for worker_id in ("normalized", "legacy")
+            ]
+
+        def get_schedule_state(self, *, worker_id):
+            if worker_id == "normalized":
+                return {
+                    "next_run_at": None,
+                    "last_scheduled_run_at": None,
+                }
+            return {"next_run_at": "2000-01-01T00:00:00+00:00"}
+
+        def set_next_run_at(self, *, worker_id, next_run_at):
+            self.next_updates.append((worker_id, next_run_at))
+
+        def mark_scheduled_run(
+            self, *, worker_id, last_scheduled_run_at, next_run_at
+        ):
+            self.marked.append(
+                {
+                    "worker_id": worker_id,
+                    "last_scheduled_run_at": last_scheduled_run_at,
+                    "next_run_at": next_run_at,
+                }
+            )
+
+    def test_tick_falls_back_only_for_worker_without_normalized_row(self):
+        import scheduler
+
+        workers = self.Workers()
+        repos = SimpleNamespace(
+            workers=workers,
+            runs=SimpleNamespace(count_running_for_worker=lambda **_kwargs: 0),
+        )
+        fired = []
+
+        def fake_create_run(worker_id, _inputs, **_kwargs):
+            fired.append(worker_id)
+            return f"run_{worker_id}"
+
+        with (
+            patch.object(scheduler, "get_repositories", return_value=repos),
+            patch.object(scheduler, "alerting_tick", return_value=None),
+            patch.object(scheduler, "_worker_is_archived", return_value=False),
+            patch.object(scheduler, "_owner_is_active", return_value=True),
+            patch.object(
+                scheduler, "_effective_scheduled_inputs", return_value=({}, [])
+            ),
+            patch.object(
+                scheduler,
+                "_missing_secrets_for_scheduled_worker",
+                return_value=[],
+            ),
+            patch.object(
+                scheduler,
+                "_missing_connections_for_scheduled_worker",
+                return_value=[],
+            ),
+            patch.object(
+                scheduler, "_record_schedule_missed_if_late", return_value=None
+            ),
+            patch.object(scheduler, "create_run", side_effect=fake_create_run),
+            patch.object(scheduler, "start_run", return_value=None),
+            patch.object(scheduler, "_emit_trigger_fired", return_value=None),
+        ):
+            scheduler._tick()
+
+        self.assertEqual(fired, ["legacy"])
+        self.assertEqual(
+            workers.marked[0],
+            {
+                "worker_id": "normalized",
+                "last_scheduled_run_at": "2026-07-20T12:00:00+00:00",
+                "next_run_at": "2099-01-01T00:00:00+00:00",
+            },
+        )
+
+    def test_observability_sync_uses_earliest_next_and_latest_fire(self):
+        import scheduler
+
+        workers = self.Workers()
+        repos = SimpleNamespace(workers=workers)
+        rows = [
+            {
+                "worker_id": "normalized",
+                "next_run_at": "2026-07-22T12:00:00+00:00",
+                "last_fired_at": "2026-07-20T12:00:00+00:00",
+            },
+            {
+                "worker_id": "normalized",
+                "next_run_at": "2026-07-21T12:00:00+00:00",
+                "last_fired_at": "2026-07-21T09:00:00+00:00",
+            },
+        ]
+
+        scheduler._sync_legacy_schedule_state(repos, rows)
+
+        self.assertEqual(
+            workers.marked,
+            [
+                {
+                    "worker_id": "normalized",
+                    "last_scheduled_run_at": "2026-07-21T09:00:00+00:00",
+                    "next_run_at": "2026-07-21T12:00:00+00:00",
+                }
+            ],
+        )
 
 
 class TestContextsAPI(unittest.TestCase):
