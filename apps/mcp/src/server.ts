@@ -542,27 +542,58 @@ async function listTriggers(workerId?: string, app?: string, limit = 50, offset 
       })
     : [];
   if (!connections.length) {
-    return { items: [] };
+    return { items: [], limit, offset, total_items: 0, next_offset: null };
   }
   const merged: JsonObject[] = [];
   const seen = new Set<string>();
   for (const connection of connections) {
-    const payload = await request("GET", "/integrations/triggers", undefined, { app: connection, ...query }) as JsonObject;
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    for (const item of items) {
-      if (!item || typeof item !== "object") {
-        continue;
+    let appOffset = 0;
+    while (true) {
+      const payload = await request("GET", "/integrations/triggers", undefined, {
+        app: connection,
+        limit: 100,
+        offset: appOffset,
+        verbose: query.verbose,
+      }) as JsonObject;
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      for (const item of items) {
+        if (!item || typeof item !== "object") {
+          continue;
+        }
+        const record = item as JsonObject;
+        const eventName = String(record.event || record.slug || record.id || record.name || JSON.stringify(item));
+        const dedupeKey = `${connection.toLowerCase()}:${eventName}`;
+        if (seen.has(dedupeKey)) {
+          continue;
+        }
+        seen.add(dedupeKey);
+        merged.push(record);
       }
-      const eventName = String((item as JsonObject).name || (item as JsonObject).slug || JSON.stringify(item));
-      const dedupeKey = `${connection}:${eventName}`;
-      if (seen.has(dedupeKey)) {
-        continue;
+      const nextOffset = typeof payload.next_offset === "number" ? payload.next_offset : null;
+      if (nextOffset === null || nextOffset <= appOffset) {
+        break;
       }
-      seen.add(dedupeKey);
-      merged.push(item as JsonObject);
+      appOffset = nextOffset;
     }
   }
-  return { items: merged, limit, offset, total_items: merged.length, next_offset: null };
+  merged.sort((left, right) => {
+    const key = (item: JsonObject) => {
+      const toolkit = typeof item.toolkit === "string"
+        ? item.toolkit
+        : (item.toolkit && typeof item.toolkit === "object" ? String((item.toolkit as JsonObject).slug || "") : "");
+      return `${toolkit}\u0000${String(item.event || item.slug || item.id || item.name || "")}`.toLowerCase();
+    };
+    return key(left).localeCompare(key(right));
+  });
+  const totalItems = merged.length;
+  const items = merged.slice(offset, offset + limit);
+  return {
+    items,
+    limit,
+    offset,
+    total_items: totalItems,
+    next_offset: offset + limit < totalItems ? offset + limit : null,
+  };
 }
 
 async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObject> {

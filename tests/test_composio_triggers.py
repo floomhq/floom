@@ -617,6 +617,17 @@ def test_integrations_triggers_proxy_caches_catalog(monkeypatch, tmp_path):
 
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
-    assert first.json() == {"items": [{"slug": "GMAIL_NEW_EMAIL"}]}
+    assert first.json() == {
+        "items": [{
+            "id": "GMAIL_NEW_EMAIL",
+            "name": "GMAIL_NEW_EMAIL",
+            "description": "",
+            "toolkit": "",
+        }],
+        "limit": 50,
+        "offset": 0,
+        "total_items": 1,
+        "next_offset": None,
+    }
     assert second.json() == first.json()
     assert calls == ["list"]

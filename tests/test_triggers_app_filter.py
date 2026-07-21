@@ -90,9 +90,9 @@ def test_triggers_no_filter_returns_all(monkeypatch, tmp_path):
     assert res.status_code == 200
     items = res.json()["items"]
     assert len(items) == 4
-    slugs = {item["slug"] for item in items}
-    assert "GMAIL_NEW_EMAIL" in slugs
-    assert "SLACK_MESSAGE_POSTED" in slugs
+    ids = {item["id"] for item in items}
+    assert "GMAIL_NEW_EMAIL" in ids
+    assert "SLACK_MESSAGE_POSTED" in ids
     assert call_count[0] == 1
 
 
@@ -116,11 +116,11 @@ def test_triggers_app_filter_gmail_returns_only_gmail(monkeypatch, tmp_path):
     items = res.json()["items"]
     assert len(items) == 2
     for item in items:
-        assert item["toolkit"]["slug"] == "gmail"
-    slugs = {item["slug"] for item in items}
-    assert "GMAIL_NEW_EMAIL" in slugs
-    assert "GMAIL_NEW_LABEL" in slugs
-    assert "SLACK_MESSAGE_POSTED" not in slugs
+        assert item["toolkit"] == "gmail"
+    ids = {item["id"] for item in items}
+    assert "GMAIL_NEW_EMAIL" in ids
+    assert "GMAIL_NEW_LABEL" in ids
+    assert "SLACK_MESSAGE_POSTED" not in ids
 
 
 def test_triggers_app_filter_unknown_returns_empty(monkeypatch, tmp_path):
@@ -169,7 +169,7 @@ def test_triggers_app_filter_uses_cache_avoids_extra_composio_call(monkeypatch, 
     # Only one Composio call despite three requests
     assert call_count[0] == 1
     assert len(r2.json()["items"]) == 1
-    assert r2.json()["items"][0]["slug"] == "SLACK_MESSAGE_POSTED"
+    assert r2.json()["items"][0]["id"] == "SLACK_MESSAGE_POSTED"
     assert len(r3.json()["items"]) == 2
 
 
@@ -188,4 +188,4 @@ def test_triggers_app_filter_hubspot_uses_app_field(monkeypatch, tmp_path):
     assert res.status_code == 200
     items = res.json()["items"]
     assert len(items) == 1
-    assert items[0]["slug"] == "HUBSPOT_DEAL_CREATED"
+    assert items[0]["id"] == "HUBSPOT_DEAL_CREATED"
