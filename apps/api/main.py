@@ -5217,8 +5217,18 @@ def _managed_llm_usage(response: Any) -> tuple[int, Optional[float]] | None:
     completion_tokens = _usage_value(usage, "completion_tokens")
     if completion_tokens is None:
         completion_tokens = _usage_value(usage, "output_tokens")
+
+    # Prefer a provider-reported total. Only derive one when both components
+    # were actually reported; treating a missing component as zero fabricates
+    # a deceptively complete usage value.
+    reported_total = _usage_value(usage, "total_tokens")
     try:
-        total_tokens = int(prompt_tokens or 0) + int(completion_tokens or 0)
+        if reported_total is not None:
+            total_tokens = int(reported_total)
+        elif prompt_tokens is not None and completion_tokens is not None:
+            total_tokens = int(prompt_tokens) + int(completion_tokens)
+        else:
+            return None
     except (TypeError, ValueError):
         return None
     if total_tokens <= 0:
@@ -5299,16 +5309,22 @@ def managed_llm_batch_proxy(
 
     _authorize_run_platform_proxy(request, run_id)
     _require_running_run_for_platform_proxy(run_id, repos)
-    with ThreadPoolExecutor(max_workers=min(body.max_parallel, len(body.requests))) as pool:
-        completed = list(pool.map(_managed_llm_completion, body.requests))
-    for _, usage in completed:
+
+    def _complete_and_persist(item: _ManagedLLMRequest) -> Any:
+        response, usage = _managed_llm_completion(item)
+        # Persist in the worker that completed the billable call. A later
+        # failure in another future must not discard this real usage.
         if usage is not None:
             repos.runs.add_usage(
                 run_id=run_id,
                 total_tokens=usage[0],
                 total_cost_usd=usage[1],
             )
-    return {"results": [response for response, _ in completed]}
+        return response
+
+    with ThreadPoolExecutor(max_workers=min(body.max_parallel, len(body.requests))) as pool:
+        completed = list(pool.map(_complete_and_persist, body.requests))
+    return {"results": completed}
 
 
 @app.post("/runs/{run_id}/embeddings")

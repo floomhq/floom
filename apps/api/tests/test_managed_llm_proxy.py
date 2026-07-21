@@ -143,6 +143,30 @@ def test_managed_llm_usage_is_persisted_and_survives_completion(monkeypatch, tmp
     assert completed["total_cost_usd"] == 0.0042
 
 
+def test_managed_llm_partial_usage_does_not_fabricate_total(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    _seed_running_run(db)
+
+    monkeypatch.setattr(
+        "llm.completion",
+        lambda **_kwargs: {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"completion_tokens": 30},
+            "_hidden_params": {"response_cost": 0.0042},
+        },
+    )
+
+    response = TestClient(main.app).post(
+        "/runs/run-managed/llm",
+        headers=_run_headers("run-managed"),
+        json={"messages": [{"role": "user", "content": "score"}]},
+    )
+
+    assert response.status_code == 200, response.text
+    stored = db.get_repositories().runs.get_any(run_id="run-managed")
+    assert stored["total_tokens"] is None
+
+
 def test_run_token_can_call_workspace_managed_embeddings(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     _seed_running_run(db)
@@ -272,6 +296,58 @@ def test_managed_llm_batch_runs_each_request(monkeypatch, tmp_path):
     assert resp.status_code == 200, resp.text
     assert sorted(seen) == ["a", "b"]
     assert [r["choices"][0]["message"]["content"] for r in resp.json()["results"]] == ["a", "b"]
+
+
+def test_managed_llm_batch_failure_preserves_successful_usage(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    _seed_running_run(db)
+
+    def fake_completion(**kwargs):
+        content = kwargs["messages"][0]["content"]
+        if content == "fail":
+            raise RuntimeError("provider failure")
+        return {
+            "choices": [{"message": {"content": content}}],
+            "usage": {"prompt_tokens": 40, "completion_tokens": 2},
+            "_hidden_params": {"response_cost": 0.0015},
+        }
+
+    monkeypatch.setattr("llm.completion", fake_completion)
+    response = TestClient(main.app, raise_server_exceptions=False).post(
+        "/runs/run-managed/llm/batch",
+        headers=_run_headers("run-managed"),
+        json={
+            "requests": [
+                {"messages": [{"role": "user", "content": "ok"}]},
+                {"messages": [{"role": "user", "content": "fail"}]},
+            ],
+            "max_parallel": 1,
+        },
+    )
+
+    assert response.status_code == 502, response.text
+    stored = db.get_repositories().runs.get_any(run_id="run-managed")
+    assert stored["total_tokens"] == 42
+    assert stored["total_cost_usd"] == 0.0015
+
+
+def test_terminal_cost_combines_transcript_and_managed_proxy_usage(monkeypatch, tmp_path):
+    db, _main = _load_app(monkeypatch, tmp_path)
+    _seed_running_run(db)
+    repos = db.get_repositories()
+    repos.runs.add_usage(run_id="run-managed", total_tokens=42, total_cost_usd=0.0015)
+
+    import cost
+    from services.run_cost import _persist_run_cost
+
+    monkeypatch.setattr(cost, "total_tokens_from_transcript", lambda _run_id: 100)
+    monkeypatch.setattr(cost, "resolved_cost_usd_from_transcript", lambda _run_id: 0.0025)
+
+    _persist_run_cost("run-managed", user_id="owner-a", repos=repos)
+
+    stored = repos.runs.get_any(run_id="run-managed")
+    assert stored["total_tokens"] == 142
+    assert stored["total_cost_usd"] == 0.004
 
 
 def test_managed_llm_rejects_terminal_run(monkeypatch, tmp_path):

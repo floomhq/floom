@@ -54,14 +54,22 @@ def _persist_run_cost(
     # AI-instrumented (pure-script, or analytics disabled at run time).
     cost = resolved_cost_usd_from_transcript(run_id)
 
-    # Script workers call the run-scoped LLM proxy, which persists each
-    # provider response directly because those calls never enter the agent
-    # transcript. Do not erase those accumulated values at terminal status when
-    # there is no transcript usage row.
+    # Managed-LLM proxy calls are persisted directly and never enter either a
+    # script or agent transcript. Thus any values already on a still-running
+    # run are disjoint from transcript usage and must be combined with it at
+    # terminal status, not overwritten. Before this terminal path, add_usage is
+    # the only writer of these fields, so this does not re-add transcript usage.
     if tokens is None:
         return
 
     if repos is not None and user_id is not None:
+        existing = repos.runs.get_any(run_id=run_id) or {}
+        proxy_tokens = existing.get("total_tokens")
+        proxy_cost = existing.get("total_cost_usd")
+        if proxy_tokens is not None:
+            tokens += int(proxy_tokens)
+            if proxy_cost is not None:
+                cost = float(proxy_cost) + (cost or 0.0)
         repos.runs.update(
             user_id=user_id,
             run_id=run_id,
@@ -73,6 +81,14 @@ def _persist_run_cost(
     from db import get_db
 
     with get_db() as conn:
+        existing = conn.execute(
+            "SELECT total_tokens, total_cost_usd FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if existing is not None and existing["total_tokens"] is not None:
+            tokens += int(existing["total_tokens"])
+            if existing["total_cost_usd"] is not None:
+                cost = float(existing["total_cost_usd"]) + (cost or 0.0)
         conn.execute(
             "UPDATE runs SET total_tokens = ?, total_cost_usd = ? WHERE id = ?",
             (tokens, cost, run_id),
