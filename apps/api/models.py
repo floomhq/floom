@@ -1597,7 +1597,7 @@ class WorkerContractCapabilities(BaseModel):
 
 
 def normalize_worker_contract_connections(value: Any) -> Any:
-    """Move the legacy misplaced capabilities.connections block to top level."""
+    """Normalize the legacy misplaced capabilities.connections block."""
     if not isinstance(value, dict):
         return value
 
@@ -1613,12 +1613,14 @@ def normalize_worker_contract_connections(value: Any) -> Any:
         return value
 
     misplaced = capabilities.get("connections")
-    canonical = value.get("connections")
     canonical_declared = "connections" in value
-    if canonical_declared and canonical != misplaced:
-        raise ValueError(
-            "connections are declared both at top level and under capabilities "
-            "with different values; keep only the top-level declaration"
+    if canonical_declared:
+        warnings.warn(
+            "Worker manifest declares connections both at top level and under "
+            "capabilities; top-level connections are authoritative and "
+            "capabilities.connections was ignored.",
+            UserWarning,
+            stacklevel=2,
         )
 
     normalized = dict(value)
