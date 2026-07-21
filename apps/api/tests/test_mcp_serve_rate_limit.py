@@ -13,8 +13,11 @@ Run:
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from pathlib import Path
+
+from fastapi.testclient import TestClient
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -42,3 +45,49 @@ def test_mcp_serve_has_strict_rate_limit(monkeypatch, tmp_path):
 def test_unmatched_paths_keep_default(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
     assert main._rate_limit_for_path("/some/other/path") == main.DEFAULT_RATE_LIMIT
+
+
+def _mcp_request(client):
+    return client.post(
+        "/mcp-tools/serve",
+        content=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        headers={"x-floom-secret": "rate-limit-test-secret"},
+    )
+
+
+def test_mcp_rate_limit_signals_and_fixed_window(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLOOM_SECRET", "rate-limit-test-secret")
+    main = _load_main(monkeypatch, tmp_path)
+    main._rate_buckets.clear()
+    clock = [1_000.0]
+    monkeypatch.setattr(main.time, "time", lambda: clock[0])
+
+    with TestClient(main.app) as client:
+        for _ in range(10):
+            assert _mcp_request(client).status_code == 200
+
+        rejected = _mcp_request(client)
+        assert rejected.status_code == 429
+        detail = rejected.json()["detail"]
+        assert detail == {
+            "error_code": "rate_limit_exceeded",
+            "message": "Rate limit exceeded",
+            "retry_after": 60,
+            "scope": "per-workspace",
+            "limit": 10,
+            "remaining": 0,
+        }
+        assert rejected.headers["Retry-After"] == "60"
+        assert rejected.headers["X-RateLimit-Scope"] == "per-workspace"
+        assert rejected.headers["RateLimit-Limit"] == "10"
+        assert rejected.headers["RateLimit-Remaining"] == "0"
+
+        # Repeated rejected calls do not move the fixed window's expiry.
+        clock[0] += 20
+        assert _mcp_request(client).headers["Retry-After"] == "40"
+        clock[0] += 20
+        assert _mcp_request(client).headers["Retry-After"] == "20"
+
+        # Waiting the advertised remainder frees the window.
+        clock[0] += 20
+        assert _mcp_request(client).status_code == 200

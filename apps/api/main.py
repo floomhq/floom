@@ -1703,16 +1703,17 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
     return response
 
-# Simple in-memory token bucket rate limit per client IP.
+# Simple in-memory fixed-window rate limit per caller and path. Rejected
+# requests never mutate the window, so backoff cannot extend a lockout.
 _rate_lock = threading.Lock()
-_rate_buckets: Dict[str, list[float]] = {}
+_rate_buckets: Dict[str, tuple[float, int]] = {}
 
 
 def _rate_caller_keys(request: Request, path: str) -> List[str]:
     # #1184: add per-secret and per-session keys so NAT/shared-IP clients don't
     # exhaust each other's buckets, and so attackers with many IPs can't bypass.
     ip = _client_ip(request)
-    keys = [f"ip:{ip}:{path}"]
+    keys: List[str] = []
     headers = {k.lower(): v for k, v in (
         (h[0].decode("latin-1", errors="replace"), h[1].decode("latin-1", errors="replace"))
         for h in request.scope.get("headers", [])
@@ -1736,7 +1737,17 @@ def _rate_caller_keys(request: Request, path: str) -> List[str]:
         bearer = auth_header[7:].strip()
         bearer_key = hashlib.sha256(bearer.encode()).hexdigest()[:16]
         keys.append(f"bearer:{bearer_key}:{path}")
+    keys.append(f"ip:{ip}:{path}")
     return keys
+
+
+def _rate_limit_scope(key: str) -> str:
+    """Return a stable, actionable label without exposing caller identifiers."""
+    if key.startswith("secret:"):
+        return "per-workspace"
+    if key.startswith(("session:", "bearer:")):
+        return "per-user"
+    return "per-ip"
 
 
 @app.middleware("http")
@@ -1754,23 +1765,37 @@ async def rate_limit_middleware(request: Request, call_next):
     now = time.time()
     keys = _rate_caller_keys(request, path)
     with _rate_lock:
+        active: Dict[str, tuple[float, int]] = {}
         for key in keys:
-            bucket = [t for t in _rate_buckets.get(key, []) if t > now - window]
-            _rate_buckets[key] = bucket
-            if len(bucket) >= limit:
+            window_start, count = _rate_buckets.get(key, (now, 0))
+            if now >= window_start + window:
+                window_start, count = now, 0
+            active[key] = (window_start, count)
+            if count >= limit:
+                retry_after = max(1, math.ceil(window_start + window - now))
+                scope = _rate_limit_scope(key)
                 return JSONResponse(
                     status_code=429,
                     content={
                         "detail": {
                             "error_code": "rate_limit_exceeded",
                             "message": "Rate limit exceeded",
-                            "retry_after": int(window),
+                            "retry_after": retry_after,
+                            "scope": scope,
+                            "limit": limit,
+                            "remaining": 0,
                         }
                     },
-                    headers={"Retry-After": str(int(window))},
+                    headers={
+                        "Retry-After": str(retry_after),
+                        "RateLimit-Limit": str(limit),
+                        "RateLimit-Remaining": "0",
+                        "RateLimit-Reset": str(retry_after),
+                        "X-RateLimit-Scope": scope,
+                    },
                 )
-        for key in keys:
-            _rate_buckets[key].append(now)
+        for key, (window_start, count) in active.items():
+            _rate_buckets[key] = (window_start, count + 1)
     return await call_next(request)
 
 
