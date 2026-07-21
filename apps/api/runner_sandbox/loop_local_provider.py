@@ -34,10 +34,19 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import replace
-from typing import Any, AsyncIterator, Callable, Optional
+from dataclasses import dataclass, replace
+from typing import Any, AsyncIterator, Callable, Optional, Sequence
 
 logger = logging.getLogger("floom.runner_sandbox.loop_local_provider")
+
+_UNSET = object()
+
+
+@dataclass(frozen=True)
+class _FallbackTarget:
+    name: str
+    extra_args: dict[str, Any] | None
+    max_tokens: int | None | object = _UNSET
 
 
 def _resolve_openai_api_key() -> Optional[str]:
@@ -75,9 +84,10 @@ class _FallbackModel:
         fallback_name: str,
         should_fallback: Callable[[BaseException], bool],
         fallback_extra_args: dict[str, Any] | None = None,
-        fallback_max_tokens: int | None = None,
+        fallback_max_tokens: int | None | object = _UNSET,
         operation_name: str = "Chat",
         exhausted_marker: str | None = "chat model fallback exhausted",
+        exhausted_marker_requires_retryable: bool = False,
         on_fallback: Callable[[str, str], None] | None = None,
     ) -> None:
         self._primary = primary
@@ -91,6 +101,7 @@ class _FallbackModel:
         self._fallback_max_tokens = fallback_max_tokens
         self._operation_name = operation_name
         self._exhausted_marker = exhausted_marker
+        self._exhausted_marker_requires_retryable = exhausted_marker_requires_retryable
         self._on_fallback = on_fallback
 
     def _get_fallback(self) -> Any:
@@ -122,17 +133,20 @@ class _FallbackModel:
 
     def _fallback_model_settings(self, model_settings: Any) -> Any:
         replacements: dict[str, Any] = {"extra_args": self._fallback_extra_args}
-        if self._fallback_max_tokens is not None:
+        if self._fallback_max_tokens is not _UNSET:
             primary_max_tokens = getattr(model_settings, "max_tokens", None)
             replacements["max_tokens"] = (
                 min(primary_max_tokens, self._fallback_max_tokens)
-                if primary_max_tokens is not None
+                if primary_max_tokens is not None and self._fallback_max_tokens is not None
                 else self._fallback_max_tokens
             )
         return replace(model_settings, **replacements)
 
     def _raise_fallback_error(self, fallback_exc: BaseException) -> None:
-        if self._exhausted_marker is None:
+        if self._exhausted_marker is None or (
+            self._exhausted_marker_requires_retryable
+            and not self._should_fallback(fallback_exc)
+        ):
             raise fallback_exc
         raise RuntimeError(self._exhausted_marker) from fallback_exc
 
@@ -168,7 +182,8 @@ class _FallbackModel:
                 return await self._get_fallback().get_response(*fallback_args, **fallback_kwargs)
             except Exception as fallback_exc:
                 logger.error(
-                    "Chat fallback model %s failed after primary model %s",
+                    "%s fallback model %s failed after primary model %s",
+                    self._operation_name,
                     self._fallback_name,
                     self._primary_name,
                     exc_info=True,
@@ -211,7 +226,8 @@ class _FallbackModel:
                     buffered.append(event)
             except Exception as fallback_exc:
                 logger.error(
-                    "Chat fallback model %s stream failed after primary model %s",
+                    "%s fallback model %s stream failed after primary model %s",
+                    self._operation_name,
                     self._fallback_name,
                     self._primary_name,
                     exc_info=True,
@@ -239,24 +255,58 @@ class LoopLocalModelProvider:
         self,
         *,
         fallback_model_name: str | None = None,
+        fallback_model_names: Sequence[str] | None = None,
         should_fallback: Callable[[BaseException], bool] | None = None,
         fallback_extra_args: dict[str, Any] | None = None,
-        fallback_max_tokens: int | None = None,
+        fallback_extra_args_by_model: Sequence[dict[str, Any] | None] | None = None,
+        fallback_max_tokens: int | None | object = _UNSET,
+        fallback_max_tokens_by_model: Sequence[int | None] | None = None,
         fallback_operation_name: str = "Chat",
         fallback_exhausted_marker: str | None = "chat model fallback exhausted",
+        fallback_exhausted_marker_requires_retryable: bool = False,
         on_fallback: Callable[[str, str], None] | None = None,
     ) -> None:
         self._provider: Any = None
         self._openai_client: Any = None
         self._http_client: Any = None
-        self._fallback_model_name = fallback_model_name
         self._should_fallback = should_fallback
-        self._fallback_extra_args = fallback_extra_args
-        self._fallback_max_tokens = fallback_max_tokens
         self._fallback_operation_name = fallback_operation_name
         self._fallback_exhausted_marker = fallback_exhausted_marker
+        self._fallback_exhausted_marker_requires_retryable = (
+            fallback_exhausted_marker_requires_retryable
+        )
         self._on_fallback = on_fallback
         self._fallback_models: dict[str | None, Any] = {}
+        if fallback_model_names is None:
+            self._fallback_targets = (
+                [
+                    _FallbackTarget(
+                        name=fallback_model_name,
+                        extra_args=fallback_extra_args,
+                        max_tokens=fallback_max_tokens,
+                    )
+                ]
+                if fallback_model_name
+                else []
+            )
+        else:
+            names = list(fallback_model_names)
+            extra_args = (
+                list(fallback_extra_args_by_model)
+                if fallback_extra_args_by_model is not None
+                else [None] * len(names)
+            )
+            max_tokens: list[int | None | object] = (
+                list(fallback_max_tokens_by_model)
+                if fallback_max_tokens_by_model is not None
+                else [_UNSET] * len(names)
+            )
+            if len(extra_args) != len(names) or len(max_tokens) != len(names):
+                raise ValueError("Fallback model settings must match fallback model count")
+            self._fallback_targets = [
+                _FallbackTarget(name=name, extra_args=extra, max_tokens=maximum)
+                for name, extra, maximum in zip(names, extra_args, max_tokens)
+            ]
 
     def _ensure_provider(self, *, needs_openai_client: bool) -> Any:
         if self._provider is not None:
@@ -296,28 +346,61 @@ class LoopLocalModelProvider:
         return self
 
     # --- ModelProvider protocol -------------------------------------------------
+    def _build_fallback_chain(
+        self,
+        *,
+        primary: Any,
+        primary_name: str,
+        targets: Sequence[_FallbackTarget],
+        target_index: int = 0,
+    ) -> Any:
+        if target_index >= len(targets):
+            return primary
+        target = targets[target_index]
+
+        def fallback_factory() -> Any:
+            fallback = self._ensure_provider(
+                needs_openai_client=_uses_openai_provider(target.name)
+            ).get_model(target.name)
+            return self._build_fallback_chain(
+                primary=fallback,
+                primary_name=target.name,
+                targets=targets,
+                target_index=target_index + 1,
+            )
+
+        last_target = target_index == len(targets) - 1
+        return _FallbackModel(
+            primary=primary,
+            fallback_factory=fallback_factory,
+            primary_name=primary_name,
+            fallback_name=target.name,
+            should_fallback=self._should_fallback,
+            fallback_extra_args=target.extra_args,
+            fallback_max_tokens=target.max_tokens,
+            operation_name=self._fallback_operation_name,
+            exhausted_marker=(
+                self._fallback_exhausted_marker if last_target else None
+            ),
+            exhausted_marker_requires_retryable=(
+                self._fallback_exhausted_marker_requires_retryable if last_target else False
+            ),
+            on_fallback=self._on_fallback,
+        )
+
     def get_model(self, model_name: str | None) -> Any:
         if model_name in self._fallback_models:
             return self._fallback_models[model_name]
         primary = self._ensure_provider(
             needs_openai_client=_uses_openai_provider(model_name)
         ).get_model(model_name)
-        fallback_name = self._fallback_model_name
-        if not fallback_name or not self._should_fallback or fallback_name == model_name:
+        targets = [target for target in self._fallback_targets if target.name != model_name]
+        if not targets or not self._should_fallback:
             return primary
-        model = _FallbackModel(
+        model = self._build_fallback_chain(
             primary=primary,
-            fallback_factory=lambda: self._ensure_provider(
-                needs_openai_client=_uses_openai_provider(fallback_name)
-            ).get_model(fallback_name),
             primary_name=model_name or "default",
-            fallback_name=fallback_name,
-            should_fallback=self._should_fallback,
-            fallback_extra_args=self._fallback_extra_args,
-            fallback_max_tokens=self._fallback_max_tokens,
-            operation_name=self._fallback_operation_name,
-            exhausted_marker=self._fallback_exhausted_marker,
-            on_fallback=self._on_fallback,
+            targets=targets,
         )
         self._fallback_models[model_name] = model
         return model

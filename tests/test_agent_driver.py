@@ -132,9 +132,10 @@ def test_multi_iteration_tool_loop_reads_file_then_writes_output(tmp_path):
 
 
 class _ProviderModel:
-    def __init__(self, *, error=None, response=None):
+    def __init__(self, *, error=None, response=None, stream_events=None):
         self.error = error
         self.response = response
+        self.stream_events = list(stream_events or [])
         self.calls = 0
         self.last_model_settings = None
 
@@ -151,6 +152,8 @@ class _ProviderModel:
     async def stream_response(self, *_args, **_kwargs):
         self.calls += 1
         self.last_model_settings = _args[2]
+        for event in self.stream_events:
+            yield event
         if self.error is not None:
             raise self.error
         if self.response is not None:
@@ -158,12 +161,18 @@ class _ProviderModel:
 
 
 class _ProviderExercisingAgentDriver(AgentDriver):
+    def __init__(self):
+        super().__init__()
+        self.seen_events = []
+        self.stream_runs = 0
+
     async def _run_streamed(self, agent, run_input, max_turns, run_config):
+        self.stream_runs += 1
         model = run_config.model_provider.get_model(agent.model)
-        async for _event in model.stream_response(
+        async for event in model.stream_response(
             None, [], agent.model_settings, [], None, [], None
         ):
-            pass
+            self.seen_events.append(event)
         return FakeStreamingResult(
             agent,
             [
@@ -183,6 +192,9 @@ class _WorkerErrorAgentDriver(AgentDriver):
 
 def _install_fake_multi_provider(monkeypatch, models):
     class FakeMultiProvider:
+        def __init__(self, **_kwargs):
+            pass
+
         def get_model(self, model_name):
             return models[model_name]
 
@@ -190,6 +202,284 @@ def _install_fake_multi_provider(monkeypatch, models):
 
     monkeypatch.setattr(multi_provider, "MultiProvider", FakeMultiProvider)
     monkeypatch.setattr(agent_module._llm, "provider_credentials_present", lambda _model: True)
+
+
+def _three_provider_models(*, primary, first_fallback, second_fallback):
+    return {
+        "litellm/bedrock/us.anthropic.claude-sonnet-4-6": primary,
+        "litellm/gemini/gemini-3.5-flash": first_fallback,
+        "openai/gpt-5.5": second_fallback,
+    }
+
+
+def _three_provider_config(tmp_path):
+    return make_config(
+        tmp_path,
+        model="bedrock/us.anthropic.claude-sonnet-4-6",
+        limits={
+            "max_tool_iterations": 6,
+            "max_output_tokens": 1_000_000,
+            "max_total_tokens": 1_000_000,
+            "timeout_seconds": 30,
+        },
+    )
+
+
+def _configure_three_provider_chain(monkeypatch):
+    monkeypatch.setenv(
+        "WORKEROS_AGENT_FALLBACK_MODEL",
+        "gemini/gemini-3.5-flash, openai/gpt-5.5",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-only")
+
+
+def test_agent_fallback_models_preserve_scalar_configuration(monkeypatch):
+    monkeypatch.setattr(agent_module._llm, "provider_credentials_present", lambda _model: True)
+    monkeypatch.setenv("WORKEROS_AGENT_FALLBACK_MODEL", " gemini/gemini-3.5-flash ")
+
+    assert agent_module._resolve_agent_fallback_models(
+        "bedrock/us.anthropic.claude-sonnet-4-6"
+    ) == ["gemini/gemini-3.5-flash"]
+    assert (
+        agent_module._resolve_agent_fallback_model(
+            "bedrock/us.anthropic.claude-sonnet-4-6"
+        )
+        == "gemini/gemini-3.5-flash"
+    )
+
+
+def test_empty_agent_fallback_env_preserves_default_fallback(monkeypatch):
+    monkeypatch.setattr(agent_module._llm, "provider_credentials_present", lambda _model: True)
+    monkeypatch.setenv("WORKEROS_AGENT_FALLBACK_MODEL", "")
+
+    assert agent_module._resolve_agent_fallback_models(
+        "gemini/gemini-3.5-flash"
+    ) == [agent_module._DEFAULT_AGENT_FALLBACK_MODEL]
+
+
+def test_agent_fallback_models_parse_validate_and_dedupe_ordered_chain(monkeypatch):
+    configured = {
+        "gemini/gemini-3.5-flash",
+        "gemini/gemini-3.5-return",
+        "openai/gpt-5.5",
+    }
+    monkeypatch.setattr(
+        agent_module._llm,
+        "provider_credentials_present",
+        lambda model: model in configured,
+    )
+    monkeypatch.setenv(
+        "WORKEROS_AGENT_FALLBACK_MODEL",
+        ", ".join(
+            [
+                "bedrock/us.anthropic.claude-sonnet-4-6",
+                "gemini/gemini-3.5-flash",
+                "gemini/gemini-3.5-pro",
+                "gemini/gemini-3.5-flash",
+                "anthropic/claude-sonnet-4-6",
+                "openai/gpt-5.5",
+                "gemini/gemini-3.5-return",
+                "openai/gpt-5.5",
+            ]
+        ),
+    )
+
+    assert agent_module._resolve_agent_fallback_models(
+        "bedrock/us.anthropic.claude-sonnet-4-6"
+    ) == [
+        "gemini/gemini-3.5-flash",
+        "openai/gpt-5.5",
+    ]
+
+
+def test_first_fallback_success_does_not_call_third_provider(tmp_path, monkeypatch):
+    primary = _ProviderModel(error=RuntimeError("429 bedrock throttling"))
+    first_fallback = _ProviderModel(response="gemini response")
+    second_fallback = _ProviderModel(response="must not be called")
+    _install_fake_multi_provider(
+        monkeypatch,
+        _three_provider_models(
+            primary=primary,
+            first_fallback=first_fallback,
+            second_fallback=second_fallback,
+        ),
+    )
+    _configure_three_provider_chain(monkeypatch)
+    entries, log_fn = logs()
+
+    result = _ProviderExercisingAgentDriver().run(
+        "agent-test",
+        "run_first_fallback",
+        {},
+        {},
+        log_fn,
+        "trace",
+        config=_three_provider_config(tmp_path),
+    )
+
+    assert result.status == "success"
+    assert [primary.calls, first_fallback.calls, second_fallback.calls] == [1, 1, 0]
+    assert sum("retrying model call" in message.lower() for _level, message in entries) == 1
+
+
+def test_second_fallback_success_completes_without_whole_run_replay(tmp_path, monkeypatch):
+    primary = _ProviderModel(error=RuntimeError("429 bedrock throttling"))
+    first_fallback = _ProviderModel(error=RuntimeError("RESOURCE_EXHAUSTED"))
+    second_fallback = _ProviderModel(response="openai response")
+    _install_fake_multi_provider(
+        monkeypatch,
+        _three_provider_models(
+            primary=primary,
+            first_fallback=first_fallback,
+            second_fallback=second_fallback,
+        ),
+    )
+    _configure_three_provider_chain(monkeypatch)
+    entries, log_fn = logs()
+    driver = _ProviderExercisingAgentDriver()
+
+    result = driver.run(
+        "agent-test",
+        "run_second_fallback",
+        {},
+        {},
+        log_fn,
+        "trace",
+        config=_three_provider_config(tmp_path),
+    )
+
+    assert result.status == "success"
+    assert [primary.calls, first_fallback.calls, second_fallback.calls] == [1, 1, 1]
+    assert driver.stream_runs == 1
+    assert sum("retrying model call" in message.lower() for _level, message in entries) == 2
+
+
+def test_all_fallbacks_exhaust_once_without_leaking_partial_streams(tmp_path, monkeypatch):
+    primary = _ProviderModel(
+        stream_events=["partial-bedrock"],
+        error=RuntimeError("429 bedrock throttling"),
+    )
+    first_fallback = _ProviderModel(
+        stream_events=["partial-gemini"],
+        error=RuntimeError("RESOURCE_EXHAUSTED"),
+    )
+    second_fallback = _ProviderModel(
+        stream_events=["partial-openai"],
+        error=RuntimeError("429 openai throttling"),
+    )
+    _install_fake_multi_provider(
+        monkeypatch,
+        _three_provider_models(
+            primary=primary,
+            first_fallback=first_fallback,
+            second_fallback=second_fallback,
+        ),
+    )
+    _configure_three_provider_chain(monkeypatch)
+    _entries, log_fn = logs()
+    driver = _ProviderExercisingAgentDriver()
+
+    result = driver.run(
+        "agent-test",
+        "run_fallbacks_exhausted",
+        {},
+        {},
+        log_fn,
+        "trace",
+        config=_three_provider_config(tmp_path),
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "llm_provider_capacity"
+    assert result.retryable is True
+    assert [primary.calls, first_fallback.calls, second_fallback.calls] == [1, 1, 1]
+    assert driver.stream_runs == 1
+    assert driver.seen_events == []
+
+
+def test_non_capacity_error_stops_ordered_fallback_chain(tmp_path, monkeypatch):
+    primary = _ProviderModel(error=RuntimeError("429 bedrock throttling"))
+    first_fallback = _ProviderModel(error=RuntimeError("Gemini API connection reset"))
+    second_fallback = _ProviderModel(response="must not be called")
+    _install_fake_multi_provider(
+        monkeypatch,
+        _three_provider_models(
+            primary=primary,
+            first_fallback=first_fallback,
+            second_fallback=second_fallback,
+        ),
+    )
+    _configure_three_provider_chain(monkeypatch)
+    _entries, log_fn = logs()
+
+    result = _ProviderExercisingAgentDriver().run(
+        "agent-test",
+        "run_non_capacity_stop",
+        {},
+        {},
+        log_fn,
+        "trace",
+        config=_three_provider_config(tmp_path),
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "llm_provider_error"
+    assert [primary.calls, first_fallback.calls, second_fallback.calls] == [1, 1, 0]
+
+
+def test_openai_fallback_explicitly_clears_bedrock_max_tokens(tmp_path, monkeypatch):
+    primary = _ProviderModel(error=RuntimeError("429 bedrock throttling"))
+    first_fallback = _ProviderModel(error=RuntimeError("RESOURCE_EXHAUSTED"))
+    second_fallback = _ProviderModel(response="openai response")
+    _install_fake_multi_provider(
+        monkeypatch,
+        _three_provider_models(
+            primary=primary,
+            first_fallback=first_fallback,
+            second_fallback=second_fallback,
+        ),
+    )
+    _configure_three_provider_chain(monkeypatch)
+    _entries, log_fn = logs()
+
+    result = _ProviderExercisingAgentDriver().run(
+        "agent-test",
+        "run_openai_token_clear",
+        {},
+        {},
+        log_fn,
+        "trace",
+        config=_three_provider_config(tmp_path),
+    )
+
+    assert result.status == "success"
+    assert primary.last_model_settings.max_tokens == agent_module._BEDROCK_MAX_OUTPUT_CAP
+    assert second_fallback.last_model_settings.max_tokens is None
+
+
+def test_agent_driver_does_not_replay_whole_run_after_capacity_failure(monkeypatch):
+    class _RunCountingDriver(AgentDriver):
+        def __init__(self):
+            super().__init__()
+            self.async_runs = 0
+
+        async def _run_agent_async(self, **_kwargs):
+            self.async_runs += 1
+            raise RuntimeError("429 provider throttling")
+
+    monkeypatch.setenv(
+        "WORKEROS_AGENT_FALLBACK_MODEL",
+        "gemini/gemini-3.5-flash,openai/gpt-5.5",
+    )
+    config = type("Config", (), {"runtime": type("Runtime", (), {"model": "bedrock/test"})()})()
+    _entries, log_fn = logs()
+    driver = _RunCountingDriver()
+
+    result = driver.run("agent-test", "run_once", {}, {}, log_fn, "trace", config=config)
+
+    assert result.status == "error"
+    assert result.error_code == "llm_rate_limited"
+    assert driver.async_runs == 1
 
 
 def test_gemini_agent_capacity_error_completes_on_bedrock_fallback(tmp_path, monkeypatch):
@@ -289,6 +579,13 @@ def test_agent_capacity_classifier_uses_structured_429_status():
         status_code = 429
 
     assert agent_module._should_retry_agent_with_fallback(EmptyRateLimitError())
+
+
+def test_lone_rate_limit_remains_rate_limited():
+    assert (
+        agent_module._classify_llm_provider_error(RuntimeError("429 provider throttling"))
+        == "llm_rate_limited"
+    )
 
 
 @pytest.mark.parametrize(
