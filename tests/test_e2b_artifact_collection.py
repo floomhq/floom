@@ -1,3 +1,4 @@
+import json
 import os
 import shlex
 import subprocess
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, os.path.join(str(ROOT), "apps", "api"))
 
 import contexts as contexts_module
+import run_service
 from models import WorkerConfig, WorkerOutput, WorkerRuntime, WorkerTrigger
 from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import (
@@ -335,6 +337,180 @@ def test_skips_path_traversal_artifact(tmp_path, monkeypatch):
     assert artifacts == []
     assert not any(tmp_path.rglob("secret.txt"))
     assert any("Skipping invalid artifact path" in msg for _level, msg in logs)
+
+
+def _read_result_payload(payload):
+    logs = []
+    result_data, parse_error = e2b_driver._read_result_json(
+        FakeSandbox(
+            {
+                "/home/user/worker/result.json": json.dumps(payload).encode("utf-8"),
+            }
+        ),
+        "/home/user/worker/result.json",
+        lambda message, level="info": logs.append((level, message)),
+    )
+    return result_data, parse_error, logs
+
+
+def test_string_artifact_shorthand_is_normalized_and_merged():
+    result_data, parse_error, logs = _read_result_payload(
+        {
+            "status": "success",
+            "outputs": {"status": "success"},
+            "artifacts": [
+                {
+                    "name": "summary.md",
+                    "relative_path": "out/summary.md",
+                    "type": "text/markdown",
+                },
+                "out/this_week_papers.json",
+            ],
+        }
+    )
+
+    assert parse_error is None
+    assert result_data is not None
+    assert result_data["artifacts"] == [
+        {
+            "name": "summary.md",
+            "relative_path": "out/summary.md",
+            "type": "text/markdown",
+        },
+        {
+            "name": "out/this_week_papers.json",
+            "relative_path": "out/this_week_papers.json",
+            "type": "application/octet-stream",
+        },
+    ]
+    assert any("string path shorthand" in message for _level, message in logs)
+
+    collected = [
+        {
+            "name": "out/this_week_papers.json",
+            "relative_path": "out/this_week_papers.json",
+            "path": "/tmp/artifacts/run-1/out/this_week_papers.json",
+            "type": "application/json",
+        }
+    ]
+    assert e2b_driver._merge_artifacts(result_data["artifacts"], collected) == [
+        result_data["artifacts"][0],
+        collected[0],
+    ]
+
+
+def test_null_artifacts_value_normalizes_to_empty_list():
+    result_data, parse_error, _logs = _read_result_payload(
+        {"status": "success", "outputs": {}, "artifacts": None}
+    )
+
+    assert parse_error is None
+    assert result_data is not None
+    assert result_data["artifacts"] == []
+
+
+@pytest.mark.parametrize(
+    ("artifacts", "bad_type"),
+    [
+        ([None], "null"),
+        ([[]], "array"),
+        ([42], "number"),
+        ([True], "boolean"),
+        ([""], "string"),
+        ("out/report.json", "string"),
+        ({"relative_path": "out/report.json"}, "object"),
+    ],
+)
+def test_invalid_artifact_shapes_return_contract_error(artifacts, bad_type):
+    result_data, parse_error, logs = _read_result_payload(
+        {"status": "success", "outputs": {}, "artifacts": artifacts}
+    )
+
+    assert result_data is None
+    assert parse_error is not None
+    assert parse_error.error_code == "invalid_artifacts_shape"
+    assert "artifacts" in (parse_error.error or "")
+    assert bad_type in (parse_error.error or "")
+    assert any(level == "error" for level, _message in logs)
+
+
+def test_invalid_artifact_shape_is_permanent_and_not_retried():
+    decision = run_service._classify_retry_failure(error_code="invalid_artifacts_shape")
+
+    assert decision.permanent is True
+    assert decision.retryable is False
+
+
+def test_invalid_artifacts_do_not_mask_failure_or_discard_valid_diagnostics(
+    tmp_path, monkeypatch
+):
+    before = {
+        "name": "before.log",
+        "relative_path": "out/before.log",
+        "type": "text/plain",
+    }
+    result_data, parse_error, logs = _read_result_payload(
+        {
+            "status": "error",
+            "outputs": {},
+            "artifacts": [before, None, "out/after.json"],
+            "error": "Upstream vendor rejected the request.",
+            "error_code": "vendor_rejected",
+        }
+    )
+
+    assert parse_error is None
+    assert result_data is not None
+    assert result_data["artifacts"] == [
+        before,
+        {
+            "name": "out/after.json",
+            "relative_path": "out/after.json",
+            "type": "application/octet-stream",
+        },
+    ]
+    assert result_data["error"] == "Upstream vendor rejected the request."
+    assert result_data["error_code"] == "vendor_rejected"
+    assert any("worker-reported failure" in message for _level, message in logs)
+
+    monkeypatch.setattr(e2b_driver, "ARTIFACTS_DIR", tmp_path)
+    collected = E2BSandboxDriver()._collect_sandbox_artifacts(
+        sandbox=FakeSandbox(
+            {
+                "/home/user/worker/out/before.log": b"before failure\n",
+                "/home/user/worker/out/after.json": b'{"after":true}\n',
+            }
+        ),
+        workdir="/home/user/worker",
+        run_id="run_failed_diagnostics",
+        result_artifacts=result_data["artifacts"],
+        config=None,
+        outputs={},
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+    merged = e2b_driver._merge_artifacts(result_data["artifacts"], collected)
+
+    assert [artifact["relative_path"] for artifact in merged] == [
+        "out/before.log",
+        "out/after.json",
+    ]
+    assert [Path(artifact["path"]).read_bytes() for artifact in merged] == [
+        b"before failure\n",
+        b'{"after":true}\n',
+    ]
+
+
+def test_string_artifact_shorthand_still_uses_path_traversal_guard():
+    result_data, parse_error, _logs = _read_result_payload(
+        {"status": "success", "outputs": {}, "artifacts": ["../secrets.txt"]}
+    )
+
+    assert parse_error is None
+    assert result_data is not None
+    with pytest.raises(ValueError, match="invalid artifact path"):
+        e2b_driver._normalize_sandbox_relative_path(
+            result_data["artifacts"][0]["relative_path"]
+        )
 
 
 def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):

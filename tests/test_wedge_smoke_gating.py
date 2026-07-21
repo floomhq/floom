@@ -149,8 +149,8 @@ def _make_smoke_env(monkeypatch, tmp_path, config, driver_factory):
     # context scope is a no-op context manager in this stub
     import contextlib
 
-    monkeypatch.setattr(run_service, "use_context_scope", lambda *a, **k: contextlib.nullcontext())
-    monkeypatch.setattr(run_service, "context_scope_for_user", lambda *a, **k: None)
+    monkeypatch.setattr(run_authoring, "use_context_scope", lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(run_authoring, "context_scope_for_user", lambda *a, **k: None)
     # never make a real repair model call
     monkeypatch.setattr(run_service, "_repair_run_py", lambda **k: None)
 
@@ -362,8 +362,8 @@ def _track_repair_env(monkeypatch, tmp_path, config, *, user_run_py):
     monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _failing_code_driver())
     import contextlib
 
-    monkeypatch.setattr(run_service, "use_context_scope", lambda *a, **k: contextlib.nullcontext())
-    monkeypatch.setattr(run_service, "context_scope_for_user", lambda *a, **k: None)
+    monkeypatch.setattr(run_authoring, "use_context_scope", lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(run_authoring, "context_scope_for_user", lambda *a, **k: None)
 
     repair_calls: list = []
 
