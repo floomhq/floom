@@ -717,6 +717,10 @@ def _migrate_run_cost_accounting(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE runs ADD COLUMN total_tokens INTEGER")
     if "total_cost_usd" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN total_cost_usd REAL")
+    if "proxy_total_tokens" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN proxy_total_tokens INTEGER")
+    if "proxy_total_cost_usd" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN proxy_total_cost_usd REAL")
     columns = _table_columns(conn, "runs")
     if {"worker_id", "created_at"} <= columns:
         conn.execute(

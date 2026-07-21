@@ -1703,16 +1703,17 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
     return response
 
-# Simple in-memory token bucket rate limit per client IP.
+# Simple in-memory fixed-window rate limit per caller and path. Rejected
+# requests never mutate the window, so backoff cannot extend a lockout.
 _rate_lock = threading.Lock()
-_rate_buckets: Dict[str, list[float]] = {}
+_rate_buckets: Dict[str, tuple[float, int]] = {}
 
 
 def _rate_caller_keys(request: Request, path: str) -> List[str]:
     # #1184: add per-secret and per-session keys so NAT/shared-IP clients don't
     # exhaust each other's buckets, and so attackers with many IPs can't bypass.
     ip = _client_ip(request)
-    keys = [f"ip:{ip}:{path}"]
+    keys: List[str] = []
     headers = {k.lower(): v for k, v in (
         (h[0].decode("latin-1", errors="replace"), h[1].decode("latin-1", errors="replace"))
         for h in request.scope.get("headers", [])
@@ -1736,7 +1737,17 @@ def _rate_caller_keys(request: Request, path: str) -> List[str]:
         bearer = auth_header[7:].strip()
         bearer_key = hashlib.sha256(bearer.encode()).hexdigest()[:16]
         keys.append(f"bearer:{bearer_key}:{path}")
+    keys.append(f"ip:{ip}:{path}")
     return keys
+
+
+def _rate_limit_scope(key: str) -> str:
+    """Return a stable, actionable label without exposing caller identifiers."""
+    if key.startswith("secret:"):
+        return "per-workspace"
+    if key.startswith(("session:", "bearer:")):
+        return "per-user"
+    return "per-ip"
 
 
 @app.middleware("http")
@@ -1754,23 +1765,37 @@ async def rate_limit_middleware(request: Request, call_next):
     now = time.time()
     keys = _rate_caller_keys(request, path)
     with _rate_lock:
+        active: Dict[str, tuple[float, int]] = {}
         for key in keys:
-            bucket = [t for t in _rate_buckets.get(key, []) if t > now - window]
-            _rate_buckets[key] = bucket
-            if len(bucket) >= limit:
+            window_start, count = _rate_buckets.get(key, (now, 0))
+            if now >= window_start + window:
+                window_start, count = now, 0
+            active[key] = (window_start, count)
+            if count >= limit:
+                retry_after = max(1, math.ceil(window_start + window - now))
+                scope = _rate_limit_scope(key)
                 return JSONResponse(
                     status_code=429,
                     content={
                         "detail": {
                             "error_code": "rate_limit_exceeded",
                             "message": "Rate limit exceeded",
-                            "retry_after": int(window),
+                            "retry_after": retry_after,
+                            "scope": scope,
+                            "limit": limit,
+                            "remaining": 0,
                         }
                     },
-                    headers={"Retry-After": str(int(window))},
+                    headers={
+                        "Retry-After": str(retry_after),
+                        "RateLimit-Limit": str(limit),
+                        "RateLimit-Remaining": "0",
+                        "RateLimit-Reset": str(retry_after),
+                        "X-RateLimit-Scope": scope,
+                    },
                 )
-        for key in keys:
-            _rate_buckets[key].append(now)
+        for key, (window_start, count) in active.items():
+            _rate_buckets[key] = (window_start, count + 1)
     return await call_next(request)
 
 
@@ -4415,7 +4440,7 @@ def update_worker_files(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
-    """Replace all files in a worker's directory atomically.
+    """Merge files into a worker's directory atomically.
 
     Accepts a list of {path, content} objects and writes them to disk.
     The write is atomic: files are written to a temp directory first, then
@@ -4429,11 +4454,11 @@ def update_worker_files(
     if request is not None:
         _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
-    if not worker:
-        # Donation model: admins edit workspace-shared workers (workspace-actor
-        # owned; the owner-scoped fetch above can no longer see them).
-        worker = _worker_for_mutation(worker_id, auth, get_repositories())
+    _raise_if_protected_worker_mutation(worker_id)
+    # File writes are mutations, so visibility alone is insufficient: ordinary
+    # workspace members may view shared workers but only the owner or an active
+    # workspace admin may change their bundles.
+    worker = _worker_for_mutation(worker_id, auth, repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4448,8 +4473,6 @@ def update_worker_files(
         if item.path in seen_paths:
             raise HTTPException(status_code=400, detail=f"duplicate file path: {item.path!r}")
         seen_paths.add(item.path)
-
-    _raise_if_protected_worker_mutation(worker_id)
 
     config_dict = worker.get("config") or {}
     try:
@@ -4494,13 +4517,32 @@ def update_worker_files(
     import shutil
 
     tmp_dir: Optional[Path] = None
+    request_token = _uuid_mod.uuid4().hex
     backed_up: List[tuple] = []  # list of (original_path, backup_path)
+    created_files: List[Path] = []
+
+    def rollback_files() -> None:
+        # A destination without a backup did not exist before this update. It
+        # must be removed as well as restoring overwritten files, otherwise a
+        # failed persistence step leaves a partially updated bundle on disk.
+        for created in reversed(created_files):
+            try:
+                created.unlink(missing_ok=True)
+            except Exception:
+                pass
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                if bak.exists():
+                    bak.rename(orig)
+            except Exception:
+                pass
+        invalidate_worker_cache()
 
     try:
         # Stage new files to a temp dir
-        tmp_dir = WORKERS_DIR / f".{worker_id}.tmp.{os.getpid()}"
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
+        tmp_dir = WORKERS_DIR / f".{worker_id}.tmp.{request_token}"
         tmp_dir.mkdir(parents=True)
 
         for item in payload.files:
@@ -4508,28 +4550,17 @@ def update_worker_files(
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(item.content, encoding="utf-8")
 
-        # Remove any existing files NOT in the new payload (keep backups)
-        existing_files = list(target_dir.rglob("*"))
-        new_paths = {item.path for item in payload.files}
-        for existing in existing_files:
-            if not existing.is_file():
-                continue
-            try:
-                rel = existing.relative_to(target_dir).as_posix()
-            except ValueError:
-                continue
-            if rel not in new_paths and not _should_ignore_worker_file(rel):
-                bak = existing.with_suffix(existing.suffix + f".bak{os.getpid()}")
-                existing.rename(bak)
-                backed_up.append((existing, bak))
-
         # Write new files from staging dir into target dir, backing up existing ones
         for item in payload.files:
             dest = target_dir / item.path
             if dest.exists():
-                bak = dest.with_suffix(dest.suffix + f".bak{os.getpid()}")
+                bak = dest.with_suffix(dest.suffix + f".bak.{request_token}")
                 dest.rename(bak)
                 backed_up.append((dest, bak))
+            else:
+                # Record this before copy2 so even a partially copied file is
+                # removed if copying or any later operation fails.
+                created_files.append(dest)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(tmp_dir / item.path, dest)
 
@@ -4548,23 +4579,23 @@ def update_worker_files(
                     conn, this_worker_list, user_id=auth.user_id, raise_on_skip=True
                 )
             except Exception as exc:
-                # Roll back: restore backups. Catch any persist failure
-                # (IntegrityError, ValidationError, RuntimeError) so a bad save
-                # never leaves the worker files half-written.
-                for orig, bak in reversed(backed_up):
-                    try:
-                        if orig.exists():
-                            orig.unlink()
-                        bak.rename(orig)
-                    except Exception:
-                        pass
-                invalidate_worker_cache()
+                # Catch any persist failure (IntegrityError, ValidationError,
+                # RuntimeError) so the outer rollback restores the full bundle.
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        # Remove backups on success
-        for _orig, bak in backed_up:
-            bak.unlink(missing_ok=True)
+        # The DB persist above is the commit point. From here onward, failures
+        # must not roll the bundle back behind the committed DB state.
+        backups_to_remove = list(backed_up)
         backed_up.clear()
+        created_files.clear()
+
+        # Backup cleanup is best-effort after commit. In particular, a failure
+        # after deleting only some backups must not trigger a partial rollback.
+        for _orig, bak in backups_to_remove:
+            try:
+                bak.unlink(missing_ok=True)
+            except Exception:
+                logger.warning("Failed to remove worker backup %s", bak, exc_info=True)
 
         try:
             _embed_files_in_skill_version(worker_id, target_dir)
@@ -4586,17 +4617,11 @@ def update_worker_files(
         )
 
     except HTTPException:
+        rollback_files()
         raise
     except Exception as exc:
         logger.exception("update_worker_files failed for %s", worker_id)
-        # Restore backups on unexpected error
-        for orig, bak in reversed(backed_up):
-            try:
-                if orig.exists():
-                    orig.unlink()
-                bak.rename(orig)
-            except Exception:
-                pass
+        rollback_files()
         raise HTTPException(status_code=500, detail=f"Failed to update worker files: {exc}") from exc
     finally:
         if tmp_dir is not None and tmp_dir.exists():
@@ -5199,7 +5224,66 @@ def _authorize_run_platform_proxy(request: Request, run_id: str) -> None:
     raise HTTPException(status_code=401, detail="Missing or invalid run token")
 
 
-def _managed_llm_completion(body: _ManagedLLMRequest) -> Any:
+def _usage_value(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _non_negative_integer(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        return None
+    return int(value) if value >= 0 else None
+
+
+def _finite_non_negative_float(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = float(value)
+    return result if math.isfinite(result) and result >= 0 else None
+
+
+def _managed_llm_usage(response: Any) -> tuple[Optional[int], Optional[float]] | None:
+    """Extract real usage returned by LiteLLM without inventing missing data."""
+    usage = _usage_value(response, "usage")
+
+    prompt_tokens = _usage_value(usage, "prompt_tokens")
+    if prompt_tokens is None:
+        prompt_tokens = _usage_value(usage, "input_tokens")
+    completion_tokens = _usage_value(usage, "completion_tokens")
+    if completion_tokens is None:
+        completion_tokens = _usage_value(usage, "output_tokens")
+
+    # Prefer a provider-reported total. Only derive one when both components
+    # were actually reported; treating a missing component as zero fabricates
+    # a deceptively complete usage value.
+    reported_total = _usage_value(usage, "total_tokens")
+    if reported_total is not None:
+        total_tokens = _non_negative_integer(reported_total)
+    elif prompt_tokens is not None and completion_tokens is not None:
+        prompt = _non_negative_integer(prompt_tokens)
+        completion = _non_negative_integer(completion_tokens)
+        total_tokens = prompt + completion if prompt is not None and completion is not None else None
+    else:
+        total_tokens = None
+
+    # LiteLLM exposes the provider/model-priced response cost in hidden params.
+    # Some adapters also put it directly on usage, so accept both real sources.
+    hidden = _usage_value(response, "_hidden_params")
+    raw_cost = _usage_value(hidden, "response_cost") if hidden is not None else None
+    if raw_cost is None:
+        raw_cost = _usage_value(usage, "total_cost_usd")
+    if raw_cost is None:
+        raw_cost = _usage_value(usage, "cost")
+    cost = _finite_non_negative_float(raw_cost)
+    return (total_tokens, cost) if total_tokens is not None or cost is not None else None
+
+
+def _managed_llm_completion(
+    body: _ManagedLLMRequest,
+) -> tuple[Any, tuple[int | None, float | None] | None]:
     import llm as _llm
 
     model = body.model or _platform_managed_llm_model()
@@ -5209,7 +5293,8 @@ def _managed_llm_completion(body: _ManagedLLMRequest) -> Any:
     data.pop("model", None)
     messages = data.pop("messages")
     try:
-        return _response_to_jsonable(_llm.completion(model=model, messages=messages, **data))
+        response = _llm.completion(model=model, messages=messages, **data)
+        return _response_to_jsonable(response), _managed_llm_usage(response)
     except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary
         detail = _llm.safe_llm_error_message(exc, action="Managed LLM call")
         raise HTTPException(status_code=502, detail=detail) from exc
@@ -5236,8 +5321,18 @@ def managed_llm_proxy(
     repos: Repositories = Depends(get_repos),
 ) -> Any:
     _authorize_run_platform_proxy(request, run_id)
-    _require_running_run_for_platform_proxy(run_id, repos)
-    return _managed_llm_completion(body)
+    run_row = _require_running_run_for_platform_proxy(run_id, repos)
+    worker_row = repos.workers.get_any(worker_id=str(run_row["worker_id"])) or {}
+    owner_id = str(worker_row.get("owner_id") or "")
+    response, usage = _managed_llm_completion(body)
+    if usage is not None:
+        repos.runs.add_usage(
+            user_id=owner_id,
+            run_id=run_id,
+            total_tokens=usage[0],
+            total_cost_usd=usage[1],
+        )
+    return response
 
 
 @app.post("/runs/{run_id}/llm/batch")
@@ -5250,10 +5345,26 @@ def managed_llm_batch_proxy(
     from concurrent.futures import ThreadPoolExecutor
 
     _authorize_run_platform_proxy(request, run_id)
-    _require_running_run_for_platform_proxy(run_id, repos)
+    run_row = _require_running_run_for_platform_proxy(run_id, repos)
+    worker_row = repos.workers.get_any(worker_id=str(run_row["worker_id"])) or {}
+    owner_id = str(worker_row.get("owner_id") or "")
+
+    def _complete_and_persist(item: _ManagedLLMRequest) -> Any:
+        response, usage = _managed_llm_completion(item)
+        # Persist in the worker that completed the billable call. A later
+        # failure in another future must not discard this real usage.
+        if usage is not None:
+            repos.runs.add_usage(
+                user_id=owner_id,
+                run_id=run_id,
+                total_tokens=usage[0],
+                total_cost_usd=usage[1],
+            )
+        return response
+
     with ThreadPoolExecutor(max_workers=min(body.max_parallel, len(body.requests))) as pool:
-        results = list(pool.map(_managed_llm_completion, body.requests))
-    return {"results": results}
+        completed = list(pool.map(_complete_and_persist, body.requests))
+    return {"results": completed}
 
 
 @app.post("/runs/{run_id}/embeddings")
@@ -6882,6 +6993,44 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             }, ["id"]),
         },
         {
+            "name": "workers.pause",
+            "description": "Pause a Floom worker so scheduled and manual runs are disabled.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.resume",
+            "description": "Resume a paused Floom worker.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.delete",
+            "description": "Delete a Floom worker when the caller has delete permission.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.write_file",
+            "description": "Merge source-file updates into a worker bundle; omitted files are preserved.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                        "required": ["path", "content"],
+                    },
+                },
+            }, ["id", "files"]),
+        },
+        {
+            "name": "workers.versions",
+            "description": "List saved versions of a worker, newest first.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            }, ["id"]),
+        },
+        {
             "name": "workers.run",
             "description": (
                 "Start a manual Floom worker run. File-type inputs accept a "
@@ -7214,6 +7363,40 @@ def _mcp_call_workers_update(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(data, "Worker updated.")
 
 
+def _mcp_call_worker_lifecycle(
+    action: str, arguments: Dict[str, Any], auth: AuthContext, repos: Repositories
+) -> Dict[str, Any]:
+    worker_id = _mcp_arg(arguments, "id")
+    request = _internal_asgi_request()
+    if action == "pause":
+        return _mcp_call_result(pause_worker(worker_id, request, auth=auth, repos=repos), "Worker paused.")
+    if action == "resume":
+        return _mcp_call_result(resume_worker(worker_id, request, auth=auth, repos=repos), "Worker resumed.")
+    delete_worker(worker_id, request, auth=auth, repos=repos)
+    return _mcp_call_result({"id": worker_id, "deleted": True}, "Worker deleted.")
+
+
+def _mcp_call_workers_write_file(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    files = arguments.get("files")
+    if not isinstance(files, list):
+        raise ValueError("Tool argument 'files' is required")
+    payload = WorkerFilesUpdateRequest(files=files)
+    data = update_worker_files(
+        _mcp_arg(arguments, "id"), payload, _internal_asgi_request(), auth=auth, repos=repos
+    )
+    return _mcp_call_result(data, "Worker files updated.")
+
+
+def _mcp_call_workers_versions(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_worker_versions(
+        _mcp_arg(arguments, "id"),
+        limit=min(max(int(arguments.get("limit") or 50), 1), 100),
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(data)
+
+
 def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     payload = RunCreate(
         inputs=arguments.get("inputs") if isinstance(arguments.get("inputs"), dict) else {},
@@ -7540,6 +7723,12 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_workers_create(arguments, auth, repos)
         if tool_name == "workers.update":
             return _mcp_call_workers_update(arguments, auth, repos)
+        if tool_name in {"workers.pause", "workers.resume", "workers.delete"}:
+            return _mcp_call_worker_lifecycle(tool_name.split(".", 1)[1], arguments, auth, repos)
+        if tool_name == "workers.write_file":
+            return _mcp_call_workers_write_file(arguments, auth, repos)
+        if tool_name == "workers.versions":
+            return _mcp_call_workers_versions(arguments, auth, repos)
         if tool_name == "workers.run":
             return _mcp_call_workers_run(arguments, auth, repos)
         if tool_name == "files.upload":
@@ -8190,10 +8379,12 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "workers.get", "description": "Get a Floom worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.create", "description": "Create a Floom worker from WorkerContract YAML. For script-mode workers supply run_py or run_ts. For agent/skill-mode workers supply skill_md.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "run_ts": {"type": "string", "description": "TypeScript source for run.ts."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Optional complete worker bundle files. Must include worker.yml when supplied."}}, "required": ["worker_yml"]}},
     {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
+    {"name": "workers.pause", "description": "Pause a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.resume", "description": "Resume a paused Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.delete", "description": "Delete a Floom worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
     {"name": "workers.run", "description": "Start a Floom worker run through MCP. File-type inputs accept a SHA-256 upload reference (mint one with files.upload), inline text content, or {content|content_base64, filename} — inline content is uploaded transparently.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run. For file-type inputs pass a SHA-256 reference from files.upload, inline text content, or {content|content_base64, filename}."}}, "required": ["id"]}},
     {"name": "files.upload", "description": "Upload file content (UTF-8 text or base64) and get back the SHA-256 reference to pass as a file-type input value in workers.run. This is the MCP upload path — no browser form needed.", "inputSchema": {"type": "object", "properties": {"filename": {"type": "string", "description": "Filename with extension, e.g. notes.txt or data.csv. The extension determines the stored media type and must be on the upload allowlist."}, "content": {"type": "string", "description": "UTF-8 text content. Provide exactly one of content or content_base64."}, "content_base64": {"type": "string", "description": "Base64-encoded binary content. Provide exactly one of content or content_base64."}}, "required": ["filename"]}},
-    {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, run.ts, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
+    {"name": "workers.write_file", "description": "Merge source-file updates into a worker directory (worker.yml, SKILL.md, run.py, run.ts, requirements.txt). Omitted files are preserved. Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to merge. Must include worker.yml."}}, "required": ["id", "files"]}},
     {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
     {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.timeseries", "description": "Get daily run counts and success/failure breakdown for a worker over the last N days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "days": {"type": "integer", "default": 30, "description": "Days of history (1–90)."}}, "required": ["id"]}},
@@ -8218,11 +8409,11 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "secrets.delete", "description": "Delete a secret by key.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}},
     {"name": "secrets.test", "description": "Verify a secret exists and is reachable without revealing its value.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}},
     # --- connections ---
-    {"name": "connections.list", "description": "List configured app connections.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "connections.list", "description": "List configured app connections. status/configuration_status describe configuration; health_status and last_check_* contain only recorded health evidence.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "connections.add_mcp", "description": "Save an MCP server connection. Supports streamable_http, sse, and stdio transports.", "inputSchema": {"type": "object", "properties": {"label": {"type": "string"}, "transport": {"type": "string", "enum": ["streamable_http", "sse", "stdio"], "default": "streamable_http"}, "url": {"type": "string"}, "command": {"type": "string"}, "args": {"type": "array", "items": {"type": "string"}, "default": []}, "env": {"type": "object", "default": {}}, "cwd": {"type": "string"}, "auth_secret": {"type": "string"}, "allowed_tools": {"type": "array", "items": {"type": "string"}, "default": []}}, "required": ["label"]}},
     {"name": "connections.delete", "description": "Remove a configured app connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
     {"name": "connections.status", "description": "Check the health and auth status of a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
-    {"name": "connections.test", "description": "Run a live connectivity check on a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
+    {"name": "connections.test", "description": "Run a live connectivity probe. Non-mutating by default; set record=true to persist shared health state.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}, "record": {"type": "boolean", "default": False}}, "required": ["connection_id"]}},
     # --- contexts ---
     {"name": "contexts.list", "description": "List Floom context folders.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
@@ -8420,6 +8611,10 @@ async def _mcp_dispatch(
         body = {k: a[k] for k in a if k != "id"}
         data, s = await _api_call("PATCH", f"/workers/{_enc(a['id'])}", request, body=body)
         return _mcp_api_result(data, s)
+    if name in {"workers.pause", "workers.resume"}:
+        action = name.split(".", 1)[1]
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/{action}", request)
+        return _mcp_api_result(data, s)
     if name == "workers.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}", request)
         return _mcp_api_result(data, s)
@@ -8527,7 +8722,8 @@ async def _mcp_dispatch(
         data, s = await _api_call("GET", f"/connections/{_enc(a['connection_id'])}/status", request)
         return _mcp_api_result(data, s)
     if name == "connections.test":
-        data, s = await _api_call("POST", f"/connections/{_enc(a['connection_id'])}/test", request)
+        record = "true" if a.get("record", False) else "false"
+        data, s = await _api_call("POST", f"/connections/{_enc(a['connection_id'])}/test?record={record}", request)
         return _mcp_api_result(data, s)
 
     # --- contexts ---

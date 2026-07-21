@@ -1133,6 +1133,25 @@ export function createServer(): McpServer {
       callTool(async () => jsonResult(await request("DELETE", `/workers/${encodeURIComponent(id)}`), "Worker deleted.")),
   );
 
+  for (const action of ["pause", "resume"] as const) {
+    server.registerTool(
+      `workers.${action}`,
+      {
+        title: `${action === "pause" ? "Pause" : "Resume"} Worker`,
+        description: `${action === "pause" ? "Pause" : "Resume"} a Floom worker.`,
+        inputSchema: workerIdSchema.shape,
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      },
+      async ({ id }) =>
+        callTool(async () =>
+          jsonResult(
+            await request("POST", `/workers/${encodeURIComponent(id)}/${action}`),
+            `Worker ${action === "pause" ? "paused" : "resumed"}.`,
+          ),
+        ),
+    );
+  }
+
   server.registerTool(
     "workers.run",
     {
@@ -1277,7 +1296,7 @@ export function createServer(): McpServer {
     "connections.list",
     {
       title: "List Connections",
-      description: "List configured app connections.",
+      description: "List configured app connections. status/configuration_status describe configuration, while health_status and last_check_* report only recorded health evidence; never_checked means no health claim is available.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -1440,7 +1459,7 @@ export function createServer(): McpServer {
     "workers.write_file",
     {
       title: "Write Worker File",
-      description: "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Atomically replaces all provided files. You must include worker.yml in every call.",
+      description: "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Omitted files are preserved. You must include worker.yml in every call.",
       inputSchema: {
         id: z.string().min(1).describe("Worker ID."),
         files: z.array(
@@ -1989,15 +2008,16 @@ export function createServer(): McpServer {
     "connections.test",
     {
       title: "Test Connection",
-      description: "Run a live connectivity check on a configured connection to verify the auth token is still valid.",
+      description: "Run a live connectivity probe. Non-mutating by default; set record=true to persist the result as shared health state.",
       inputSchema: {
         connection_id: z.string().min(1).describe("Connection ID."),
+        record: z.boolean().optional().default(false).describe("Persist this probe as the connection's shared health state."),
       },
-      annotations: { readOnlyHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ connection_id }) =>
+    async ({ connection_id, record }) =>
       callTool(async () =>
-        jsonResult(await request("POST", `/connections/${encodeURIComponent(connection_id)}/test`)),
+        jsonResult(await request("POST", `/connections/${encodeURIComponent(connection_id)}/test?record=${record ? "true" : "false"}`)),
       ),
   );
 

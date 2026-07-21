@@ -55,20 +55,39 @@ def _persist_run_cost(
     cost = resolved_cost_usd_from_transcript(run_id)
 
     if repos is not None and user_id is not None:
+        existing = repos.runs.get_any(run_id=run_id) or {}
+        proxy_tokens = existing.get("proxy_total_tokens")
+        proxy_cost = existing.get("proxy_total_cost_usd")
+        combined_tokens = (
+            sum(value for value in (proxy_tokens, tokens) if value is not None)
+            if proxy_tokens is not None or tokens is not None else None
+        )
+        combined_cost = (
+            sum(value for value in (proxy_cost, cost) if value is not None)
+            if proxy_cost is not None or cost is not None else None
+        )
         repos.runs.update(
             user_id=user_id,
             run_id=run_id,
-            total_tokens=tokens,
-            total_cost_usd=cost,
+            total_tokens=combined_tokens,
+            total_cost_usd=combined_cost,
         )
         return
 
     from db import get_db
 
     with get_db() as conn:
+        existing = conn.execute(
+            "SELECT proxy_total_tokens, proxy_total_cost_usd FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        proxy_tokens = existing["proxy_total_tokens"] if existing is not None else None
+        proxy_cost = existing["proxy_total_cost_usd"] if existing is not None else None
+        combined_tokens = sum(v for v in (proxy_tokens, tokens) if v is not None) if proxy_tokens is not None or tokens is not None else None
+        combined_cost = sum(v for v in (proxy_cost, cost) if v is not None) if proxy_cost is not None or cost is not None else None
         conn.execute(
             "UPDATE runs SET total_tokens = ?, total_cost_usd = ? WHERE id = ?",
-            (tokens, cost, run_id),
+            (combined_tokens, combined_cost, run_id),
         )
 
 
@@ -315,4 +334,3 @@ def _user_day_to_date_cost_usd(
     except Exception:
         logger.debug("user day-to-date cost lookup failed for %s", user_id, exc_info=True)
         return 0.0
-

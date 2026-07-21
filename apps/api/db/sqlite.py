@@ -2542,7 +2542,7 @@ class SqliteRunRepository:
                        r.error, r.error_code, r.started_at, r.completed_at, r.duration_ms, r.created_at,
                        r.cancel_requested, r.cancelled_at, r.bundle_snapshot_path,
                        r.quality_warning, r.trigger_ref, r.retry_not_before,
-                       r.total_cost_usd
+                       r.total_tokens, r.total_cost_usd
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
@@ -2732,6 +2732,50 @@ class SqliteRunRepository:
                     (*params, run_id, *scope_params),
                 )
         return self.get(user_id=user_id, run_id=run_id)
+
+    def add_usage(
+        self,
+        *,
+        user_id: str,
+        run_id: str,
+        total_tokens: int | None,
+        total_cost_usd: float | None,
+    ) -> None:
+        """Atomically accumulate usage for a run owned by the given tenant."""
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET proxy_total_tokens = CASE
+                        WHEN ? IS NULL THEN proxy_total_tokens
+                        ELSE COALESCE(proxy_total_tokens, 0) + ?
+                    END,
+                    proxy_total_cost_usd = CASE
+                        WHEN ? IS NULL THEN proxy_total_cost_usd
+                        ELSE COALESCE(proxy_total_cost_usd, 0.0) + ?
+                    END,
+                    total_tokens = CASE
+                        WHEN ? IS NULL THEN total_tokens
+                        ELSE COALESCE(total_tokens, 0) + ?
+                    END,
+                    total_cost_usd = CASE
+                        WHEN ? IS NULL THEN total_cost_usd
+                        ELSE COALESCE(total_cost_usd, 0.0) + ?
+                    END
+                WHERE id = ?
+                  AND EXISTS (
+                      SELECT 1 FROM workers w
+                      WHERE w.id = runs.worker_id AND w.owner_id = ?
+                  )
+                """,
+                (
+                    total_tokens, total_tokens,
+                    total_cost_usd, total_cost_usd,
+                    total_tokens, total_tokens,
+                    total_cost_usd, total_cost_usd,
+                    run_id, user_id,
+                ),
+            )
 
     def delete(self, *, user_id: str, run_id: str) -> bool:
         with get_db() as conn:
