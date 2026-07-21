@@ -54,6 +54,13 @@ def _persist_run_cost(
     # AI-instrumented (pure-script, or analytics disabled at run time).
     cost = resolved_cost_usd_from_transcript(run_id)
 
+    # Script workers call the run-scoped LLM proxy, which persists each
+    # provider response directly because those calls never enter the agent
+    # transcript. Do not erase those accumulated values at terminal status when
+    # there is no transcript usage row.
+    if tokens is None:
+        return
+
     if repos is not None and user_id is not None:
         repos.runs.update(
             user_id=user_id,
@@ -315,4 +322,3 @@ def _user_day_to_date_cost_usd(
     except Exception:
         logger.debug("user day-to-date cost lookup failed for %s", user_id, exc_info=True)
         return 0.0
-

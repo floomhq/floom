@@ -109,6 +109,40 @@ def test_run_token_can_call_workspace_managed_llm(monkeypatch, tmp_path):
     assert resp.json()["choices"][0]["message"]["content"] == "ok"
 
 
+def test_managed_llm_usage_is_persisted_and_survives_completion(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    _seed_running_run(db)
+
+    def fake_completion(**_kwargs):
+        return {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 30},
+            "_hidden_params": {"response_cost": 0.0042},
+        }
+
+    monkeypatch.setattr("llm.completion", fake_completion)
+    client = TestClient(main.app)
+    response = client.post(
+        "/runs/run-managed/llm",
+        headers=_run_headers("run-managed"),
+        json={"messages": [{"role": "user", "content": "score"}]},
+    )
+    assert response.status_code == 200, response.text
+
+    repos = db.get_repositories()
+    stored = repos.runs.get_any(run_id="run-managed")
+    assert stored["total_tokens"] == 150
+    assert stored["total_cost_usd"] == 0.0042
+
+    repos.runs.update_status(user_id="owner-a", run_id="run-managed", status="completed")
+    from services.run_cost import _persist_run_cost
+
+    _persist_run_cost("run-managed", user_id="owner-a", repos=repos)
+    completed = repos.runs.get_any(run_id="run-managed")
+    assert completed["total_tokens"] == 150
+    assert completed["total_cost_usd"] == 0.0042
+
+
 def test_run_token_can_call_workspace_managed_embeddings(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     _seed_running_run(db)

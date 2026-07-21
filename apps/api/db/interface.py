@@ -440,6 +440,16 @@ class RunRepository(Protocol):
 
     def update(self, *, user_id: str, run_id: str, **fields: Any) -> RowDict | None: ...
 
+    def add_usage(
+        self,
+        *,
+        run_id: str,
+        total_tokens: int,
+        total_cost_usd: float | None,
+    ) -> None:
+        """Atomically add provider-reported LLM usage to a run."""
+        ...
+
     def delete(self, *, user_id: str, run_id: str) -> bool: ...
 
     def set_input_json(self, *, user_id: str, run_id: str, input_json: dict[str, Any]) -> None: ...

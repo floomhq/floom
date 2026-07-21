@@ -5199,7 +5199,47 @@ def _authorize_run_platform_proxy(request: Request, run_id: str) -> None:
     raise HTTPException(status_code=401, detail="Missing or invalid run token")
 
 
-def _managed_llm_completion(body: _ManagedLLMRequest) -> Any:
+def _usage_value(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _managed_llm_usage(response: Any) -> tuple[int, Optional[float]] | None:
+    """Extract real usage returned by LiteLLM without inventing missing data."""
+    usage = _usage_value(response, "usage")
+    if usage is None:
+        return None
+
+    prompt_tokens = _usage_value(usage, "prompt_tokens")
+    if prompt_tokens is None:
+        prompt_tokens = _usage_value(usage, "input_tokens")
+    completion_tokens = _usage_value(usage, "completion_tokens")
+    if completion_tokens is None:
+        completion_tokens = _usage_value(usage, "output_tokens")
+    try:
+        total_tokens = int(prompt_tokens or 0) + int(completion_tokens or 0)
+    except (TypeError, ValueError):
+        return None
+    if total_tokens <= 0:
+        return None
+
+    # LiteLLM exposes the provider/model-priced response cost in hidden params.
+    # Some adapters also put it directly on usage, so accept both real sources.
+    hidden = _usage_value(response, "_hidden_params")
+    raw_cost = _usage_value(hidden, "response_cost") if hidden is not None else None
+    if raw_cost is None:
+        raw_cost = _usage_value(usage, "total_cost_usd")
+    if raw_cost is None:
+        raw_cost = _usage_value(usage, "cost")
+    try:
+        cost = float(raw_cost) if raw_cost is not None else None
+    except (TypeError, ValueError):
+        cost = None
+    return total_tokens, cost
+
+
+def _managed_llm_completion(body: _ManagedLLMRequest) -> tuple[Any, tuple[int, Optional[float]] | None]:
     import llm as _llm
 
     model = body.model or _platform_managed_llm_model()
@@ -5209,7 +5249,8 @@ def _managed_llm_completion(body: _ManagedLLMRequest) -> Any:
     data.pop("model", None)
     messages = data.pop("messages")
     try:
-        return _response_to_jsonable(_llm.completion(model=model, messages=messages, **data))
+        response = _llm.completion(model=model, messages=messages, **data)
+        return _response_to_jsonable(response), _managed_llm_usage(response)
     except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary
         detail = _llm.safe_llm_error_message(exc, action="Managed LLM call")
         raise HTTPException(status_code=502, detail=detail) from exc
@@ -5237,7 +5278,14 @@ def managed_llm_proxy(
 ) -> Any:
     _authorize_run_platform_proxy(request, run_id)
     _require_running_run_for_platform_proxy(run_id, repos)
-    return _managed_llm_completion(body)
+    response, usage = _managed_llm_completion(body)
+    if usage is not None:
+        repos.runs.add_usage(
+            run_id=run_id,
+            total_tokens=usage[0],
+            total_cost_usd=usage[1],
+        )
+    return response
 
 
 @app.post("/runs/{run_id}/llm/batch")
@@ -5252,8 +5300,15 @@ def managed_llm_batch_proxy(
     _authorize_run_platform_proxy(request, run_id)
     _require_running_run_for_platform_proxy(run_id, repos)
     with ThreadPoolExecutor(max_workers=min(body.max_parallel, len(body.requests))) as pool:
-        results = list(pool.map(_managed_llm_completion, body.requests))
-    return {"results": results}
+        completed = list(pool.map(_managed_llm_completion, body.requests))
+    for _, usage in completed:
+        if usage is not None:
+            repos.runs.add_usage(
+                run_id=run_id,
+                total_tokens=usage[0],
+                total_cost_usd=usage[1],
+            )
+    return {"results": [response for response, _ in completed]}
 
 
 @app.post("/runs/{run_id}/embeddings")
