@@ -1236,6 +1236,8 @@ def get_run(
     _transcript_rows = _read_transcript_rows(run.get("runner", ""), artifacts)
     _tool_calls = _parse_tool_calls_from_transcript(_transcript_rows)
     _total_tokens = _extract_total_tokens_from_transcript(_transcript_rows)
+    if _total_tokens is None and isinstance(run.get("total_tokens"), int):
+        _total_tokens = run["total_tokens"]
 
     # #561: approval trail — single approval row per run (if any).
     _approval_trail: Optional[ApprovalEntry] = None
