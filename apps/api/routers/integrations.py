@@ -224,9 +224,24 @@ def _trigger_item_app_slug(item: Dict[str, Any]) -> str:
     return str(slug).lower()
 
 
+def _compact_trigger_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the discovery fields without the trigger's embedded JSON schema."""
+    toolkit = _trigger_item_app_slug(item)
+    description = " ".join(str(item.get("description") or "").split())
+    return {
+        "id": item.get("id") or item.get("slug") or item.get("name"),
+        "name": item.get("name") or item.get("slug") or item.get("id"),
+        "description": description,
+        "toolkit": toolkit,
+    }
+
+
 @integrations_router.get("/integrations/triggers")
 def list_integration_triggers(
     app: Optional[str] = Query(None, description="Filter by app slug (e.g. 'gmail')"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    verbose: bool = Query(False, description="Include full trigger objects and JSON schemas"),
     auth: AuthContext = Depends(get_auth_context),
 ):
     """Proxy Composio's trigger catalog, cached for one hour.
@@ -245,7 +260,15 @@ def list_integration_triggers(
                     item for item in items
                     if _trigger_item_app_slug(item) == app_lower
                 ]
-            return {"items": items}
+            total_items = len(items)
+            page_items = items[offset : offset + limit]
+            return {
+                "items": page_items if verbose else [_compact_trigger_item(item) for item in page_items],
+                "limit": limit,
+                "offset": offset,
+                "total_items": total_items,
+                "next_offset": offset + limit if offset + limit < total_items else None,
+            }
 
     try:
         from composio_client import list_triggers
@@ -259,7 +282,15 @@ def list_integration_triggers(
             if app:
                 app_lower = app.lower()
                 items = [item for item in items if _trigger_item_app_slug(item) == app_lower]
-            return {"items": items}
+            total_items = len(items)
+            page_items = items[offset : offset + limit]
+            return {
+                "items": page_items if verbose else [_compact_trigger_item(item) for item in page_items],
+                "limit": limit,
+                "offset": offset,
+                "total_items": total_items,
+                "next_offset": offset + limit if offset + limit < total_items else None,
+            }
         logger.exception("Failed to fetch Composio trigger catalog")
         _raise_composio_unavailable(exc)
 
@@ -270,4 +301,12 @@ def list_integration_triggers(
     if app:
         app_lower = app.lower()
         items = [item for item in items if _trigger_item_app_slug(item) == app_lower]
-    return {"items": items}
+    total_items = len(items)
+    page_items = items[offset : offset + limit]
+    return {
+        "items": page_items if verbose else [_compact_trigger_item(item) for item in page_items],
+        "limit": limit,
+        "offset": offset,
+        "total_items": total_items,
+        "next_offset": offset + limit if offset + limit < total_items else None,
+    }

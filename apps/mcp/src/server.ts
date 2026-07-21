@@ -517,12 +517,13 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
   };
 }
 
-async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
+async function listTriggers(workerId?: string, app?: string, limit = 50, offset = 0, verbose = false): Promise<unknown> {
+  const query = { limit, offset, verbose: verbose ? 1 : 0 };
   if (app) {
-    return request("GET", "/integrations/triggers", undefined, { app });
+    return request("GET", "/integrations/triggers", undefined, { app, ...query });
   }
   if (!workerId) {
-    return request("GET", "/integrations/triggers");
+    return request("GET", "/integrations/triggers", undefined, query);
   }
   const worker = await request("GET", `/workers/${encodeURIComponent(workerId)}`) as JsonObject;
   const config = (worker.config && typeof worker.config === "object") ? worker.config as JsonObject : {};
@@ -546,7 +547,7 @@ async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
   const merged: JsonObject[] = [];
   const seen = new Set<string>();
   for (const connection of connections) {
-    const payload = await request("GET", "/integrations/triggers", undefined, { app: connection }) as JsonObject;
+    const payload = await request("GET", "/integrations/triggers", undefined, { app: connection, ...query }) as JsonObject;
     const items = Array.isArray(payload.items) ? payload.items : [];
     for (const item of items) {
       if (!item || typeof item !== "object") {
@@ -561,7 +562,7 @@ async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
       merged.push(item as JsonObject);
     }
   }
-  return { items: merged };
+  return { items: merged, limit, offset, total_items: merged.length, next_offset: null };
 }
 
 async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObject> {
@@ -1407,11 +1408,14 @@ export function createServer(): McpServer {
       inputSchema: {
         worker_id: z.string().optional().describe("Optional worker id to scope triggers by worker connections."),
         app: z.string().optional().describe("Optional app slug filter."),
+        limit: z.number().int().min(1).max(100).default(50).describe("Maximum triggers to return."),
+        offset: z.number().int().min(0).default(0).describe("Number of matching triggers to skip."),
+        verbose: z.boolean().default(false).describe("Include full trigger objects and embedded JSON schemas."),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ worker_id, app }) =>
-      callTool(async () => jsonResult(await listTriggers(worker_id, app))),
+    async ({ worker_id, app, limit, offset, verbose }) =>
+      callTool(async () => jsonResult(await listTriggers(worker_id, app, limit, offset, verbose))),
   );
 
   server.registerTool(
@@ -2010,10 +2014,16 @@ export function createServer(): McpServer {
     {
       title: "List Integrations Catalog",
       description: "Browse available integrations (apps, triggers, actions) supported by Floom.",
-      inputSchema: {},
+      inputSchema: {
+        page: z.number().int().min(1).default(1).describe("Catalog page number."),
+        limit: z.number().int().min(1).max(100).default(30).describe("Integrations per page."),
+        search: z.string().max(120).optional().describe("Search integration names and descriptions."),
+        category: z.string().max(200).optional().describe("Optional category slug filter."),
+      },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async () => callTool(async () => jsonResult(await request("GET", "/integrations/catalog"))),
+    async ({ page, limit, search, category }) =>
+      callTool(async () => jsonResult(await request("GET", "/integrations/catalog", undefined, { page, limit, search, category }))),
   );
 
   // ---------------------------------------------------------------------------
