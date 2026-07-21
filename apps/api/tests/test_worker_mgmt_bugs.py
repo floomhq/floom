@@ -345,6 +345,107 @@ def test_mcp_dispatch_executes_worker_mutations(app_ctx, monkeypatch, endpoint):
     assert client.get("/workers/sales-summary").status_code == 404
 
 
+@pytest.mark.parametrize("endpoint", ["/api/mcp", "/mcp-tools/serve"])
+def test_mcp_dispatch_denies_shared_worker_mutations_to_ordinary_member(
+    app_ctx, monkeypatch, endpoint
+):
+    client, main, _scheduler = app_ctx
+    monkeypatch.setenv("WORKEROS_MCP_FULL_TOOLS", "1")
+    monkeypatch.setenv("WORKSPACE_AGENT_MCP_USER_ID", "member-user")
+
+    worker_dir = main.WORKERS_DIR / "sales-summary"
+    worker_yml = (worker_dir / "worker.yml").read_text(encoding="utf-8")
+    before_files = {
+        path.relative_to(worker_dir).as_posix(): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    with main.get_db() as conn:
+        conn.execute(
+            "UPDATE workers SET visibility = 'workspace', workspace_id = 'local-default' "
+            "WHERE id = 'sales-summary'"
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_members
+                (workspace_id, user_id, role, status, created_at, updated_at)
+            VALUES ('local-default', 'member-user', 'member', 'active', ?, ?)
+            """,
+            (now, now),
+        )
+        before_row = dict(
+            conn.execute("SELECT * FROM workers WHERE id = 'sales-summary'").fetchone()
+        )
+
+    from fastapi.testclient import TestClient
+
+    if endpoint == "/mcp-tools/serve":
+        member_client = TestClient(
+            main.app,
+            headers={
+                "x-floom-secret": "worker-mgmt-secret",
+                "x-floom-user": "member-user",
+            },
+        )
+        headers = {}
+    else:
+        member_client = client
+        headers = {"Authorization": "Bearer worker-mgmt-mcp-token"}
+        # The local remote-MCP surface uses its authenticated context directly.
+        # Seed the same ordinary member identity with MCP scope. Admin-gated
+        # delete is rejected by the dispatcher; the other calls reach handlers.
+        from auth.context import AuthContext, set_current_auth_context
+
+        set_current_auth_context(
+            AuthContext(user_id="member-user", role="member", scopes=("mcp",))
+        )
+
+    operations = [
+        (
+            "workers.write_file",
+            {
+                "id": "sales-summary",
+                "files": [
+                    {"path": "worker.yml", "content": worker_yml},
+                    {"path": "member-write.py", "content": "print('forbidden')\n"},
+                ],
+            },
+        ),
+        ("workers.pause", {"id": "sales-summary"}),
+        ("workers.resume", {"id": "sales-summary"}),
+        ("workers.delete", {"id": "sales-summary"}),
+    ]
+    for operation, arguments in operations:
+        response = member_client.post(
+            endpoint,
+            json={
+                "jsonrpc": "2.0",
+                "id": operation,
+                "method": "tools/call",
+                "params": {"name": operation, "arguments": arguments},
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()["result"]
+        assert result.get("isError") is True, result
+        if "structuredContent" in result:
+            assert result["structuredContent"]["status"] == 404, result
+
+    after_files = {
+        path.relative_to(worker_dir).as_posix(): path.read_bytes()
+        for path in worker_dir.rglob("*")
+        if path.is_file()
+    }
+    with main.get_db() as conn:
+        after_row = dict(
+            conn.execute("SELECT * FROM workers WHERE id = 'sales-summary'").fetchone()
+        )
+    assert after_row == before_row
+    assert after_files == before_files
+
+
 def test_worker_create_rejects_oversized_json_file_bundle(app_ctx):
     client, _main, _scheduler = app_ctx
     worker_yml = _worker_yml("huge-json-bundle", title="Huge JSON Bundle")

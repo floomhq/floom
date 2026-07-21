@@ -4427,11 +4427,10 @@ def update_worker_files(
     if request is not None:
         _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
-    if not worker:
-        # Donation model: admins edit workspace-shared workers (workspace-actor
-        # owned; the owner-scoped fetch above can no longer see them).
-        worker = _worker_for_mutation(worker_id, auth, get_repositories())
+    # File writes are mutations, so visibility alone is insufficient: ordinary
+    # workspace members may view shared workers but only the owner or an active
+    # workspace admin may change their bundles.
+    worker = _worker_for_mutation(worker_id, auth, repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4491,6 +4490,7 @@ def update_worker_files(
     import shutil
 
     tmp_dir: Optional[Path] = None
+    request_token = _uuid_mod.uuid4().hex
     backed_up: List[tuple] = []  # list of (original_path, backup_path)
     created_files: List[Path] = []
 
@@ -4515,9 +4515,7 @@ def update_worker_files(
 
     try:
         # Stage new files to a temp dir
-        tmp_dir = WORKERS_DIR / f".{worker_id}.tmp.{os.getpid()}"
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
+        tmp_dir = WORKERS_DIR / f".{worker_id}.tmp.{request_token}"
         tmp_dir.mkdir(parents=True)
 
         for item in payload.files:
@@ -4529,7 +4527,7 @@ def update_worker_files(
         for item in payload.files:
             dest = target_dir / item.path
             if dest.exists():
-                bak = dest.with_suffix(dest.suffix + f".bak{os.getpid()}")
+                bak = dest.with_suffix(dest.suffix + f".bak.{request_token}")
                 dest.rename(bak)
                 backed_up.append((dest, bak))
             else:
@@ -4558,11 +4556,19 @@ def update_worker_files(
                 # RuntimeError) so the outer rollback restores the full bundle.
                 raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        # Remove backups on success
-        for _orig, bak in backed_up:
-            bak.unlink(missing_ok=True)
+        # The DB persist above is the commit point. From here onward, failures
+        # must not roll the bundle back behind the committed DB state.
+        backups_to_remove = list(backed_up)
         backed_up.clear()
         created_files.clear()
+
+        # Backup cleanup is best-effort after commit. In particular, a failure
+        # after deleting only some backups must not trigger a partial rollback.
+        for _orig, bak in backups_to_remove:
+            try:
+                bak.unlink(missing_ok=True)
+            except Exception:
+                logger.warning("Failed to remove worker backup %s", bak, exc_info=True)
 
         try:
             _embed_files_in_skill_version(worker_id, target_dir)
