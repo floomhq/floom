@@ -88,11 +88,9 @@ def test_triggers_no_filter_returns_all(monkeypatch, tmp_path):
         res = client.get("/integrations/triggers")
 
     assert res.status_code == 200
-    items = res.json()["items"]
-    assert len(items) == 4
-    slugs = {item["slug"] for item in items}
-    assert "GMAIL_NEW_EMAIL" in slugs
-    assert "SLACK_MESSAGE_POSTED" in slugs
+    assert res.json() == {"items": FAKE_TRIGGERS}
+    assert "limit" not in res.json()
+    assert res.json()["items"][0]["toolkit"] == {"slug": "gmail"}
     assert call_count[0] == 1
 
 
@@ -116,11 +114,11 @@ def test_triggers_app_filter_gmail_returns_only_gmail(monkeypatch, tmp_path):
     items = res.json()["items"]
     assert len(items) == 2
     for item in items:
-        assert item["toolkit"]["slug"] == "gmail"
-    slugs = {item["slug"] for item in items}
-    assert "GMAIL_NEW_EMAIL" in slugs
-    assert "GMAIL_NEW_LABEL" in slugs
-    assert "SLACK_MESSAGE_POSTED" not in slugs
+        assert item["toolkit"] == {"slug": "gmail"}
+    ids = {item["slug"] for item in items}
+    assert "GMAIL_NEW_EMAIL" in ids
+    assert "GMAIL_NEW_LABEL" in ids
+    assert "SLACK_MESSAGE_POSTED" not in ids
 
 
 def test_triggers_app_filter_unknown_returns_empty(monkeypatch, tmp_path):

@@ -8425,7 +8425,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
     {"name": "contexts.rollback", "description": "Restore a brain pack context to a previous version.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "version_id": {"type": "string"}}, "required": ["name", "version_id"]}},
     # --- triggers ---
-    {"name": "triggers.list", "description": "List integration triggers, globally or filtered by worker/app.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "app": {"type": "string"}}}},
+    {"name": "triggers.list", "description": "List integration triggers globally or filtered by worker/app. Returns compact results by default.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "app": {"type": "string"}, "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 100}, "offset": {"type": "integer", "default": 0, "minimum": 0}, "verbose": {"type": "boolean", "default": False, "description": "Include full trigger objects and embedded JSON schemas."}}}},
     # --- approvals ---
     {"name": "approvals.list", "description": "List pending approval requests.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}},
     {"name": "approvals.approve", "description": "Approve a pending run so it continues executing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
@@ -8443,7 +8443,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "system.info", "description": "Get platform version, deployment mode, and configuration flags.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "system.alerts", "description": "Get system-wide active alerts — worker failures, scheduler issues, connection errors.", "inputSchema": {"type": "object", "properties": {}}},
     # --- integrations ---
-    {"name": "integrations.catalog", "description": "Browse available integrations (apps, triggers, actions) supported by Floom.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "integrations.catalog", "description": "Browse and search available integrations supported by Floom.", "inputSchema": {"type": "object", "properties": {"page": {"type": "integer", "default": 1, "minimum": 1}, "limit": {"type": "integer", "default": 30, "minimum": 1, "maximum": 100}, "search": {"type": "string"}, "category": {"type": "string"}}}},
     # --- conversations ---
     {"name": "conversations.list", "description": "List past workspace agent conversations.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
     {"name": "conversations.get", "description": "Retrieve a full conversation history by ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
@@ -8779,7 +8779,68 @@ async def _mcp_dispatch(
 
     # --- triggers ---
     if name == "triggers.list":
-        data, s = await _api_call("GET", "/integrations/triggers", request, params={"worker_id": a.get("worker_id"), "app": a.get("app")})
+        limit = a.get("limit", 50)
+        offset = a.get("offset", 0)
+        verbose = a.get("verbose", False)
+        worker_id = a.get("worker_id")
+        if a.get("app") or not worker_id:
+            data, s = await _api_call("GET", "/integrations/triggers", request, params={"app": a.get("app"), "limit": limit, "offset": offset, "verbose": verbose, "mcp": True})
+            return _mcp_api_result(data, s)
+
+        worker, s = await _api_call("GET", f"/workers/{_enc(worker_id)}", request)
+        if s >= 400:
+            return _mcp_api_result(worker, s)
+        config = worker.get("config") if isinstance(worker, dict) else {}
+        raw_connections = config.get("connections") if isinstance(config, dict) else []
+        connections: list[str] = []
+        for connection in raw_connections if isinstance(raw_connections, list) else []:
+            app_slug = connection if isinstance(connection, str) else None
+            if isinstance(connection, dict):
+                composio = connection.get("composio")
+                if isinstance(composio, dict) and isinstance(composio.get("app"), str):
+                    app_slug = composio["app"]
+                elif isinstance(connection.get("app"), str):
+                    app_slug = connection["app"]
+            if app_slug:
+                connections.append(app_slug)
+
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for connection in connections:
+            app_offset = 0
+            while True:
+                payload, s = await _api_call("GET", "/integrations/triggers", request, params={"app": connection, "limit": 100, "offset": app_offset, "verbose": verbose, "mcp": True})
+                if s >= 400:
+                    return _mcp_api_result(payload, s)
+                for item in payload.get("items", []) if isinstance(payload, dict) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    event_name = item.get("event") or item.get("slug") or item.get("id") or item.get("name") or repr(item)
+                    dedupe_key = f"{connection.lower()}:{event_name}"
+                    if dedupe_key not in seen:
+                        seen.add(dedupe_key)
+                        merged.append(item)
+                next_offset = payload.get("next_offset") if isinstance(payload, dict) else None
+                if not isinstance(next_offset, int) or next_offset <= app_offset:
+                    break
+                app_offset = next_offset
+
+        def trigger_sort_key(item: dict[str, Any]) -> str:
+            toolkit = item.get("toolkit")
+            if isinstance(toolkit, dict):
+                toolkit = toolkit.get("slug")
+            event_name = item.get("event") or item.get("slug") or item.get("id") or item.get("name") or ""
+            return f"{toolkit or ''}\0{event_name}".lower()
+
+        merged.sort(key=trigger_sort_key)
+        total_items = len(merged)
+        data = {
+            "items": merged[offset : offset + limit],
+            "limit": limit,
+            "offset": offset,
+            "total_items": total_items,
+            "next_offset": offset + limit if offset + limit < total_items else None,
+        }
         return _mcp_api_result(data, s)
 
     # --- approvals ---
@@ -8831,7 +8892,7 @@ async def _mcp_dispatch(
 
     # --- integrations ---
     if name == "integrations.catalog":
-        data, s = await _api_call("GET", "/integrations/catalog", request)
+        data, s = await _api_call("GET", "/integrations/catalog", request, params={"page": a.get("page", 1), "limit": a.get("limit", 30), "search": a.get("search"), "category": a.get("category")})
         return _mcp_api_result(data, s)
 
     # --- conversations ---
