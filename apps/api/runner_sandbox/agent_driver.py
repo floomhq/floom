@@ -27,6 +27,7 @@ from contexts import (
     context_scope_for_execution,
     iter_context_files,
     normalize_context_mount,
+    refresh_context_summary_after_writeback,
     sync_refreshed_context_pack,
     use_context_scope,
 )
@@ -1393,6 +1394,7 @@ class AgentDriver(SandboxDriver):
                             "warning",
                         )
                         continue
+                    refresh_context_summary_after_writeback(name, log_fn=log_fn)
                     log_fn(f"[agent] Persisted writeable context {name!r}", "info")
                 except Exception as exc:
                     log_fn(f"[agent] Failed to persist writeable context {name!r}: {exc}", "warning")

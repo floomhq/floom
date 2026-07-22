@@ -8,6 +8,7 @@ path-safe and binary-safe.
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -20,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, Optional
 
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTEXTS_DIR = Path(os.environ.get("FLOOM_CONTEXTS_DIR", str(PROJECT_ROOT / "contexts"))).resolve()
@@ -842,6 +845,43 @@ def refresh_context_summary_metadata(name: str) -> dict[str, Any]:
     metadata[safe_name] = pack
     save_context_metadata(metadata)
     return summary
+
+
+def refresh_context_summary_after_writeback(
+    name: str,
+    *,
+    log_fn: Optional[Callable[[str, str], None]] = None,
+) -> None:
+    """Best-effort refresh of a context's cached summary + ``updated_at`` after a
+    run writes back a ``writeable:true`` pack onto local disk.
+
+    Durable object-storage persistence of the writeback is handled separately by
+    :func:`sync_refreshed_context_pack` (the hosted refresh hook). That path does
+    not, however, refresh the *local* cached summary that operator listings read:
+    ``GET /contexts/{name}/files`` and the Library rows source ``file_count`` /
+    size / ``updated_at`` from ``metadata[name]["summary"]`` (see
+    ``services.context_access._context_summary``). Without this call a writeback
+    leaves those fields stale until the next explicit write. Mirrors the
+    refresh-then-sync ordering the system-asset refresh path already uses.
+
+    Never raises: a summary-refresh failure is logged but must not fail the run
+    or undo the already-completed durable persistence. Call inside the active
+    ``use_context_scope`` block so the metadata resolves to the right workspace.
+    """
+    try:
+        refresh_context_summary_metadata(name)
+    except Exception as exc:  # noqa: BLE001 - best-effort, never fail the run
+        message = (
+            f"Failed to refresh cached summary for context {name!r} after "
+            f"writeback: {exc}"
+        )
+        if log_fn is not None:
+            try:
+                log_fn(message, "warning")
+                return
+            except Exception:
+                pass
+        logger.warning(message)
 
 
 def context_total_size(root: Path) -> int:

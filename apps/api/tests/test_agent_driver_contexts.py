@@ -283,3 +283,139 @@ def test_memory_enabled_worker_reads_and_persists_learning_across_runs(driver_en
     second_read = driver._read_file(bundle_dir, f"context/{memory_name}/learnings.jsonl", run2_context)
     assert second_read["ok"] is True
     assert "Prefer concise recruiter summaries." in second_read["content"]
+
+
+class _PersistConfig:
+    """Minimal WorkerConfig stand-in for the writeback path (only ``contexts``
+    and ``outputs`` are read by ``_persist_writeable_contexts``)."""
+
+    def __init__(self, contexts):
+        self.contexts = contexts
+        self.outputs = []
+
+
+def test_writeback_refreshes_summary_and_syncs_durable(driver_env, monkeypatch):
+    """A ``writeable:true`` writeback must BOTH refresh the cached summary +
+    ``updated_at`` that operator listings read AND trigger the durable
+    object-storage sync, each keyed by the context name.
+
+    Regression guard for the gap where writeback overlaid files onto local disk
+    but never refreshed ``metadata[name]["summary"]`` (so ``GET
+    /contexts/{name}/files`` / Library rows showed a stale ``updated_at`` /
+    ``file_count``). The durable upload itself runs through the
+    ``sync_refreshed_context_pack`` hook.
+    """
+    import contexts as contexts_mod
+
+    agent_driver_mod = driver_env["agent_driver"]
+    artifacts_dir = driver_env["artifacts_dir"]
+
+    ctx = [{"name": "research-notes", "writeable": True, "source": "local"}]
+    driver, context_root, staged = _stage(
+        agent_driver_mod, artifacts_dir, contexts=ctx, user_id="alice", run_id="run-wb-1"
+    )
+    assert staged == ["research-notes"]
+
+    # Simulate the run mutating a staged file via a shell tool.
+    (context_root / "research-notes" / "summary.md").write_text(
+        "# Alice facts\nQ2 revenue up 30%.\nNEW: Q3 pipeline doubled.\n",
+        encoding="utf-8",
+    )
+
+    refreshed: list[str] = []
+    synced: list[str] = []
+    monkeypatch.setattr(
+        contexts_mod,
+        "refresh_context_summary_metadata",
+        lambda name: refreshed.append(name) or {"file_count": 0, "updated_at": "x"},
+    )
+    monkeypatch.setattr(
+        agent_driver_mod,
+        "sync_refreshed_context_pack",
+        lambda scope, name, source_dir, summary: synced.append(name),
+    )
+
+    driver._persist_writeable_contexts(
+        config=_PersistConfig(ctx),
+        context_root=context_root,
+        user_id="alice",
+        log_fn=_log_fn,
+    )
+
+    assert refreshed == ["research-notes"]
+    assert synced == ["research-notes"]
+
+
+def test_writeback_bumps_cached_summary_end_to_end(driver_env):
+    """End-to-end (no mocks): after a writeback the pack's cached summary is
+    written to metadata with a non-empty ``file_count`` + ``updated_at``, so the
+    operator listing fast-path reflects the run's edits."""
+    import contexts as contexts_mod
+
+    agent_driver_mod = driver_env["agent_driver"]
+    artifacts_dir = driver_env["artifacts_dir"]
+
+    ctx = [{"name": "research-notes", "writeable": True, "source": "local"}]
+    driver, context_root, staged = _stage(
+        agent_driver_mod, artifacts_dir, contexts=ctx, user_id="alice", run_id="run-wb-e2e"
+    )
+    assert staged == ["research-notes"]
+
+    (context_root / "research-notes" / "summary.md").write_text(
+        "# Alice facts\nfresh edit\n", encoding="utf-8"
+    )
+
+    scope = contexts_mod.context_scope_for_user("alice")
+    with contexts_mod.use_context_scope(scope):
+        before = (contexts_mod.load_context_metadata().get("research-notes") or {}).get("summary")
+    assert before is None  # fixture wrote files directly, no cached summary yet
+
+    driver._persist_writeable_contexts(
+        config=_PersistConfig(ctx),
+        context_root=context_root,
+        user_id="alice",
+        log_fn=_log_fn,
+    )
+
+    with contexts_mod.use_context_scope(scope):
+        after = contexts_mod.load_context_metadata()["research-notes"]["summary"]
+    assert after["file_count"] >= 1
+    assert after["updated_at"]
+
+
+def test_readonly_context_writeback_does_not_refresh_or_sync(driver_env, monkeypatch):
+    """A read-only (``writeable:false``) context is skipped by writeback, so it
+    triggers neither the summary refresh nor the durable sync."""
+    import contexts as contexts_mod
+
+    agent_driver_mod = driver_env["agent_driver"]
+    artifacts_dir = driver_env["artifacts_dir"]
+
+    ctx = [{"name": "research-notes", "writeable": False, "source": "local"}]
+    driver, context_root, staged = _stage(
+        agent_driver_mod, artifacts_dir, contexts=ctx, user_id="alice", run_id="run-ro-1"
+    )
+    assert staged == ["research-notes"]
+
+    refreshed: list[str] = []
+    synced: list[str] = []
+    monkeypatch.setattr(
+        contexts_mod,
+        "refresh_context_summary_metadata",
+        lambda name: refreshed.append(name) or {},
+    )
+    monkeypatch.setattr(
+        agent_driver_mod,
+        "sync_refreshed_context_pack",
+        lambda *args, **kwargs: synced.append(args),
+    )
+
+    driver._persist_writeable_contexts(
+        config=_PersistConfig(ctx),
+        context_root=context_root,
+        user_id="alice",
+        log_fn=_log_fn,
+    )
+
+    assert refreshed == []
+    assert synced == []
