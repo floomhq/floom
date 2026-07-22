@@ -300,6 +300,33 @@ _E2B_INTERNAL_ENV_VARS = (
 )
 
 
+def _context_env_var_name(name: str) -> str:
+    """Map a mounted context name to its env var, e.g. ``my-state`` -> ``CONTEXT_MY_STATE``.
+
+    Pure-script workers receive one ``CONTEXT_<NAME>`` env var per mounted
+    context pointing at that context's absolute mount path in the sandbox, so
+    an author can reliably resolve (and write into) a writeable context via
+    ``os.environ["CONTEXT_MY_STATE"]`` instead of hardcoding the relative
+    ``context/<name>`` path.
+    """
+    return "CONTEXT_" + re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper()
+
+
+def _context_env_map(mounted_contexts: set[str], workdir: str) -> dict[str, str]:
+    """Build ``{CONTEXT_<NAME>: <absolute mount path>}`` for mounted contexts.
+
+    Each value is the absolute sandbox mount path
+    (``{workdir}/context/{name}``), matching where _upload_contexts_to_sandbox
+    mounts the context and where _persist_writeable_contexts tars writeable ones
+    back. Sorted for deterministic output when two names normalize to the same
+    env var.
+    """
+    return {
+        _context_env_var_name(name): f"{workdir}/context/{name}"
+        for name in sorted(mounted_contexts)
+    }
+
+
 def _scrub_internal_env_command(command: str, worker_id: str | None) -> str:
     """Wrap the worker command so internal infra env vars are unset for it.
 
@@ -2732,6 +2759,18 @@ class E2BSandboxDriver(SandboxDriver):
             if _worker_call_token:
                 _cmd_envs["WORKEROS_RUN_TOKEN"] = _worker_call_token
                 _cmd_envs["WORKEROS_CALL_DEPTH"] = str(_self_depth)  # #994
+            # Expose each mounted context's absolute path as CONTEXT_<NAME> so a
+            # pure-script worker can resolve (and write into) it via os.environ
+            # instead of hardcoding the relative `context/<name>` path. The path
+            # mirrors where _upload_contexts_to_sandbox mounts each context
+            # (`{workdir}/context/{name}`) and where _persist_writeable_contexts
+            # tars writeable ones back, so a script that writes to
+            # os.environ["CONTEXT_<NAME>"] now persists. Injected for BOTH the
+            # cold-mount and warm-pool paths (mounted_contexts is populated on
+            # each). These names are not in the internal-env scrub list, so they
+            # reach the worker process. Applied for readable and writeable
+            # contexts alike (read access via env is legitimate too).
+            _cmd_envs.update(_context_env_map(mounted_contexts, workdir))
             perf.mark("command_env")
             result_path = f"{workdir}/result.json"
 
