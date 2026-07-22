@@ -3196,6 +3196,9 @@ class E2BSandboxDriver(SandboxDriver):
                             "warning",
                         )
                         continue
+                    _contexts_module.refresh_context_summary_after_writeback(
+                        name, log_fn=log_fn
+                    )
                     log_fn(f"[e2b] Persisted writeable context {name!r}", "info")
                 except Exception as exc:
                     log_fn(f"[e2b] Failed to persist writeable context {name!r}: {exc}", "warning")

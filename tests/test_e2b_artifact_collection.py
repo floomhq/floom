@@ -1170,6 +1170,74 @@ def test_writeable_context_writeback_syncs_refresh_hook(tmp_path, monkeypatch):
     ]
 
 
+def test_writeable_context_writeback_refreshes_cached_summary(tmp_path, monkeypatch):
+    """After the writeback overlays edits onto local disk, the driver must
+    refresh the pack's cached summary + ``updated_at`` so operator listings
+    (``GET /contexts/{name}/files`` / Library rows) stop showing stale metadata.
+    The durable object-storage upload runs separately via the refresh hook."""
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    target = contexts_root / "history"
+    target.mkdir(parents=True)
+    (target / "state.json").write_bytes(b'{"before": true}\n')
+
+    class _RoundTripCommands:
+        def __init__(self, files):
+            self.files = files
+
+        def run(self, command, **_kwargs):
+            tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
+            buffer = BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w") as archive:
+                info = tarfile.TarInfo("state.json")
+                content = b'{"after": true}\n'
+                info.size = len(content)
+                archive.addfile(info, BytesIO(content))
+            self.files.write(tar_path, buffer.getvalue())
+            return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+    refreshed = []
+    real_refresh = contexts_module.refresh_context_summary_metadata
+
+    def _recording_refresh(name):
+        refreshed.append(name)
+        return real_refresh(name)
+
+    monkeypatch.setattr(
+        contexts_module, "refresh_context_summary_metadata", _recording_refresh
+    )
+
+    sandbox = FakeFullSandbox()
+    sandbox.files.dirs.add("/home/user/worker/context/history")
+    sandbox.commands = _RoundTripCommands(sandbox.files)
+    config = WorkerConfig(
+        id="context-summary-refresh-test",
+        name="Context Summary Refresh Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+        contexts=[{"name": "history", "writeable": True}],
+        outputs=[],
+    )
+
+    E2BSandboxDriver()._persist_writeable_contexts(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        run_id="run_context_summary_refresh",
+        config=config,
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+
+    assert (target / "state.json").read_text() == '{"after": true}\n'
+    # The refresh ran for the writeable pack ...
+    assert refreshed == ["history"]
+    # ... and actually persisted a fresh cached summary with updated_at.
+    cached = (contexts_module.load_context_metadata().get("history") or {}).get("summary")
+    assert cached is not None
+    assert cached["file_count"] >= 1
+    assert cached["updated_at"]
+
+
 def test_writeable_context_round_trip_across_workers_uses_active_workspace_scope(
     tmp_path, monkeypatch
 ):
