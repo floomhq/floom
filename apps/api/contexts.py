@@ -120,6 +120,81 @@ def sync_refreshed_context_pack(
         hook(scope, name, source_dir, summary)
 
 
+# --- Writeable-context mount snapshot hook (durable read for mutable packs) --
+#
+# A writeable (mutable) context's source of truth in hosted mode is the durable
+# object store, not the executor's long-lived local disk. Mounting such a pack
+# from the local cache serves whatever that container last hydrated, so a
+# writeback made by another executor/replica, or an operator edit made through
+# the API container, is invisible to the run (the local cache is only ever
+# hydrated when empty). Runs then read a stale mutable pack: "not visible to
+# other workers / next run".
+#
+# In hosted mode startup.py registers a hook that materializes an EXACT snapshot
+# of the pack from the durable store into a caller-owned fresh directory, so a
+# run always mounts the authoritative state. The hook MUST:
+#   * write an exact mirror (a file absent from the durable store is absent from
+#     the snapshot, so a deletion is honoured and never resurrected on writeback)
+#   * RAISE (not partially fill ``dest_dir``) on a listing/download failure, so
+#     the caller fails the mount closed and retries instead of mounting stale
+#     mutable data
+#   * return ``True`` when it populated ``dest_dir``, or ``False`` to decline
+#     (e.g. the pack is not in the durable store yet, a brand-new local-only
+#     pack, so the caller falls back to the local cache).
+#
+# In OSS/single-tenant mode the hook is unset: the local disk IS the durable
+# store, so ``writeable_mount_source`` yields ``context_dir(name)`` unchanged.
+#
+# Signature: snapshot_hook(scope: str | None, name: str, dest_dir: Path) -> bool
+_mount_snapshot_hook: Optional[Callable[[Optional[str], str, "Path"], bool]] = None
+
+
+def set_context_mount_snapshot_hook(
+    hook: Optional[Callable[[Optional[str], str, "Path"], bool]],
+) -> None:
+    """Register (or clear) the writeable-context mount snapshot hook.
+
+    Called by the cloud startup to plug in durable-store snapshotting for
+    mutable context mounts. Pass ``None`` to clear (OSS/test mode).
+    """
+    global _mount_snapshot_hook
+    _mount_snapshot_hook = hook
+
+
+@contextmanager
+def writeable_mount_source(name: str):
+    """Yield the directory a run should mount for a WRITEABLE local context.
+
+    OSS/local (no hook): yields ``context_dir(name)``, the canonical on-disk
+    pack, which is itself the source of truth. Hosted (hook set): yields a
+    fresh, exact snapshot of the pack materialized from durable storage into a
+    temporary directory that is removed on exit; the long-lived canonical cache
+    is never mounted or mutated, so a concurrent run's writeback cannot be read
+    torn. A hook failure PROPAGATES (fail-closed): the caller must abort the
+    mount as retryable rather than mount stale mutable data.
+    """
+    hook = _mount_snapshot_hook
+    if hook is None:
+        yield context_dir(name)
+        return
+    import shutil
+    import tempfile
+
+    tmp = Path(tempfile.mkdtemp(prefix="wos-ctxsnap-"))
+    try:
+        # A hook exception is intentionally NOT caught here: it must surface to
+        # the mount caller so the run fails closed instead of mounting stale
+        # data. ``False`` means the pack is not durably stored yet -> fall back
+        # to the local cache (brand-new local-only pack).
+        populated = hook(_current_scope(), name, tmp)
+        if populated:
+            yield tmp
+        else:
+            yield context_dir(name)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) -> None:
     """Register a callable returning the active scope id (workspace_id) for
     the current request. Pass ``None`` to clear the resolver (OSS mode).
