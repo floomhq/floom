@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 from pathlib import Path
+from unittest import mock
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -137,45 +139,45 @@ def test_mark_run_worker_command_started_sets_flag():
         run_service._unregister_active_run("run-mark")
 
 
-def test_cancel_loop_is_time_bounded_on_hung_kills(monkeypatch):
-    # Fake clock so each kill "takes" long enough to blow a 1s budget.
-    clock = [1000.0]
-    monkeypatch.setattr(run_service.time, "monotonic", lambda: clock[0])
+def test_cancel_loop_is_time_bounded_on_hung_kills():
+    # Use REAL wall-clock (no global time.monotonic patch, which is pollution
+    # prone). The first kill "hangs" long enough to exceed the small budget, so
+    # the loop must stop issuing kills instead of running one-per-active-run.
+    timeout_seconds = 0.2
+    hang_seconds = 0.5
 
     calls: list[tuple[str, float]] = []
 
     def fake_cancel(run_id, *, reason=None, request_timeout=None):
         calls.append((run_id, request_timeout))
-        clock[0] += 5.0  # a hung/slow kill consumes 5s of wall time
+        time.sleep(hang_seconds)  # a hung/slow kill consumes real wall time
         return True
 
-    monkeypatch.setattr(e2b_driver, "cancel_sandbox", fake_cancel)
-
-    active = [
-        run_service._ActiveRun(
-            run_id=f"run-{i}",
-            worker_id="w",
-            user_id="u",
-            thread=_finished_thread(),
+    with mock.patch.object(e2b_driver, "cancel_sandbox", fake_cancel):
+        active = [
+            run_service._ActiveRun(
+                run_id=f"run-{i}",
+                worker_id="w",
+                user_id="u",
+                thread=_finished_thread(),
+            )
+            for i in range(4)
+        ]
+        run_service._cancel_active_runs(
+            active,
+            repos=_FakeRepos(),
+            timeout_seconds=timeout_seconds,
+            reason="shutdown",
+            mark_shutdown_cancelled=False,
         )
-        for i in range(4)
-    ]
 
-    run_service._cancel_active_runs(
-        active,
-        repos=_FakeRepos(),
-        timeout_seconds=1.0,
-        reason="shutdown",
-        mark_shutdown_cancelled=False,
-    )
-
-    # Only the first run is killed before the 1s budget is exhausted; the rest
-    # are skipped (handled by thread-join + startup recovery), so the loop does
-    # NOT run for 4 x 60s.
+    # Only the first run is killed before the budget is exhausted; the rest are
+    # skipped (handled by thread-join + startup recovery), so the loop does NOT
+    # run for 4 x 60s.
     assert len(calls) == 1
     run_id, request_timeout = calls[0]
     assert run_id == "run-0"
     # Each kill timeout is bounded by both the per-call cap and remaining budget.
     assert request_timeout is not None
     assert request_timeout <= run_service._CANCEL_LOOP_SANDBOX_KILL_REQUEST_TIMEOUT_SECONDS
-    assert request_timeout <= 1.0
+    assert request_timeout <= timeout_seconds
