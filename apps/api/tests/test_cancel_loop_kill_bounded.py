@@ -39,6 +39,26 @@ def _finished_thread() -> threading.Thread:
     return t
 
 
+def test_liveness_unconfirmed_is_never_retried_even_with_manifest_optin():
+    """sandbox_liveness_unconfirmed is a safety terminal: a worker manifest that
+    names it in retry.on (or retryable=True) must NOT force a re-dispatch, which
+    would risk duplicating side effects."""
+
+    class _RetryCfg:
+        on = ["sandbox_liveness_unconfirmed"]
+        max_attempts = 5
+
+    decision = run_service._classify_retry_failure(
+        error_code="sandbox_liveness_unconfirmed",
+        error="sandbox could not be confirmed stopped",
+        result_retryable=True,
+        retry_cfg=_RetryCfg(),
+    )
+    assert decision.retryable is False
+    assert decision.permanent is True
+    assert decision.reason == "never_retry_safety"
+
+
 def test_cancel_sandbox_forwards_bounded_request_timeout():
     kills: list[float] = []
 

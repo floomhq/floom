@@ -56,6 +56,10 @@ class _Files:
         return sandbox_path in self._files or self._host_path(sandbox_path).exists()
 
     def read(self, sandbox_path: str, format="text", **_kwargs):
+        if _ConfigurableSandbox.state.get("result_read_raises") and sandbox_path.endswith(
+            "result.json"
+        ):
+            raise _TransientDrop("Request timed out")
         data = self._files.get(sandbox_path)
         if data is None:
             data = self._host_path(sandbox_path).read_bytes()  # raises if missing
@@ -124,7 +128,15 @@ class _ConfigurableSandbox:
         return self.state["is_running"]
 
 
-def _install(monkeypatch, tmp_path, *, command_behaviour, kill_raises, is_running=True):
+def _install(
+    monkeypatch,
+    tmp_path,
+    *,
+    command_behaviour,
+    kill_raises,
+    is_running=True,
+    result_read_raises=False,
+):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_MAX_ATTEMPTS", "3")
     monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_RETRY_BASE_SECONDS", "0")
@@ -141,6 +153,7 @@ def _install(monkeypatch, tmp_path, *, command_behaviour, kill_raises, is_runnin
         "command_behaviour": command_behaviour,
         "kill_raises": kill_raises,
         "is_running": is_running,
+        "result_read_raises": result_read_raises,
     }
 
 
@@ -239,6 +252,82 @@ def test_drop_after_command_start_with_confirmed_dead_sandbox_retries(tmp_path, 
     assert _ConfigurableSandbox.state["creates"] == 2  # original + one retry
     assert result.status == "success"
     assert result.outputs == {"attempt": 2}
+    _cleanup()
+
+
+def test_completed_worker_then_result_read_drop_does_not_retry(tmp_path, monkeypatch):
+    """The worker command RETURNS successfully (exit 0, side effects done), then
+    the result.json read drops transiently. Retrying would re-run the completed
+    worker -> duplicate. So NO second sandbox is spawned and the run ends
+    terminally rather than re-executing."""
+    _install(
+        monkeypatch,
+        tmp_path,
+        command_behaviour=lambda _attempt: "success",  # command returns exit 0
+        kill_raises=False,  # kill confirms dead - but that must NOT greenlight retry
+        result_read_raises=True,  # the post-completion result.json read drops
+    )
+    config = _worker_config(tmp_path)
+
+    result = E2BSandboxDriver().run(
+        worker_id="side-effect-worker",
+        run_id="run-completed-read-drop",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_a, **_k: None,
+        trace_id="trace-completed-read-drop",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    # The worker ran exactly ONCE and no retry sandbox was created, even though
+    # the sandbox was confirmed dead. A completed worker is never re-run.
+    assert _ConfigurableSandbox.state["creates"] == 1
+    assert _ConfigurableSandbox.state["worker_attempts"] == 1
+    assert result.status == "error"
+    assert result.error_code == "sandbox_liveness_unconfirmed"
+    assert result.retryable is False
+    _cleanup()
+
+
+def test_cancel_during_setup_after_registration_aborts_before_command(tmp_path, monkeypatch):
+    """Create-race second gate: cancel lands AFTER the pre-spawn check (e.g.
+    during Sandbox.create/setup). The sandbox is created and registered but the
+    worker command must NOT run."""
+    _install(
+        monkeypatch,
+        tmp_path,
+        command_behaviour=lambda _attempt: "success",
+        kill_raises=False,
+    )
+    # False on the pre-spawn check, True on the pre-command re-check.
+    calls = {"n": 0}
+
+    def _cancel(_run_id):
+        calls["n"] += 1
+        return calls["n"] >= 2
+
+    monkeypatch.setattr(e2b_driver, "run_cancel_requested", _cancel)
+    config = _worker_config(tmp_path)
+
+    result = E2BSandboxDriver().run(
+        worker_id="side-effect-worker",
+        run_id="run-cancel-during-setup",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_a, **_k: None,
+        trace_id="trace-cancel-during-setup",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    # Sandbox was created (cancel landed after the pre-spawn check) but the
+    # worker command never ran, and the created sandbox was killed via finally.
+    assert _ConfigurableSandbox.state["creates"] == 1
+    assert _ConfigurableSandbox.state["worker_attempts"] == 0
+    assert result.status == "cancelled"
+    assert result.error_code == "user_cancel"
+    assert _ConfigurableSandbox.state["instances"][0].kill_calls  # killed on the way out
     _cleanup()
 
 

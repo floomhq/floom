@@ -635,6 +635,15 @@ _RETRY_EXHAUSTED_ERROR_CODES = {
     "transient_network_retry_exhausted",
 }
 
+# Safety terminal codes that must NEVER be auto-retried, not even when a worker
+# manifest names them in retry.on. sandbox_liveness_unconfirmed means we could
+# not confirm the original sandbox stopped after a transport drop; re-running
+# would risk duplicating real side effects (emails, CRM writes, sends), so a
+# manifest opt-in must not be able to force it.
+_NEVER_RETRY_ERROR_CODES = {
+    "sandbox_liveness_unconfirmed",
+}
+
 _PERMANENT_RETRY_CATEGORIES = {
     "auth",
     "cancelled",
@@ -696,6 +705,10 @@ def _classify_retry_failure(
     from services import run_metrics
 
     category = run_metrics.classify_failure(error_code=code, error=error)
+    if code in _NEVER_RETRY_ERROR_CODES:
+        # Hard safety veto: overrides manifest retry.on and retryable=True so a
+        # liveness-unconfirmed run can never be re-dispatched.
+        return _RetryDecision(False, True, category, "never_retry_safety")
     if code in _RETRY_EXHAUSTED_ERROR_CODES:
         return _RetryDecision(False, True, category, "retry_exhausted")
     if _retry_config_exactly_allows_error(retry_cfg, code):
@@ -3312,10 +3325,12 @@ def _cancel_active_runs(
         cancel_sandbox = None
 
     cancelled_at = _now_iso()
-    # Bound the serial kill loop so one hung control-plane kill cannot blow the
-    # whole cancel budget. Once the budget is spent, stop killing and let the
-    # thread-join + startup recovery handle any stragglers.
-    kill_deadline = time.monotonic() + max(0.0, timeout_seconds)
+    # Single shared deadline for BOTH the kill pass and the join pass so the
+    # whole cancel operation stays within timeout_seconds (previously the kill
+    # pass and join pass each got a full budget, so total could reach ~2x, and a
+    # hung control-plane kill could blow it). Stragglers are handled by startup
+    # recovery.
+    overall_deadline = time.monotonic() + max(0.0, timeout_seconds)
     for run in active:
         if run.user_id:
             try:
@@ -3335,7 +3350,7 @@ def _cancel_active_runs(
             except Exception as exc:
                 logger.warning("Failed to mark run %s cancelled: %s", run.run_id, exc)
         if cancel_sandbox is not None:
-            remaining = kill_deadline - time.monotonic()
+            remaining = overall_deadline - time.monotonic()
             if remaining <= 0:
                 logger.warning(
                     "Cancel loop kill budget exhausted; leaving sandbox for run %s to "
@@ -3355,9 +3370,8 @@ def _cancel_active_runs(
                 except Exception:
                     logger.debug("E2B cancel failed for run %s", run.run_id, exc_info=True)
 
-    deadline = time.monotonic() + max(0.0, timeout_seconds)
     for run in active:
-        remaining = deadline - time.monotonic()
+        remaining = overall_deadline - time.monotonic()
         if remaining <= 0:
             break
         run.thread.join(timeout=remaining)

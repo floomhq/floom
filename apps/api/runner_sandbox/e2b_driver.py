@@ -2288,14 +2288,22 @@ class E2BSandboxDriver(SandboxDriver):
                     # re-run and surface an operator-action terminal code rather
                     # than risk a duplicate.
                     command_started = bool(getattr(exc, "_e2b_worker_command_started", False))
+                    command_completed = bool(getattr(exc, "_e2b_worker_command_completed", False))
                     sandbox_confirmed_dead = bool(getattr(exc, "_e2b_sandbox_confirmed_dead", False))
-                    if command_started and not sandbox_confirmed_dead:
+                    # Refuse to retry when either (a) the command RAN TO COMPLETION
+                    # (side effects done; a retry is a pure duplicate) or (b) the
+                    # command started and the original sandbox could not be
+                    # confirmed dead (it may still be running its side effects).
+                    if command_completed or (command_started and not sandbox_confirmed_dead):
                         logger.error(
-                            "E2B transport dropped after the worker command started for "
-                            "worker %s run %s and the original sandbox could not be confirmed "
-                            "terminated; refusing to re-run to avoid duplicate side effects",
+                            "E2B transport dropped after the worker %s for worker %s run %s; "
+                            "refusing to re-run to avoid duplicate side effects (command_completed=%s, "
+                            "sandbox_confirmed_dead=%s)",
+                            "completed" if command_completed else "started",
                             worker_id,
                             run_id,
+                            command_completed,
+                            sandbox_confirmed_dead,
                         )
                         log_fn(
                             "[e2b] Sandbox transport dropped after the worker started and the "
@@ -2600,6 +2608,10 @@ class E2BSandboxDriver(SandboxDriver):
         # transport drop carries side-effect risk, so the finally block below
         # must CONFIRM this sandbox dead before the outer run() loop may retry.
         worker_command_started = False
+        # Tracks whether the worker command RETURNED (ran to completion). Once
+        # True, side effects are done and a retry would duplicate them, so run()
+        # never retries a completed run regardless of sandbox liveness.
+        worker_command_completed = False
 
         try:
             workdir = "/home/user/worker"
@@ -2975,6 +2987,22 @@ class E2BSandboxDriver(SandboxDriver):
                 )
 
             perf.log(log_fn, "e2b.before_worker_command")
+            # Second cancel gate (closes the create-race window): the sandbox is
+            # now registered, but a cancel may have landed AFTER the pre-spawn
+            # check and DURING Sandbox.create()/setup, when the cancel sweep saw
+            # no registered sandbox to kill. Re-check here, immediately before the
+            # worker runs. Together with registration this closes the window: once
+            # registered, the cancel sweep can find + kill the sandbox; a cancel
+            # set before registration is caught here. Return through the finally,
+            # which kills the (still unused) sandbox.
+            if run_cancel_requested(run_id):
+                logger.info("E2B run %s cancel-requested before worker command; aborting without execution", run_id)
+                log_fn("[e2b] Run cancelled before worker command; not executing", "info")
+                return WorkerResult(
+                    status="cancelled",
+                    error="Cancelled by user",
+                    error_code="user_cancel",
+                )
             # From here on the worker's own code may run and cause side effects,
             # so a transport drop must not be blindly retried (see run() guard).
             worker_command_started = True
@@ -2988,6 +3016,11 @@ class E2BSandboxDriver(SandboxDriver):
                     timeout=float(effective_timeout_seconds),
                     request_timeout=_e2b_command_request_timeout(effective_timeout_seconds),
                 )
+                # The command RETURNED (exit code known): the worker ran to
+                # completion, so its side effects are already done. A later
+                # transient failure (e.g. result.json read) must NOT trigger a
+                # retry, which would re-run those side effects. See run() guard.
+                worker_command_completed = True
             except Exception as exc:
                 exc_stdout = _coerce_output_text(getattr(exc, "stdout", None))
                 exc_stderr = _coerce_output_text(getattr(exc, "stderr", None))
@@ -3175,6 +3208,7 @@ class E2BSandboxDriver(SandboxDriver):
                     confirmed_dead = _terminate_and_confirm_dead(sandbox, log_fn=log_fn)
                     try:
                         pending_exc._e2b_worker_command_started = True
+                        pending_exc._e2b_worker_command_completed = worker_command_completed
                         pending_exc._e2b_sandbox_confirmed_dead = confirmed_dead
                     except Exception:
                         logger.debug("Could not stamp liveness state on exception", exc_info=True)
