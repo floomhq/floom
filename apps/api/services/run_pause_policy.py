@@ -22,6 +22,7 @@ logger = logging.getLogger("floom.run_service")
 _TERMINAL_SCHEDULE_SETUP_ERROR_CODES = {
     "llm_model_not_configured",
     "missing_connection",
+    "missing_required_input",
     "missing_secret",
 }
 
