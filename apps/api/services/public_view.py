@@ -109,6 +109,11 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     # Sandbox / timeout / resource.
     "e2b_sandbox_error": _SANDBOX_HEADLINE,
     "sandbox_transport_retry_exhausted": _SANDBOX_HEADLINE,
+    "sandbox_liveness_unconfirmed": (
+        "The sandbox connection dropped after this worker started, and Floom could not confirm "
+        "it stopped. To avoid duplicate actions, the run was not retried automatically. Check "
+        "whether its actions completed, then re-run it manually if needed."
+    ),
     "transient_network_error": "A temporary network connection dropped. Floom is retrying this run automatically.",
     "transient_network_retry_exhausted": (
         "The network connection dropped repeatedly and Floom could not complete the run after automatic retries. "

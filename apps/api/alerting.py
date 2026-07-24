@@ -102,6 +102,7 @@ _OPS_PLATFORM_ERROR_CODES = {
     "run_claimed_without_dispatch",
     "run_execution_exception",
     "sandbox_crash",
+    "sandbox_liveness_unconfirmed",
     "sandbox_transport_retry_exhausted",
     "schedule_missed",
     "scheduler_missed",

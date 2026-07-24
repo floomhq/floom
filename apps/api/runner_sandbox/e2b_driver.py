@@ -12,6 +12,7 @@ import io
 import re
 import shlex
 import shutil
+import sys
 import tarfile
 import threading
 import time
@@ -65,6 +66,19 @@ E2B_COMMAND_REQUEST_TIMEOUT_BUFFER_SECONDS = 60
 E2B_INSTALL_COMMAND_MIN_REQUEST_TIMEOUT_SECONDS = 300
 E2B_CREATE_REQUEST_TIMEOUT_SECONDS = 120
 E2B_CONTROL_REQUEST_TIMEOUT_SECONDS = 60
+# Bounded kill-and-verify budget used before a transport-drop retry. A dropped
+# worker-command transport must NOT be retried until the ORIGINAL sandbox is
+# CONFIRMED terminated, otherwise the original keeps running (real side effects:
+# emails, CRM writes, sends) while the retry runs a second time -> duplicate.
+# These bound the confirmation so we never block on the unbounded 60s control
+# timeout over an already-dead transport.
+E2B_KILL_VERIFY_REQUEST_TIMEOUT_SECONDS = 15
+E2B_KILL_VERIFY_BUDGET_SECONDS = 30.0
+E2B_KILL_VERIFY_POLL_INTERVAL_SECONDS = 1.0
+# Terminal, operator-action error code: a transport dropped AFTER the worker
+# command started and the original sandbox could not be confirmed dead. We
+# refuse to re-run rather than risk double-executing side effects.
+SANDBOX_LIVENESS_UNCONFIRMED_ERROR_CODE = "sandbox_liveness_unconfirmed"
 MAX_WORKER_ERROR_OUTPUT_CHARS = 1000
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
@@ -131,6 +145,81 @@ def _kill_sandbox_quietly(sandbox: Any) -> None:
         sandbox.kill(request_timeout=E2B_CONTROL_REQUEST_TIMEOUT_SECONDS)
     except Exception:
         logger.debug("E2B sandbox kill suppressed", exc_info=True)
+
+
+def _e2b_kill_verify_budget_seconds() -> float:
+    raw = os.environ.get("WORKEROS_E2B_KILL_VERIFY_BUDGET_SECONDS", "")
+    if not raw:
+        return E2B_KILL_VERIFY_BUDGET_SECONDS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return E2B_KILL_VERIFY_BUDGET_SECONDS
+
+
+def _e2b_kill_verify_request_timeout_seconds() -> float:
+    raw = os.environ.get("WORKEROS_E2B_KILL_VERIFY_REQUEST_TIMEOUT_SECONDS", "")
+    if not raw:
+        return float(E2B_KILL_VERIFY_REQUEST_TIMEOUT_SECONDS)
+    try:
+        return max(0.1, float(raw))
+    except ValueError:
+        return float(E2B_KILL_VERIFY_REQUEST_TIMEOUT_SECONDS)
+
+
+def _sandbox_confirmed_not_running(sandbox: Any, *, request_timeout: float) -> bool:
+    """Positive liveness probe: return True ONLY when the sandbox is provably
+    not running. e2b ``is_running()`` hits the sandbox's own envd health route
+    and returns False when it is gone (502) or raises on any ambiguity
+    (timeout / connection error). Any exception -> False, so an unreachable
+    sandbox is never mistaken for a dead one."""
+    try:
+        return sandbox.is_running(request_timeout=request_timeout) is False
+    except Exception:
+        logger.debug("E2B is_running probe inconclusive", exc_info=True)
+        return False
+
+
+def _terminate_and_confirm_dead(
+    sandbox: Any, *, log_fn: Callable[[str, str], None]
+) -> bool:
+    """Kill the sandbox and return True ONLY when termination is CONFIRMED.
+
+    e2b ``kill()`` is a DELETE against the control plane (api.e2b.dev), which
+    travels a DIFFERENT transport than the worker-command envd stream, so it
+    usually succeeds even when the command stream dropped. A ``kill()`` that
+    returns (killed, or 404 already-gone) WITHOUT raising is authoritative proof
+    the sandbox is terminated. If ``kill()`` keeps raising (control plane also
+    unreachable) we fall back to polling ``is_running()`` for a bounded budget.
+
+    Returns False when termination cannot be POSITIVELY confirmed within the
+    budget. The caller MUST NOT re-dispatch on a False result: a still-running
+    original would double-execute the worker's side effects. The budget is
+    bounded (never the unbounded 60s control timeout on a dead transport)."""
+    budget = _e2b_kill_verify_budget_seconds()
+    request_timeout = _e2b_kill_verify_request_timeout_seconds()
+    deadline = time.monotonic() + budget
+    attempted = False
+    while True:
+        if attempted and time.monotonic() >= deadline:
+            return False
+        attempted = True
+        try:
+            # Control-plane terminate. Returns True (killed) or False (404,
+            # already gone); either is confirmed-dead. Only a raise is ambiguous.
+            sandbox.kill(request_timeout=request_timeout)
+            return True
+        except Exception:
+            logger.debug(
+                "E2B bounded kill did not confirm termination; probing liveness",
+                exc_info=True,
+            )
+        if _sandbox_confirmed_not_running(sandbox, request_timeout=request_timeout):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(E2B_KILL_VERIFY_POLL_INTERVAL_SECONDS, remaining))
 
 
 def _warm_pool_lease(key: str, *, log_fn: Callable[[str, str], None]) -> _WarmSandboxEntry | None:
@@ -1532,13 +1621,18 @@ def active_sandbox_count() -> int:
         return len(_active_sandboxes)
 
 
-def cancel_sandbox(run_id: str, *, reason: str | None = None) -> bool:
+def cancel_sandbox(
+    run_id: str,
+    *,
+    reason: str | None = None,
+    request_timeout: float = E2B_CONTROL_REQUEST_TIMEOUT_SECONDS,
+) -> bool:
     with _active_sandboxes_lock:
         sandbox = _active_sandboxes.get(run_id)
     if sandbox is None:
         return False
     try:
-        sandbox.kill(request_timeout=E2B_CONTROL_REQUEST_TIMEOUT_SECONDS)
+        sandbox.kill(request_timeout=request_timeout)
         logger.warning("Killed active E2B sandbox for run %s: %s", run_id, reason or "cancel requested")
         return True
     except Exception as exc:
@@ -2181,6 +2275,56 @@ class E2BSandboxDriver(SandboxDriver):
                             error="Cancelled by user",
                             error_code="user_cancel",
                         )
+                    # Double-execute guard: only retry when it is SAFE. A retry
+                    # re-runs the worker (run.py) from scratch in a fresh sandbox.
+                    # Once the worker command has STARTED, its side effects
+                    # (emails, CRM writes, sends) may already be committed:
+                    # partially if it dropped mid-run, fully if it completed. The
+                    # bounded kill-and-verify below stops the ORIGINAL sandbox, but
+                    # killing cannot UNDO an action that already committed, and the
+                    # platform does not yet enforce action-level idempotency at the
+                    # connector boundary. So a post-command-start retry could
+                    # DUPLICATE a committed action even when the original is
+                    # confirmed dead. We therefore refuse to auto-retry any run
+                    # whose command started, and surface an operator-action
+                    # terminal instead. Retry stays enabled ONLY for create/upload
+                    # phase drops (command never started -> no worker code ran ->
+                    # no side effects possible), which covers the common
+                    # sandbox-create / HPACK / header-block transport drops.
+                    # (Re-enabling safe post-start retry requires durable
+                    # run_id+operation idempotency keys threaded into connector
+                    # calls; tracked as the documented residual.)
+                    command_started = bool(getattr(exc, "_e2b_worker_command_started", False))
+                    command_completed = bool(getattr(exc, "_e2b_worker_command_completed", False))
+                    sandbox_confirmed_dead = bool(getattr(exc, "_e2b_sandbox_confirmed_dead", False))
+                    if command_started:
+                        logger.error(
+                            "E2B transport dropped after the worker command %s for worker %s run %s; "
+                            "refusing to re-run to avoid duplicate side effects "
+                            "(command_completed=%s, sandbox_confirmed_dead=%s)",
+                            "completed" if command_completed else "started",
+                            worker_id,
+                            run_id,
+                            command_completed,
+                            sandbox_confirmed_dead,
+                        )
+                        log_fn(
+                            "[e2b] Sandbox transport dropped after the worker started; NOT retrying "
+                            "to avoid duplicating actions (emails, CRM writes, sends). Operator "
+                            "action required.",
+                            "error",
+                        )
+                        return WorkerResult(
+                            status="error",
+                            error=(
+                                "The sandbox connection dropped after the worker started. Floom did "
+                                "not re-run it to avoid duplicating side effects (emails, CRM writes, "
+                                "sends). Check whether the run's actions completed, then re-run "
+                                "manually if needed."
+                            ),
+                            error_code=SANDBOX_LIVENESS_UNCONFIRMED_ERROR_CODE,
+                            retryable=False,
+                        )
                     detail = (
                         _sanitize_sandbox_exception_detail(str(transport_exc))
                         or transport_exc.__class__.__name__
@@ -2255,6 +2399,38 @@ class E2BSandboxDriver(SandboxDriver):
                     status="error",
                     error=str(exc),
                     error_code="sandbox_oom",
+                    retryable=False,
+                )
+            # Double-execute guard (outer handler): an exception that is NOT a
+            # recognized transient transport drop still reaches here after the
+            # worker command started (e.g. an opaque error during result
+            # processing). _sandbox_exception_result would classify it as a
+            # RETRYABLE code (e2b_sandbox_error / upstream_http_5xx), and the
+            # run_service retry scheduler would then re-dispatch the whole run in
+            # a fresh sandbox, re-running the worker -> duplicate side effects. If
+            # the command started, force a non-retryable safety terminal so no
+            # layer re-runs it.
+            if getattr(exc, "_e2b_worker_command_started", False):
+                logger.error(
+                    "E2B sandbox failed for worker %s run %s AFTER the worker command started; "
+                    "surfacing a non-retryable terminal to avoid duplicate side effects: %s",
+                    worker_id,
+                    run_id,
+                    exc,
+                )
+                log_fn(
+                    "[e2b] Sandbox failed after the worker started; NOT retrying to avoid "
+                    "duplicating actions. Operator action required.",
+                    "error",
+                )
+                return WorkerResult(
+                    status="error",
+                    error=(
+                        "The sandbox failed after the worker started. Floom did not re-run it to "
+                        "avoid duplicating side effects (emails, CRM writes, sends). Check whether "
+                        "the run's actions completed, then re-run manually if needed."
+                    ),
+                    error_code=SANDBOX_LIVENESS_UNCONFIRMED_ERROR_CODE,
                     retryable=False,
                 )
             logger.exception(
@@ -2427,6 +2603,20 @@ class E2BSandboxDriver(SandboxDriver):
                 error_code="context_mount_failed",
                 retryable=True,
             )
+        # Post-cancel create race: a shutdown or user-cancel pass sweeps the
+        # registered sandboxes and sets cancel_requested, but a thread that is
+        # still in pre-sandbox setup here has no registered sandbox yet, so the
+        # sweep misses it and it would spawn an ORPHAN the pass believes it
+        # terminated. Re-check cancel as close to the spawn as possible and
+        # refuse to create/lease a sandbox for an already-cancelled run.
+        if run_cancel_requested(run_id):
+            logger.info("E2B run %s cancel-requested before sandbox spawn; not creating a sandbox", run_id)
+            log_fn("[e2b] Run cancelled before sandbox spawn; not creating a sandbox", "info")
+            return WorkerResult(
+                status="cancelled",
+                error="Cancelled by user",
+                error_code="user_cancel",
+            )
         warm_entry = _warm_pool_lease(warm_key or "", log_fn=log_fn) if warm_key else None
         perf.mark("warm_lease")
         sandbox_prepared = warm_entry is not None
@@ -2448,6 +2638,14 @@ class E2BSandboxDriver(SandboxDriver):
         _register_sandbox(run_id, sandbox)
         perf.mark("register_sandbox")
         keep_warm = False
+        # Tracks whether the worker command (run.py) has started. Once True, a
+        # transport drop carries side-effect risk, so the finally block below
+        # must CONFIRM this sandbox dead before the outer run() loop may retry.
+        worker_command_started = False
+        # Tracks whether the worker command RETURNED (ran to completion). Once
+        # True, side effects are done and a retry would duplicate them, so run()
+        # never retries a completed run regardless of sandbox liveness.
+        worker_command_completed = False
 
         try:
             workdir = "/home/user/worker"
@@ -2823,6 +3021,34 @@ class E2BSandboxDriver(SandboxDriver):
                 )
 
             perf.log(log_fn, "e2b.before_worker_command")
+            # Second cancel gate (closes the create-race window): the sandbox is
+            # now registered, but a cancel may have landed AFTER the pre-spawn
+            # check and DURING Sandbox.create()/setup, when the cancel sweep saw
+            # no registered sandbox to kill. Re-check here, immediately before the
+            # worker runs. Together with registration this closes the window: once
+            # registered, the cancel sweep can find + kill the sandbox; a cancel
+            # set before registration is caught here. Return through the finally,
+            # which kills the (still unused) sandbox.
+            if run_cancel_requested(run_id):
+                logger.info("E2B run %s cancel-requested before worker command; aborting without execution", run_id)
+                log_fn("[e2b] Run cancelled before worker command; not executing", "info")
+                return WorkerResult(
+                    status="cancelled",
+                    error="Cancelled by user",
+                    error_code="user_cancel",
+                )
+            # From here on the worker's own code may run and cause side effects,
+            # so a transport drop must not be blindly retried (see run() guard).
+            worker_command_started = True
+            # Signal run_service so the graceful-shutdown requeue never re-runs a
+            # started worker. Lazy + guarded: the OSS/single-tenant path and unit
+            # tests may run the driver without the run_service executor loaded.
+            try:
+                from run_service import mark_run_worker_command_started  # noqa: PLC0415
+
+                mark_run_worker_command_started(run_id)
+            except Exception:
+                logger.debug("Could not mark worker_command_started for run %s", run_id, exc_info=True)
             try:
                 proc = sandbox.commands.run(
                     command,
@@ -2833,6 +3059,11 @@ class E2BSandboxDriver(SandboxDriver):
                     timeout=float(effective_timeout_seconds),
                     request_timeout=_e2b_command_request_timeout(effective_timeout_seconds),
                 )
+                # The command RETURNED (exit code known): the worker ran to
+                # completion, so its side effects are already done. A later
+                # transient failure (e.g. result.json read) must NOT trigger a
+                # retry, which would re-run those side effects. See run() guard.
+                worker_command_completed = True
             except Exception as exc:
                 exc_stdout = _coerce_output_text(getattr(exc, "stdout", None))
                 exc_stderr = _coerce_output_text(getattr(exc, "stderr", None))
@@ -2998,8 +3229,23 @@ class E2BSandboxDriver(SandboxDriver):
 
         finally:
             _unregister_sandbox(run_id, sandbox)
+            pending_exc = sys.exc_info()[1]
+            unwinding_after_command_start = pending_exc is not None and worker_command_started
+            # Stamp liveness intent on EVERY post-command-start unwind, BEFORE the
+            # warm-pool branch. A warm-pool return (pooled=True) must never be able
+            # to bypass this: if the stamp were skipped, run()'s outer handler
+            # would fall back to a RETRYABLE code and the run_service scheduler
+            # would re-dispatch the worker -> duplicate side effects.
+            if unwinding_after_command_start:
+                try:
+                    pending_exc._e2b_worker_command_started = True
+                    pending_exc._e2b_worker_command_completed = worker_command_completed
+                except Exception:
+                    logger.debug("Could not stamp command-start state on exception", exc_info=True)
             pooled = False
-            if keep_warm and warm_key:
+            # Never return a sandbox to the warm pool while unwinding a failure;
+            # only pool a cleanly-completed run's sandbox.
+            if keep_warm and warm_key and not unwinding_after_command_start:
                 entry = warm_entry or _WarmSandboxEntry(
                     key=warm_key,
                     sandbox=sandbox,
@@ -3009,14 +3255,33 @@ class E2BSandboxDriver(SandboxDriver):
                 )
                 pooled = _warm_pool_return(entry, log_fn=log_fn)
             if not pooled:
-                try:
-                    # e2b 2.x: kill() may raise if the sandbox already exited.
-                    # We attempt gracefully; any exception is a warning, not a failure.
-                    sandbox.kill(request_timeout=E2B_CONTROL_REQUEST_TIMEOUT_SECONDS)
-                    log_fn("[e2b] Sandbox killed", "debug")
-                except Exception as close_exc:
-                    # Sandbox may have self-terminated (timeout, OOM) — not an error.
-                    logger.debug("E2B sandbox already gone (kill suppressed): %s", close_exc)
+                if unwinding_after_command_start:
+                    # Bounded kill-and-verify to STOP the original promptly (it may
+                    # still be mid-run). The confirmed-dead result is informational
+                    # now that run() refuses any post-command-start retry.
+                    confirmed_dead = _terminate_and_confirm_dead(sandbox, log_fn=log_fn)
+                    try:
+                        pending_exc._e2b_sandbox_confirmed_dead = confirmed_dead
+                    except Exception:
+                        logger.debug("Could not stamp liveness state on exception", exc_info=True)
+                    if confirmed_dead:
+                        log_fn("[e2b] Sandbox confirmed terminated after transport drop", "debug")
+                    else:
+                        log_fn(
+                            "[e2b] Sandbox termination could NOT be confirmed after transport drop",
+                            "warning",
+                        )
+                else:
+                    # Normal completion, or a pre-command failure (no worker side
+                    # effects yet): best-effort quiet kill, as before.
+                    try:
+                        # e2b 2.x: kill() may raise if the sandbox already exited.
+                        # We attempt gracefully; any exception is a warning, not a failure.
+                        sandbox.kill(request_timeout=E2B_CONTROL_REQUEST_TIMEOUT_SECONDS)
+                        log_fn("[e2b] Sandbox killed", "debug")
+                    except Exception as close_exc:
+                        # Sandbox may have self-terminated (timeout, OOM); not an error.
+                        logger.debug("E2B sandbox already gone (kill suppressed): %s", close_exc)
 
     def _upload_contexts_to_sandbox(
         self,

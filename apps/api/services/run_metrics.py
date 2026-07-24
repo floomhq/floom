@@ -76,6 +76,7 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     # a reworded message.
     "e2b_sandbox_error": "crash",
     "sandbox_transport_retry_exhausted": "crash",
+    "sandbox_liveness_unconfirmed": "crash",
     "sandbox_crash": "crash",
     "invalid_result_json": "crash",
     "missing_result": "crash",

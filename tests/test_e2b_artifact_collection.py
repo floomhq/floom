@@ -242,16 +242,28 @@ class FakeRaisingOOMSandbox:
 
 
 class FakeCancelledCommandRunner:
+    def __init__(self, sandbox):
+        self._sandbox = sandbox
+
     def run(self, _command, **_kwargs):
+        # Simulate the sandbox being killed by a concurrent cancel WHILE the
+        # worker command is running (a post-spawn cancellation). The optional
+        # class hook lets a test flip the run's cancel flag at this exact moment.
+        hook = getattr(self._sandbox.__class__, "on_command_run", None)
+        if hook is not None:
+            hook()
         raise RuntimeError("sandbox was killed")
 
 
 class FakeCancelledSandbox:
     instances = []
+    # Optional callable invoked when the worker command runs (post-spawn). Set by
+    # tests to move a cancellation to after the sandbox has spawned.
+    on_command_run = None
 
     def __init__(self):
         self.files = FakeWritableFiles({})
-        self.commands = FakeCancelledCommandRunner()
+        self.commands = FakeCancelledCommandRunner(self)
         self.killed = False
         FakeCancelledSandbox.instances.append(self)
 
@@ -1586,15 +1598,27 @@ def test_e2b_cancelled_sandbox_exception_reads_active_repository(tmp_path, monke
     with e2b_driver._active_sandboxes_lock:
         e2b_driver._active_sandboxes.clear()
 
+    # The run is cancelled AFTER the sandbox spawns (the sandbox is killed while
+    # the worker command runs), so the driver must terminate and read the active
+    # repository to detect the cancel. Not cancelled at spawn time, so the
+    # pre-spawn create-race guard does not fire.
+    cancel_state = {"requested": False}
+
     class Runs:
         def get_any(self, *, run_id: str):
             assert run_id == "run_cancelled"
-            return {"run_id": run_id, "cancel_requested": True}
+            return {"run_id": run_id, "cancel_requested": cancel_state["requested"]}
 
     class Repos:
         runs = Runs()
 
     monkeypatch.setattr(db_module, "get_repositories", lambda: Repos())
+    # Flip the cancel flag the moment the worker command runs (post-spawn).
+    monkeypatch.setattr(
+        FakeCancelledSandbox,
+        "on_command_run",
+        lambda: cancel_state.__setitem__("requested", True),
+    )
     worker_dir = tmp_path / "workers" / "cancelled-worker"
     worker_dir.mkdir(parents=True)
     (worker_dir / "run.py").write_text("print('unused')\n")
@@ -1610,6 +1634,9 @@ def test_e2b_cancelled_sandbox_exception_reads_active_repository(tmp_path, monke
         timeout_seconds=30,
     )
 
+    # The sandbox DID spawn and the worker command ran (post-spawn path), then the
+    # cancel was detected via the active repository.
+    assert len(FakeCancelledSandbox.instances) == 1
     assert result.status == "cancelled"
     assert result.error_code == "user_cancel"
     assert ("info", "[e2b] Sandbox terminated - run cancelled by user") in logs

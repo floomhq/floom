@@ -601,6 +601,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
     "output_token_limit",
     "output_too_large",
     "quality_gate_failed",
+    "sandbox_liveness_unconfirmed",
     "schema_violation",
     "spend_cap_exceeded",
     "token_cap_exceeded",
@@ -632,6 +633,15 @@ _TRANSIENT_RETRY_ERROR_CODES = {
 _RETRY_EXHAUSTED_ERROR_CODES = {
     "llm_provider_capacity_retry_exhausted",
     "transient_network_retry_exhausted",
+}
+
+# Safety terminal codes that must NEVER be auto-retried, not even when a worker
+# manifest names them in retry.on. sandbox_liveness_unconfirmed means we could
+# not confirm the original sandbox stopped after a transport drop; re-running
+# would risk duplicating real side effects (emails, CRM writes, sends), so a
+# manifest opt-in must not be able to force it.
+_NEVER_RETRY_ERROR_CODES = {
+    "sandbox_liveness_unconfirmed",
 }
 
 _PERMANENT_RETRY_CATEGORIES = {
@@ -695,6 +705,10 @@ def _classify_retry_failure(
     from services import run_metrics
 
     category = run_metrics.classify_failure(error_code=code, error=error)
+    if code in _NEVER_RETRY_ERROR_CODES:
+        # Hard safety veto: overrides manifest retry.on and retryable=True so a
+        # liveness-unconfirmed run can never be re-dispatched.
+        return _RetryDecision(False, True, category, "never_retry_safety")
     if code in _RETRY_EXHAUSTED_ERROR_CODES:
         return _RetryDecision(False, True, category, "retry_exhausted")
     if _retry_config_exactly_allows_error(retry_cfg, code):
@@ -2444,6 +2458,12 @@ _SCHEDULE_MISSING_SECRET_PAUSE_AFTER = 3
 _RUN_REAPER_DEFAULT_GRACE_SECONDS = 60
 _RUN_REAPER_DEFAULT_INTERVAL_SECONDS = 180
 _RESTART_RETRY_BACKOFF_SECONDS = 60
+# Per-sandbox control-plane kill timeout used inside the cancel loop. The loop
+# runs serially over every active run, so the driver default (60s) could make a
+# single hung kill blow the whole shutdown/cancel budget. Bound each kill and
+# stop issuing kills once the overall cancel budget is spent (leftover sandboxes
+# are handled by thread-join + startup recovery).
+_CANCEL_LOOP_SANDBOX_KILL_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass
@@ -2454,6 +2474,19 @@ class _ActiveRun:
     thread: threading.Thread
     started_monotonic: float = field(default_factory=time.monotonic)
     stage: str = "claimed"
+    # Set once the sandbox worker command (run.py) has started for this run. Once
+    # True, the run must NOT be requeued/re-dispatched on shutdown: re-running a
+    # started worker could duplicate side effects (emails, CRM writes, sends).
+    worker_command_started: bool = False
+
+
+def mark_run_worker_command_started(run_id: str) -> None:
+    """Called by the sandbox driver when the worker command starts, so the
+    graceful-shutdown requeue can skip runs whose worker already began."""
+    with _active_runs_lock:
+        active = _active_runs.get(run_id)
+        if active is not None:
+            active.worker_command_started = True
 
 
 _active_runs: dict[str, _ActiveRun] = {}
@@ -3305,6 +3338,12 @@ def _cancel_active_runs(
         cancel_sandbox = None
 
     cancelled_at = _now_iso()
+    # Single shared deadline for BOTH the kill pass and the join pass so the
+    # whole cancel operation stays within timeout_seconds (previously the kill
+    # pass and join pass each got a full budget, so total could reach ~2x, and a
+    # hung control-plane kill could blow it). Stragglers are handled by startup
+    # recovery.
+    overall_deadline = time.monotonic() + max(0.0, timeout_seconds)
     for run in active:
         if run.user_id:
             try:
@@ -3324,14 +3363,28 @@ def _cancel_active_runs(
             except Exception as exc:
                 logger.warning("Failed to mark run %s cancelled: %s", run.run_id, exc)
         if cancel_sandbox is not None:
-            try:
-                cancel_sandbox(run.run_id, reason=reason)
-            except Exception:
-                logger.debug("E2B cancel failed for run %s", run.run_id, exc_info=True)
+            remaining = overall_deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "Cancel loop kill budget exhausted; leaving sandbox for run %s to "
+                    "thread-join and startup recovery",
+                    run.run_id,
+                )
+            else:
+                try:
+                    cancel_sandbox(
+                        run.run_id,
+                        reason=reason,
+                        request_timeout=min(
+                            _CANCEL_LOOP_SANDBOX_KILL_REQUEST_TIMEOUT_SECONDS,
+                            remaining,
+                        ),
+                    )
+                except Exception:
+                    logger.debug("E2B cancel failed for run %s", run.run_id, exc_info=True)
 
-    deadline = time.monotonic() + max(0.0, timeout_seconds)
     for run in active:
-        remaining = deadline - time.monotonic()
+        remaining = overall_deadline - time.monotonic()
         if remaining <= 0:
             break
         run.thread.join(timeout=remaining)
@@ -3437,6 +3490,18 @@ def request_active_run_shutdown(
     requeued = 0
     for run in active:
         if run.run_id in remaining_ids:
+            continue
+        # Double-execute guard: never requeue a run whose sandbox worker command
+        # had already started. Re-running it would re-execute committed side
+        # effects (emails, CRM writes, sends). Leave it cancelled (from the
+        # cancel pass) for operator action instead. Pre-command runs (setup /
+        # queued-but-not-yet-executing) are safe to requeue.
+        if run.worker_command_started:
+            logger.warning(
+                "Not requeuing run %s on shutdown: its worker command had started; "
+                "re-running could duplicate side effects",
+                run.run_id,
+            )
             continue
         if _requeue_interrupted_run_in_place(repos_obj, run.run_id, run.user_id):
             requeued += 1
