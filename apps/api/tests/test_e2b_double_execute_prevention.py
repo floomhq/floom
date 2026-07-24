@@ -412,6 +412,67 @@ def test_cancel_during_setup_after_registration_aborts_before_command(tmp_path, 
     _cleanup()
 
 
+def test_warm_pool_does_not_bypass_post_command_start_guard(tmp_path, monkeypatch):
+    """If a failure unwinds AFTER the worker command started, the warm-pool
+    return must NOT bypass the double-execute guard: the exception is still
+    stamped (so run() returns a non-retryable terminal, not a retryable code the
+    scheduler would re-dispatch) and the sandbox is NOT returned to the pool."""
+    from models import WorkerConfig, WorkerRuntime, WorkerTrigger
+
+    _install(
+        monkeypatch,
+        tmp_path,
+        command_behaviour=lambda _attempt: "success",  # command succeeds, keep_warm set
+        kill_raises=False,
+    )
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    e2b_driver.clear_warm_pool()
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir(exist_ok=True)
+    (worker_dir / "requirements.txt").write_text("", encoding="utf-8")
+    (worker_dir / "run.py").write_text("print('x')\n", encoding="utf-8")
+    config = WorkerConfig(
+        id="side-effect-worker",
+        name="Side Effect Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311", command="python3 run.py", mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=["OPENAI_API_KEY"],  # qualifies for a warm-pool key
+        memory=False,
+        outputs=[],
+    )
+
+    # Raise AFTER the worker completed and keep_warm was set (the exact window
+    # where warm-pool return could skip stamping).
+    raised = {"done": False}
+
+    def log_fn(msg, level="info"):
+        if not raised["done"] and "Run completed successfully" in msg:
+            raised["done"] = True
+            raise RuntimeError("post-completion logging failure")
+
+    result = E2BSandboxDriver().run(
+        worker_id="side-effect-worker",
+        run_id="run-warm-bypass",
+        inputs={},
+        secrets={"OPENAI_API_KEY": "sk-test"},
+        log_fn=log_fn,
+        trace_id="trace-warm-bypass",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert raised["done"] is True  # the injected failure fired
+    assert result.status == "error"
+    assert result.error_code == "sandbox_liveness_unconfirmed"
+    assert result.retryable is False
+    assert e2b_driver.warm_pool_size() == 0  # sandbox NOT pooled while unwinding
+    _cleanup()
+
+
 def test_cancel_requested_before_spawn_does_not_create_sandbox(tmp_path, monkeypatch):
     """Post-cancel create race: a run cancel-requested while it sat in
     pre-sandbox setup must NOT spawn a sandbox (which the cancel sweep already

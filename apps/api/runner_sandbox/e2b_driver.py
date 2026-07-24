@@ -3229,8 +3229,23 @@ class E2BSandboxDriver(SandboxDriver):
 
         finally:
             _unregister_sandbox(run_id, sandbox)
+            pending_exc = sys.exc_info()[1]
+            unwinding_after_command_start = pending_exc is not None and worker_command_started
+            # Stamp liveness intent on EVERY post-command-start unwind, BEFORE the
+            # warm-pool branch. A warm-pool return (pooled=True) must never be able
+            # to bypass this: if the stamp were skipped, run()'s outer handler
+            # would fall back to a RETRYABLE code and the run_service scheduler
+            # would re-dispatch the worker -> duplicate side effects.
+            if unwinding_after_command_start:
+                try:
+                    pending_exc._e2b_worker_command_started = True
+                    pending_exc._e2b_worker_command_completed = worker_command_completed
+                except Exception:
+                    logger.debug("Could not stamp command-start state on exception", exc_info=True)
             pooled = False
-            if keep_warm and warm_key:
+            # Never return a sandbox to the warm pool while unwinding a failure;
+            # only pool a cleanly-completed run's sandbox.
+            if keep_warm and warm_key and not unwinding_after_command_start:
                 entry = warm_entry or _WarmSandboxEntry(
                     key=warm_key,
                     sandbox=sandbox,
@@ -3240,18 +3255,12 @@ class E2BSandboxDriver(SandboxDriver):
                 )
                 pooled = _warm_pool_return(entry, log_fn=log_fn)
             if not pooled:
-                pending_exc = sys.exc_info()[1]
-                if pending_exc is not None and worker_command_started:
-                    # We are unwinding a failure AFTER the worker command started.
-                    # The outer run() loop may want to retry, but retrying while
-                    # the original is still running would DUPLICATE side effects.
-                    # Do a bounded kill-and-verify and stamp the result on the
-                    # in-flight exception so run() only retries when the original
-                    # is CONFIRMED dead (or refuses to, terminally).
+                if unwinding_after_command_start:
+                    # Bounded kill-and-verify to STOP the original promptly (it may
+                    # still be mid-run). The confirmed-dead result is informational
+                    # now that run() refuses any post-command-start retry.
                     confirmed_dead = _terminate_and_confirm_dead(sandbox, log_fn=log_fn)
                     try:
-                        pending_exc._e2b_worker_command_started = True
-                        pending_exc._e2b_worker_command_completed = worker_command_completed
                         pending_exc._e2b_sandbox_confirmed_dead = confirmed_dead
                     except Exception:
                         logger.debug("Could not stamp liveness state on exception", exc_info=True)
@@ -3259,8 +3268,7 @@ class E2BSandboxDriver(SandboxDriver):
                         log_fn("[e2b] Sandbox confirmed terminated after transport drop", "debug")
                     else:
                         log_fn(
-                            "[e2b] Sandbox termination could NOT be confirmed after transport "
-                            "drop; a retry will be refused to avoid duplicate side effects",
+                            "[e2b] Sandbox termination could NOT be confirmed after transport drop",
                             "warning",
                         )
                 else:
