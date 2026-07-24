@@ -2474,6 +2474,19 @@ class _ActiveRun:
     thread: threading.Thread
     started_monotonic: float = field(default_factory=time.monotonic)
     stage: str = "claimed"
+    # Set once the sandbox worker command (run.py) has started for this run. Once
+    # True, the run must NOT be requeued/re-dispatched on shutdown: re-running a
+    # started worker could duplicate side effects (emails, CRM writes, sends).
+    worker_command_started: bool = False
+
+
+def mark_run_worker_command_started(run_id: str) -> None:
+    """Called by the sandbox driver when the worker command starts, so the
+    graceful-shutdown requeue can skip runs whose worker already began."""
+    with _active_runs_lock:
+        active = _active_runs.get(run_id)
+        if active is not None:
+            active.worker_command_started = True
 
 
 _active_runs: dict[str, _ActiveRun] = {}
@@ -3477,6 +3490,18 @@ def request_active_run_shutdown(
     requeued = 0
     for run in active:
         if run.run_id in remaining_ids:
+            continue
+        # Double-execute guard: never requeue a run whose sandbox worker command
+        # had already started. Re-running it would re-execute committed side
+        # effects (emails, CRM writes, sends). Leave it cancelled (from the
+        # cancel pass) for operator action instead. Pre-command runs (setup /
+        # queued-but-not-yet-executing) are safe to requeue.
+        if run.worker_command_started:
+            logger.warning(
+                "Not requeuing run %s on shutdown: its worker command had started; "
+                "re-running could duplicate side effects",
+                run.run_id,
+            )
             continue
         if _requeue_interrupted_run_in_place(repos_obj, run.run_id, run.user_id):
             requeued += 1

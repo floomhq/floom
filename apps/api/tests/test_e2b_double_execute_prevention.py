@@ -85,6 +85,10 @@ class _Commands:
             behaviour = state["command_behaviour"](state["worker_attempts"])
             if behaviour == "drop":
                 raise _TransientDrop("Server disconnected")
+            if behaviour == "boom":
+                # Opaque, NON-transient failure (not a recognized transport drop
+                # and not OOM) raised after the command started.
+                raise RuntimeError("totally unexpected worker sandbox failure")
             # success: write result.json exactly as a real worker would
             self.sandbox.files.write(
                 "/home/user/worker/result.json",
@@ -259,6 +263,38 @@ def test_drop_after_command_start_even_confirmed_dead_does_not_retry(tmp_path, m
     )
 
     # ...yet a completed/in-flight worker is never re-run.
+    assert _ConfigurableSandbox.state["creates"] == 1
+    assert _ConfigurableSandbox.state["worker_attempts"] == 1
+    assert result.status == "error"
+    assert result.error_code == "sandbox_liveness_unconfirmed"
+    assert result.retryable is False
+    _cleanup()
+
+
+def test_opaque_failure_after_command_start_is_non_retryable(tmp_path, monkeypatch):
+    """An opaque, non-transient failure raised AFTER the worker command started
+    must NOT come back as a retryable code (which run_service's retry scheduler
+    would re-dispatch, re-running the worker). The driver's outer handler forces
+    the non-retryable sandbox_liveness_unconfirmed terminal."""
+    _install(
+        monkeypatch,
+        tmp_path,
+        command_behaviour=lambda _attempt: "boom",  # opaque non-transient failure
+        kill_raises=False,
+    )
+    config = _worker_config(tmp_path)
+
+    result = E2BSandboxDriver().run(
+        worker_id="side-effect-worker",
+        run_id="run-opaque-boom",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_a, **_k: None,
+        trace_id="trace-opaque-boom",
+        timeout_seconds=30,
+        config=config,
+    )
+
     assert _ConfigurableSandbox.state["creates"] == 1
     assert _ConfigurableSandbox.state["worker_attempts"] == 1
     assert result.status == "error"

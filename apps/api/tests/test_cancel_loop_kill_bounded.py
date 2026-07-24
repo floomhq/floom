@@ -74,6 +74,69 @@ def test_cancel_sandbox_forwards_bounded_request_timeout():
     assert kills == [7.5]
 
 
+def test_shutdown_does_not_requeue_started_worker_runs(monkeypatch):
+    """Graceful shutdown must not requeue a run whose worker command already
+    started (re-running it would duplicate side effects). A pre-command run is
+    still requeued."""
+    # Each run thread waits until its sandbox is cancelled, then (like the real
+    # executor) unregisters itself so the shutdown join sees it stop.
+    stop_events = {"run-started": threading.Event(), "run-pre": threading.Event()}
+
+    def fake_cancel(run_id, *, reason=None, request_timeout=None):
+        stop_events[run_id].set()
+        return True
+
+    monkeypatch.setattr(e2b_driver, "cancel_sandbox", fake_cancel)
+
+    requeued: list[str] = []
+    monkeypatch.setattr(
+        run_service,
+        "_requeue_interrupted_run_in_place",
+        lambda _repos, run_id, _user_id: (requeued.append(run_id) or True),
+    )
+
+    def make_thread(run_id: str) -> threading.Thread:
+        def target():
+            stop_events[run_id].wait(timeout=3)
+            run_service._unregister_active_run(run_id)
+
+        return threading.Thread(target=target)
+
+    started = run_service._ActiveRun(
+        run_id="run-started", worker_id="w", user_id="u", thread=make_thread("run-started")
+    )
+    started.worker_command_started = True
+    pre_command = run_service._ActiveRun(
+        run_id="run-pre", worker_id="w", user_id="u", thread=make_thread("run-pre")
+    )
+
+    run_service._register_active_run(started)
+    run_service._register_active_run(pre_command)
+    started.thread.start()
+    pre_command.thread.start()
+    try:
+        run_service.request_active_run_shutdown(repos=_FakeRepos(), timeout_seconds=5.0)
+    finally:
+        run_service._unregister_active_run("run-started")
+        run_service._unregister_active_run("run-pre")
+
+    assert "run-started" not in requeued  # started worker never re-run
+    assert "run-pre" in requeued  # pre-command run safely requeued
+
+
+def test_mark_run_worker_command_started_sets_flag():
+    run = run_service._ActiveRun(
+        run_id="run-mark", worker_id="w", user_id="u", thread=_finished_thread()
+    )
+    run_service._register_active_run(run)
+    try:
+        assert run.worker_command_started is False
+        run_service.mark_run_worker_command_started("run-mark")
+        assert run.worker_command_started is True
+    finally:
+        run_service._unregister_active_run("run-mark")
+
+
 def test_cancel_loop_is_time_bounded_on_hung_kills(monkeypatch):
     # Fake clock so each kill "takes" long enough to blow a 1s budget.
     clock = [1000.0]

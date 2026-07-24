@@ -2401,6 +2401,38 @@ class E2BSandboxDriver(SandboxDriver):
                     error_code="sandbox_oom",
                     retryable=False,
                 )
+            # Double-execute guard (outer handler): an exception that is NOT a
+            # recognized transient transport drop still reaches here after the
+            # worker command started (e.g. an opaque error during result
+            # processing). _sandbox_exception_result would classify it as a
+            # RETRYABLE code (e2b_sandbox_error / upstream_http_5xx), and the
+            # run_service retry scheduler would then re-dispatch the whole run in
+            # a fresh sandbox, re-running the worker -> duplicate side effects. If
+            # the command started, force a non-retryable safety terminal so no
+            # layer re-runs it.
+            if getattr(exc, "_e2b_worker_command_started", False):
+                logger.error(
+                    "E2B sandbox failed for worker %s run %s AFTER the worker command started; "
+                    "surfacing a non-retryable terminal to avoid duplicate side effects: %s",
+                    worker_id,
+                    run_id,
+                    exc,
+                )
+                log_fn(
+                    "[e2b] Sandbox failed after the worker started; NOT retrying to avoid "
+                    "duplicating actions. Operator action required.",
+                    "error",
+                )
+                return WorkerResult(
+                    status="error",
+                    error=(
+                        "The sandbox failed after the worker started. Floom did not re-run it to "
+                        "avoid duplicating side effects (emails, CRM writes, sends). Check whether "
+                        "the run's actions completed, then re-run manually if needed."
+                    ),
+                    error_code=SANDBOX_LIVENESS_UNCONFIRMED_ERROR_CODE,
+                    retryable=False,
+                )
             logger.exception(
                 "E2B sandbox failed for worker %s run %s: %s", worker_id, run_id, exc
             )
@@ -3008,6 +3040,15 @@ class E2BSandboxDriver(SandboxDriver):
             # From here on the worker's own code may run and cause side effects,
             # so a transport drop must not be blindly retried (see run() guard).
             worker_command_started = True
+            # Signal run_service so the graceful-shutdown requeue never re-runs a
+            # started worker. Lazy + guarded: the OSS/single-tenant path and unit
+            # tests may run the driver without the run_service executor loaded.
+            try:
+                from run_service import mark_run_worker_command_started  # noqa: PLC0415
+
+                mark_run_worker_command_started(run_id)
+            except Exception:
+                logger.debug("Could not mark worker_command_started for run %s", run_id, exc_info=True)
             try:
                 proc = sandbox.commands.run(
                     command,
