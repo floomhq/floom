@@ -51,7 +51,9 @@ def test_request_active_run_shutdown_marks_cancel_and_kills_sandbox(monkeypatch)
     monkeypatch.setattr(
         e2b_driver,
         "cancel_sandbox",
-        lambda run_id, reason=None: killed.append((run_id, reason)) or True,
+        # cancel_sandbox now takes a bounded request_timeout (the cancel loop
+        # bounds each kill so a hung kill cannot blow the shutdown budget).
+        lambda run_id, reason=None, request_timeout=None: killed.append((run_id, reason)) or True,
     )
 
     try:
