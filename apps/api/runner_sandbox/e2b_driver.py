@@ -2277,28 +2277,31 @@ class E2BSandboxDriver(SandboxDriver):
                         )
                     # Double-execute guard: only retry when it is SAFE. A retry
                     # re-runs the worker (run.py) from scratch in a fresh sandbox.
-                    # If the worker command had already STARTED when the transport
-                    # dropped, its side effects (emails, CRM writes, sends) may
-                    # already be in flight in the ORIGINAL sandbox. _run_in_sandbox
-                    # stamps the in-flight exception with whether the command had
-                    # started and whether it CONFIRMED the original sandbox dead
-                    # (bounded kill-and-verify). Retry only when the command never
-                    # started (create/upload phase: no side effects yet) OR the
-                    # original was confirmed terminated. Otherwise refuse to
-                    # re-run and surface an operator-action terminal code rather
-                    # than risk a duplicate.
+                    # Once the worker command has STARTED, its side effects
+                    # (emails, CRM writes, sends) may already be committed:
+                    # partially if it dropped mid-run, fully if it completed. The
+                    # bounded kill-and-verify below stops the ORIGINAL sandbox, but
+                    # killing cannot UNDO an action that already committed, and the
+                    # platform does not yet enforce action-level idempotency at the
+                    # connector boundary. So a post-command-start retry could
+                    # DUPLICATE a committed action even when the original is
+                    # confirmed dead. We therefore refuse to auto-retry any run
+                    # whose command started, and surface an operator-action
+                    # terminal instead. Retry stays enabled ONLY for create/upload
+                    # phase drops (command never started -> no worker code ran ->
+                    # no side effects possible), which covers the common
+                    # sandbox-create / HPACK / header-block transport drops.
+                    # (Re-enabling safe post-start retry requires durable
+                    # run_id+operation idempotency keys threaded into connector
+                    # calls; tracked as the documented residual.)
                     command_started = bool(getattr(exc, "_e2b_worker_command_started", False))
                     command_completed = bool(getattr(exc, "_e2b_worker_command_completed", False))
                     sandbox_confirmed_dead = bool(getattr(exc, "_e2b_sandbox_confirmed_dead", False))
-                    # Refuse to retry when either (a) the command RAN TO COMPLETION
-                    # (side effects done; a retry is a pure duplicate) or (b) the
-                    # command started and the original sandbox could not be
-                    # confirmed dead (it may still be running its side effects).
-                    if command_completed or (command_started and not sandbox_confirmed_dead):
+                    if command_started:
                         logger.error(
-                            "E2B transport dropped after the worker %s for worker %s run %s; "
-                            "refusing to re-run to avoid duplicate side effects (command_completed=%s, "
-                            "sandbox_confirmed_dead=%s)",
+                            "E2B transport dropped after the worker command %s for worker %s run %s; "
+                            "refusing to re-run to avoid duplicate side effects "
+                            "(command_completed=%s, sandbox_confirmed_dead=%s)",
                             "completed" if command_completed else "started",
                             worker_id,
                             run_id,
@@ -2306,17 +2309,16 @@ class E2BSandboxDriver(SandboxDriver):
                             sandbox_confirmed_dead,
                         )
                         log_fn(
-                            "[e2b] Sandbox transport dropped after the worker started and the "
-                            "original sandbox could not be confirmed stopped; NOT retrying to "
-                            "avoid duplicating actions. Operator action required.",
+                            "[e2b] Sandbox transport dropped after the worker started; NOT retrying "
+                            "to avoid duplicating actions (emails, CRM writes, sends). Operator "
+                            "action required.",
                             "error",
                         )
                         return WorkerResult(
                             status="error",
                             error=(
-                                "The sandbox connection dropped after the worker started and the "
-                                "original sandbox could not be confirmed stopped. Floom did not "
-                                "re-run it to avoid duplicating side effects (emails, CRM writes, "
+                                "The sandbox connection dropped after the worker started. Floom did "
+                                "not re-run it to avoid duplicating side effects (emails, CRM writes, "
                                 "sends). Check whether the run's actions completed, then re-run "
                                 "manually if needed."
                             ),

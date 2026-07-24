@@ -112,6 +112,10 @@ class _ConfigurableSandbox:
     @classmethod
     def create(cls, **_kwargs):
         cls.state["creates"] += 1
+        behaviour = cls.state.get("create_behaviour")
+        if behaviour is not None and behaviour(cls.state["creates"]) == "drop":
+            # Transport drop DURING Sandbox.create (before any worker code runs).
+            raise _TransientDrop("Server disconnected")
         return cls()
 
     def set_timeout(self, *_args, **_kwargs):
@@ -136,6 +140,7 @@ def _install(
     kill_raises,
     is_running=True,
     result_read_raises=False,
+    create_behaviour=None,
 ):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_MAX_ATTEMPTS", "3")
@@ -154,6 +159,7 @@ def _install(
         "kill_raises": kill_raises,
         "is_running": is_running,
         "result_read_raises": result_read_raises,
+        "create_behaviour": create_behaviour,
     }
 
 
@@ -220,21 +226,24 @@ def test_drop_after_command_start_with_unconfirmed_kill_does_not_double_execute(
     assert result.error_code == "sandbox_liveness_unconfirmed"
     assert result.retryable is False
     assert any(
-        "could not be confirmed" in msg.lower() and level == "error"
+        "not retrying" in msg.lower() and level == "error"
         for msg, level in logs
     )
     _cleanup()
 
 
-def test_drop_after_command_start_with_confirmed_dead_sandbox_retries(tmp_path, monkeypatch):
-    """Transport drops mid-command but the original sandbox is CONFIRMED
-    terminated (kill succeeds) -> it is SAFE to retry, so a fresh sandbox runs
-    and the run succeeds."""
+def test_drop_after_command_start_even_confirmed_dead_does_not_retry(tmp_path, monkeypatch):
+    """Transport drops mid-command and the original sandbox IS confirmed dead
+    (kill succeeds). Confirmed-dead stops concurrent execution, but it cannot
+    undo a side effect the worker may have already committed before the drop,
+    and the platform does not enforce action-level idempotency. So we still
+    refuse to auto-retry a run whose command started: NO second sandbox, and the
+    run ends terminally with sandbox_liveness_unconfirmed."""
     _install(
         monkeypatch,
         tmp_path,
-        command_behaviour=lambda attempt: "drop" if attempt == 1 else "success",
-        kill_raises=False,  # control-plane kill confirms termination
+        command_behaviour=lambda _attempt: "drop",
+        kill_raises=False,  # control-plane kill confirms termination...
     )
     config = _worker_config(tmp_path)
 
@@ -249,9 +258,45 @@ def test_drop_after_command_start_with_confirmed_dead_sandbox_retries(tmp_path, 
         config=config,
     )
 
-    assert _ConfigurableSandbox.state["creates"] == 2  # original + one retry
+    # ...yet a completed/in-flight worker is never re-run.
+    assert _ConfigurableSandbox.state["creates"] == 1
+    assert _ConfigurableSandbox.state["worker_attempts"] == 1
+    assert result.status == "error"
+    assert result.error_code == "sandbox_liveness_unconfirmed"
+    assert result.retryable is False
+    _cleanup()
+
+
+def test_drop_before_command_start_retries(tmp_path, monkeypatch):
+    """A transport drop DURING Sandbox.create (before any worker code runs) has
+    no side-effect risk, so retry is safe and preserved: a fresh sandbox is
+    created and the worker runs to success."""
+    _install(
+        monkeypatch,
+        tmp_path,
+        command_behaviour=lambda _attempt: "success",
+        kill_raises=False,
+        create_behaviour=lambda create_count: "drop" if create_count == 1 else "ok",
+    )
+    config = _worker_config(tmp_path)
+
+    result = E2BSandboxDriver().run(
+        worker_id="side-effect-worker",
+        run_id="run-create-drop",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_a, **_k: None,
+        trace_id="trace-create-drop",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    # First create dropped (no worker ran); retry created a second sandbox and
+    # the worker ran exactly once.
+    assert _ConfigurableSandbox.state["creates"] == 2
+    assert _ConfigurableSandbox.state["worker_attempts"] == 1
     assert result.status == "success"
-    assert result.outputs == {"attempt": 2}
+    assert result.outputs == {"attempt": 1}
     _cleanup()
 
 
