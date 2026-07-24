@@ -42,6 +42,7 @@ from contexts import (
     iter_context_files,
     normalize_context_mount,
     use_context_scope,
+    writeable_mount_source,
 )
 from models import (
     UnsafeMCPUrlError,
@@ -428,18 +429,32 @@ def stage_context_packs(
                 )
                 continue
 
-            local_dir = context_dir(name)
-            if not local_dir.is_dir():
-                log_fn(f"[capabilities] Context {name!r} not found locally", "warning")
-                continue
+            def _copy_pack_tree(local_dir: Path) -> bool:
+                if not local_dir.is_dir():
+                    log_fn(f"[capabilities] Context {name!r} not found locally", "warning")
+                    return False
+                pack_target = _safe_path(context_root, name)
+                pack_target.mkdir(parents=True, exist_ok=True)
+                for fpath in iter_context_files(local_dir):
+                    rel = fpath.relative_to(local_dir)
+                    dest = _safe_path(pack_target, rel.as_posix())
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(fpath.read_bytes())
+                return True
 
-            pack_target = _safe_path(context_root, name)
-            pack_target.mkdir(parents=True, exist_ok=True)
-            for fpath in iter_context_files(local_dir):
-                rel = fpath.relative_to(local_dir)
-                dest = _safe_path(pack_target, rel.as_posix())
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(fpath.read_bytes())
+            # Writeable (mutable) packs stage from the authoritative durable
+            # store, not this container's long-lived local cache, so an edit
+            # from another executor/replica or the operator API is visible to
+            # the run. writeable_mount_source yields a fresh exact snapshot in
+            # hosted mode (context_dir(name) in OSS); a snapshot failure
+            # PROPAGATES so the run fails closed rather than stages stale data.
+            if context.get("writeable"):
+                with writeable_mount_source(name) as local_dir:
+                    if not _copy_pack_tree(local_dir):
+                        continue
+            else:
+                if not _copy_pack_tree(context_dir(name)):
+                    continue
             staged.append(name)
             log_fn(f"[capabilities] Staged context {name!r}", "debug")
     return staged

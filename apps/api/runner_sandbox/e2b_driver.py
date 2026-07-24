@@ -38,6 +38,7 @@ from contexts import (
     load_context_metadata,
     normalize_context_mount,
     use_context_scope,
+    writeable_mount_source,
 )
 from runner_utils import ARTIFACTS_DIR
 from runtime_limits import (
@@ -3356,6 +3357,36 @@ class E2BSandboxDriver(SandboxDriver):
                         return (
                             f"git context {name!r} clone failed "
                             f"(exit {result.exit_code}): {(result.stderr or result.stdout or '')[:500]}"
+                        )
+                    continue
+
+                # Writeable (mutable) packs must mount from the authoritative
+                # durable store, not this container's long-lived local cache, so
+                # a writeback from another executor/replica or an operator edit
+                # is visible to the run. writeable_mount_source yields a fresh
+                # exact snapshot in hosted mode (context_dir(name) in OSS). A
+                # snapshot failure PROPAGATES -> fail the mount closed (retryable)
+                # rather than mount stale mutable data.
+                if context.get("writeable"):
+                    try:
+                        with writeable_mount_source(name) as local_dir:
+                            if not local_dir.is_dir():
+                                log_fn(f"[e2b] context {name!r} not found locally", "warning")
+                                continue
+                            upload_tree_tarball(
+                                sandbox,
+                                local_dir,
+                                sandbox_target,
+                                skip=lambda _path, rel: "__pycache__" in rel.parts,
+                                log_fn=log_fn,
+                                label=f"context {name}",
+                            )
+                    except RuntimeError as exc:
+                        return str(exc)
+                    except Exception as exc:  # noqa: BLE001 - snapshot fail-closed
+                        return (
+                            f"writeable context {name!r} could not be refreshed "
+                            f"from durable storage: {exc}"
                         )
                     continue
 
