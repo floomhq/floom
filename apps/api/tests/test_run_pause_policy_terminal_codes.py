@@ -143,6 +143,21 @@ def test_missing_connection_is_terminal(monkeypatch, tmp_path):
     assert repos.workers.worker["enabled"] is False
 
 
+def test_missing_required_input_is_terminal(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
+    monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
+    repos = _Repos(
+        [
+            "missing_required_input",
+            "missing_required_input",
+            "missing_required_input",
+        ]
+    )
+
+    assert _apply(repos, "missing_required_input") is True
+    assert repos.workers.worker["enabled"] is False
+
+
 def test_resume_requires_three_fresh_terminal_failures(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
     monkeypatch.setattr("worker_registry.WORKERS_DIR", tmp_path)
