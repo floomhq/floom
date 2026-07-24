@@ -601,6 +601,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
     "output_token_limit",
     "output_too_large",
     "quality_gate_failed",
+    "sandbox_liveness_unconfirmed",
     "schema_violation",
     "spend_cap_exceeded",
     "token_cap_exceeded",
@@ -2444,6 +2445,12 @@ _SCHEDULE_MISSING_SECRET_PAUSE_AFTER = 3
 _RUN_REAPER_DEFAULT_GRACE_SECONDS = 60
 _RUN_REAPER_DEFAULT_INTERVAL_SECONDS = 180
 _RESTART_RETRY_BACKOFF_SECONDS = 60
+# Per-sandbox control-plane kill timeout used inside the cancel loop. The loop
+# runs serially over every active run, so the driver default (60s) could make a
+# single hung kill blow the whole shutdown/cancel budget. Bound each kill and
+# stop issuing kills once the overall cancel budget is spent (leftover sandboxes
+# are handled by thread-join + startup recovery).
+_CANCEL_LOOP_SANDBOX_KILL_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass
@@ -3305,6 +3312,10 @@ def _cancel_active_runs(
         cancel_sandbox = None
 
     cancelled_at = _now_iso()
+    # Bound the serial kill loop so one hung control-plane kill cannot blow the
+    # whole cancel budget. Once the budget is spent, stop killing and let the
+    # thread-join + startup recovery handle any stragglers.
+    kill_deadline = time.monotonic() + max(0.0, timeout_seconds)
     for run in active:
         if run.user_id:
             try:
@@ -3324,10 +3335,25 @@ def _cancel_active_runs(
             except Exception as exc:
                 logger.warning("Failed to mark run %s cancelled: %s", run.run_id, exc)
         if cancel_sandbox is not None:
-            try:
-                cancel_sandbox(run.run_id, reason=reason)
-            except Exception:
-                logger.debug("E2B cancel failed for run %s", run.run_id, exc_info=True)
+            remaining = kill_deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "Cancel loop kill budget exhausted; leaving sandbox for run %s to "
+                    "thread-join and startup recovery",
+                    run.run_id,
+                )
+            else:
+                try:
+                    cancel_sandbox(
+                        run.run_id,
+                        reason=reason,
+                        request_timeout=min(
+                            _CANCEL_LOOP_SANDBOX_KILL_REQUEST_TIMEOUT_SECONDS,
+                            remaining,
+                        ),
+                    )
+                except Exception:
+                    logger.debug("E2B cancel failed for run %s", run.run_id, exc_info=True)
 
     deadline = time.monotonic() + max(0.0, timeout_seconds)
     for run in active:
