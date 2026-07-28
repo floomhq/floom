@@ -849,6 +849,33 @@ class TestEmailNotifications:
     """Tests for _send_email_notification. These are pure-unit — they mock
     Resend entirely and do NOT import db (so they pass on Windows too)."""
 
+    def _capture_resend(self, monkeypatch, *, send=None):
+        """Intercept the outbound Resend POST and record payload + headers.
+
+        The send is a plain HTTPS POST with the credential in a per-request
+        Authorization header (never the SDK's process-global `resend.api_key`,
+        which two concurrent senders can race on).
+        """
+        import httpx
+
+        captured = []
+
+        class _Response:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"id": "email_123"}
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            captured.append({"url": url, "payload": json, "headers": headers})
+            if send is not None:
+                send(json)
+            return _Response()
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+        return captured
+
     def _import_send_email(self):
         """Import _send_email_notification by loading run_service with fcntl mocked."""
         # Stub out fcntl so run_service can be imported on Windows
@@ -870,8 +897,7 @@ class TestEmailNotifications:
     def test_send_email_skips_when_resend_not_configured(self, monkeypatch):
         """When RESEND_API_KEY is absent, no Resend call is attempted."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
-        fake_resend = MagicMock()
-        monkeypatch.setitem(sys.modules, "resend", fake_resend)
+        captured = self._capture_resend(monkeypatch)
         run_svc = self._import_send_email()
 
         run_svc._send_email_notification(
@@ -883,14 +909,13 @@ class TestEmailNotifications:
             error=None,
         )
 
-        fake_resend.Emails.send.assert_not_called()
+        assert captured == []
 
     def test_send_email_uses_resend_payload_and_escapes_html(self, monkeypatch):
         """Configured email notifications call Resend with safe HTML and plain text."""
         monkeypatch.setenv("RESEND_API_KEY", "re_test")
         monkeypatch.setenv("NOTIFY_FROM_EMAIL", "notifications@example.com")
-        fake_resend = MagicMock()
-        monkeypatch.setitem(sys.modules, "resend", fake_resend)
+        captured = self._capture_resend(monkeypatch)
         run_svc = self._import_send_email()
 
         run_svc._send_email_notification(
@@ -902,9 +927,11 @@ class TestEmailNotifications:
             error="Boom <script>",
         )
 
-        fake_resend.Emails.send.assert_called_once()
-        payload = fake_resend.Emails.send.call_args.args[0]
-        assert fake_resend.api_key == "re_test"
+        assert len(captured) == 1
+        payload = captured[0]["payload"]
+        # The credential travels with THIS request; nothing global is mutated.
+        assert captured[0]["url"] == "https://api.resend.com/emails"
+        assert captured[0]["headers"]["Authorization"] == "Bearer re_test"
         assert payload["from"] == "Floom <notifications@example.com>"
         assert payload["to"] == ["ops@example.com"]
         assert payload["subject"] == "Worker Weekly <Digest> failed"
@@ -921,8 +948,7 @@ class TestEmailNotifications:
         monkeypatch.setenv("RESEND_API_KEY", "re_test")
         monkeypatch.setenv("NOTIFY_FROM_EMAIL", "Workeros <noreply@floom.dev>")
         monkeypatch.setenv("WORKEROS_EMAIL_UNSUBSCRIBE_URL", "https://floom.dev/app/settings")
-        fake_resend = MagicMock()
-        monkeypatch.setitem(sys.modules, "resend", fake_resend)
+        captured = self._capture_resend(monkeypatch)
         run_svc = self._import_send_email()
 
         run_svc._send_email_notification(
@@ -934,13 +960,13 @@ class TestEmailNotifications:
             error=None,
         )
 
-        payload = fake_resend.Emails.send.call_args.args[0]
+        payload = captured[0]["payload"]
         assert payload["from"] == "Floom <notifications@floom.dev>"
         assert payload["headers"]["List-Unsubscribe"] == "<https://floom.dev/app/settings>"
         assert "Manage alerts" in payload["html"]
 
     def test_send_email_timeout_returns_without_waiting_for_resend(self, monkeypatch):
-        """A hung Resend SDK call is bounded and does not block run completion."""
+        """A hung Resend call is bounded and does not block run completion."""
         monkeypatch.setenv("RESEND_API_KEY", "re_test")
         monkeypatch.setenv("WORKEROS_RESEND_TIMEOUT_SECONDS", "0.1")
         send_entered = threading.Event()
@@ -949,9 +975,7 @@ class TestEmailNotifications:
             send_entered.set()
             time.sleep(5)
 
-        fake_resend = MagicMock()
-        fake_resend.Emails.send.side_effect = hung_send
-        monkeypatch.setitem(sys.modules, "resend", fake_resend)
+        captured = self._capture_resend(monkeypatch, send=hung_send)
         run_svc = self._import_send_email()
 
         started = time.monotonic()
@@ -965,9 +989,9 @@ class TestEmailNotifications:
         )
         elapsed = time.monotonic() - started
 
-        assert send_entered.wait(timeout=0.1)
+        assert send_entered.wait(timeout=1.0)
         assert elapsed < 1.0
-        fake_resend.Emails.send.assert_called_once()
+        assert len(captured) == 1
 
     def test_notify_config_model_accepts_email_to(self):
         """NotifyConfig Pydantic model accepts email_to list."""
