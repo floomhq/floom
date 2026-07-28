@@ -41,6 +41,9 @@ logger = logging.getLogger("floom.run_service")
 FLOOM_EMAIL_LOGO_URL = "https://workers.floom.dev/brand/floom-email-logo@2x.png"
 FLOOM_NOTIFICATIONS_FROM = "Floom <notifications@floom.dev>"
 
+RESEND_API_BASE_URL = "https://api.resend.com"
+RESEND_SEND_URL = f"{RESEND_API_BASE_URL}/emails"
+
 
 def _resend_timeout_seconds() -> float:
     try:
@@ -49,14 +52,81 @@ def _resend_timeout_seconds() -> float:
         return 10.0
 
 
-def _resend_send_with_timeout(resend_module: Any, payload: dict[str, Any]) -> None:
+def _resend_send_url() -> str:
+    """The Resend send endpoint, honouring the SDK's own RESEND_API_URL override.
+
+    The resend SDK read this env var to retarget the API (proxy, test endpoint,
+    self-hosted gateway). Dropping the SDK must not silently drop that knob.
+    """
+    base = (os.environ.get("RESEND_API_URL") or RESEND_API_BASE_URL).strip().rstrip("/")
+    return f"{base or RESEND_API_BASE_URL}/emails"
+
+
+def _resend_send(*, api_key: str, params: dict[str, Any]) -> dict[str, Any]:
+    """POST one email to Resend with the credential carried on that request.
+
+    Deliberately not the resend SDK. The SDK reads its credential from the
+    process-global ``resend.api_key`` when it BUILDS the request, not when you
+    assign it, so anything else in the process that assigns that global can
+    interleave with a send here and ship the email under the wrong account's
+    credential. That is not hypothetical: the hosted wrapper vendors this
+    engine and sends its own auth mail from a second Resend account in the same
+    process, and this notification path runs on its own daemon sender thread.
+    A per-request Authorization header has no shared state to lose.
+
+    Mirrors the same fix on the cloud side (workeros-cloud #1277, 2a0b474).
+    """
+    import httpx
+
+    response = httpx.post(
+        _resend_send_url(),
+        json=params,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        timeout=_resend_timeout_seconds(),
+    )
+    # Only a 2xx means Resend accepted the email. httpx does not follow
+    # redirects, so a 3xx is an undelivered email and has to read as a failure
+    # rather than as a body with no message id. (The old SDK went through
+    # requests, which does follow; chasing a redirect here would only have
+    # arrived unauthenticated anyway, since httpx strips Authorization across
+    # origins.)
+    if not 200 <= response.status_code < 300:
+        detail = ""
+        try:
+            body = response.json()
+            if isinstance(body, dict):
+                detail = str(body.get("message") or body.get("name") or "")
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            f"Resend returned {response.status_code}{': ' + detail if detail else ''}"
+        )
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}
+
+
+def _resend_post_with_timeout(api_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Run one Resend send under a hard wall-clock bound.
+
+    ``httpx`` applies its timeout per operation (connect, write, read), so a
+    pathological endpoint can still outlive it overall. This alert path runs on
+    a daemon thread that must never park, so the send keeps its own strict
+    join-based ceiling on top.
+
+    Renamed from ``_resend_send_with_timeout``, whose first argument was the
+    resend SDK module. That contract cannot survive dropping the SDK, so the
+    name goes with it: an out-of-tree importer gets a loud ImportError instead
+    of a silently reinterpreted first argument.
+    """
     timeout = _resend_timeout_seconds()
-    result: "queue.Queue[BaseException | None]" = queue.Queue(maxsize=1)
+    result: "queue.Queue[BaseException | dict[str, Any]]" = queue.Queue(maxsize=1)
 
     def _send() -> None:
         try:
-            resend_module.Emails.send(payload)
-            result.put(None)
+            result.put(_resend_send(api_key=api_key, params=payload))
         except BaseException as exc:
             result.put(exc)
 
@@ -66,8 +136,9 @@ def _resend_send_with_timeout(resend_module: Any, payload: dict[str, Any]) -> No
     if thread.is_alive():
         raise TimeoutError(f"Resend email send exceeded {timeout:g}s timeout")
     outcome = result.get_nowait()
-    if outcome is not None:
+    if isinstance(outcome, BaseException):
         raise outcome
+    return outcome
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -450,8 +521,6 @@ def _send_email_notification(
         text_lines += ["", f"Approval: {approval_label or 'Review approval'}", approval_url]
 
     try:
-        import resend
-        resend.api_key = api_key
         payload = {
             "from": from_addr,
             "to": to_addrs,
@@ -465,8 +534,14 @@ def _send_email_notification(
                 "List-Unsubscribe": f"<{unsubscribe_url}>",
                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
             }
-        _resend_send_with_timeout(resend, payload)
-        logger.debug("Email notification sent via Resend to %s for run %s (%s)", to_addrs, run_id, status)
+        response = _resend_post_with_timeout(api_key, payload)
+        logger.debug(
+            "Email notification sent via Resend to %s for run %s (%s) id=%s",
+            to_addrs,
+            run_id,
+            status,
+            response.get("id"),
+        )
     except Exception as exc:
         logger.warning("Resend email notification failed for run %s: %s", run_id, exc)
 

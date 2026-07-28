@@ -226,7 +226,8 @@ def execution_role_enabled() -> bool:
 # services.run_notifications; re-imported for backward compatibility.
 from services.run_notifications import (
     _resend_timeout_seconds,
-    _resend_send_with_timeout,
+    _resend_send,
+    _resend_post_with_timeout,
     _NoRedirectHandler,
     _PinnedHTTPConnection,
     _PinnedHTTPSConnection,
