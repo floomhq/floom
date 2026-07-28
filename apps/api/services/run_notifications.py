@@ -88,10 +88,11 @@ def _resend_send(*, api_key: str, params: dict[str, Any]) -> dict[str, Any]:
         timeout=_resend_timeout_seconds(),
     )
     # Only a 2xx means Resend accepted the email. httpx does not follow
-    # redirects, and a credentialed POST must not chase one anyway (the
-    # Authorization header would travel to whatever host answered), so a 3xx is
-    # an undelivered email and has to read as a failure rather than as a body
-    # with no message id.
+    # redirects, so a 3xx is an undelivered email and has to read as a failure
+    # rather than as a body with no message id. (The old SDK went through
+    # requests, which does follow; chasing a redirect here would only have
+    # arrived unauthenticated anyway, since httpx strips Authorization across
+    # origins.)
     if not 200 <= response.status_code < 300:
         detail = ""
         try:
