@@ -57,13 +57,33 @@ def _install_resend_global_probe(monkeypatch):
     """Put a stub ``resend`` module in place whose api_key must never change.
 
     Under the old implementation ``import resend; resend.api_key = api_key``
-    would overwrite this sentinel on every send.
+    overwrote this sentinel on every send. The stub faithfully reproduces what
+    the real SDK does with it: ``Request.__get_headers`` builds
+    ``Authorization: Bearer {resend.api_key}`` when the request is BUILT, on
+    the sender thread, long after the assignment. So if anything ever routes
+    through the SDK again, these tests observe the real crossover (a header
+    carrying another sender's key) rather than merely a stub that refuses.
     """
     stub = types.ModuleType("resend")
     stub.api_key = GLOBAL_SENTINEL
-    stub.Emails = types.SimpleNamespace(
-        send=lambda _payload: pytest.fail("the resend SDK must not be used")
-    )
+
+    def _sdk_send(payload):
+        import httpx
+
+        # The window the SDK leaves open between "assign the global" and "read
+        # the global to build the request".
+        time.sleep(0.001)
+        # Literal URL, not a module constant: the stub has to work unchanged
+        # against the pre-fix implementation for the counterfactual to mean
+        # anything.
+        return httpx.post(
+            "https://api.resend.com/emails",
+            json=payload,
+            headers={"Authorization": f"Bearer {stub.api_key}"},
+            timeout=5.0,
+        )
+
+    stub.Emails = types.SimpleNamespace(send=_sdk_send)
     monkeypatch.setitem(sys.modules, "resend", stub)
     return stub
 
@@ -112,9 +132,43 @@ def test_resend_send_carries_the_key_per_request_and_surfaces_provider_errors(mo
     with pytest.raises(RuntimeError):
         rn._resend_send(api_key="re_caller_key", params={})
 
-    # A malformed success body yields no message id rather than exploding.
+    # A redirect is an UNDELIVERED email. httpx does not follow it (and a
+    # credentialed POST must not chase one), so it has to raise rather than be
+    # mistaken for an accepted send with no message id.
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _Response(302, {"id": "not-delivered"}))
+    with pytest.raises(RuntimeError) as redirect_err:
+        rn._resend_send(api_key="re_caller_key", params={})
+    assert "302" in str(redirect_err.value)
+
+    # A success body that is valid JSON but not an object yields no message id
+    # rather than exploding.
     monkeypatch.setattr(httpx, "post", lambda *a, **k: _Response(200, ["unexpected"]))
     assert rn._resend_send(api_key="re_caller_key", params={}) == {}
+
+    # A success body that is not JSON at all surfaces as a failure, so the
+    # caller logs it instead of reporting a delivery it cannot confirm.
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _Response(200, ValueError("not json")))
+    with pytest.raises(ValueError):
+        rn._resend_send(api_key="re_caller_key", params={})
+
+
+def test_resend_send_honours_the_api_url_override(monkeypatch):
+    """The SDK read RESEND_API_URL; dropping the SDK must not drop the knob."""
+    seen = []
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, json=None, headers=None, timeout=None: seen.append(url)
+        or _Response(200, {"id": "email_1"}),
+    )
+
+    monkeypatch.delenv("RESEND_API_URL", raising=False)
+    rn._resend_send(api_key="k", params={})
+    assert seen[-1] == rn.RESEND_SEND_URL == "https://api.resend.com/emails"
+
+    monkeypatch.setenv("RESEND_API_URL", "https://resend.proxy.internal/")
+    rn._resend_send(api_key="k", params={})
+    assert seen[-1] == "https://resend.proxy.internal/emails"
 
 
 def test_notification_send_never_assigns_the_process_global_api_key(monkeypatch):
@@ -199,8 +253,10 @@ def test_concurrent_sends_never_carry_another_senders_key(monkeypatch):
     lock = threading.Lock()
 
     def fake_post(url, json=None, headers=None, timeout=None):
-        # A short pause widens the window in which a shared global would be
-        # overwritten by another sender before this request is built.
+        # Hold each request in flight briefly so the senders genuinely overlap
+        # rather than serialising through the transport. (The window that
+        # mattered, between assigning the SDK global and reading it to build the
+        # header, is reproduced inside the stub SDK in _install_resend_global_probe.)
         time.sleep(0.001)
         with lock:
             observed.append((json["to"][0], headers["Authorization"]))
