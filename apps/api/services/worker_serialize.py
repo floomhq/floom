@@ -18,9 +18,11 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
@@ -301,6 +303,116 @@ def _resolve_worker_stage(worker: Dict[str, Any]) -> str:
     return "draft"
 
 
+_DEFAULT_SCHEDULE_STALE_GRACE_SECONDS = 900.0
+# timedelta overflows long before float does, so an absurd but finite env value
+# would otherwise raise OverflowError straight out of GET /workers. 30 days is
+# far beyond any sane grace and keeps the cutoff arithmetic total.
+_MAX_SCHEDULE_STALE_GRACE_SECONDS = 30.0 * 24 * 60 * 60
+
+
+def _schedule_stale_grace_seconds() -> float:
+    """Seconds a schedule slot may sit in the past before the worker is stale.
+
+    ``WORKEROS_SCHEDULE_STALE_GRACE_SECONDS`` (default 900 = 15 minutes) absorbs
+    the scheduler poll interval, a slow fire, and clock skew, so a healthy
+    deployment never flickers into needs_attention. Anything unparseable, zero,
+    negative or non-finite falls back to the default rather than disabling or
+    over-tightening the check, and an absurdly large one is clamped so the
+    cutoff subtraction can never overflow out of the endpoint.
+    """
+    raw = (os.environ.get("WORKEROS_SCHEDULE_STALE_GRACE_SECONDS") or "").strip()
+    if not raw:
+        return _DEFAULT_SCHEDULE_STALE_GRACE_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_SCHEDULE_STALE_GRACE_SECONDS
+    if not math.isfinite(value) or value <= 0:
+        return _DEFAULT_SCHEDULE_STALE_GRACE_SECONDS
+    return min(value, _MAX_SCHEDULE_STALE_GRACE_SECONDS)
+
+
+def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
+    """Best-effort UTC datetime from a stored timestamp; None if unusable.
+
+    Never raises: a weird/legacy/NULL ``next_run_at`` must degrade to "no
+    signal" (not stale), never take down GET /workers.
+    """
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        text = value.strip()
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except (TypeError, ValueError):
+            return None
+    else:
+        return None
+    try:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (OverflowError, ValueError):
+        return None
+
+
+def _schedule_stale_worker_ids(
+    worker_ids: List[str],
+    *,
+    user_id: str,
+    repos: Repositories,
+    now: Optional[datetime] = None,
+) -> set[str]:
+    """The subset of *worker_ids* whose cron slot has silently drifted past.
+
+    Part 2 of the 2026-07 silent-scheduler outage. Part 1 covers a LIVE
+    scheduler whose fire is refused (it now writes a synthetic FAILED run, so
+    last_run_status goes red). This covers the other half: a scheduler process
+    that is entirely dead and writes nothing at all. Its fingerprint is the
+    durable ``worker_triggers.next_run_at`` column, which the scheduler rewrites
+    to the next cron slot on BOTH the success and the failure path, so if it has
+    drifted into the past, nothing advanced it.
+
+    Deliberately NO croniter / timezone math / cron parsing in the request path:
+    duplicating the scheduler's slot computation here would risk DST divergence
+    between the two, which is exactly the kind of drift this is meant to detect.
+
+    Batched in ONE query per request (see ``schedule_staleness_batch``) so the
+    worker list never pays an N+1, and judged against ONE request-scoped *now*
+    so every worker in a response is measured from the same instant.
+
+    ``schedule_staleness_batch`` is an OPTIONAL repository hook: the cloud
+    backend lives in another repository and does not implement it yet. A missing
+    or throwing hook yields an empty set, i.e. every worker is treated as not
+    stale and behavior is byte-identical to before.
+    """
+    if not worker_ids:
+        return set()
+    staleness_batch = getattr(
+        getattr(repos, "workers", None), "schedule_staleness_batch", None
+    )
+    if not callable(staleness_batch):
+        return set()
+    try:
+        rows = staleness_batch(user_id=user_id, worker_ids=list(worker_ids))
+    except Exception:
+        logger.debug("schedule staleness batch failed", exc_info=True)
+        return set()
+    if not isinstance(rows, dict):
+        return set()
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(
+        seconds=_schedule_stale_grace_seconds()
+    )
+    stale: set[str] = set()
+    for worker_id, next_run_at in rows.items():
+        parsed = _parse_utc_timestamp(next_run_at)
+        if parsed is not None and parsed < cutoff:
+            stale.add(str(worker_id))
+    return stale
+
+
 def _resolve_worker_status(
     worker: Dict[str, Any],
     *,
@@ -308,6 +420,7 @@ def _resolve_worker_status(
     available_secret_names: Iterable[str],
     last_run_status: Optional[RunStatus],
     has_run: bool,
+    schedule_stale: bool = False,
 ) -> WorkerStatus:
     """Single source of truth for an operator-facing worker status.
 
@@ -322,6 +435,15 @@ def _resolve_worker_status(
     4. READY — the worker has never run, so "healthy" (which implies a
        verified-working worker) has not been EARNED. READY renders identically
        to HEALTHY in the quiet UI; this only keeps the API claim honest.
+    5. NEEDS_ATTENTION on ``schedule_stale``: an enabled schedule trigger's
+       ``next_run_at`` sits further in the past than the grace window, so no
+       scheduler has advanced it. Without this, a scheduler process that is
+       entirely dead writes nothing at all, ``last_run_status`` stays green from
+       whenever it last worked, and a worker that has not fired for 100+ hours
+       reports healthy (the 2026-07 outage: 17 workers dead for four days). The
+       caller computes the flag (see ``_schedule_stale_worker_ids``); it
+       defaults to False so a backend without the batch hook behaves exactly as
+       before.
 
     Archived workers are intentionally inactive and keep their stored status
     (they surface via the archived badge, not needs_attention).
@@ -366,6 +488,17 @@ def _resolve_worker_status(
         and enabled
     ):
         status = WorkerStatus.READY
+
+    # Last, so it only ever downgrades a status that is STILL healthy here: a
+    # never-run worker stays READY and a missing-secret / failed / disabled /
+    # error worker keeps its more specific reason.
+    if (
+        status == WorkerStatus.HEALTHY
+        and schedule_stale
+        and not is_archived
+        and enabled
+    ):
+        status = WorkerStatus.NEEDS_ATTENTION
 
     return status
 
@@ -675,12 +808,17 @@ def _build_worker_detail(
     else:
         available_secret_names = _available_secret_names_for_user(user_id, repos)
         available_conn_slugs_detail = _available_connection_slugs_for_user(user_id, repos)
+        # Same batch hook the LIST path uses (for this one worker), so a dead
+        # scheduler downgrades the card and the detail page identically.
         status = _resolve_worker_status(
             worker,
             config=config,
             available_secret_names=available_secret_names,
             last_run_status=recent_runs[0].status if recent_runs else None,
             has_run=bool(recent_runs),
+            schedule_stale=worker_id in _schedule_stale_worker_ids(
+                [worker_id], user_id=user_id, repos=repos
+            ),
         )
         # #556: compute specific missing items.
         _det_req_secrets = _worker_required_secret_names(worker) if config else []
