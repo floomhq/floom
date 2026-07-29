@@ -152,7 +152,7 @@ def _patch_preflight(monkeypatch):
 
 def _spend_cap_error() -> SpendCapExceeded:
     return SpendCapExceeded(
-        "User has reached their monthly spend cap ($25.69 of $25.00)."
+        "User has reached their monthly spend cap ($30.00 of $25.00)."
     )
 
 
