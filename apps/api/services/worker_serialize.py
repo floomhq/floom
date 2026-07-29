@@ -304,6 +304,10 @@ def _resolve_worker_stage(worker: Dict[str, Any]) -> str:
 
 
 _DEFAULT_SCHEDULE_STALE_GRACE_SECONDS = 900.0
+# timedelta overflows long before float does, so an absurd but finite env value
+# would otherwise raise OverflowError straight out of GET /workers. 30 days is
+# far beyond any sane grace and keeps the cutoff arithmetic total.
+_MAX_SCHEDULE_STALE_GRACE_SECONDS = 30.0 * 24 * 60 * 60
 
 
 def _schedule_stale_grace_seconds() -> float:
@@ -313,7 +317,8 @@ def _schedule_stale_grace_seconds() -> float:
     the scheduler poll interval, a slow fire, and clock skew, so a healthy
     deployment never flickers into needs_attention. Anything unparseable, zero,
     negative or non-finite falls back to the default rather than disabling or
-    over-tightening the check.
+    over-tightening the check, and an absurdly large one is clamped so the
+    cutoff subtraction can never overflow out of the endpoint.
     """
     raw = (os.environ.get("WORKEROS_SCHEDULE_STALE_GRACE_SECONDS") or "").strip()
     if not raw:
@@ -324,7 +329,7 @@ def _schedule_stale_grace_seconds() -> float:
         return _DEFAULT_SCHEDULE_STALE_GRACE_SECONDS
     if not math.isfinite(value) or value <= 0:
         return _DEFAULT_SCHEDULE_STALE_GRACE_SECONDS
-    return value
+    return min(value, _MAX_SCHEDULE_STALE_GRACE_SECONDS)
 
 
 def _parse_utc_timestamp(value: Any) -> Optional[datetime]:

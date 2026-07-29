@@ -322,6 +322,12 @@ def _is_same_utc_month(created_at: Any, now: datetime) -> bool:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     parsed = parsed.astimezone(timezone.utc)
+    # Normalize BOTH sides: every current caller passes an aware UTC ``now``,
+    # but comparing a UTC month against a local-time month would silently
+    # mis-scope the billing window near a month boundary.
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now = now.astimezone(timezone.utc)
     return (parsed.year, parsed.month) == (now.year, now.month)
 
 
@@ -455,7 +461,26 @@ def _fail_started_schedule_run(
     ``start_run`` blowing up after ``create_run`` returned means a runs row
     exists for this occurrence. Writing a second synthetic row would double
     count one logical fire, so transition the existing run instead.
+
+    Only a still-QUEUED row is transitioned. ``start_run`` can enqueue the work
+    and then raise, in which case the executor owns the run and marking it
+    failed here would contradict live work.
     """
+    try:
+        existing = repos.runs.get(user_id=user_id, run_id=run_id)
+        current = str((existing or {}).get("status") or "").strip().lower()
+        if current and current != RunStatus.QUEUED.value:
+            logger.warning(
+                "Not failing run %s (worker %s): it already moved to %s",
+                run_id,
+                worker_id,
+                current,
+            )
+            return
+    except Exception:
+        logger.debug(
+            "Could not read run %s before failing it; proceeding", run_id, exc_info=True
+        )
     try:
         update_run_status(
             run_id,

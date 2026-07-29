@@ -270,6 +270,47 @@ def test_start_run_failure_fails_the_existing_run_without_a_second_row(monkeypat
     assert repos.workers.next_updates[-1] == ("trigger-a", expected_next)
 
 
+def test_start_run_failure_leaves_an_already_live_run_alone(monkeypatch):
+    """start_run can enqueue and THEN raise; the executor owns that run."""
+    now = datetime(2026, 7, 20, 12, 15, tzinfo=timezone.utc)
+    repos = _Repos(_trigger_row((now - timedelta(seconds=30)).isoformat()))
+    _patch_preflight(monkeypatch)
+    repos.runs.created.append(
+        {"run_id": "run-live", "worker_id": "worker-a", "status": "running"}
+    )
+    monkeypatch.setattr(scheduler, "create_run", lambda *_a, **_k: "run-live")
+    monkeypatch.setattr(
+        scheduler,
+        "start_run",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("dispatched then blew up")),
+    )
+    status_updates: list[dict] = []
+    monkeypatch.setattr(
+        scheduler,
+        "update_run_status",
+        lambda run_id, status, **kwargs: status_updates.append({"run_id": run_id}),
+    )
+
+    assert scheduler._tick_trigger_rows(repos, now, now.isoformat()) == 1
+
+    # The live run is NOT contradicted, and no synthetic duplicate is written.
+    assert status_updates == []
+    assert [r["run_id"] for r in repos.runs.created] == ["run-live"]
+    expected_next = scheduler.compute_next_run_at("*/15 * * * *", now, "UTC")
+    assert repos.workers.next_updates[-1] == ("trigger-a", expected_next)
+
+
+def test_absurd_grace_env_cannot_overflow_the_staleness_cutoff(monkeypatch):
+    """A finite but enormous grace must not raise out of GET /workers."""
+    from services import worker_serialize
+
+    monkeypatch.setenv("WORKEROS_SCHEDULE_STALE_GRACE_SECONDS", "1e308")
+    grace = worker_serialize._schedule_stale_grace_seconds()
+    assert grace == worker_serialize._MAX_SCHEDULE_STALE_GRACE_SECONDS
+    # The cutoff subtraction is now total.
+    assert datetime.now(timezone.utc) - timedelta(seconds=grace)
+
+
 def test_failure_recording_that_throws_still_advances_the_schedule(monkeypatch):
     now = datetime(2026, 7, 20, 12, 15, tzinfo=timezone.utc)
     repos = _Repos(_trigger_row((now - timedelta(seconds=30)).isoformat()))
