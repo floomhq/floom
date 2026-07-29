@@ -46,6 +46,7 @@ from services.worker_serialize import (
     _get_timeseries_batch,
     _resolve_worker_stage,
     _resolve_worker_status,
+    _schedule_stale_worker_ids,
     _starred_worker_ids,
     _worker_public_link,
 )
@@ -249,6 +250,11 @@ def list_workers(
         workers = workers[:limit]
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids, user_id=worker_user_id, repos=repos)
+    # One batched query, one request-scoped `now`: every worker in this response
+    # is judged stale against the same instant (see _schedule_stale_worker_ids).
+    schedule_stale_ids = _schedule_stale_worker_ids(
+        worker_ids, user_id=worker_user_id, repos=repos
+    )
     # S44 Win 3: skip expensive timeseries fetch when list shape requested.
     list_shape = shape == "list"
     timeseries_by_id = (
@@ -276,6 +282,7 @@ def list_workers(
             available_secret_names=available_secret_names,
             last_run_status=last_run.status if last_run else None,
             has_run=last_run is not None,
+            schedule_stale=w["id"] in schedule_stale_ids,
         )
 
         triggers = _build_triggers_list(w)

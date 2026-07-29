@@ -191,6 +191,32 @@ class WorkerRepository(Protocol):
         days: int = 14,
     ) -> dict[str, list[TimeseriesDay]]: ...
 
+    def schedule_staleness_batch(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+    ) -> dict[str, str | None]:
+        """Oldest pending ``next_run_at`` per worker, for schedule-staleness.
+
+        One entry per requested worker id: the MIN ``next_run_at`` across that
+        worker's ENABLED schedule trigger rows, or None when it has no enabled
+        schedule trigger carrying a slot. Batched (one query for the whole page)
+        like ``stats_batch`` / ``timeseries_batch`` so the worker list never pays
+        an N+1.
+
+        Why this is the health signal: the scheduler rewrites ``next_run_at`` to
+        the next cron slot on BOTH its success and its failure path, so a value
+        that has drifted into the past means nothing advanced it, i.e. the
+        scheduler process is dead. The caller owns the grace window and the
+        status downgrade (see ``services.worker_serialize``); no cron parsing
+        happens here.
+
+        Optional hook: every call site MUST tolerate a backend that does not
+        implement it (treat every worker as not stale, exactly as before).
+        """
+        ...
+
     def get_owner(self, *, worker_id: str) -> str | None: ...
 
     def list_scheduled(self) -> list[RowDict]: ...

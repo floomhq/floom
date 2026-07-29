@@ -1550,6 +1550,44 @@ class SqliteWorkerRepository:
                     result[worker_id].append(TimeseriesDay(date=date_str, total=0, completed=0, failed=0))
         return result
 
+    def schedule_staleness_batch(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+    ) -> dict[str, str | None]:
+        if not worker_ids:
+            return {}
+        # MIN() over the stored ISO-8601 UTC strings the scheduler writes
+        # (compute_next_run_at always normalizes to UTC + '+00:00'), so the
+        # lexicographic minimum IS the chronological one, the same comparison
+        # _sync_worker_next_run_from_triggers already does in the scheduler.
+        # Owner-scoped like stats_batch so the list and detail paths, which both
+        # scope to the same user, can never disagree for one worker.
+        placeholders = ",".join("?" for _ in worker_ids)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT t.worker_id AS worker_id, MIN(t.next_run_at) AS next_run_at
+                FROM worker_triggers t
+                JOIN workers w ON w.id = t.worker_id
+                WHERE w.owner_id = ?
+                  AND t.type = 'schedule'
+                  AND t.enabled = 1
+                  AND t.next_run_at IS NOT NULL
+                  AND t.worker_id IN ({placeholders})
+                GROUP BY t.worker_id
+                """,
+                [user_id, *worker_ids],
+            ).fetchall()
+        result: dict[str, str | None] = {worker_id: None for worker_id in worker_ids}
+        for row in rows:
+            data = _row_dict(row)
+            worker_id = str(data.get("worker_id") or "")
+            if worker_id:
+                result[worker_id] = data.get("next_run_at")
+        return result
+
     def get_owner(self, *, worker_id: str) -> str | None:
         with get_db() as conn:
             row = conn.execute(
