@@ -27,11 +27,13 @@ from croniter import croniter
 from db.factory import get_repositories
 from models import RunStatus
 from run_service import (
+    SpendCapExceeded,
     _maybe_pause_scheduled_worker_after_setup_failure,
     create_run,
     get_worker_config_for_run,
     get_worker_recipe_for_run,
     start_run,
+    update_run_status,
 )
 from alerting import alerting_tick
 from services.product_events import emit_product_event
@@ -180,6 +182,9 @@ _SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS = POLL_INTERVAL_SECONDS * 3.0
 _scheduler_last_heartbeat_monotonic: float | None = None
 SCHEDULE_MISSED_ERROR_CODE = "scheduler_missed"
 SCHEDULE_MISSED_ERROR = "Scheduled fire was missed or delayed by the scheduler."
+SPEND_CAP_ERROR_CODE = "spend_cap_exceeded"
+SCHEDULE_FIRE_FAILED_ERROR_CODE = "schedule_fire_failed"
+SCHEDULER_RUNNER = "scheduler"
 
 
 def _cron_zone(cron_timezone: str | None) -> ZoneInfo:
@@ -292,6 +297,180 @@ def _create_synthetic_failed_schedule_run(
             worker_id,
         )
     return run_id
+
+
+def _schedule_failure_error_code(exc: BaseException) -> str:
+    """Classify a failed scheduled fire so the recorded run is diagnosable.
+
+    A spend-cap rejection is a billing state the owner can act on, not a bug;
+    it gets its own code so the UI, OPS alerts and the coalescing window below
+    can treat one capped month as a single episode.
+    """
+    if isinstance(exc, SpendCapExceeded):
+        return SPEND_CAP_ERROR_CODE
+    return SCHEDULE_FIRE_FAILED_ERROR_CODE
+
+
+def _is_same_utc_month(created_at: Any, now: datetime) -> bool:
+    """True when an ISO timestamp falls in the same UTC month as ``now``."""
+    if not created_at:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(created_at))
+    except Exception:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    parsed = parsed.astimezone(timezone.utc)
+    return (parsed.year, parsed.month) == (now.year, now.month)
+
+
+def _has_open_schedule_failure_episode(
+    repos,
+    *,
+    worker_id: str,
+    user_id: str | None,
+    error_code: str,
+    now: datetime,
+) -> bool:
+    """True when this worker is already inside an unbroken failure episode.
+
+    Without this a ``*/15`` schedule whose owner crossed a spend cap would
+    write 96 identical failed rows a day. An episode is "still open" when the
+    worker's MOST RECENT run is a synthetic scheduler failure carrying the same
+    error_code inside the same UTC month (the billing window a spend cap resets
+    on). Any successful run, any other failure class, or a new month ends the
+    episode and the next occurrence is recorded again.
+    """
+    if not user_id:
+        return False
+    try:
+        rows = repos.runs.list_for_worker(
+            user_id=user_id,
+            worker_id=worker_id,
+            limit=1,
+            offset=0,
+        )
+    except Exception:
+        # Never let a read failure suppress the record; a duplicate row is far
+        # cheaper than another silently dead worker.
+        logger.debug(
+            "Could not read the latest run for worker %s while coalescing",
+            worker_id,
+            exc_info=True,
+        )
+        return False
+    latest = (rows[0] if rows else None) or {}
+    if str(latest.get("status") or "") != RunStatus.FAILED.value:
+        return False
+    if str(latest.get("error_code") or "") != error_code:
+        return False
+    if not _is_same_utc_month(latest.get("created_at"), now):
+        return False
+    runner = latest.get("runner")
+    if runner is None:
+        # The run-summary projection omits ``runner``; read the full row so a
+        # real run that happened to fail with this code is never mistaken for a
+        # synthetic scheduler marker.
+        try:
+            full = repos.runs.get(user_id=user_id, run_id=str(latest.get("id") or ""))
+        except Exception:
+            logger.debug(
+                "Could not read run %s while coalescing for worker %s",
+                latest.get("id"),
+                worker_id,
+                exc_info=True,
+            )
+            return False
+        runner = (full or {}).get("runner")
+    return str(runner or "") == SCHEDULER_RUNNER
+
+
+def _record_schedule_fire_failure(
+    repos,
+    *,
+    worker_id: str,
+    user_id: str | None,
+    now: datetime,
+    now_iso: str,
+    error: str,
+    error_code: str,
+    trigger_ref: str | None = None,
+    input_json: dict[str, object] | None = None,
+) -> None:
+    """Best-effort: make a fire that died before any run row existed visible.
+
+    ``create_run`` can reject a fire (spend cap, worker lookup, validation)
+    BEFORE inserting a runs row. Logging only left the worker's last_run_status
+    reading "completed" from days earlier, so health surfaces called a dead
+    worker healthy. Record a terminal failed run instead.
+
+    This never raises: the caller must advance next_run_at whether or not the
+    telemetry write lands, otherwise a failing recorder becomes a hot loop.
+    """
+    try:
+        if _has_open_schedule_failure_episode(
+            repos,
+            worker_id=worker_id,
+            user_id=user_id,
+            error_code=error_code,
+            now=now,
+        ):
+            logger.warning(
+                "Scheduled fire for worker %s failed again with %s (%s); "
+                "coalesced into the open failure episode",
+                worker_id,
+                error_code,
+                error,
+            )
+            return
+        _create_synthetic_failed_schedule_run(
+            repos,
+            worker_id=worker_id,
+            user_id=user_id,
+            now_iso=now_iso,
+            trigger_ref=trigger_ref,
+            input_json=input_json,
+            error=error,
+            error_code=error_code,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to record the scheduled fire failure for worker %s",
+            worker_id,
+        )
+
+
+def _fail_started_schedule_run(
+    repos,
+    *,
+    run_id: str,
+    worker_id: str,
+    user_id: str | None,
+    error: str,
+    error_code: str,
+) -> None:
+    """Best-effort: fail the run row that ``create_run`` already inserted.
+
+    ``start_run`` blowing up after ``create_run`` returned means a runs row
+    exists for this occurrence. Writing a second synthetic row would double
+    count one logical fire, so transition the existing run instead.
+    """
+    try:
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error=error,
+            error_code=error_code,
+            user_id=user_id,
+            repos=repos,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to mark run %s (worker %s) failed after start_run raised",
+            run_id,
+            worker_id,
+        )
 
 
 def _record_schedule_missed_if_late(
@@ -700,6 +879,8 @@ def _tick_trigger_rows(
                 worker_id,
                 next_at_str,
             )
+            run_id: str | None = None
+            run_started = False
             try:
                 run_id = create_run(
                     worker_id,
@@ -710,6 +891,7 @@ def _tick_trigger_rows(
                     repos=repos,
                 )
                 start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
+                run_started = True
                 repos.workers.mark_trigger_fired(
                     trigger_id=trigger_id,
                     last_fired_at=now_iso_str,
@@ -746,6 +928,44 @@ def _tick_trigger_rows(
                     new_next,
                 )
             except Exception as exc:
+                logger.exception(
+                    "Failed to fire schedule trigger %s for worker %s: %s",
+                    trigger_id,
+                    worker_id,
+                    exc,
+                )
+                # Make the dead fire visible. A spend-cap rejection inside
+                # create_run() used to be logged and nothing else: no runs row
+                # was ever written, so the worker's last_run_status stayed
+                # "completed" from its last healthy day and health surfaces
+                # reported a worker that had not fired for days as healthy.
+                # When run_started is True the run itself dispatched and only
+                # the post-fire bookkeeping broke, so leave that run alone.
+                if not run_started:
+                    if run_id is None:
+                        _record_schedule_fire_failure(
+                            repos,
+                            worker_id=worker_id,
+                            user_id=user_id,
+                            now=now,
+                            now_iso=now_iso_str,
+                            trigger_ref=trigger_id,
+                            input_json=scheduled_inputs,
+                            error=str(exc),
+                            error_code=_schedule_failure_error_code(exc),
+                        )
+                    else:
+                        _fail_started_schedule_run(
+                            repos,
+                            run_id=run_id,
+                            worker_id=worker_id,
+                            user_id=user_id,
+                            error=str(exc),
+                            error_code=_schedule_failure_error_code(exc),
+                        )
+                # Advancement is guaranteed: it runs after the best-effort
+                # recording above, so a telemetry write that throws can never
+                # strand the trigger or turn it into a hot re-claim loop.
                 _advance_next_run_after_failure(
                     repos,
                     worker_id=worker_id,
@@ -753,18 +973,6 @@ def _tick_trigger_rows(
                     next_run_at=new_next,
                 )
                 row["next_run_at"] = new_next
-                logger.exception(
-                    "Failed to fire schedule trigger %s for worker %s: %s",
-                    trigger_id,
-                    worker_id,
-                    exc,
-                )
-                if new_next:
-                    try:
-                        repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
-                        row["next_run_at"] = new_next
-                    except Exception:
-                        pass
         except Exception as row_exc:
             # #2214: a single worker's broken config/manifest (e.g. an invalid
             # WorkerConfig on disk) used to raise up through this per-row loop,
@@ -996,6 +1204,8 @@ def _tick() -> None:
             logger.info(
                 "Firing scheduled run for worker %s (was due %s)", worker_id, next_at_str
             )
+            run_id: str | None = None
+            run_started = False
             try:
                 run_id = create_run(
                     worker_id,
@@ -1005,6 +1215,7 @@ def _tick() -> None:
                     repos=repos,
                 )
                 start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
+                run_started = True
 
                 # Update last_scheduled_run_at + next_run_at
                 new_next = compute_next_run_at(cron_expr, now, cron_timezone)
@@ -1026,19 +1237,38 @@ def _tick() -> None:
                     new_next,
                 )
             except Exception as exc:
+                logger.exception(
+                    "Failed to fire scheduled run for worker %s: %s", worker_id, exc
+                )
+                # Same visibility contract as the trigger-row path above: a fire
+                # that dies before any runs row exists must still leave a failed
+                # run behind, otherwise the worker reads as healthy while dead.
+                if not run_started:
+                    if run_id is None:
+                        _record_schedule_fire_failure(
+                            repos,
+                            worker_id=worker_id,
+                            user_id=user_id,
+                            now=now,
+                            now_iso=now_iso_str,
+                            input_json=scheduled_inputs,
+                            error=str(exc),
+                            error_code=_schedule_failure_error_code(exc),
+                        )
+                    else:
+                        _fail_started_schedule_run(
+                            repos,
+                            run_id=run_id,
+                            worker_id=worker_id,
+                            user_id=user_id,
+                            error=str(exc),
+                            error_code=_schedule_failure_error_code(exc),
+                        )
                 _advance_next_run_after_failure(
                     repos,
                     worker_id=worker_id,
                     next_run_at=new_next,
                 )
-                logger.exception(
-                    "Failed to fire scheduled run for worker %s: %s", worker_id, exc
-                )
-                if new_next:
-                    try:
-                        repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
-                    except Exception:
-                        pass
         except Exception as row_exc:
             logger.exception(
                 "Scheduled run for worker %s failed with an unexpected error; "

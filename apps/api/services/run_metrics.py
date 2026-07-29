@@ -93,6 +93,9 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "schedule_missed": "crash",
     "scheduler_missed": "crash",
     "scheduler_row_error": "crash",
+    # The scheduler could not dispatch a due fire and no more specific code
+    # applied. Same class as scheduler_row_error, so keep it out of "unknown".
+    "schedule_fire_failed": "crash",
     # configuration / worker definition problems
     "invalid_worker": "config",
     "worker_not_found": "config",
