@@ -77,6 +77,10 @@ _ERROR_CODE_CATEGORY: Dict[str, str] = {
     "e2b_sandbox_error": "crash",
     "sandbox_transport_retry_exhausted": "crash",
     "sandbox_liveness_unconfirmed": "crash",
+    # A Python defect inside the sandbox driver (or a library it calls). Split
+    # out of the e2b_sandbox_error catch-all so "E2B is flaky" stops absorbing
+    # our own bugs. Still crash-class for the headline categories.
+    "sandbox_driver_internal_error": "crash",
     "sandbox_crash": "crash",
     "invalid_result_json": "crash",
     "missing_result": "crash",

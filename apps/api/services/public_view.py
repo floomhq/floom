@@ -109,6 +109,11 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     # Sandbox / timeout / resource.
     "e2b_sandbox_error": _SANDBOX_HEADLINE,
     "sandbox_transport_retry_exhausted": _SANDBOX_HEADLINE,
+    "sandbox_driver_internal_error": (
+        "Floom's sandbox runner hit an internal error, so this run was stopped. This is a "
+        "problem on our side, not with your worker, and it has been reported automatically. "
+        "Re-running is unlikely to help until it is fixed."
+    ),
     "sandbox_liveness_unconfirmed": (
         "The sandbox connection dropped after this worker started, and Floom could not confirm "
         "it stopped. To avoid duplicate actions, the run was not retried automatically. Check "

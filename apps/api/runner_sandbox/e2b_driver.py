@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 
 from .base import SandboxDriver
 from .cancellation import run_cancel_requested
+from .e2b_connect_hardening import install_e2b_connect_error_hardening
 from .e2b_upload import E2B_FILE_REQUEST_TIMEOUT_SECONDS, upload_tree_tarball
 from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult, assert_safe_outbound_url
@@ -80,6 +81,10 @@ E2B_KILL_VERIFY_POLL_INTERVAL_SECONDS = 1.0
 # command started and the original sandbox could not be confirmed dead. We
 # refuse to re-run rather than risk double-executing side effects.
 SANDBOX_LIVENESS_UNCONFIRMED_ERROR_CODE = "sandbox_liveness_unconfirmed"
+# Terminal, non-retryable code for a Python defect in this driver or a library it
+# calls. Distinct from e2b_sandbox_error so our own bugs stop being counted (and
+# retried) as E2B platform flakiness.
+SANDBOX_DRIVER_INTERNAL_ERROR_CODE = "sandbox_driver_internal_error"
 MAX_WORKER_ERROR_OUTPUT_CHARS = 1000
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
@@ -1225,6 +1230,36 @@ def _sanitize_sandbox_exception_detail(detail: str) -> str:
     return cleaned.strip()
 
 
+# Exception types that can only mean a defect in our code or a library we call.
+# None of the e2b SDK's own exceptions (SandboxException, ConnectException,
+# TimeoutException, ...) derive from these, and neither do the httpx/httpcore/h2
+# transport errors, so this cannot swallow a genuine platform failure.
+_DRIVER_INTERNAL_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
+    AttributeError,
+    ImportError,
+    IndexError,
+    KeyError,
+    NameError,
+    NotImplementedError,
+    TypeError,
+    UnboundLocalError,
+    ZeroDivisionError,
+)
+
+
+def _is_driver_internal_error(exc: Exception) -> bool:
+    """Whether *exc* is a programming defect rather than a sandbox failure.
+
+    Deliberately narrow: only exact programming-error types count, and an
+    exception that a transport classifier already recognizes as transient stays
+    on the transport path. A defect is never fixed by re-running, so this is what
+    separates "retry it" from "page the operator".
+    """
+    if not isinstance(exc, _DRIVER_INTERNAL_EXCEPTION_TYPES):
+        return False
+    return not _is_transient_e2b_transport_error(exc)
+
+
 def _sandbox_exception_result(
     exc: Exception,
     *,
@@ -1262,6 +1297,25 @@ def _sandbox_exception_result(
             error=f"E2B sandbox failed with an upstream {status_code} response: {detail}",
             error_code="upstream_http_5xx",
             retryable=True,
+        )
+    # A Python type/name/attribute error here is a defect in this driver or in a
+    # library it calls, NOT an E2B platform failure. Filing it under the generic
+    # retryable e2b_sandbox_error had two costs: it inflated the "E2B is flaky"
+    # bucket with our own bugs (which is why such a defect could sit undiagnosed
+    # behind a catch-all), and, being retryable, it made the run scheduler
+    # re-dispatch a deterministic failure twice more, tripling the failed-run
+    # count a user sees for one real problem. Give it its own non-retryable code.
+    if _is_driver_internal_error(exc):
+        return WorkerResult(
+            status="error",
+            error=(
+                "The sandbox runner hit an internal error and the run was stopped: "
+                f"{exc.__class__.__name__}: {detail}. This is a Floom defect, not a "
+                "problem with your worker. It has been logged for the operator; "
+                "re-running is unlikely to help."
+            ),
+            error_code=SANDBOX_DRIVER_INTERNAL_ERROR_CODE,
+            retryable=False,
         )
     return WorkerResult(
         status="error",
@@ -2465,6 +2519,12 @@ class E2BSandboxDriver(SandboxDriver):
     ) -> WorkerResult:
         perf = _E2BPerfTimer()
         from e2b import Sandbox  # e2b 2.x
+
+        # The vendored e2b_connect error decoder raises AttributeError on an
+        # error payload that is valid JSON but not an object, which destroys the
+        # real upstream error and defeats the transport-retry classifier below.
+        # Idempotent, and a no-op after the first call.
+        install_e2b_connect_error_hardening()
         perf.mark("import_e2b")
 
         api_keys = _configured_e2b_api_keys()
