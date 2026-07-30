@@ -78,6 +78,41 @@ _QUOTA_ERROR_RE = re.compile(
     r"|resource[_ -]?exhausted",
     re.IGNORECASE,
 )
+_CAPACITY_ERROR_RE = re.compile(
+    r"\b(?:502|503|529)\b|service[_ -]?unavailable|\boverloaded\b|overloaded_error"
+    r"|insufficient capacity|no capacity|not enough capacity"
+    r"|capacity (?:issue|constraint|problem|unavailable)"
+    r"|\bUNAVAILABLE\b|temporarily unavailable|server[_ -]?busy",
+    re.IGNORECASE,
+)
+# Capacity classification is gated on the failure being attributable to a MODEL
+# PROVIDER call, not merely mentioning a provider name. A worker's own outbound
+# HTTP 503 (requests/httpx against some third-party API) must never be reported
+# as our platform capacity, because that would trigger a 30-minute platform
+# retry and hide a real worker-side bug. Provider SDKs and litellm always stamp
+# their exceptions with these typed markers, so this keys on the exception type
+# rather than on free text. The exception often reaches us as a RuntimeError
+# wrapping the provider text, so the marker is matched against module, class
+# name and message alike.
+_PROVIDER_EXCEPTION_MARKER_RE = re.compile(
+    r"(?:OpenAI|Anthropic|Bedrock|VertexAI|Vertex_ai_beta|Gemini|Azure|Cohere|Mistral)Exception"
+    # Python exception reprs only: "<sdk>.<Something>Error". Anchoring on the
+    # trailing Error/Exception keeps a bare hostname such as
+    # "status.openai.com" from being read as a provider failure.
+    r"|\b(?:litellm|openai|anthropic|vertexai|botocore\.exceptions|google\.genai)"
+    r"\.\w*(?:Error|Exception)\b"
+    r"|ThrottlingException|ServiceUnavailableException|ModelStreamErrorException"
+    r"|ModelNotReadyException|ModelErrorException",
+    re.IGNORECASE,
+)
+# When the exception object itself comes from a general-purpose HTTP client, the
+# failure is the worker's own outbound call, whatever provider names happen to
+# appear in its message or traceback. This is a structural signal, so it beats
+# the textual marker above and prevents a worker-side 503 from ever being
+# reported as our platform capacity.
+_NON_PROVIDER_EXC_MODULE_RE = re.compile(
+    r"^(?:requests|httpx|httpcore|urllib3|urllib|aiohttp|http\.client|socket|ssl)\b"
+)
 _MODEL_NOT_CONFIGURED_RE = re.compile(
     r"missing.*credential|no.*credential|unable to locate credentials"
     r"|could not load credentials|api[_ -]?key.*not (?:set|configured|provided)"
@@ -390,6 +425,19 @@ def _classify_llm_provider_error(
         return "llm_provider_capacity" if shared_credentials else "llm_quota_exceeded"
     if status_code in {401, 403} or re.search(r"\b(?:401|403)\b", haystack):
         return "llm_auth_error"
+    # Server-side overload (Gemini 503 UNAVAILABLE, Bedrock "insufficient
+    # capacity", Anthropic 529 overloaded_error, OpenAI 500 "engine is
+    # overloaded") carries no quota/billing wording, so it used to fall through
+    # to llm_provider_error, which is excluded from the cross-provider fallback
+    # set and from the capacity backoff: a transient platform condition killed
+    # the run terminally. Overload is never the caller's quota, so it stays
+    # llm_provider_capacity even on user-supplied credentials.
+    if (
+        not _NON_PROVIDER_EXC_MODULE_RE.match(module)
+        and _PROVIDER_EXCEPTION_MARKER_RE.search(haystack)
+        and (status_code in {502, 503, 529} or _CAPACITY_ERROR_RE.search(haystack))
+    ):
+        return "llm_provider_capacity"
     if _PROVIDER_ERROR_RE.search(haystack):
         return "llm_provider_error"
     return None
@@ -1120,6 +1168,25 @@ class AgentDriver(SandboxDriver):
             # error, timeout, cancel, cap). Local outcome flag -> concurrency safe
             # (AgentDriver instances may be reused across runs). Never raises.
             self._finish_ai_trace(ai_ctx, succeeded=ai_outcome["succeeded"])
+            # Record which model actually served the run. Without this a run that
+            # silently fell back to a secondary provider is indistinguishable
+            # from one served by the primary.
+            try:
+                served_model = loop_local_provider.served_model_name
+                if served_model and served_model != _llm.agent_model(resolved_model):
+                    log_fn(
+                        f"[agent] Run served by fallback model {served_model} "
+                        f"(primary {resolved_model} hit provider capacity)",
+                        "info",
+                    )
+                    logger.info(
+                        "Agent run %s served by fallback model %s (primary %s)",
+                        run_id,
+                        served_model,
+                        resolved_model,
+                    )
+            except Exception:
+                logger.debug("Served-model reporting failed", exc_info=True)
             await self._cleanup_mcp_servers(mcp_servers, log_fn)
             # Close the per-run OpenAI + httpx client while THIS run's loop is
             # still alive, so the connection pool is released cleanly (no leaks,
