@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // jsdom does not implement window.open; replace it once so async effects that
 // fire after a test completes never log an un-implemented error.
@@ -38,6 +39,18 @@ import RedirectPage from "@/app/connections/redirect/page";
 
 const COMPOSIO_URL = "https://platform.composio.dev/link/abc123";
 
+// #1209/#1206: RedirectPage now invalidates TanStack Query caches (connections
+// / worker-detail / overview) once the poll finds an active connection, so it
+// needs a real QueryClient in the tree.
+function renderRedirectPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <RedirectPage />
+    </QueryClientProvider>
+  );
+}
+
 describe("connections/redirect auto-open", () => {
   beforeEach(() => {
     initiate.mockReset().mockResolvedValue({
@@ -54,7 +67,7 @@ describe("connections/redirect auto-open", () => {
   });
 
   it("auto-opens the Composio URL in a new tab without a click", async () => {
-    render(<RedirectPage />);
+    renderRedirectPage();
 
     await waitFor(() =>
       expect(openMock).toHaveBeenCalledWith(
@@ -66,7 +79,7 @@ describe("connections/redirect auto-open", () => {
   });
 
   it("explains what Composio is", async () => {
-    render(<RedirectPage />);
+    renderRedirectPage();
     await waitFor(() =>
       expect(screen.getByText(/What is Composio\?/i)).toBeTruthy()
     );
@@ -75,7 +88,7 @@ describe("connections/redirect auto-open", () => {
   it("falls back to a manual Open Composio link when the pop-up is blocked", async () => {
     // Blocked pop-up: window.open returns null.
     openMock.mockReturnValue(null);
-    render(<RedirectPage />);
+    renderRedirectPage();
 
     const link = await screen.findByRole("link", { name: /Open Composio/i });
     expect(link.getAttribute("href")).toBe(COMPOSIO_URL);

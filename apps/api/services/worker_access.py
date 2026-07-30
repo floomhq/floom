@@ -818,7 +818,22 @@ def _available_connection_slugs_for_user(user_id: str, repos: "Repositories") ->
     return _available_connection_slugs_for_users([user_id], repos)
 
 def _available_connection_slugs_for_users(user_ids: List[str], repos: "Repositories") -> set[str]:
-    """Return active connection slugs for one or more owner principals."""
+    """Return active connection slugs for one or more owner principals.
+
+    #1209/#1206: a transient DB failure here used to look identical to
+    "genuinely no connections": both silently returned an empty set. Every
+    caller (worker detail's missing_connections, the worker grid's
+    missing-connections banner, and Overview's connected-apps read) renders
+    that empty set as "not connected", so a DB hiccup on one surface flipped
+    its connection status while a fraction of a second later a different
+    surface's (unaffected) read showed the real, connected state: exactly the
+    "flipped without user action" symptom. Logging the exception makes a real
+    DB error distinguishable from an empty result in observability instead of
+    silently masquerading as one. Still returns an empty set on failure (no
+    established partial-failure sentinel exists on this response shape yet,
+    and every caller already treats "unknown" and "none" the same way) rather
+    than inventing a new error-surfacing contract across three call sites.
+    """
     _live = {"active", "valid", "connected"}
     slugs: set[str] = set()
     try:
@@ -833,6 +848,11 @@ def _available_connection_slugs_for_users(user_ids: List[str], repos: "Repositor
             )
         return slugs
     except Exception:
+        logger.exception(
+            "_available_connection_slugs_for_users failed for user_ids=%s; "
+            "returning empty set (renders as 'not connected' on every caller)",
+            user_ids,
+        )
         return set()
 
 def _normalize_trigger_type(value: Any) -> str:
