@@ -1627,9 +1627,16 @@ export function WorkspaceInfoSettings({ canEdit = true }: { canEdit?: boolean })
 
 export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
+  // #1201: "who pays for this, doesn't this cost a lot", spend-to-date next
+  // to the cap itself, so the number that matters sits beside the control
+  // that changes it. Fetched from the purpose-built GET /workspace/spend
+  // (not parsed out of getSettings) so it stays correct if that endpoint's
+  // shape evolves independently of the settings KV map.
+  const [spend, setSpend] = useState<import("../../lib/types").WorkspaceSpend | null>(null);
 
   useEffect(() => {
     api.workspace.getSettings().then(setValues).catch(() => setValues({}));
+    api.workspace.getSpend().then(setSpend).catch(() => setSpend(null));
   }, []);
 
   const save = (key: string, value: string) => {
@@ -1637,6 +1644,9 @@ export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
     api.workspace.setSetting(key, value).catch((err) => {
       toast.error((err as Error).message || "Could not save setting");
     });
+    if (key === "monthly_spend_cap_usd") {
+      api.workspace.getSpend().then(setSpend).catch(() => {});
+    }
   };
 
   if (values === null) return <Skeleton className="h-28 w-full" />;
@@ -1673,6 +1683,19 @@ export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
             }}
           />
           <p className="text-xs text-muted-foreground">{f.hint}</p>
+          {f.key === "monthly_spend_cap_usd" && spend && (
+            <p className="text-xs" data-testid="workspace-spend-readout">
+              <span className="font-medium text-foreground">${spend.month_spend_usd.toFixed(2)}</span>
+              {spend.monthly_cap_usd != null ? (
+                <> of ${spend.monthly_cap_usd.toFixed(2)} spent this month</>
+              ) : (
+                <> spent this month (no cap set)</>
+              )}
+              {spend.daily_cap_usd != null && (
+                <> · ${spend.day_spend_usd.toFixed(2)} of ${spend.daily_cap_usd.toFixed(2)} today</>
+              )}
+            </p>
+          )}
         </div>
         )
       ))}

@@ -10,6 +10,7 @@ import type {
   SystemOverview,
   WorkerSummary,
   WorkerDetail,
+  WorkerSpend,
   ConnectionItem,
   SecretItem,
   RunSummary,
@@ -66,6 +67,8 @@ export const qk = {
     ["worker-detail", id, workspaceId || workspaceScope()] as const,
   workerRuns: (workerId: string, limit = 20) => ["worker-runs", workerId, limit] as const,
   workerVersions: (workerId: string) => ["worker-versions", workerId] as const,
+  // #1201: this worker's month-to-date spend + configured cap.
+  workerSpend: (workerId: string) => ["worker-spend", workerId] as const,
 };
 
 // Each hook is cache-first (see QueryProvider defaults: staleTime 30s,
@@ -217,6 +220,18 @@ export function workerDetailQueryOptions(id: string, workspaceId?: string | null
 export function useWorkerDetailQuery(id: string, workspaceId?: string | null) {
   return useQuery<WorkerDetail>({
     ...workerDetailQueryOptions(id, workspaceId),
+    enabled: Boolean(id),
+  });
+}
+
+// #1201: month-to-date spend + configured cap for one worker. Cache-first,
+// same defaults as the rest of the detail pane (see QueryProvider); failing
+// soft (react-query surfaces isError, no thrown render) is fine here since
+// this is a supplementary stat, not blocking detail render.
+export function useWorkerSpendQuery(id: string) {
+  return useQuery<WorkerSpend>({
+    queryKey: qk.workerSpend(id),
+    queryFn: () => api.workers.getSpend(id),
     enabled: Boolean(id),
   });
 }

@@ -4,9 +4,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 // #797: ModelDefaults loads workspace settings, prefills fields, and persists
 // edits on blur via api.workspace.setSetting.
 
-const { getSettings, setSetting } = vi.hoisted(() => ({
+const { getSettings, setSetting, getSpend } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   setSetting: vi.fn(),
+  getSpend: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -14,12 +15,18 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/settings",
 }));
-vi.mock("@/lib/api", () => ({ API_BASE: "/api/proxy", api: { workspace: { getSettings, setSetting } } }));
+vi.mock("@/lib/api", () => ({
+  API_BASE: "/api/proxy",
+  api: { workspace: { getSettings, setSetting, getSpend } },
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
   getSettings.mockResolvedValue({ default_model: "claude-opus-4-8" });
   setSetting.mockResolvedValue(null);
+  // #1201: ModelDefaults also fetches workspace spend-to-date; unrelated to
+  // this test's cap-save assertions, so resolve it away.
+  getSpend.mockResolvedValue({ day_spend_usd: 0, month_spend_usd: 0, daily_cap_usd: null, monthly_cap_usd: null });
 });
 
 describe("ModelDefaults (#797)", () => {

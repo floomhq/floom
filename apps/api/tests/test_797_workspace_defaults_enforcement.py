@@ -374,10 +374,89 @@ class TestCurrentSpendSurfaced:
 
         client, _ = client_main
         assert client.post("/workers", json={"worker_yml": _yml("capworkerdelta"), "run_py": "print(1)"}).status_code == 200
-        this_month = datetime.now(timezone.utc).strftime("%Y-%m-05T00:00:00+00:00")
-        _seed_cost("capworkerdelta", 4.25, this_month)
+        # #1201: seed a run for "today" (not a hardcoded day-05), so the
+        # day-spend assertion below isn't date-dependent flaky past the 5th
+        # of any given month.
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%dT01:00:00+00:00")
+        _seed_cost("capworkerdelta", 4.25, today)
         settings = client.get("/workspace/settings").json()
         assert "current_day_spend_usd" in settings
         assert "current_month_spend_usd" in settings
         assert float(settings["current_day_spend_usd"]) >= 4.25
         assert float(settings["current_month_spend_usd"]) >= 4.25
+
+    def test_workspace_spend_endpoint_returns_current_spend_and_caps(self, client_main):
+        """#1201: GET /workspace/spend is the purpose-built readout next to
+        the spend-cap setting (settings-page stat + any other consumer)."""
+        from datetime import datetime, timezone
+
+        client, _ = client_main
+        assert client.post("/workers", json={"worker_yml": _yml("spendendpointalpha"), "run_py": "print(1)"}).status_code == 200
+        _set(client, "monthly_spend_cap_usd", "50.0")
+        _set(client, "daily_spend_cap_usd", "10.0")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%dT01:00:00+00:00")
+        _seed_cost("spendendpointalpha", 6.5, today)
+
+        resp = client.get("/workspace/spend")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["day_spend_usd"] >= 6.5
+        assert body["month_spend_usd"] >= 6.5
+        assert body["daily_cap_usd"] == 10.0
+        assert body["monthly_cap_usd"] == 50.0
+
+    def test_workspace_spend_endpoint_returns_active_workspace_caps(self, client_main):
+        """The cap read uses the request's active workspace, not local-default."""
+        client, _ = client_main
+        _set(client, "daily_spend_cap_usd", "10.0")
+        _set(client, "monthly_spend_cap_usd", "50.0")
+
+        created = client.post("/workspaces", json={"name": "Spend visibility"})
+        assert created.status_code == 200, created.text
+        workspace_id = created.json()["id"]
+        headers = {"x-floom-workspace": workspace_id}
+        assert client.put(
+            "/workspace/settings/daily_spend_cap_usd",
+            json={"value": "21.0"},
+            headers=headers,
+        ).status_code in (200, 204)
+        assert client.put(
+            "/workspace/settings/monthly_spend_cap_usd",
+            json={"value": "84.0"},
+            headers=headers,
+        ).status_code in (200, 204)
+
+        resp = client.get("/workspace/spend", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["daily_cap_usd"] == 21.0
+        assert resp.json()["monthly_cap_usd"] == 84.0
+
+    def test_workspace_spend_endpoint_uses_repo_backend_when_available(self, client_main):
+        """#1201: regression guard for the exact bug this PR fixes: the
+        workspace spend read must go through Repositories.runs.cost_total_usd
+        (workspace_scoped=True) when the deploy provides one, not silently
+        fall back to the engine's local sqlite (empty on a hosted deploy)."""
+        import run_service
+
+        client, main = client_main
+        calls = []
+
+        class _Runs:
+            def cost_total_usd(self, **kwargs):
+                calls.append(kwargs)
+                return 3.25
+
+        class _FakeRepos:
+            runs = _Runs()
+
+        main.app.dependency_overrides[main.get_repos] = lambda: _FakeRepos()
+        try:
+            resp = client.get("/workspace/spend")
+        finally:
+            main.app.dependency_overrides.pop(main.get_repos, None)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["day_spend_usd"] == 3.25
+        assert body["month_spend_usd"] == 3.25
+        assert any(call.get("workspace_scoped") is True for call in calls)

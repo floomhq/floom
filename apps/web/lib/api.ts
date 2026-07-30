@@ -316,6 +316,10 @@ export const api = {
     duplicate: (id: string) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}/duplicate`, { method: "POST" }),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
+    // #1201: month-to-date spend for this one worker + its configured monthly
+    // cap (null when uncapped). Read-only.
+    getSpend: (id: string) =>
+      fetchJson<import("./types").WorkerSpend>(`/workers/${encodeURIComponent(id)}/spend`),
     restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: async (id: string) => {
       const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" });
@@ -1424,6 +1428,9 @@ export const api = {
       }),
     // #794/#797: workspace behaviour toggles + model defaults (admin-only PUT).
     getSettings: () => fetchJson<Record<string, string>>("/workspace/settings"),
+    // #1201: purpose-built spend-to-date + caps readout, next to the cap
+    // setting in Settings. Any member can view.
+    getSpend: () => fetchJson<import("./types").WorkspaceSpend>("/workspace/spend"),
     setSetting: async (key: string, value: string) => {
       const result = await fetchJson<null>(`/workspace/settings/${encodeURIComponent(key)}`, {
         method: "PUT",

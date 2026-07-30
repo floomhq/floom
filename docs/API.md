@@ -30,6 +30,7 @@ the generated OpenAPI docs.
 | `/workers/reload` | POST | Reload workers from disk |
 | `/workers/{id}/runs` | POST | Trigger a run |
 | `/workers/import-from-share` | POST | Import a worker from a public share token |
+| `/workers/{id}/spend` | GET | This worker's month-to-date spend + its configured monthly cap, if any |
 
 ### Runs and approvals
 
@@ -96,6 +97,15 @@ cloud bundle flow preserve them automatically. The curated `/workspace/export` +
 `/workspace/import` template bundle preserves them explicitly: issue files are
 written under `issues/` in the zip and restored into `.floom/issues/` on import
 (existing ids are never clobbered).
+
+### Spend and limits
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/workspace/settings` | GET | Workspace behaviour + model-default settings, plus read-only `current_day_spend_usd`/`current_month_spend_usd` mirrors |
+| `/workspace/settings/{key}` | PUT | Update a workspace setting, including `daily_spend_cap_usd`/`monthly_spend_cap_usd` (admin-only) |
+| `/workspace/spend` | GET | Purpose-built workspace spend-to-date (day + month) against the configured caps |
+| `/workers/{id}/spend` | GET | A single worker's month-to-date spend + its configured monthly cap |
 
 ### Auth and system
 

@@ -1365,6 +1365,7 @@ def delete_workspace_secret(
 def get_workspace_settings(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
     """#794/#797: workspace behaviour toggles + model defaults (key→value map).
 
@@ -1382,11 +1383,55 @@ def get_workspace_settings(
     try:
         from run_service import _workspace_day_to_date_cost_usd, _workspace_month_to_date_cost_usd
 
-        out["current_day_spend_usd"] = f"{_workspace_day_to_date_cost_usd():.4f}"
-        out["current_month_spend_usd"] = f"{_workspace_month_to_date_cost_usd():.4f}"
+        # #1201: pass repos + the caller's user_id so a hosted deployment
+        # sums cost via its own Repositories backend (e.g. Supabase). Without
+        # these, the aggregation silently fell back to the engine's local
+        # sqlite file, which is empty on a hosted deployment, so cloud always
+        # rendered $0.00 regardless of real spend.
+        out["current_day_spend_usd"] = f"{_workspace_day_to_date_cost_usd(repos=repos, user_id=auth.user_id):.4f}"
+        out["current_month_spend_usd"] = f"{_workspace_month_to_date_cost_usd(repos=repos, user_id=auth.user_id):.4f}"
     except Exception:
-        pass
+        logger.debug("workspace settings: current spend lookup failed", exc_info=True)
     return out
+
+
+class WorkspaceSpendResponse(BaseModel):
+    """#1201: 'who pays for this, doesn't this cost a lot', a purpose-built,
+    read-only readout of workspace spend-to-date against its configured caps.
+    Reuses the same aggregation the spend-cap enforcement already runs
+    (services.run_cost); never writes anything."""
+
+    day_spend_usd: float
+    month_spend_usd: float
+    daily_cap_usd: Optional[float] = None
+    monthly_cap_usd: Optional[float] = None
+
+
+@workspace_router.get("/workspace/spend", response_model=WorkspaceSpendResponse)
+def get_workspace_spend(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceSpendResponse:
+    """#1201: workspace month/day spend-to-date + the configured caps, scoped
+    to the caller's active workspace via the request-bound Repositories (no
+    cross-workspace params to accept, so there is nothing to authorize beyond
+    a valid session). Any member can view; only admins can change the cap
+    (PUT /workspace/settings/{key}, #804)."""
+    from run_service import (
+        _workspace_day_to_date_cost_usd,
+        _workspace_daily_spend_cap_usd,
+        _workspace_month_to_date_cost_usd,
+        _workspace_monthly_spend_cap_usd,
+    )
+    workspace_id = _active_workspace_id(request)
+
+    return WorkspaceSpendResponse(
+        day_spend_usd=_workspace_day_to_date_cost_usd(repos=repos, user_id=auth.user_id),
+        month_spend_usd=_workspace_month_to_date_cost_usd(repos=repos, user_id=auth.user_id),
+        daily_cap_usd=_workspace_daily_spend_cap_usd(workspace_id=workspace_id),
+        monthly_cap_usd=_workspace_monthly_spend_cap_usd(workspace_id=workspace_id),
+    )
 
 
 @workspace_router.put("/workspace/settings/{key}", status_code=204, response_class=Response)

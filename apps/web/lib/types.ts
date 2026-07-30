@@ -1073,6 +1073,21 @@ export interface LocalWorkspace {
   created_at: string;
 }
 
+// #1201: GET /workspace/spend response.
+export interface WorkspaceSpend {
+  day_spend_usd: number;
+  month_spend_usd: number;
+  daily_cap_usd: number | null;
+  monthly_cap_usd: number | null;
+}
+
+// #1201: GET /workers/{id}/spend response.
+export interface WorkerSpend {
+  worker_id: string;
+  month_spend_usd: number;
+  monthly_cap_usd: number | null;
+}
+
 export interface LocalWorkspaceListResponse {
   workspaces: LocalWorkspace[];
   active_id: string;

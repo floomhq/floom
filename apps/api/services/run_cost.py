@@ -168,10 +168,10 @@ def _spend_cap_for_config(config: Any) -> Optional[float]:
     return float(cap) if cap is not None else None
 
 
-def _workspace_monthly_spend_cap_usd() -> Optional[float]:
+def _workspace_monthly_spend_cap_usd(*, workspace_id: str = "local-default") -> Optional[float]:
     """#797: the workspace-level monthly spend cap from settings, then env default."""
     from run_service import _workspace_setting
-    raw = (_workspace_setting("monthly_spend_cap_usd") or "").strip()
+    raw = (_workspace_setting("monthly_spend_cap_usd", workspace_id=workspace_id) or "").strip()
     if not raw:
         return _default_spend_cap_usd("WORKEROS_DEFAULT_MONTHLY_SPEND_CAP_USD", "25")
     try:
@@ -181,10 +181,10 @@ def _workspace_monthly_spend_cap_usd() -> Optional[float]:
         return _default_spend_cap_usd("WORKEROS_DEFAULT_MONTHLY_SPEND_CAP_USD", "25")
 
 
-def _workspace_daily_spend_cap_usd() -> Optional[float]:
+def _workspace_daily_spend_cap_usd(*, workspace_id: str = "local-default") -> Optional[float]:
     """Workspace-level daily spend cap from settings, then env default."""
     from run_service import _workspace_setting
-    raw = (_workspace_setting("daily_spend_cap_usd") or "").strip()
+    raw = (_workspace_setting("daily_spend_cap_usd", workspace_id=workspace_id) or "").strip()
     if not raw:
         return _default_spend_cap_usd("WORKEROS_DEFAULT_DAILY_SPEND_CAP_USD", "5")
     try:
