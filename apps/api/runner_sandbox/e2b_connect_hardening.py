@@ -44,6 +44,14 @@ The fix is deliberately narrow: normalize a non-Mapping payload into the shape
 The SDK then produces a real ``ConnectException`` and every existing
 classification, retry and reporting path works as designed.
 
+``make_error`` is the only function we need to wrap. Verified against the
+vendored e2b 2.34.0 tree: ``e2b_connect`` is a single ``client.py`` plus an
+``__init__`` that re-exports only ``Client``, ``GzipCompressor``,
+``ConnectException`` and ``Code``. Nothing anywhere imports ``make_error`` or
+``error_for_response`` by name, so both of its call sites (inside
+``error_for_response``, and the stream trailer's ``make_error(data["error"])``)
+resolve it as a module global at call time and see the wrapper.
+
 This wraps the SDK rather than pinning a newer one on purpose. ``e2b`` 2.35
 replaced the vendored ``e2b_connect`` with third-party ``connectrpc`` and swapped
 the HTTP transport, which would invalidate the transport-retry behaviour tuned
@@ -52,7 +60,9 @@ against 2.34. Wrapping one function is the smaller, reversible change.
 
 from __future__ import annotations
 
+import inspect
 import logging
+import threading
 from collections.abc import Mapping
 from typing import Any
 
@@ -62,9 +72,13 @@ logger = logging.getLogger(__name__)
 # hardening is present without depending on the wrapper's identity.
 _HARDENED_ATTR = "_workeros_connect_error_hardened"
 
-# Set once we have attempted installation, so the hot path (every sandbox spawn)
-# does not re-import and re-inspect the SDK on each run.
-_install_attempted = False
+# Memoized so the hot path (every sandbox spawn) does not re-import and
+# re-inspect the SDK. Guarded by a lock rather than a bare flag: runs execute on
+# concurrent executor threads, and a check-then-set flag would let a second
+# thread observe "attempted" while the first is still importing, and proceed
+# against an UNPATCHED SDK. That would reintroduce, under load, exactly the bug
+# this module exists to prevent.
+_install_lock = threading.Lock()
 _install_result: bool | None = None
 
 
@@ -87,7 +101,7 @@ def normalize_connect_error_payload(payload: Any) -> Any:
     if payload is None:
         return {"code": None, "message": ""}
     if isinstance(payload, (bytes, bytearray)):
-        return {"code": None, "message": bytes(payload).decode("utf-8", errors="replace")}
+        return {"code": None, "message": payload.decode("utf-8", errors="replace")}
     if isinstance(payload, str):
         return {"code": None, "message": payload}
     # bool is an int subclass but is never a meaningful HTTP status.
@@ -109,14 +123,48 @@ def install_e2b_connect_error_hardening() -> bool:
 
     :return: ``True`` when the hardening is active after this call, ``False``
         when the SDK could not be hardened (module unavailable, or unexpected
-        shape). Safe to call on every sandbox spawn.
+        shape). Safe to call on every sandbox spawn, from any thread.
     """
-    global _install_attempted, _install_result
-    if _install_attempted:
-        return bool(_install_result)
-    _install_attempted = True
-    _install_result = _install_once()
-    return _install_result
+    global _install_result
+    # Read under the lock too: a plain fast-path read could observe a half-set
+    # result while another thread is mid-import.
+    with _install_lock:
+        if _install_result is None:
+            _install_result = _install_once()
+        return _install_result
+
+
+def _accepts_one_positional_argument(func: Any) -> bool:
+    """Whether *func* can be called as ``func(payload)``.
+
+    A structural check instead of an e2b version pin: a version string would
+    refuse to harden a patch release that still carries the defect, and would
+    still not notice a signature change within the same version. What actually
+    matters is that our one-argument call is still valid.
+    """
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):  # builtins and C functions have no signature
+        return False
+    positional = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind
+        in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if any(
+        parameter.kind is parameter.VAR_POSITIONAL
+        for parameter in signature.parameters.values()
+    ):
+        return True
+    if len(positional) != 1:
+        return False
+    # A second, keyword-only parameter with no default would also break the call.
+    return all(
+        parameter.default is not parameter.empty
+        for parameter in signature.parameters.values()
+        if parameter.kind is parameter.KEYWORD_ONLY
+    )
 
 
 def _install_once() -> bool:
@@ -140,6 +188,13 @@ def _install_once() -> bool:
         # Already wrapped (another import path, or a reloaded module). Report it
         # as active but never stack a second wrapper on top.
         return True
+    if not _accepts_one_positional_argument(original):
+        logger.warning(
+            "e2b_connect.client.make_error has an unexpected signature (%s); "
+            "skipping connect error hardening rather than risk breaking it",
+            getattr(original, "__name__", original),
+        )
+        return False
 
     def make_error(error: Any):  # noqa: ANN202 - mirrors the SDK signature
         return original(normalize_connect_error_payload(error))
@@ -156,7 +211,7 @@ def _install_once() -> bool:
 
 
 def reset_install_state_for_tests() -> None:
-    """Clear the once-guard. Test-only."""
-    global _install_attempted, _install_result
-    _install_attempted = False
-    _install_result = None
+    """Clear the memoized result. Test-only."""
+    global _install_result
+    with _install_lock:
+        _install_result = None

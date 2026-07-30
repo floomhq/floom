@@ -414,6 +414,173 @@ def test_a_transport_exception_nested_as_a_cause_is_still_transport():
     assert result.retryable is True
 
 
+def test_our_own_bug_inside_an_sdk_stream_callback_is_not_called_transport():
+    """The reason only the innermost frame counts.
+
+    on_stdout/on_stderr are our callbacks, but the SDK invokes them from inside
+    the httpx/httpcore stream loop, so a defect in one of them has transport
+    frames ABOVE it in the traceback. Matching any frame would label our own bug
+    a transient transport failure and retry it forever.
+    """
+    namespace = {"__name__": "runner_sandbox.e2b_driver"}
+    exec("def _our_callback():\n    raise AttributeError('boom in on_stdout')\n", namespace)
+    outer = {"__name__": "httpcore._sync.http2", "_cb": namespace["_our_callback"]}
+    exec("def _stream_loop():\n    _cb()\n", outer)
+    try:
+        outer["_stream_loop"]()
+    except AttributeError as raised:
+        exc = raised
+    else:  # pragma: no cover
+        raise AssertionError("expected the callback to raise")
+
+    # Outermost frame is httpcore, innermost is ours. Ours must win.
+    assert _is_driver_internal_error(exc) is True
+    result = _sandbox_exception_result(exc, elapsed_seconds=4.0, timeout_seconds=1800)
+    assert result.error_code == SANDBOX_DRIVER_INTERNAL_ERROR_CODE
+    assert result.retryable is False
+
+
+def test_stream_id_keyerror_without_a_traceback_still_stays_retryable():
+    """Backstop for an exception that lost its traceback: origin is unknowable,
+    so fall back to the observed httpcore signature (detail is all digits)."""
+    exc = KeyError(2251)
+    assert getattr(exc, "__traceback__", None) is None
+    assert _is_driver_internal_error(exc) is False
+    result = _sandbox_exception_result(exc, elapsed_seconds=4.0, timeout_seconds=1800)
+    assert result.error_code == "e2b_sandbox_error"
+    assert result.retryable is True
+
+
+def test_a_named_keyerror_without_a_traceback_is_still_a_driver_defect():
+    """The digit backstop must stay narrow: a normal KeyError is our bug."""
+    exc = KeyError("outputs")
+    assert _is_driver_internal_error(exc) is True
+    result = _sandbox_exception_result(exc, elapsed_seconds=4.0, timeout_seconds=1800)
+    assert result.error_code == SANDBOX_DRIVER_INTERNAL_ERROR_CODE
+
+
+@pytest.mark.parametrize(
+    "exc_factory",
+    [lambda: ValueError("bad literal"), lambda: RuntimeError("something odd")],
+)
+def test_broad_exception_types_are_deliberately_left_in_the_existing_bucket(exc_factory):
+    """ValueError/RuntimeError are ordinary control flow in third-party code.
+
+    Classifying them as our defect would hard-fail runs that a retry recovers
+    today, so they keep the pre-existing retryable behaviour on purpose.
+    """
+    result = _sandbox_exception_result(
+        exc_factory(), elapsed_seconds=4.0, timeout_seconds=1800
+    )
+    assert result.error_code == "e2b_sandbox_error"
+    assert result.retryable is True
+
+
+def test_install_is_thread_safe_and_never_exposes_an_unpatched_sdk(fake_connect_module):
+    """A check-then-set flag would let a second thread see "already attempted"
+    while the first is still importing, and proceed against the UNPATCHED SDK,
+    reintroducing the original bug under concurrent sandbox spawns."""
+    import threading
+    import time
+
+    original = fake_connect_module.make_error
+    slow_import_started = threading.Event()
+
+    real_install_once = e2b_connect_hardening._install_once
+
+    def slow_install_once():
+        slow_import_started.set()
+        time.sleep(0.15)  # widen the window a racy implementation would lose
+        return real_install_once()
+
+    e2b_connect_hardening._install_once = slow_install_once
+    try:
+        results: list[bool] = []
+        observed_after_return: list[bool] = []
+
+        def worker():
+            results.append(e2b_connect_hardening.install_e2b_connect_error_hardening())
+            # Whatever this thread saw, once install() returns the SDK must be
+            # patched. This is the assertion the racy version fails.
+            observed_after_return.append(
+                getattr(
+                    fake_connect_module.make_error,
+                    e2b_connect_hardening._HARDENED_ATTR,
+                    False,
+                )
+            )
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        assert slow_import_started.wait(timeout=5)
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert results == [True] * 8
+        assert observed_after_return == [True] * 8
+        assert fake_connect_module.make_error is not original
+        # Exactly one wrapper, never stacked.
+        assert fake_connect_module.make_error.__wrapped__ is original
+    finally:
+        e2b_connect_hardening._install_once = real_install_once
+
+
+def test_install_refuses_a_make_error_with_an_unexpected_signature(monkeypatch):
+    """Structural guard in place of an e2b version pin: if the SDK changes the
+    call shape, leave it alone rather than wrap it into a new failure."""
+    import types
+
+    def two_arg_make_error(error, extra):  # noqa: ANN001
+        return (error, extra)
+
+    package = types.ModuleType("e2b_connect")
+    module = types.ModuleType("e2b_connect.client")
+    module.make_error = two_arg_make_error
+    package.client = module
+    monkeypatch.setitem(sys.modules, "e2b_connect", package)
+    monkeypatch.setitem(sys.modules, "e2b_connect.client", module)
+    e2b_connect_hardening.reset_install_state_for_tests()
+    try:
+        assert e2b_connect_hardening.install_e2b_connect_error_hardening() is False
+        assert module.make_error is two_arg_make_error
+    finally:
+        e2b_connect_hardening.reset_install_state_for_tests()
+
+
+@pytest.mark.parametrize(
+    "func, accepted",
+    [
+        (lambda error: error, True),
+        (lambda *args: args, True),
+        (lambda error, extra: (error, extra), False),
+        (lambda: None, False),
+        (lambda error, *, required: (error, required), False),
+        (lambda error, *, optional=1: (error, optional), True),
+    ],
+)
+def test_signature_guard_accepts_only_a_one_argument_call(func, accepted):
+    assert e2b_connect_hardening._accepts_one_positional_argument(func) is accepted
+
+
+def test_liveness_unconfirmed_guard_still_outranks_the_new_internal_code():
+    """A defect raised AFTER the worker command started must keep producing the
+    safety terminal, so nothing can re-run a worker whose side effects may have
+    landed. The new code is non-retryable too, so this is strictly safer than the
+    previous behaviour, where such a defect was retryable."""
+    import inspect
+
+    from runner_sandbox import e2b_driver
+
+    source = inspect.getsource(e2b_driver.E2BSandboxDriver.run)
+    liveness_at = source.index("_e2b_worker_command_started")
+    classify_at = source.index("_sandbox_exception_result(")
+    assert liveness_at < classify_at, (
+        "the worker-command-started guard must be evaluated before the generic "
+        "exception classifier"
+    )
+
+
 def test_timeout_classification_still_wins_over_the_internal_split():
     exc = TypeError("context deadline exceeded")
     result = _sandbox_exception_result(exc, elapsed_seconds=1800.0, timeout_seconds=1800)

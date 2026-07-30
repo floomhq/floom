@@ -1090,24 +1090,41 @@ _TRANSPORT_STACK_MODULE_PREFIXES = (
 )
 
 
+def _looks_like_http2_stream_id_keyerror(exc: BaseException) -> bool:
+    """A ``KeyError`` whose whole message is a stream id, e.g. ``KeyError(2251)``.
+
+    Backstop for the case where the traceback is gone (an exception re-raised
+    without it), since origin is then unknowable. Narrow on purpose: only
+    ``KeyError``, and only when the entire detail is digits. Our own code never
+    keys a dict by a bare integer in this path.
+    """
+    return isinstance(exc, KeyError) and str(exc).strip("'\" ").isdigit()
+
+
 def _raised_in_transport_stack(exc: BaseException) -> bool:
     """Whether *exc* was raised from inside the HTTP/2 transport libraries.
 
     Message matching alone cannot classify these. Under connection teardown,
     httpcore's HTTP/2 handler indexes its per-stream event map by stream id
     (``self._events[stream_id]``), so a torn-down stream raises ``KeyError(19)``
-    whose ``str()`` is the bare string ``"19"``. Prod carries 33 such runs, with
-    details that are nothing but a number. They are genuine transport races in a
-    dependency, and they must stay retryable rather than be mistaken for a defect
-    in our own driver.
+    whose ``str()`` is the bare string ``"19"``. Prod carries 33 such runs whose
+    entire error detail is a number. They are genuine transport races in a
+    dependency and must stay retryable, not be mistaken for a defect of ours.
+
+    Only the INNERMOST frame counts, because that is where the exception was
+    actually raised. Scanning the whole traceback would be actively wrong here:
+    our own ``on_stdout``/``on_stderr`` callbacks are invoked by the SDK from
+    inside the httpx/httpcore stream loop, so a bug in one of those callbacks
+    has transport frames above it. Matching any frame would label our own defect
+    a transient transport failure and retry it forever.
     """
     tb = getattr(exc, "__traceback__", None)
-    while tb is not None:
-        module = tb.tb_frame.f_globals.get("__name__") or ""
-        if module.startswith(_TRANSPORT_STACK_MODULE_PREFIXES):
-            return True
+    if tb is None:
+        return _looks_like_http2_stream_id_keyerror(exc)
+    while tb.tb_next is not None:
         tb = tb.tb_next
-    return False
+    module = tb.tb_frame.f_globals.get("__name__") or ""
+    return module.startswith(_TRANSPORT_STACK_MODULE_PREFIXES)
 
 
 def _is_transient_e2b_transport_error(exc: Exception) -> bool:
@@ -1267,6 +1284,13 @@ def _sanitize_sandbox_exception_detail(detail: str) -> str:
 # None of the e2b SDK's own exceptions (SandboxException, ConnectException,
 # TimeoutException, ...) derive from these, and neither do the httpx/httpcore/h2
 # transport errors, so this cannot swallow a genuine platform failure.
+#
+# Deliberately does NOT include ValueError, RuntimeError or AssertionError even
+# though a raised one is usually a defect. They are too widely used as ordinary
+# control flow inside third-party libraries, and the cost of a wrong call here is
+# asymmetric: over-classifying removes a retry that works today and hard-fails a
+# recoverable run, while under-classifying only leaves it in the pre-existing
+# bucket. Widen this list from observed failures, never from speculation.
 _DRIVER_INTERNAL_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
     AttributeError,
     ImportError,
