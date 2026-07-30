@@ -2268,6 +2268,27 @@ MIGRATIONS: list[Migration] = [
             id
         );
     """,
+    # -- migration 96: per-user spend cap overrides ---------------------------
+    # Deliberately a DEDICATED table rather than columns on `user_settings` or
+    # `users`:
+    #   - `user_settings` holds user-CONTROLLED preferences (theme/accent) and is
+    #     written by PUT /user/settings. A spend cap is a platform cost control,
+    #     not a preference; co-locating them invites a future edit that lets a
+    #     user raise their own cap through the preferences route.
+    #   - `users` is empty in single-user legacy mode (multi-member auth only
+    #     activates after POST /auth/setup), so a cap keyed off it would be
+    #     unsettable for the most common OSS deployment.
+    # No FK: the billed principal is whatever `cap_user_id` resolves to at run
+    # admission, which is not always a row in `users`.
+    # NULL column = "no override" and resolves to the env default.
+    """
+    CREATE TABLE IF NOT EXISTS user_spend_caps (
+        user_id                TEXT PRIMARY KEY,
+        monthly_spend_cap_usd  REAL,
+        daily_spend_cap_usd    REAL,
+        updated_at             TEXT NOT NULL
+    );
+    """,
 ]
 
 

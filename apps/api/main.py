@@ -5987,6 +5987,18 @@ from routers.user_settings import (
 )
 app.include_router(user_settings_router)
 
+from routers.spend import (
+    spend_router,
+    AccountSpendResponse,
+    SpendScope,
+    UserSpendCaps,
+    UserSpendCapsUpdate,
+    get_account_spend,
+    get_user_spend_caps,
+    put_user_spend_caps,
+)
+app.include_router(spend_router)
+
 from routers.share import (
     share_router,
     _GrantRequest,

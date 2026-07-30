@@ -4,15 +4,51 @@ Extracted verbatim from run_service.py: per-run cost persistence, worker /
 workspace month-to-date spend lookups, and spend-cap resolution. run_service
 re-imports these names for backward compatibility. The workspace-setting
 accessor is lazy-imported from run_service.
+
+SEMANTICS OF A SPEND CAP (read this before changing anything here)
+-----------------------------------------------------------------
+A spend cap is an ADMISSION THRESHOLD, not a hard ceiling. ``_enforce_run_spend_caps``
+refuses to admit a NEW run once *already finalized* cost has reached the cap. A run's
+cost is only finalized after it terminates (``_persist_run_cost``), so:
+
+  * the run that crosses the cap always completes and is billed in full, and
+  * runs already in flight are invisible to the check, so several concurrent runs
+    can each be admitted just below the cap.
+
+Therefore the guaranteed bound is:
+
+    final spend <= cap + (total cost of the runs in flight when the cap was crossed)
+
+which is itself bounded by ``WORKEROS_MAX_CONCURRENT_RUNS`` (or the injected
+distributed limiter) times the cost of the most expensive single run. Observed in
+production 2026-07-25: $25.69 against a $25 cap, i.e. 2.8% overshoot from a single
+run.
+
+This is deliberate. A pre-run reservation would need a pre-run cost ESTIMATE, which
+does not exist for agentic runs (real spend varies by ~100x for the same recipe), plus
+hold/release/reconcile on every terminal path and a reaper for reservations leaked by
+crashed executors: a new distributed-state surface in the money path to remove a
+few-percent error. If overshoot ever becomes material the cheap correct lever is to
+lower the admission threshold (or the cap), not to build a ledger.
+
+What the code DOES owe you is visibility: the exceeded message and
+``user_spend_snapshot`` both report ``overshoot_usd``, and ``spend_cap_warnings``
+surfaces the approach to the cap BEFORE runs start failing.
 """
 from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("floom.run_service")
+
+# Fraction of a cap at which a scope is reported as "warning". Crossing it changes
+# nothing about admission; it only makes the approach visible (overview inbox +
+# logs + GET /account/spend) so a user finds out BEFORE their automations stop.
+DEFAULT_SPEND_CAP_WARN_RATIO = 0.8
 
 
 class SpendCapExceeded(ValueError):
@@ -194,14 +230,288 @@ def _workspace_daily_spend_cap_usd() -> Optional[float]:
         return _default_spend_cap_usd("WORKEROS_DEFAULT_DAILY_SPEND_CAP_USD", "5")
 
 
-def _user_monthly_spend_cap_usd() -> Optional[float]:
-    """User-level monthly spend cap across all workspaces."""
+# --- per-user spend cap overrides -------------------------------------------
+# Until 2026-07-30 the user caps read ONLY the env defaults, so the only way to
+# give ONE customer headroom was to raise the cap for EVERYONE. That is what turned
+# a $0.69 overage into 4 days of silently dead schedules.
+#
+# The override is NOT modelled on the workspace-cap settings path
+# (`_workspace_setting` -> sqlite `workspace_settings`). That path does not work on
+# the cloud: the cloud's sqlite is a container-local file with no volume, so writes
+# are wiped on every redeploy and are invisible to the separate executor service,
+# and the reader hardcodes workspace_id="local-default" while the writer keys rows
+# by the real `ws_...` id. Instead this uses the same injection seam the cloud
+# already uses for repositories and the run limiter: the deployment registers a
+# durable store, and the engine falls back to sqlite for single-node/OSS.
+_USER_SPEND_CAP_STORE: Any = None
+_user_spend_cap_store_lock = threading.Lock()
+
+
+def register_user_spend_cap_store(store: Any) -> None:
+    """Inject a durable per-user spend-cap store.
+
+    ``store`` must expose::
+
+        get(user_id: str) -> Mapping with optional float keys
+                             "monthly_spend_cap_usd" / "daily_spend_cap_usd"
+        set(user_id: str, *, monthly_spend_cap_usd: float | None,
+            daily_spend_cap_usd: float | None) -> None
+
+    Unset (the default) = the sqlite-backed store below, so OSS/single-node
+    behaviour is unchanged. The cloud overlay registers a Supabase-backed store in
+    startup, mirroring ``register_repositories`` / ``register_run_limiter``.
+    """
+    global _USER_SPEND_CAP_STORE
+    with _user_spend_cap_store_lock:
+        _USER_SPEND_CAP_STORE = store
+
+
+def clear_user_spend_cap_store() -> None:
+    """Drop the injected store (revert to sqlite). For tests."""
+    global _USER_SPEND_CAP_STORE
+    with _user_spend_cap_store_lock:
+        _USER_SPEND_CAP_STORE = None
+
+
+class _SqliteUserSpendCapStore:
+    """Default store: the engine's `user_spend_caps` table (migration 96)."""
+
+    def get(self, user_id: str) -> Dict[str, Optional[float]]:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT monthly_spend_cap_usd, daily_spend_cap_usd "
+                "FROM user_spend_caps WHERE user_id = ? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        if row is None:
+            return {}
+        return {
+            "monthly_spend_cap_usd": row["monthly_spend_cap_usd"],
+            "daily_spend_cap_usd": row["daily_spend_cap_usd"],
+        }
+
+    def set(
+        self,
+        user_id: str,
+        *,
+        monthly_spend_cap_usd: Optional[float],
+        daily_spend_cap_usd: Optional[float],
+    ) -> None:
+        from db import get_db, now_iso
+
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_spend_caps
+                    (user_id, monthly_spend_cap_usd, daily_spend_cap_usd, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    monthly_spend_cap_usd = excluded.monthly_spend_cap_usd,
+                    daily_spend_cap_usd = excluded.daily_spend_cap_usd,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, monthly_spend_cap_usd, daily_spend_cap_usd, now_iso()),
+            )
+
+
+def _active_user_spend_cap_store() -> Any:
+    store = _USER_SPEND_CAP_STORE
+    return store if store is not None else _SqliteUserSpendCapStore()
+
+
+def _coerce_cap_override(value: Any) -> Optional[float]:
+    """A usable override is a finite number >= 0. Anything else = no override."""
+    if value is None:
+        return None
+    try:
+        cap = float(value)
+    except (TypeError, ValueError):
+        return None
+    if cap != cap or cap in (float("inf"), float("-inf")) or cap < 0:
+        return None
+    return cap
+
+
+def user_spend_cap_overrides(user_id: str) -> Dict[str, Optional[float]]:
+    """Per-user cap overrides, or {} when none are set / the store is unreachable.
+
+    FAIL-CLOSED: a store error resolves to "no override", i.e. the env default cap
+    still applies. It must never resolve to "no cap" — a store outage would then
+    silently remove the platform's cost control.
+    """
+    if not user_id:
+        return {}
+    try:
+        raw = _active_user_spend_cap_store().get(user_id) or {}
+    except Exception:
+        logger.warning(
+            "user spend cap override lookup failed for %s; falling back to env defaults",
+            user_id,
+            exc_info=True,
+        )
+        return {}
+    out: Dict[str, Optional[float]] = {}
+    for key in ("monthly_spend_cap_usd", "daily_spend_cap_usd"):
+        cap = _coerce_cap_override(raw.get(key) if hasattr(raw, "get") else None)
+        if cap is not None:
+            out[key] = cap
+    return out
+
+
+def set_user_spend_caps(
+    user_id: str,
+    *,
+    monthly_spend_cap_usd: Optional[float],
+    daily_spend_cap_usd: Optional[float],
+) -> None:
+    """Write the per-user overrides. ``None`` clears an override (env default wins).
+
+    There is no "unlimited" sentinel on purpose: pass a large number instead, so the
+    effective ceiling is always an auditable figure rather than an absent one.
+    """
+    if not str(user_id or "").strip():
+        raise ValueError("user_id is required")
+    for label, value in (
+        ("monthly_spend_cap_usd", monthly_spend_cap_usd),
+        ("daily_spend_cap_usd", daily_spend_cap_usd),
+    ):
+        if value is None:
+            continue
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError(f"{label} must be a finite number")
+        if value < 0:
+            raise ValueError(f"{label} must be >= 0")
+        if value > 1_000_000:
+            raise ValueError(f"{label} must be <= 1000000")
+    _active_user_spend_cap_store().set(
+        str(user_id),
+        monthly_spend_cap_usd=monthly_spend_cap_usd,
+        daily_spend_cap_usd=daily_spend_cap_usd,
+    )
+
+
+def _user_monthly_spend_cap_usd(user_id: str) -> Optional[float]:
+    """User-level monthly spend cap across all workspaces.
+
+    Per-user override first, then ``WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD``.
+    ``user_id`` is REQUIRED: a caller in the money path that does not know which
+    principal it is billing must fail loudly rather than silently bill an anonymous
+    env default.
+    """
+    override = user_spend_cap_overrides(user_id).get("monthly_spend_cap_usd")
+    if override is not None:
+        return override
     return _default_spend_cap_usd("WORKEROS_DEFAULT_USER_MONTHLY_SPEND_CAP_USD", "25")
 
 
-def _user_daily_spend_cap_usd() -> Optional[float]:
-    """User-level daily spend cap across all workspaces."""
+def _user_daily_spend_cap_usd(user_id: str) -> Optional[float]:
+    """User-level daily spend cap across all workspaces (override, then env)."""
+    override = user_spend_cap_overrides(user_id).get("daily_spend_cap_usd")
+    if override is not None:
+        return override
     return _default_spend_cap_usd("WORKEROS_DEFAULT_USER_DAILY_SPEND_CAP_USD", "5")
+
+
+def _spend_cap_warn_ratio() -> float:
+    raw = (os.environ.get("WORKEROS_SPEND_CAP_WARN_RATIO", "") or "").strip()
+    if not raw:
+        return DEFAULT_SPEND_CAP_WARN_RATIO
+    try:
+        ratio = float(raw)
+    except ValueError:
+        return DEFAULT_SPEND_CAP_WARN_RATIO
+    if not 0 < ratio <= 1:
+        return DEFAULT_SPEND_CAP_WARN_RATIO
+    return ratio
+
+
+def _spend_scope(scope: str, spent: float, cap: Optional[float], source: str) -> Dict[str, Any]:
+    ratio = _spend_cap_warn_ratio()
+    pct = (spent / cap) if cap else None
+    return {
+        "scope": scope,
+        "spent_usd": round(float(spent), 4),
+        "cap_usd": cap,
+        "cap_source": source,
+        "used_ratio": round(pct, 4) if pct is not None else None,
+        "warn_ratio": ratio,
+        "warning": bool(cap is not None and cap > 0 and spent >= cap * ratio and spent < cap),
+        "exceeded": bool(cap is not None and spent >= cap),
+        # See the module docstring: a cap is an admission threshold, so spend can
+        # legitimately land above it. Report the gap instead of hiding it.
+        "overshoot_usd": round(max(0.0, float(spent) - float(cap)), 4) if cap is not None else 0.0,
+    }
+
+
+def user_spend_snapshot(
+    user_id: str,
+    *,
+    repos: Any = None,
+    scope_user_id: str | None = None,
+) -> Dict[str, Any]:
+    """Effective caps + month/day-to-date spend for one user.
+
+    Powers ``GET /account/spend`` and the ``spend_cap_warning`` overview items.
+    """
+    overrides = user_spend_cap_overrides(user_id)
+    month_cap = _user_monthly_spend_cap_usd(user_id)
+    day_cap = _user_daily_spend_cap_usd(user_id)
+    month_spent = _user_month_to_date_cost_usd(user_id, repos=repos, scope_user_id=scope_user_id)
+    day_spent = _user_day_to_date_cost_usd(user_id, repos=repos, scope_user_id=scope_user_id)
+    return {
+        "user_id": user_id,
+        "warn_ratio": _spend_cap_warn_ratio(),
+        "scopes": [
+            _spend_scope(
+                "user_monthly",
+                month_spent,
+                month_cap,
+                "override" if "monthly_spend_cap_usd" in overrides else "env_default",
+            ),
+            _spend_scope(
+                "user_daily",
+                day_spent,
+                day_cap,
+                "override" if "daily_spend_cap_usd" in overrides else "env_default",
+            ),
+        ],
+    }
+
+
+_SPEND_SCOPE_LABELS = {
+    "user_monthly": ("monthly", "next month"),
+    "user_daily": ("daily", "tomorrow"),
+}
+
+
+def spend_cap_warnings(
+    user_id: str,
+    *,
+    repos: Any = None,
+    scope_user_id: str | None = None,
+) -> List[Dict[str, Any]]:
+    """Scopes at or past the warn ratio but not yet exceeded, worst first.
+
+    Never raises: a warning surface that can break the caller is a warning surface
+    that gets wrapped in a bare except and forgotten.
+    """
+    try:
+        snapshot = user_spend_snapshot(user_id, repos=repos, scope_user_id=scope_user_id)
+    except Exception:
+        logger.warning("spend cap warning computation failed for %s", user_id, exc_info=True)
+        return []
+    warnings = [scope for scope in snapshot["scopes"] if scope.get("warning")]
+    warnings.sort(key=lambda scope: scope.get("used_ratio") or 0.0, reverse=True)
+    for scope in warnings:
+        period, reset = _SPEND_SCOPE_LABELS.get(scope["scope"], ("", "later"))
+        scope["message"] = (
+            f"You have used ${scope['spent_usd']:.2f} of your ${scope['cap_usd']:.2f} "
+            f"{period} spend cap ({(scope['used_ratio'] or 0) * 100:.0f}%). "
+            f"Runs stop being accepted at 100% until {reset}."
+        )
+    return warnings
 
 
 def _workspace_month_to_date_cost_usd(
