@@ -715,6 +715,44 @@ def system_overview(
             )
         )
 
+    # Spend-cap approach warning. Same shape as connection_expiring above: a
+    # worker-less, forward-looking "this will break soon" item. This exists because
+    # crossing a user spend cap used to be invisible until every scheduled worker had
+    # been dead for days — the failure itself is now visible (synthetic FAILED run,
+    # #2334), but only AFTER automations stop. This is the rung before that.
+    #
+    # Isolated in its own try/except on purpose: the overview is the operator's
+    # primary dashboard, and a spend aggregate that fails or times out must degrade
+    # to "no warning shown", never to a 500. Costs two aggregate cost queries and is
+    # covered by the per-user overview hot cache.
+    try:
+        from services.run_cost import spend_cap_warnings
+
+        for warning in spend_cap_warnings(
+            str(auth.user_id or ""),
+            repos=repos,
+            scope_user_id=str(auth.user_id or ""),
+        ):
+            # Exceeded scopes stay in this list rather than dropping out of it at
+            # 100%. Otherwise the notice would vanish exactly when runs start being
+            # refused, and the only remaining signal would be a failed run on
+            # whichever worker happens to fire next.
+            exceeded = bool(warning.get("exceeded"))
+            item_type = "spend_cap_exceeded" if exceeded else "spend_cap_warning"
+            attention_items.append(
+                OverviewAttentionItem(
+                    type=item_type,
+                    kind=item_type,
+                    error_code=item_type,
+                    message=str(warning.get("message") or ""),
+                    cause=str(warning.get("scope") or ""),
+                    suggested_actions=["raise_spend_cap"],
+                    action_url="/settings",
+                )
+            )
+    except Exception:
+        logger.warning("overview spend cap warning skipped", exc_info=True)
+
     # G5 FIX 3: scope the headline success rate to runs from active, real
     # workers (see _active_real_worker_ids). This excludes paused, example,
     # system, and stock-worker runs so the number a partner sees reflects their

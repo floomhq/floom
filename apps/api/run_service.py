@@ -1384,6 +1384,7 @@ def _snapshot_worker_bundle_background(
 from services.run_cost import (  # noqa: E402,F401
     SpendCapExceeded,
     _persist_run_cost,
+    _spend_cap_warn_ratio,
     _user_daily_spend_cap_usd,
     _user_day_to_date_cost_usd,
     _user_monthly_spend_cap_usd,
@@ -1394,6 +1395,12 @@ from services.run_cost import (  # noqa: E402,F401
     _workspace_day_to_date_cost_usd,
     _workspace_monthly_spend_cap_usd,
     _workspace_month_to_date_cost_usd,
+    clear_user_spend_cap_store,
+    register_user_spend_cap_store,
+    set_user_spend_caps,
+    spend_cap_warnings,
+    user_spend_cap_overrides,
+    user_spend_snapshot,
 )
 def create_run(
     worker_id: str,
@@ -1472,6 +1479,43 @@ def create_run(
     return run_id
 
 
+def _spend_overshoot_suffix(spent: float, cap: float) -> str:
+    """Name the overshoot in the rejection message instead of hiding it.
+
+    A cap is an admission threshold, not a ceiling (see services/run_cost.py), so
+    `spent` is routinely above `cap` by the cost of the run that crossed it. Saying
+    so in the message is the difference between "the system is broken" and "this is
+    how admission works".
+    """
+    overshoot = float(spent) - float(cap)
+    return f", ${overshoot:.2f} over" if overshoot > 0 else ""
+
+
+def _log_spend_cap_approach(scope: str, cap_user_id: str, spent: float, cap: float) -> None:
+    """Emit a greppable WARNING as a scope approaches its cap.
+
+    The user-visible surface is the /system/overview needs_attention inbox; this is
+    the operator half, so an approaching wall is visible in logs before schedules
+    start dying.
+    """
+    try:
+        if cap <= 0 or spent >= cap:
+            return
+        ratio = _spend_cap_warn_ratio()
+        if spent < cap * ratio:
+            return
+        logger.warning(
+            "spend_cap_warning scope=%s user_id=%s spent_usd=%.4f cap_usd=%.4f used_pct=%.1f",
+            scope,
+            cap_user_id,
+            spent,
+            cap,
+            (spent / cap) * 100,
+        )
+    except Exception:  # pragma: no cover - a warning must never block admission
+        logger.debug("spend cap approach logging failed", exc_info=True)
+
+
 def _enforce_run_spend_caps(
     *,
     worker_id: str,
@@ -1488,9 +1532,11 @@ def _enforce_run_spend_caps(
         if _spent >= _cap:
             raise SpendCapExceeded(
                 f"Worker {worker_id} has reached its monthly spend cap "
-                f"(${_spent:.2f} of ${_cap:.2f}). Raise the cap or wait for next month."
+                f"(${_spent:.2f} of ${_cap:.2f}"
+                f"{_spend_overshoot_suffix(_spent, _cap)}). "
+                f"Raise the cap or wait for next month."
             )
-    _user_day_cap = _user_daily_spend_cap_usd()
+    _user_day_cap = _user_daily_spend_cap_usd(cap_user_id) if cap_user_id else None
     if cap_user_id and _user_day_cap is not None:
         _user_day_spent = _user_day_to_date_cost_usd(
             cap_user_id,
@@ -1500,9 +1546,12 @@ def _enforce_run_spend_caps(
         if _user_day_spent >= _user_day_cap:
             raise SpendCapExceeded(
                 f"User has reached their daily spend cap "
-                f"(${_user_day_spent:.2f} of ${_user_day_cap:.2f}). Raise it or wait until tomorrow."
+                f"(${_user_day_spent:.2f} of ${_user_day_cap:.2f}"
+                f"{_spend_overshoot_suffix(_user_day_spent, _user_day_cap)}). "
+                f"Raise it or wait until tomorrow."
             )
-    _user_month_cap = _user_monthly_spend_cap_usd()
+        _log_spend_cap_approach("user daily", cap_user_id, _user_day_spent, _user_day_cap)
+    _user_month_cap = _user_monthly_spend_cap_usd(cap_user_id) if cap_user_id else None
     if cap_user_id and _user_month_cap is not None:
         _user_month_spent = _user_month_to_date_cost_usd(
             cap_user_id,
@@ -1512,8 +1561,11 @@ def _enforce_run_spend_caps(
         if _user_month_spent >= _user_month_cap:
             raise SpendCapExceeded(
                 f"User has reached their monthly spend cap "
-                f"(${_user_month_spent:.2f} of ${_user_month_cap:.2f}). Raise it or wait for next month."
+                f"(${_user_month_spent:.2f} of ${_user_month_cap:.2f}"
+                f"{_spend_overshoot_suffix(_user_month_spent, _user_month_cap)}). "
+                f"Raise it or wait for next month."
             )
+        _log_spend_cap_approach("user monthly", cap_user_id, _user_month_spent, _user_month_cap)
     # Launch abuse guard: every workspace gets a daily spend backstop by
     # default, even if no explicit workspace setting has been saved.
     _ws_day_cap = _workspace_daily_spend_cap_usd()
@@ -1522,8 +1574,11 @@ def _enforce_run_spend_caps(
         if _ws_day_spent >= _ws_day_cap:
             raise SpendCapExceeded(
                 f"Workspace has reached its daily spend cap "
-                f"(${_ws_day_spent:.2f} of ${_ws_day_cap:.2f}). Raise it in Settings or wait until tomorrow."
+                f"(${_ws_day_spent:.2f} of ${_ws_day_cap:.2f}"
+                f"{_spend_overshoot_suffix(_ws_day_spent, _ws_day_cap)}). "
+                f"Raise it in Settings or wait until tomorrow."
             )
+        _log_spend_cap_approach("workspace daily", owner_id, _ws_day_spent, _ws_day_cap)
     # #797: workspace-level monthly spend cap — aggregate ALL workers' month-to-
     # date cost against the workspace budget.
     _ws_cap = _workspace_monthly_spend_cap_usd()
@@ -1532,8 +1587,11 @@ def _enforce_run_spend_caps(
         if _ws_spent >= _ws_cap:
             raise SpendCapExceeded(
                 f"Workspace has reached its monthly spend cap "
-                f"(${_ws_spent:.2f} of ${_ws_cap:.2f}). Raise it in Settings or wait for next month."
+                f"(${_ws_spent:.2f} of ${_ws_cap:.2f}"
+                f"{_spend_overshoot_suffix(_ws_spent, _ws_cap)}). "
+                f"Raise it in Settings or wait for next month."
             )
+        _log_spend_cap_approach("workspace monthly", owner_id, _ws_spent, _ws_cap)
 
 
 def _persist_log_batch(batch: list[_PendingLog], repos: Repositories | None = None) -> None:

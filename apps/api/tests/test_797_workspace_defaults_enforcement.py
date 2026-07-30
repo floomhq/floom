@@ -374,8 +374,11 @@ class TestCurrentSpendSurfaced:
 
         client, _ = client_main
         assert client.post("/workers", json={"worker_yml": _yml("capworkerdelta"), "run_py": "print(1)"}).status_code == 200
-        this_month = datetime.now(timezone.utc).strftime("%Y-%m-05T00:00:00+00:00")
-        _seed_cost("capworkerdelta", 4.25, this_month)
+        # Seed at TODAY, not a hardcoded day-05. current_day_spend_usd sums from UTC
+        # midnight, so the day-05 timestamp made this assertion pass only during the
+        # first five days of a month and fail on every other day of the year.
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00+00:00")
+        _seed_cost("capworkerdelta", 4.25, today)
         settings = client.get("/workspace/settings").json()
         assert "current_day_spend_usd" in settings
         assert "current_month_spend_usd" in settings

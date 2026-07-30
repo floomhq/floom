@@ -126,6 +126,14 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "llm_provider_capacity_retry_exhausted": (
         "Model capacity is still unavailable on our side after automatic retries. Try again later."
     ),
+    # Billing state, not a bug. Without an entry here the UI fell back to the
+    # auto-generated "Spend cap exceeded", which reads like a crash and offers no
+    # next step.
+    "spend_cap_exceeded": (
+        "This run was not started because the account reached its spend cap. Raise the cap or wait "
+        "for the next period, then re-run the worker."
+    ),
+    "spend_cap_warning": "The account is close to its spend cap. Runs stop being accepted at 100%.",
     "tool_iteration_cap_exceeded": "This worker took too many steps and was stopped. Try simplifying the task.",
     "tool_loop_exhausted": "This worker took too many steps and was stopped. Try simplifying the task.",
     "missing_e2b_key": _RUNTIME_HEADLINE,
