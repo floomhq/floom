@@ -602,6 +602,7 @@ _PERMANENT_RETRY_ERROR_CODES = {
     "output_token_limit",
     "output_too_large",
     "quality_gate_failed",
+    "sandbox_driver_internal_error",
     "sandbox_liveness_unconfirmed",
     "schema_violation",
     "spend_cap_exceeded",

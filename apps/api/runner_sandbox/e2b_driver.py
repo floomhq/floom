@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 
 from .base import SandboxDriver
 from .cancellation import run_cancel_requested
+from .e2b_connect_hardening import install_e2b_connect_error_hardening
 from .e2b_upload import E2B_FILE_REQUEST_TIMEOUT_SECONDS, upload_tree_tarball
 from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult, assert_safe_outbound_url
@@ -80,6 +81,10 @@ E2B_KILL_VERIFY_POLL_INTERVAL_SECONDS = 1.0
 # command started and the original sandbox could not be confirmed dead. We
 # refuse to re-run rather than risk double-executing side effects.
 SANDBOX_LIVENESS_UNCONFIRMED_ERROR_CODE = "sandbox_liveness_unconfirmed"
+# Terminal, non-retryable code for a Python defect in this driver or a library it
+# calls. Distinct from e2b_sandbox_error so our own bugs stop being counted (and
+# retried) as E2B platform flakiness.
+SANDBOX_DRIVER_INTERNAL_ERROR_CODE = "sandbox_driver_internal_error"
 MAX_WORKER_ERROR_OUTPUT_CHARS = 1000
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
@@ -1074,9 +1079,59 @@ _TRANSIENT_E2B_TRANSPORT_MARKERS = (
 )
 
 
+# Modules that only ever appear in a traceback because the HTTP/2 transport to
+# the sandbox broke. An exception raised inside one of these is a transport
+# failure whatever its Python type.
+_TRANSPORT_STACK_MODULE_PREFIXES = (
+    "h2.",
+    "hpack.",
+    "httpcore.",
+    "httpx.",
+)
+
+
+def _looks_like_http2_stream_id_keyerror(exc: BaseException) -> bool:
+    """A ``KeyError`` whose whole message is a stream id, e.g. ``KeyError(2251)``.
+
+    Backstop for the case where the traceback is gone (an exception re-raised
+    without it), since origin is then unknowable. Narrow on purpose: only
+    ``KeyError``, and only when the entire detail is digits. Our own code never
+    keys a dict by a bare integer in this path.
+    """
+    return isinstance(exc, KeyError) and str(exc).strip("'\" ").isdigit()
+
+
+def _raised_in_transport_stack(exc: BaseException) -> bool:
+    """Whether *exc* was raised from inside the HTTP/2 transport libraries.
+
+    Message matching alone cannot classify these. Under connection teardown,
+    httpcore's HTTP/2 handler indexes its per-stream event map by stream id
+    (``self._events[stream_id]``), so a torn-down stream raises ``KeyError(19)``
+    whose ``str()`` is the bare string ``"19"``. Prod carries 33 such runs whose
+    entire error detail is a number. They are genuine transport races in a
+    dependency and must stay retryable, not be mistaken for a defect of ours.
+
+    Only the INNERMOST frame counts, because that is where the exception was
+    actually raised. Scanning the whole traceback would be actively wrong here:
+    our own ``on_stdout``/``on_stderr`` callbacks are invoked by the SDK from
+    inside the httpx/httpcore stream loop, so a bug in one of those callbacks
+    has transport frames above it. Matching any frame would label our own defect
+    a transient transport failure and retry it forever.
+    """
+    tb = getattr(exc, "__traceback__", None)
+    if tb is None:
+        return _looks_like_http2_stream_id_keyerror(exc)
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    module = tb.tb_frame.f_globals.get("__name__") or ""
+    return module.startswith(_TRANSPORT_STACK_MODULE_PREFIXES)
+
+
 def _is_transient_e2b_transport_error(exc: Exception) -> bool:
     text = _exception_text(exc).lower()
     if any(marker in text for marker in _TRANSIENT_E2B_TRANSPORT_MARKERS):
+        return True
+    if _raised_in_transport_stack(exc):
         return True
     cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
     if isinstance(cause, Exception) and cause is not exc:
@@ -1225,6 +1280,46 @@ def _sanitize_sandbox_exception_detail(detail: str) -> str:
     return cleaned.strip()
 
 
+# Exception types that can only mean a defect in our code or a library we call.
+# None of the e2b SDK's own exceptions (SandboxException, ConnectException,
+# TimeoutException, ...) derive from these, and neither do the httpx/httpcore/h2
+# transport errors, so this cannot swallow a genuine platform failure.
+#
+# Deliberately does NOT include ValueError, RuntimeError or AssertionError even
+# though a raised one is usually a defect. They are too widely used as ordinary
+# control flow inside third-party libraries, and the cost of a wrong call here is
+# asymmetric: over-classifying removes a retry that works today and hard-fails a
+# recoverable run, while under-classifying only leaves it in the pre-existing
+# bucket. Widen this list from observed failures, never from speculation.
+_DRIVER_INTERNAL_EXCEPTION_TYPES: tuple[type[BaseException], ...] = (
+    AttributeError,
+    ImportError,
+    IndexError,
+    KeyError,
+    NameError,
+    NotImplementedError,
+    TypeError,
+    UnboundLocalError,
+    ZeroDivisionError,
+)
+
+
+def _is_driver_internal_error(exc: Exception) -> bool:
+    """Whether *exc* is a programming defect rather than a sandbox failure.
+
+    Deliberately narrow: only exact programming-error types count, and an
+    exception that the transport classifier recognizes as transient stays on the
+    transport path. That second condition is load-bearing rather than defensive:
+    a torn-down HTTP/2 stream surfaces as ``KeyError(<stream_id>)`` raised inside
+    httpcore, which is a transport race, not our bug, and must stay retryable.
+    A defect is never fixed by re-running, so this is what separates "retry it"
+    from "page the operator".
+    """
+    if not isinstance(exc, _DRIVER_INTERNAL_EXCEPTION_TYPES):
+        return False
+    return not _is_transient_e2b_transport_error(exc)
+
+
 def _sandbox_exception_result(
     exc: Exception,
     *,
@@ -1262,6 +1357,25 @@ def _sandbox_exception_result(
             error=f"E2B sandbox failed with an upstream {status_code} response: {detail}",
             error_code="upstream_http_5xx",
             retryable=True,
+        )
+    # A Python type/name/attribute error here is a defect in this driver or in a
+    # library it calls, NOT an E2B platform failure. Filing it under the generic
+    # retryable e2b_sandbox_error had two costs: it inflated the "E2B is flaky"
+    # bucket with our own bugs (which is why such a defect could sit undiagnosed
+    # behind a catch-all), and, being retryable, it made the run scheduler
+    # re-dispatch a deterministic failure twice more, tripling the failed-run
+    # count a user sees for one real problem. Give it its own non-retryable code.
+    if _is_driver_internal_error(exc):
+        return WorkerResult(
+            status="error",
+            error=(
+                "The sandbox runner hit an internal error and the run was stopped: "
+                f"{exc.__class__.__name__}: {detail}. This is a Floom defect, not a "
+                "problem with your worker. It has been logged for the operator; "
+                "re-running is unlikely to help."
+            ),
+            error_code=SANDBOX_DRIVER_INTERNAL_ERROR_CODE,
+            retryable=False,
         )
     return WorkerResult(
         status="error",
@@ -2465,6 +2579,12 @@ class E2BSandboxDriver(SandboxDriver):
     ) -> WorkerResult:
         perf = _E2BPerfTimer()
         from e2b import Sandbox  # e2b 2.x
+
+        # The vendored e2b_connect error decoder raises AttributeError on an
+        # error payload that is valid JSON but not an object, which destroys the
+        # real upstream error and defeats the transport-retry classifier below.
+        # Idempotent, and a no-op after the first call.
+        install_e2b_connect_error_hardening()
         perf.mark("import_e2b")
 
         api_keys = _configured_e2b_api_keys()
