@@ -336,6 +336,21 @@ def test_worker_side_503_is_not_reported_as_platform_capacity():
     assert _classify_llm_provider_error(exc) is None
 
 
+def test_worker_http_client_exception_quoting_a_provider_is_not_capacity():
+    """Structural guard: the exception came from requests, so it is worker-side.
+
+    Covers the adversarial case where a worker's own 503 response body or
+    traceback happens to quote a provider exception repr. The exception's own
+    module is authoritative and beats any text in the message.
+    """
+    exc = _WorkerToolExc(
+        "HTTPError: 503 Service Unavailable; upstream body contained "
+        "'litellm.InternalServerError: OpenAIException - overloaded'",
+        503,
+    )
+    assert _classify_llm_provider_error(exc) != "llm_provider_capacity"
+
+
 def test_worker_error_merely_naming_a_provider_is_not_capacity():
     """Mentioning a provider in worker text is not proof our provider failed."""
     exc = _WorkerToolExc(

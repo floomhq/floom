@@ -105,6 +105,14 @@ _PROVIDER_EXCEPTION_MARKER_RE = re.compile(
     r"|ModelNotReadyException|ModelErrorException",
     re.IGNORECASE,
 )
+# When the exception object itself comes from a general-purpose HTTP client, the
+# failure is the worker's own outbound call, whatever provider names happen to
+# appear in its message or traceback. This is a structural signal, so it beats
+# the textual marker above and prevents a worker-side 503 from ever being
+# reported as our platform capacity.
+_NON_PROVIDER_EXC_MODULE_RE = re.compile(
+    r"^(?:requests|httpx|httpcore|urllib3|urllib|aiohttp|http\.client|socket|ssl)\b"
+)
 _MODEL_NOT_CONFIGURED_RE = re.compile(
     r"missing.*credential|no.*credential|unable to locate credentials"
     r"|could not load credentials|api[_ -]?key.*not (?:set|configured|provided)"
@@ -424,8 +432,10 @@ def _classify_llm_provider_error(
     # set and from the capacity backoff: a transient platform condition killed
     # the run terminally. Overload is never the caller's quota, so it stays
     # llm_provider_capacity even on user-supplied credentials.
-    if _PROVIDER_EXCEPTION_MARKER_RE.search(haystack) and (
-        status_code in {502, 503, 529} or _CAPACITY_ERROR_RE.search(haystack)
+    if (
+        not _NON_PROVIDER_EXC_MODULE_RE.match(module)
+        and _PROVIDER_EXCEPTION_MARKER_RE.search(haystack)
+        and (status_code in {502, 503, 529} or _CAPACITY_ERROR_RE.search(haystack))
     ):
         return "llm_provider_capacity"
     if _PROVIDER_ERROR_RE.search(haystack):
