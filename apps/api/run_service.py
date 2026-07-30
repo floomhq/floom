@@ -1532,7 +1532,9 @@ def _enforce_run_spend_caps(
         if _spent >= _cap:
             raise SpendCapExceeded(
                 f"Worker {worker_id} has reached its monthly spend cap "
-                f"(${_spent:.2f} of ${_cap:.2f}). Raise the cap or wait for next month."
+                f"(${_spent:.2f} of ${_cap:.2f}"
+                f"{_spend_overshoot_suffix(_spent, _cap)}). "
+                f"Raise the cap or wait for next month."
             )
     _user_day_cap = _user_daily_spend_cap_usd(cap_user_id) if cap_user_id else None
     if cap_user_id and _user_day_cap is not None:
@@ -1572,8 +1574,11 @@ def _enforce_run_spend_caps(
         if _ws_day_spent >= _ws_day_cap:
             raise SpendCapExceeded(
                 f"Workspace has reached its daily spend cap "
-                f"(${_ws_day_spent:.2f} of ${_ws_day_cap:.2f}). Raise it in Settings or wait until tomorrow."
+                f"(${_ws_day_spent:.2f} of ${_ws_day_cap:.2f}"
+                f"{_spend_overshoot_suffix(_ws_day_spent, _ws_day_cap)}). "
+                f"Raise it in Settings or wait until tomorrow."
             )
+        _log_spend_cap_approach("workspace daily", owner_id, _ws_day_spent, _ws_day_cap)
     # #797: workspace-level monthly spend cap — aggregate ALL workers' month-to-
     # date cost against the workspace budget.
     _ws_cap = _workspace_monthly_spend_cap_usd()
@@ -1582,8 +1587,11 @@ def _enforce_run_spend_caps(
         if _ws_spent >= _ws_cap:
             raise SpendCapExceeded(
                 f"Workspace has reached its monthly spend cap "
-                f"(${_ws_spent:.2f} of ${_ws_cap:.2f}). Raise it in Settings or wait for next month."
+                f"(${_ws_spent:.2f} of ${_ws_cap:.2f}"
+                f"{_spend_overshoot_suffix(_ws_spent, _ws_cap)}). "
+                f"Raise it in Settings or wait for next month."
             )
+        _log_spend_cap_approach("workspace monthly", owner_id, _ws_spent, _ws_cap)
 
 
 def _persist_log_batch(batch: list[_PendingLog], repos: Repositories | None = None) -> None:

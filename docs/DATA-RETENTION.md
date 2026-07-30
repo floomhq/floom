@@ -86,5 +86,24 @@ spend caps via:
 - `WORKEROS_DEFAULT_DAILY_SPEND_CAP_USD`
 - `WORKEROS_DEFAULT_MONTHLY_SPEND_CAP_USD`
 
+The two user-level values are DEFAULTS. A per-user override, set with
+`PUT /admin/users/{user_id}/spend-caps` and read with the matching `GET`, gives one
+account headroom without raising the ceiling for every account. `null` clears an
+override and restores the env default. There is no unlimited value: set a large
+number so the effective ceiling stays auditable.
+
+`WORKEROS_SPEND_CAP_WARN_RATIO` (default `0.8`) is the fraction of a cap at which a
+scope starts reporting a warning on `/system/overview` and in the logs. It does not
+change admission; it exists so an account learns it is approaching the wall before
+its automations stop.
+
+A cap is an **admission threshold, not a ceiling**. A run's cost is finalized only
+after it terminates, so the run that crosses the cap still completes and is billed,
+and runs already in flight are invisible to the check. The guaranteed bound is
+`final spend <= cap + (cost of the runs in flight when the cap was crossed)`, itself
+bounded by the concurrent-run limit times the cost of the most expensive single run.
+The overshoot is reported rather than hidden: see `overshoot_usd` in
+`GET /account/spend` and the "$X over" suffix in the rejection message.
+
 These are run-dispatch backstops, not a substitute for provider-side billing
 alerts, rate limits, abuse monitoring, or legal review.

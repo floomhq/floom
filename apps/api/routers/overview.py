@@ -733,11 +733,17 @@ def system_overview(
             repos=repos,
             scope_user_id=str(auth.user_id or ""),
         ):
+            # Exceeded scopes stay in this list rather than dropping out of it at
+            # 100%. Otherwise the notice would vanish exactly when runs start being
+            # refused, and the only remaining signal would be a failed run on
+            # whichever worker happens to fire next.
+            exceeded = bool(warning.get("exceeded"))
+            item_type = "spend_cap_exceeded" if exceeded else "spend_cap_warning"
             attention_items.append(
                 OverviewAttentionItem(
-                    type="spend_cap_warning",
-                    kind="spend_cap_warning",
-                    error_code="spend_cap_warning",
+                    type=item_type,
+                    kind=item_type,
+                    error_code=item_type,
                     message=str(warning.get("message") or ""),
                     cause=str(warning.get("scope") or ""),
                     suggested_actions=["raise_spend_cap"],

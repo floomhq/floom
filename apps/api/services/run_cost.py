@@ -451,38 +451,56 @@ def user_spend_snapshot(
     repos: Any = None,
     scope_user_id: str | None = None,
 ) -> Dict[str, Any]:
-    """Effective caps + month/day-to-date spend for one user.
+    """Effective caps + month/day-to-date spend for every scope that can refuse
+    this caller's runs.
+
+    ALL FOUR admission scopes are reported, not just the user pair. The workspace
+    caps are the same kind of silent wall (they sit in the same ladder in
+    ``_enforce_run_spend_caps``, and on cloud their settings override does not
+    work at all), so a user who is fine on their own budget but about to be cut off
+    by the workspace budget has to be able to see that too.
 
     Powers ``GET /account/spend`` and the ``spend_cap_warning`` overview items.
     """
     overrides = user_spend_cap_overrides(user_id)
-    month_cap = _user_monthly_spend_cap_usd(user_id)
-    day_cap = _user_daily_spend_cap_usd(user_id)
-    month_spent = _user_month_to_date_cost_usd(user_id, repos=repos, scope_user_id=scope_user_id)
-    day_spent = _user_day_to_date_cost_usd(user_id, repos=repos, scope_user_id=scope_user_id)
+    scopes = [
+        _spend_scope(
+            "user_monthly",
+            _user_month_to_date_cost_usd(user_id, repos=repos, scope_user_id=scope_user_id),
+            _user_monthly_spend_cap_usd(user_id),
+            "override" if "monthly_spend_cap_usd" in overrides else "env_default",
+        ),
+        _spend_scope(
+            "user_daily",
+            _user_day_to_date_cost_usd(user_id, repos=repos, scope_user_id=scope_user_id),
+            _user_daily_spend_cap_usd(user_id),
+            "override" if "daily_spend_cap_usd" in overrides else "env_default",
+        ),
+        _spend_scope(
+            "workspace_monthly",
+            _workspace_month_to_date_cost_usd(repos=repos, user_id=scope_user_id),
+            _workspace_monthly_spend_cap_usd(),
+            "workspace_setting_or_env_default",
+        ),
+        _spend_scope(
+            "workspace_daily",
+            _workspace_day_to_date_cost_usd(repos=repos, user_id=scope_user_id),
+            _workspace_daily_spend_cap_usd(),
+            "workspace_setting_or_env_default",
+        ),
+    ]
     return {
         "user_id": user_id,
         "warn_ratio": _spend_cap_warn_ratio(),
-        "scopes": [
-            _spend_scope(
-                "user_monthly",
-                month_spent,
-                month_cap,
-                "override" if "monthly_spend_cap_usd" in overrides else "env_default",
-            ),
-            _spend_scope(
-                "user_daily",
-                day_spent,
-                day_cap,
-                "override" if "daily_spend_cap_usd" in overrides else "env_default",
-            ),
-        ],
+        "scopes": scopes,
     }
 
 
 _SPEND_SCOPE_LABELS = {
-    "user_monthly": ("monthly", "next month"),
-    "user_daily": ("daily", "tomorrow"),
+    "user_monthly": ("your monthly", "next month"),
+    "user_daily": ("your daily", "tomorrow"),
+    "workspace_monthly": ("this workspace's monthly", "next month"),
+    "workspace_daily": ("this workspace's daily", "tomorrow"),
 }
 
 
@@ -492,25 +510,42 @@ def spend_cap_warnings(
     repos: Any = None,
     scope_user_id: str | None = None,
 ) -> List[Dict[str, Any]]:
-    """Scopes at or past the warn ratio but not yet exceeded, worst first.
+    """Scopes in the warn band OR already exceeded, worst first.
 
-    Never raises: a warning surface that can break the caller is a warning surface
-    that gets wrapped in a bare except and forgotten.
+    EXCEEDED scopes are included deliberately. Reporting only the 80-99% band would
+    make the notice disappear at exactly the moment it starts costing the user
+    something, which is a smaller version of the original bug: the only remaining
+    signal would be a failed run on a worker that happens to be scheduled soon.
+
+    Never raises: a warning surface that can break its caller is a warning surface
+    that ends up wrapped in a bare except and forgotten.
     """
     try:
         snapshot = user_spend_snapshot(user_id, repos=repos, scope_user_id=scope_user_id)
     except Exception:
         logger.warning("spend cap warning computation failed for %s", user_id, exc_info=True)
         return []
-    warnings = [scope for scope in snapshot["scopes"] if scope.get("warning")]
+    warnings = [
+        scope for scope in snapshot["scopes"] if scope.get("warning") or scope.get("exceeded")
+    ]
     warnings.sort(key=lambda scope: scope.get("used_ratio") or 0.0, reverse=True)
     for scope in warnings:
-        period, reset = _SPEND_SCOPE_LABELS.get(scope["scope"], ("", "later"))
-        scope["message"] = (
-            f"You have used ${scope['spent_usd']:.2f} of your ${scope['cap_usd']:.2f} "
-            f"{period} spend cap ({(scope['used_ratio'] or 0) * 100:.0f}%). "
-            f"Runs stop being accepted at 100% until {reset}."
-        )
+        period, reset = _SPEND_SCOPE_LABELS.get(scope["scope"], ("the", "later"))
+        if scope.get("exceeded"):
+            over = (
+                f" (${scope['overshoot_usd']:.2f} over)" if scope.get("overshoot_usd") else ""
+            )
+            scope["message"] = (
+                f"Runs are being refused: ${scope['spent_usd']:.2f} of the "
+                f"${scope['cap_usd']:.2f} {period} spend cap is used{over}. "
+                f"Raise the cap or wait until {reset}."
+            )
+        else:
+            scope["message"] = (
+                f"${scope['spent_usd']:.2f} of the ${scope['cap_usd']:.2f} {period} spend cap "
+                f"is used ({(scope['used_ratio'] or 0) * 100:.0f}%). "
+                f"Runs stop being accepted at 100% until {reset}."
+            )
     return warnings
 
 

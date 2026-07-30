@@ -280,6 +280,7 @@ class TestWarningBand:
         warnings = spend_cap_warnings(owner, repos=run_service._repos(None), scope_user_id=owner)
         assert [w["scope"] for w in warnings] == ["user_monthly"]
         assert "82%" in warnings[0]["message"]
+        assert warnings[0]["exceeded"] is False
 
         snapshot = user_spend_snapshot(owner, repos=run_service._repos(None), scope_user_id=owner)
         monthly = next(s for s in snapshot["scopes"] if s["scope"] == "user_monthly")
@@ -291,9 +292,8 @@ class TestWarningBand:
         resp = client.post("/workers/warnworker/runs", json={"inputs": {}, "trigger_source": "manual"})
         assert resp.status_code == 200, resp.text
 
-    def test_warning_stops_once_the_cap_is_exceeded(self, client_main):
-        """Past 100% the state is `exceeded`, which is a different (already
-        visible) rung than the approach warning."""
+    def test_exceeded_is_reported_as_exceeded_not_dropped(self, client_main):
+        """Past 100% the item changes tone but must stay visible."""
         client, _ = client_main
         assert (
             client.post("/workers", json={"worker_yml": _yml("overworker"), "run_py": "print(1)"}).status_code == 200
@@ -306,12 +306,19 @@ class TestWarningBand:
 
         from services.run_cost import spend_cap_warnings, user_spend_snapshot
 
-        assert spend_cap_warnings(owner, repos=run_service._repos(None), scope_user_id=owner) == []
         snapshot = user_spend_snapshot(owner, repos=run_service._repos(None), scope_user_id=owner)
         monthly = next(s for s in snapshot["scopes"] if s["scope"] == "user_monthly")
+        assert monthly["warning"] is False
         assert monthly["exceeded"] is True
         # The exact overshoot from the real incident, reported rather than hidden.
         assert monthly["overshoot_usd"] == 0.69
+
+        # The notice must NOT vanish at 100%: that would hide the problem exactly
+        # when it starts refusing runs.
+        reported = spend_cap_warnings(owner, repos=run_service._repos(None), scope_user_id=owner)
+        assert [w["scope"] for w in reported] == ["user_monthly"]
+        assert "Runs are being refused" in reported[0]["message"]
+        assert "$0.69 over" in reported[0]["message"]
 
     def test_warning_ratio_is_configurable(self, client_main, monkeypatch):
         monkeypatch.setenv("WORKEROS_SPEND_CAP_WARN_RATIO", "0.5")
@@ -344,11 +351,34 @@ class TestOverviewSurface:
         assert "spend cap" in items[0]["message"]
         assert items[0]["action_url"] == "/settings"
 
+    def test_overview_reports_an_exceeded_cap_too(self, client_main):
+        client, _ = client_main
+        assert (
+            client.post("/workers", json={"worker_yml": _yml("ovoverworker"), "run_py": "print(1)"}).status_code
+            == 200
+        )
+        import run_service
+
+        owner = run_service._worker_owner_id("ovoverworker", run_service._repos(None))
+        month_start = datetime.now(timezone.utc).replace(day=1).strftime("%Y-%m-01T00:00:00+00:00")
+        _seed_cost("ovoverworker", 25.69, month_start, actor_user_id=owner)
+
+        resp = client.get("/system/overview")
+        assert resp.status_code == 200, resp.text
+        items = [i for i in resp.json()["needs_attention"] if i["type"] == "spend_cap_exceeded"]
+        assert items, resp.json()["needs_attention"]
+        assert "Runs are being refused" in items[0]["message"]
+
     def test_overview_has_no_spend_item_when_under_the_ratio(self, client_main):
         client, _ = client_main
         resp = client.get("/system/overview")
         assert resp.status_code == 200
-        assert [i for i in resp.json()["needs_attention"] if i["type"] == "spend_cap_warning"] == []
+        spend_items = [
+            i
+            for i in resp.json()["needs_attention"]
+            if i["type"] in ("spend_cap_warning", "spend_cap_exceeded")
+        ]
+        assert spend_items == []
 
 
 class TestApiSurface:
@@ -357,7 +387,14 @@ class TestApiSurface:
         resp = client.get("/account/spend")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert {s["scope"] for s in body["scopes"]} == {"user_monthly", "user_daily"}
+        # All four admission scopes: a user blocked by the WORKSPACE cap needs to
+        # see that too, not just their own budget.
+        assert {s["scope"] for s in body["scopes"]} == {
+            "user_monthly",
+            "user_daily",
+            "workspace_monthly",
+            "workspace_daily",
+        }
         assert body["warn_ratio"] == 0.8
         # No cross-user parameter exists, so there is nothing to scope-check.
         assert "user_id" in body
