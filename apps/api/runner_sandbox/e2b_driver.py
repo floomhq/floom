@@ -1079,9 +1079,42 @@ _TRANSIENT_E2B_TRANSPORT_MARKERS = (
 )
 
 
+# Modules that only ever appear in a traceback because the HTTP/2 transport to
+# the sandbox broke. An exception raised inside one of these is a transport
+# failure whatever its Python type.
+_TRANSPORT_STACK_MODULE_PREFIXES = (
+    "h2.",
+    "hpack.",
+    "httpcore.",
+    "httpx.",
+)
+
+
+def _raised_in_transport_stack(exc: BaseException) -> bool:
+    """Whether *exc* was raised from inside the HTTP/2 transport libraries.
+
+    Message matching alone cannot classify these. Under connection teardown,
+    httpcore's HTTP/2 handler indexes its per-stream event map by stream id
+    (``self._events[stream_id]``), so a torn-down stream raises ``KeyError(19)``
+    whose ``str()`` is the bare string ``"19"``. Prod carries 33 such runs, with
+    details that are nothing but a number. They are genuine transport races in a
+    dependency, and they must stay retryable rather than be mistaken for a defect
+    in our own driver.
+    """
+    tb = getattr(exc, "__traceback__", None)
+    while tb is not None:
+        module = tb.tb_frame.f_globals.get("__name__") or ""
+        if module.startswith(_TRANSPORT_STACK_MODULE_PREFIXES):
+            return True
+        tb = tb.tb_next
+    return False
+
+
 def _is_transient_e2b_transport_error(exc: Exception) -> bool:
     text = _exception_text(exc).lower()
     if any(marker in text for marker in _TRANSIENT_E2B_TRANSPORT_MARKERS):
+        return True
+    if _raised_in_transport_stack(exc):
         return True
     cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
     if isinstance(cause, Exception) and cause is not exc:
@@ -1251,9 +1284,12 @@ def _is_driver_internal_error(exc: Exception) -> bool:
     """Whether *exc* is a programming defect rather than a sandbox failure.
 
     Deliberately narrow: only exact programming-error types count, and an
-    exception that a transport classifier already recognizes as transient stays
-    on the transport path. A defect is never fixed by re-running, so this is what
-    separates "retry it" from "page the operator".
+    exception that the transport classifier recognizes as transient stays on the
+    transport path. That second condition is load-bearing rather than defensive:
+    a torn-down HTTP/2 stream surfaces as ``KeyError(<stream_id>)`` raised inside
+    httpcore, which is a transport race, not our bug, and must stay retryable.
+    A defect is never fixed by re-running, so this is what separates "retry it"
+    from "page the operator".
     """
     if not isinstance(exc, _DRIVER_INTERNAL_EXCEPTION_TYPES):
         return False

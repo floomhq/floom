@@ -353,6 +353,67 @@ def test_a_transport_error_that_happens_to_be_a_typeerror_stays_transient():
     assert result.retryable is True
 
 
+def _raise_from_module(module_name: str, exc: BaseException) -> BaseException:
+    """Raise *exc* from a frame whose ``__name__`` is *module_name*, and return it.
+
+    Builds a real traceback through a synthetic module frame, which is how the
+    transport-stack check identifies where an exception came from.
+    """
+    namespace = {"__name__": module_name, "_exc": exc}
+    exec(  # noqa: S102 - constructing a frame with a controlled __name__
+        "def _boom():\n    raise _exc\n", namespace
+    )
+    try:
+        namespace["_boom"]()
+    except BaseException as raised:  # noqa: BLE001 - we re-hand it to the caller
+        return raised
+    raise AssertionError("expected the synthetic frame to raise")
+
+
+def test_bare_stream_id_keyerror_from_httpcore_stays_retryable():
+    """Prod carries 33 runs whose entire error detail is a bare integer.
+
+    ``str(KeyError(2251))`` is ``"2251"``. httpcore's HTTP/2 handler indexes its
+    per-stream event map by stream id, so a stream torn down mid-read raises
+    exactly this. It is a transport race in a dependency, so the new
+    driver-internal split must NOT steal it and make it non-retryable.
+    """
+    exc = _raise_from_module("httpcore._sync.http2", KeyError(2251))
+    assert str(exc) == "2251"
+    assert _is_driver_internal_error(exc) is False
+    result = _sandbox_exception_result(exc, elapsed_seconds=4.0, timeout_seconds=1800)
+    assert result.error_code == "e2b_sandbox_error"
+    assert result.retryable is True
+
+
+@pytest.mark.parametrize(
+    "module_name", ["h2.connection", "hpack.table", "httpcore._sync.http2", "httpx._client"]
+)
+def test_any_exception_from_the_transport_stack_counts_as_transport(module_name):
+    exc = _raise_from_module(module_name, RuntimeError("opaque"))
+    result = _sandbox_exception_result(exc, elapsed_seconds=4.0, timeout_seconds=1800)
+    assert result.error_code == "e2b_sandbox_error"
+    assert result.retryable is True
+
+
+def test_the_same_keyerror_raised_in_our_own_code_is_a_driver_defect():
+    """The origin frame, not the exception type, is what distinguishes them."""
+    exc = _raise_from_module("runner_sandbox.e2b_driver", KeyError("outputs"))
+    assert _is_driver_internal_error(exc) is True
+    result = _sandbox_exception_result(exc, elapsed_seconds=4.0, timeout_seconds=1800)
+    assert result.error_code == SANDBOX_DRIVER_INTERNAL_ERROR_CODE
+    assert result.retryable is False
+
+
+def test_a_transport_exception_nested_as_a_cause_is_still_transport():
+    inner = _raise_from_module("httpcore._sync.http2", KeyError(19))
+    outer = AttributeError("'str' object has no attribute 'get'")
+    outer.__cause__ = inner
+    result = _sandbox_exception_result(outer, elapsed_seconds=4.0, timeout_seconds=1800)
+    assert result.error_code == "e2b_sandbox_error"
+    assert result.retryable is True
+
+
 def test_timeout_classification_still_wins_over_the_internal_split():
     exc = TypeError("context deadline exceeded")
     result = _sandbox_exception_result(exc, elapsed_seconds=1800.0, timeout_seconds=1800)
