@@ -256,6 +256,31 @@ def test_ensure_scheduler_running_never_cold_starts_a_scheduler(scheduler):
     assert _scheduler_thread_count() == 0
 
 
+def test_heartbeat_status_reports_alive_separately_from_running(scheduler, monkeypatch):
+    """`running` is `alive and not stopping`, so a winding-down thread needs its
+    own signal: a supervisor must not confuse it with "no thread at all"."""
+    ticks = _Ticks()
+    monkeypatch.setattr(scheduler, "_tick", ticks)
+    monkeypatch.setattr(scheduler, "POLL_INTERVAL_SECONDS", 30)
+
+    assert scheduler.scheduler_heartbeat_status()["alive"] is False
+
+    scheduler.start_scheduler()
+    assert ticks.wait_for_first()
+    running = scheduler.scheduler_heartbeat_status()
+    assert running["alive"] is True
+    assert running["running"] is True
+
+    thread = scheduler._scheduler_thread
+    scheduler.stop_scheduler()
+    thread.join(timeout=5)
+
+    stopped = scheduler.scheduler_heartbeat_status()
+    assert stopped["alive"] is False
+    assert stopped["running"] is False
+    assert stopped["stopping"] is True
+
+
 def test_health_surfaces_heartbeat_staleness_additively(scheduler, monkeypatch):
     """/health gains the staleness fields without changing what `ok` means."""
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
@@ -272,6 +297,7 @@ def test_health_surfaces_heartbeat_staleness_additively(scheduler, monkeypatch):
     # Backward compatible: still a superset of the scheduler_status() keys.
     for key in ("ok", "running", "thread", "stopping"):
         assert key in healthy
+    assert healthy["alive"] is True
     assert healthy["ok"] is True
     assert healthy["running"] is True
     assert healthy["stale"] is False

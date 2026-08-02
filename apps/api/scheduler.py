@@ -1369,6 +1369,11 @@ def scheduler_heartbeat_status(*, now_monotonic: float | None = None) -> dict[st
     return {
         "ok": running and not stale,
         "running": running,
+        # `running` is `alive and not stopping`, so a live thread that is winding
+        # down looks identical to no thread at all. A supervisor must be able to
+        # tell those apart: restarting or releasing a leader lock while a live
+        # thread may still be firing triggers double-fires runs. Additive.
+        "alive": alive,
         "thread": thread.name if thread is not None else None,
         "stopping": _stop_event.is_set(),
         "heartbeat_age_seconds": heartbeat_age,

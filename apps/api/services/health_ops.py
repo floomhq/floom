@@ -126,7 +126,7 @@ def _health_check_scheduler() -> Dict[str, Any]:
         # of death and flipping `ok` would change health semantics for every
         # consumer. Leader-aware health is a separate follow-up.
         heartbeat = scheduler_heartbeat_status()
-        for key in ("heartbeat_age_seconds", "stale_after_seconds", "stale"):
+        for key in ("alive", "heartbeat_age_seconds", "stale_after_seconds", "stale"):
             payload[key] = heartbeat.get(key)
         return payload
     except Exception as exc:
