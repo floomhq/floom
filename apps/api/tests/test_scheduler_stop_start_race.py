@@ -193,7 +193,14 @@ def test_ensure_scheduler_running_is_idempotent(scheduler, monkeypatch):
     assert _scheduler_thread_count() == before, "no duplicate scheduler threads"
 
 
-def test_ensure_scheduler_running_restarts_a_stale_heartbeat(scheduler, monkeypatch):
+def test_ensure_scheduler_running_never_replaces_a_live_stale_thread(scheduler, monkeypatch):
+    """Python cannot kill a thread, so a wedged generation is left alone.
+
+    Replacing a live-but-stale scheduler would leave TWO schedulers firing the
+    same triggers and duplicating side effects, which is worse than the delay.
+    A stale heartbeat is also not proof of death: a recovery tick working
+    through many overdue triggers legitimately runs long.
+    """
     ticks = _Ticks()
     monkeypatch.setattr(scheduler, "_tick", ticks)
     monkeypatch.setattr(scheduler, "POLL_INTERVAL_SECONDS", 30)
@@ -207,12 +214,38 @@ def test_ensure_scheduler_running_restarts_a_stale_heartbeat(scheduler, monkeypa
         + scheduler._SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS
         + 1.0
     )
-    assert scheduler.ensure_scheduler_running(now_monotonic=stale_now) is True
+    status = scheduler.scheduler_heartbeat_status(now_monotonic=stale_now)
+    assert status["ok"] is False and status["stale"] is True
 
-    wedged.join(timeout=5)
-    assert scheduler._scheduler_thread is not wedged
-    assert scheduler._scheduler_thread.is_alive() is True
+    assert scheduler.ensure_scheduler_running(now_monotonic=stale_now) is False
+    assert scheduler.ensure_scheduler_running(now_monotonic=stale_now) is False
+
+    assert scheduler._scheduler_thread is wedged
+    assert wedged.is_alive() is True
     assert scheduler._stop_event.is_set() is False
+    assert _scheduler_thread_count() == 1, "a wedged scheduler must never be doubled"
+
+
+def test_ensure_scheduler_running_restarts_a_stopping_generation(scheduler, monkeypatch):
+    """A generation whose stop flag is set is dead, not wedged: replace it."""
+    ticks = _Ticks()
+    monkeypatch.setattr(scheduler, "_tick", ticks)
+    monkeypatch.setattr(scheduler, "POLL_INTERVAL_SECONDS", 30)
+
+    scheduler.start_scheduler()
+    assert ticks.wait_for_first()
+    outgoing = scheduler._scheduler_thread
+
+    scheduler.stop_scheduler()
+    ticks.seen.clear()
+
+    assert scheduler.ensure_scheduler_running() is True
+    assert ticks.wait_for_first()
+    outgoing.join(timeout=5)
+    assert outgoing.is_alive() is False
+    assert scheduler._scheduler_thread is not outgoing
+    assert scheduler._scheduler_thread.is_alive() is True
+    assert _scheduler_thread_count() == 1
 
 
 def test_ensure_scheduler_running_never_cold_starts_a_scheduler(scheduler):
@@ -223,8 +256,8 @@ def test_ensure_scheduler_running_never_cold_starts_a_scheduler(scheduler):
     assert _scheduler_thread_count() == 0
 
 
-def test_health_surfaces_a_wedged_but_alive_scheduler(scheduler, monkeypatch):
-    """/health must not call an alive-but-not-ticking scheduler healthy."""
+def test_health_surfaces_heartbeat_staleness_additively(scheduler, monkeypatch):
+    """/health gains the staleness fields without changing what `ok` means."""
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     from services import health_ops
 
@@ -241,17 +274,39 @@ def test_health_surfaces_a_wedged_but_alive_scheduler(scheduler, monkeypatch):
         assert key in healthy
     assert healthy["ok"] is True
     assert healthy["running"] is True
+    assert healthy["stale"] is False
+    assert healthy["heartbeat_age_seconds"] is not None
 
     # The thread stays alive but stops ticking, which is what is_alive() alone
-    # could never see.
+    # could never see. It is now visible, and `ok` is deliberately unchanged so
+    # no consumer's health semantics shift in this PR.
     scheduler._scheduler_last_heartbeat_monotonic = (
         time.monotonic() - scheduler._SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS - 1.0
     )
 
     wedged = health_ops._health_check_scheduler()
-    assert wedged["running"] is True
     assert wedged["stale"] is True
-    assert wedged["ok"] is False
+    assert wedged["running"] is True
+    assert wedged["ok"] is True
+
+
+def test_health_still_reports_a_dead_scheduler_as_not_ok(scheduler, monkeypatch):
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    from services import health_ops
+
+    ticks = _Ticks()
+    monkeypatch.setattr(scheduler, "_tick", ticks)
+    monkeypatch.setattr(scheduler, "POLL_INTERVAL_SECONDS", 30)
+
+    scheduler.start_scheduler()
+    assert ticks.wait_for_first()
+    thread = scheduler._scheduler_thread
+    scheduler.stop_scheduler()
+    thread.join(timeout=5)
+
+    dead = health_ops._health_check_scheduler()
+    assert dead["ok"] is False
+    assert dead["running"] is False
 
 
 def _scheduler_thread_count() -> int:

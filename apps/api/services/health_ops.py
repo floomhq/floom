@@ -117,12 +117,18 @@ def _health_check_scheduler() -> Dict[str, Any]:
     if deploy != "local":
         return {"ok": True, "enabled": False, "deploy": deploy}
     try:
-        # Heartbeat status, not scheduler_status(): a thread that is alive but
-        # wedged inside a tick still reports is_alive() True, so /health called
-        # it healthy while nothing fired. The returned dict is a superset of the
-        # scheduler_status() keys, so existing consumers are unaffected.
-        from scheduler import scheduler_heartbeat_status
-        return scheduler_heartbeat_status()
+        from scheduler import scheduler_heartbeat_status, scheduler_status
+        payload = dict(scheduler_status())
+        # Surface heartbeat staleness ADDITIVELY: a thread that is alive but
+        # wedged inside a tick still reports is_alive() True, so nothing here
+        # used to show that it stopped firing. `ok` deliberately keeps the
+        # scheduler_status() meaning, because a long recovery tick is not proof
+        # of death and flipping `ok` would change health semantics for every
+        # consumer. Leader-aware health is a separate follow-up.
+        heartbeat = scheduler_heartbeat_status()
+        for key in ("heartbeat_age_seconds", "stale_after_seconds", "stale"):
+            payload[key] = heartbeat.get(key)
+        return payload
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:300]}
 

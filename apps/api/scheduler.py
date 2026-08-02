@@ -1377,8 +1377,14 @@ def scheduler_heartbeat_status(*, now_monotonic: float | None = None) -> dict[st
     }
 
 
-def _start_scheduler_locked() -> None:
-    """Launch a fresh scheduler generation. Caller must hold ``_scheduler_lock``."""
+def _start_scheduler_locked(*, replace_wedged: bool = True) -> bool:
+    """Launch a fresh scheduler generation. Caller must hold ``_scheduler_lock``.
+
+    ``replace_wedged=False`` refuses to launch a successor while the outgoing
+    generation is still alive after the bounded join, so an automatic caller can
+    never end up with two scheduler threads firing the same triggers. Returns
+    True when a new generation was launched.
+    """
     global _scheduler_thread, _stop_event, _scheduler_last_heartbeat_monotonic
     global _scheduler_started_once
 
@@ -1386,15 +1392,23 @@ def _start_scheduler_locked() -> None:
     if previous is not None and previous.is_alive():
         if not _stop_event.is_set():
             # A healthy generation is already running: starting again is a no-op.
-            return
+            return False
         # A stop is pending for that generation. Wait for it to finish instead of
         # early-returning, otherwise the caller is left with a thread that is
         # about to exit and no successor.
         previous.join(timeout=_SCHEDULER_STOP_JOIN_TIMEOUT_SECONDS)
         if previous.is_alive():
-            # Wedged inside a tick and unkillable from here. Its stop flag stays
-            # set, so it exits as soon as that tick returns; a fresh generation
-            # now is strictly better than leaving the schedule unserved.
+            # Wedged inside a tick and unkillable from here: Python cannot stop a
+            # thread. Its stop flag stays set, so it exits as soon as that tick
+            # returns.
+            if not replace_wedged:
+                _safe_log(
+                    logging.ERROR,
+                    "Scheduler thread did not stop within %ss and is still alive; NOT starting a "
+                    "second generation, because two schedulers would fire the same triggers twice",
+                    _SCHEDULER_STOP_JOIN_TIMEOUT_SECONDS,
+                )
+                return False
             _safe_log(
                 logging.WARNING,
                 "Previous scheduler thread did not stop within %ss; starting a new generation",
@@ -1429,6 +1443,7 @@ def _start_scheduler_locked() -> None:
     _scheduler_thread = threading.Thread(target=_loop, daemon=True, name="workeros-scheduler")
     _scheduler_started_once = True
     _scheduler_thread.start()
+    return True
 
 
 def start_scheduler() -> None:
@@ -1449,13 +1464,25 @@ def stop_scheduler() -> None:
 
 
 def ensure_scheduler_running(*, now_monotonic: float | None = None) -> bool:
-    """Restart the scheduler when its thread died or its heartbeat went stale.
+    """Restart the scheduler when its thread is gone. Returns True if it did.
+
+    Three states, only one of which is recovered here:
+
+    - ok: a live generation with a fresh heartbeat. No-op.
+    - dead: no thread, a thread that is not alive, or one whose stop flag is set
+      and which exits within the bounded join. Recovered by launching a fresh
+      generation.
+    - wedged: alive, not stopping, heartbeat stale. Logged loudly and left
+      ALONE. Python cannot kill a thread, so starting a replacement would leave
+      two schedulers firing the same triggers and duplicating side effects
+      (emails, CRM writes), which is worse than the delay. A stale heartbeat is
+      also not proof of death: a recovery tick that works through many overdue
+      triggers legitimately runs long.
 
     Safe to call repeatedly and from any thread: it holds ``_scheduler_lock``
     for the whole check-and-restart, so it never spawns a second scheduler
-    thread, and it is a no-op while the current generation is healthy. It only
-    ever RE-starts, so a process that never started a scheduler (WORKEROS_ROLE=web)
-    stays without one. Returns True when it restarted the scheduler.
+    thread. It only ever RE-starts, so a process that never started a scheduler
+    (WORKEROS_ROLE=web) stays without one.
     """
     with _scheduler_lock:
         if not _scheduler_started_once:
@@ -1463,18 +1490,27 @@ def ensure_scheduler_running(*, now_monotonic: float | None = None) -> bool:
         status = scheduler_heartbeat_status(now_monotonic=now_monotonic)
         if status["ok"]:
             return False
-        if not status["running"]:
-            reason = "thread is not running"
-        elif status["stale"]:
-            reason = "heartbeat is stale"
-        else:
-            reason = "status is not ok"
-        _safe_log(logging.WARNING, "Scheduler %s; restarting it", reason)
-        # Retire the unhealthy generation first so it can never outlive its
-        # replacement, then start a fresh one under the same lock.
+        thread = _scheduler_thread
+        alive = bool(thread is not None and thread.is_alive())
+        if alive and not _stop_event.is_set():
+            _safe_log(
+                logging.ERROR,
+                "Scheduler thread is alive but its heartbeat is %.0fs old (stale after %.0fs); "
+                "leaving it alone, because replacing a live thread would run two schedulers",
+                status["heartbeat_age_seconds"] or 0.0,
+                _SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS,
+            )
+            return False
+        _safe_log(
+            logging.WARNING,
+            "Scheduler thread is %s; restarting it",
+            "stopping" if alive else "not running",
+        )
+        # Retire the outgoing generation first so it can never outlive its
+        # replacement, then start a fresh one under the same lock. A generation
+        # that refuses to die keeps the slot: no duplicate scheduler.
         _stop_event.set()
-        _start_scheduler_locked()
-        return True
+        return _start_scheduler_locked(replace_wedged=False)
 
 
 def scheduler_status() -> dict[str, Any]:
