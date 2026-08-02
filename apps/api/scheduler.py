@@ -175,11 +175,27 @@ def _warn_cronless_schedule_once(worker_id: str, trigger_id: str | None = None) 
         )
 
 POLL_INTERVAL_SECONDS = 60  # check every minute
+# Stop event of the CURRENT scheduler generation. Every start_scheduler() binds a
+# FRESH event and hands it to the thread it launches by closure, so a stop aimed
+# at generation N can never terminate generation N+1. Before this, one shared
+# module-global event meant a stop() immediately followed by a start() (what the
+# cloud wrapper does when its advisory-lock connection blips) left the flag set,
+# start() early-returned because the old thread was still sleeping, and the old
+# thread then woke up, saw the flag and exited: no scheduler thread at all.
 _stop_event: threading.Event = threading.Event()
 _scheduler_thread: threading.Thread | None = None
-_scheduler_lock = threading.Lock()
+# Re-entrant so ensure_scheduler_running() can restart under the same lock it
+# uses to read the scheduler state, without a second thread slipping in between.
+_scheduler_lock = threading.RLock()
 _SCHEDULER_HEARTBEAT_STALE_AFTER_SECONDS = POLL_INTERVAL_SECONDS * 3.0
+# How long a start waits for a stopping generation to finish before it gives up
+# and launches a fresh one anyway. Bounded so a wedged tick cannot block boot.
+_SCHEDULER_STOP_JOIN_TIMEOUT_SECONDS = 5.0
 _scheduler_last_heartbeat_monotonic: float | None = None
+# True once this process started a scheduler. ensure_scheduler_running() only
+# ever RE-starts, so a web-role process that never ran one cannot grow a
+# scheduler thread by calling the watchdog.
+_scheduler_started_once = False
 SCHEDULE_MISSED_ERROR_CODE = "scheduler_missed"
 SCHEDULE_MISSED_ERROR = "Scheduled fire was missed or delayed by the scheduler."
 SPEND_CAP_ERROR_CODE = "spend_cap_exceeded"
@@ -1315,10 +1331,23 @@ def _tick() -> None:
             )
 
 
+def _safe_log(level: int, message: str, *args: Any, exc_info: bool = False) -> None:
+    """Log without ever letting a broken handler kill the scheduler thread.
+
+    A closed stdout pipe (seen after a container restart) raises inside
+    logging, and that exception used to propagate out of the poll loop and end
+    the scheduler for the lifetime of the process.
+    """
+    try:
+        logger.log(level, message, *args, exc_info=exc_info)
+    except Exception:
+        pass
+
+
 def _record_scheduler_heartbeat() -> None:
     global _scheduler_last_heartbeat_monotonic
     _scheduler_last_heartbeat_monotonic = time.monotonic()
-    logger.info("Scheduler heartbeat")
+    _safe_log(logging.INFO, "Scheduler heartbeat")
 
 
 def scheduler_heartbeat_status(*, now_monotonic: float | None = None) -> dict[str, Any]:
@@ -1348,33 +1377,104 @@ def scheduler_heartbeat_status(*, now_monotonic: float | None = None) -> dict[st
     }
 
 
-def start_scheduler() -> None:
-    """Start the scheduler in a background daemon thread."""
-    global _scheduler_thread, _scheduler_last_heartbeat_monotonic
-    with _scheduler_lock:
-        if _scheduler_thread is not None and _scheduler_thread.is_alive():
+def _start_scheduler_locked() -> None:
+    """Launch a fresh scheduler generation. Caller must hold ``_scheduler_lock``."""
+    global _scheduler_thread, _stop_event, _scheduler_last_heartbeat_monotonic
+    global _scheduler_started_once
+
+    previous = _scheduler_thread
+    if previous is not None and previous.is_alive():
+        if not _stop_event.is_set():
+            # A healthy generation is already running: starting again is a no-op.
             return
-        _stop_event.clear()
-        _scheduler_last_heartbeat_monotonic = time.monotonic()
+        # A stop is pending for that generation. Wait for it to finish instead of
+        # early-returning, otherwise the caller is left with a thread that is
+        # about to exit and no successor.
+        previous.join(timeout=_SCHEDULER_STOP_JOIN_TIMEOUT_SECONDS)
+        if previous.is_alive():
+            # Wedged inside a tick and unkillable from here. Its stop flag stays
+            # set, so it exits as soon as that tick returns; a fresh generation
+            # now is strictly better than leaving the schedule unserved.
+            _safe_log(
+                logging.WARNING,
+                "Previous scheduler thread did not stop within %ss; starting a new generation",
+                _SCHEDULER_STOP_JOIN_TIMEOUT_SECONDS,
+            )
 
-        def _loop() -> None:
-            logger.info("Scheduler started (poll interval: %ds)", POLL_INTERVAL_SECONDS)
-            while not _stop_event.is_set():
+    stop_event = threading.Event()
+    _stop_event = stop_event
+    _scheduler_last_heartbeat_monotonic = time.monotonic()
+
+    def _loop() -> None:
+        _safe_log(logging.INFO, "Scheduler started (poll interval: %ds)", POLL_INTERVAL_SECONDS)
+        # Only `stop_event` ends this loop. Everything else, including logging
+        # and the sleep, is contained so an incidental exception cannot leave
+        # the deployment without a scheduler.
+        while not stop_event.is_set():
+            try:
                 _record_scheduler_heartbeat()
+                _tick()
+            except Exception as exc:
+                _safe_log(logging.ERROR, "Scheduler tick failed: %s", exc, exc_info=True)
+            try:
+                stop_event.wait(timeout=POLL_INTERVAL_SECONDS)
+            except Exception as exc:
+                _safe_log(logging.ERROR, "Scheduler sleep failed: %s", exc, exc_info=True)
                 try:
-                    _tick()
-                except Exception as exc:
-                    logger.exception("Scheduler tick failed: %s", exc)
-                _stop_event.wait(timeout=POLL_INTERVAL_SECONDS)
-            logger.info("Scheduler stopped")
+                    time.sleep(POLL_INTERVAL_SECONDS)
+                except Exception:
+                    pass
+        _safe_log(logging.INFO, "Scheduler stopped")
 
-        _scheduler_thread = threading.Thread(target=_loop, daemon=True, name="workeros-scheduler")
-        _scheduler_thread.start()
+    _scheduler_thread = threading.Thread(target=_loop, daemon=True, name="workeros-scheduler")
+    _scheduler_started_once = True
+    _scheduler_thread.start()
+
+
+def start_scheduler() -> None:
+    """Start the scheduler in a background daemon thread.
+
+    Idempotent while a healthy generation is running. When the current
+    generation is stopping, it is joined (bounded) and replaced, so a
+    stop/start pair can never leave the process with no scheduler.
+    """
+    with _scheduler_lock:
+        _start_scheduler_locked()
 
 
 def stop_scheduler() -> None:
-    """Signal the scheduler to stop."""
-    _stop_event.set()
+    """Signal the current scheduler generation to stop."""
+    with _scheduler_lock:
+        _stop_event.set()
+
+
+def ensure_scheduler_running(*, now_monotonic: float | None = None) -> bool:
+    """Restart the scheduler when its thread died or its heartbeat went stale.
+
+    Safe to call repeatedly and from any thread: it holds ``_scheduler_lock``
+    for the whole check-and-restart, so it never spawns a second scheduler
+    thread, and it is a no-op while the current generation is healthy. It only
+    ever RE-starts, so a process that never started a scheduler (WORKEROS_ROLE=web)
+    stays without one. Returns True when it restarted the scheduler.
+    """
+    with _scheduler_lock:
+        if not _scheduler_started_once:
+            return False
+        status = scheduler_heartbeat_status(now_monotonic=now_monotonic)
+        if status["ok"]:
+            return False
+        if not status["running"]:
+            reason = "thread is not running"
+        elif status["stale"]:
+            reason = "heartbeat is stale"
+        else:
+            reason = "status is not ok"
+        _safe_log(logging.WARNING, "Scheduler %s; restarting it", reason)
+        # Retire the unhealthy generation first so it can never outlive its
+        # replacement, then start a fresh one under the same lock.
+        _stop_event.set()
+        _start_scheduler_locked()
+        return True
 
 
 def scheduler_status() -> dict[str, Any]:
