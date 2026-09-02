@@ -104,6 +104,21 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "skill_runtime_error": _RUNTIME_HEADLINE,
     "openai_call_failed": _RUNTIME_HEADLINE,
     "interrupted_by_restart": "This run was interrupted while the service restarted. Re-run the worker.",
+    # Platform faults. Without an entry here these fell back to the generic
+    # "This worker failed to run ... edit or re-run the worker", which blames the
+    # operator for OUR restart. Name the fault as ours and say what to do.
+    "scheduler_missed": (
+        "Floom's scheduler was delayed, so this scheduled run started later than its scheduled "
+        "time. The worker itself is fine and no action is needed."
+    ),
+    "executor_lost_mid_run": (
+        "Floom's execution service stopped while this run was in progress. This is a platform "
+        "fault, not a problem with the worker. Re-run it if the work did not complete."
+    ),
+    "run_claimed_without_dispatch": (
+        "Floom picked this run up but the platform stopped before the worker started. Nothing in "
+        "the worker ran. This is a platform fault; re-run it."
+    ),
     "context_mount_failed": _RUNTIME_HEADLINE,
     "mcp_connect_failed": _CONNECTION_HEADLINE,
     # Sandbox / timeout / resource.
