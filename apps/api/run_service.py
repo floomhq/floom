@@ -149,7 +149,11 @@ from dotenv import load_dotenv
 
 from contexts import context_scope_for_execution, use_context_scope
 from db.factory import Repositories, get_repositories
-from db.interface import RUN_LOG_DRAIN_MARKER_LEVEL, RUN_LOG_DRAIN_MARKER_MESSAGE
+from db.interface import (
+    DURABLE_EXECUTION_LOG_PREFIXES,
+    RUN_LOG_DRAIN_MARKER_LEVEL,
+    RUN_LOG_DRAIN_MARKER_MESSAGE,
+)
 from runner_utils import ARTIFACTS_DIR, DEFAULT_TIMEOUT_SECONDS, _validate_output_schema
 from worker_registry import WORKERS_DIR, get_worker_config
 from runner_sandbox import get_driver as get_sandbox_driver
@@ -494,6 +498,38 @@ def _matching_retry_row(
     )
 
 
+# Every trigger_source that addresses a retry child. Kept explicit (rather than
+# derived) so adding a new retry kind forces a decision about lineage forking.
+_RETRY_TRIGGER_SOURCES = ("retry", "restart_retry")
+
+
+def _existing_sibling_retry_id(
+    repos: "Repositories",
+    *,
+    original_run_id: str,
+    attempt: int,
+    trigger_source: str,
+) -> str | None:
+    """Return a child id already persisted for this (run, attempt) under a
+    DIFFERENT trigger_source, if any (#1232)."""
+    for other_source in _RETRY_TRIGGER_SOURCES:
+        if other_source == trigger_source:
+            continue
+        sibling_id = _retry_run_id(original_run_id, attempt, other_source)
+        try:
+            sibling = repos.runs.get_any(run_id=sibling_id)
+        except Exception:
+            continue
+        if _matching_retry_row(
+            sibling,
+            original_run_id=original_run_id,
+            attempt=attempt,
+            trigger_source=other_source,
+        ):
+            return sibling_id
+    return None
+
+
 def _schedule_retry(
     *,
     original_run_id: str,
@@ -526,6 +562,26 @@ def _schedule_retry(
         ):
             logger.info("Retry #%d for run %s is already persisted as %s", attempt, original_run_id, retry_run_id)
             return True
+        # #1232: the retry id hashes trigger_source, so "retry" and
+        # "restart_retry" address different rows for the SAME (run, attempt).
+        # A falsely reaped run therefore produced a restart_retry while the
+        # still-live original later produced its own retry: one scheduled run,
+        # two retry trees. One child per lineage attempt, whoever asks first.
+        sibling_id = _existing_sibling_retry_id(
+            repos,
+            original_run_id=original_run_id,
+            attempt=attempt,
+            trigger_source=trigger_source,
+        )
+        if sibling_id:
+            logger.warning(
+                "Refusing %s child for run %s attempt %d: sibling %s already exists",
+                trigger_source,
+                original_run_id,
+                attempt,
+                sibling_id,
+            )
+            return False
         if user_id:
             not_before = None
             if delay_seconds > 0:
@@ -2517,6 +2573,12 @@ _SCHEDULE_MISSING_SECRET_PAUSE_AFTER = 3
 _RUN_REAPER_DEFAULT_GRACE_SECONDS = 60
 _RUN_REAPER_DEFAULT_INTERVAL_SECONDS = 180
 _RESTART_RETRY_BACKOFF_SECONDS = 60
+# #1232: a run that logged durable execution activity this recently is being
+# driven by *some* executor right now, so neither reaping nor retrying it is
+# safe. Sized above the observed gap between consecutive agent tool calls
+# (~10 min in the reported lineage) so a slow model call is not mistaken for a
+# dead sandbox.
+_RUN_LIVENESS_DEFAULT_WINDOW_SECONDS = 600
 # Per-sandbox control-plane kill timeout used inside the cancel loop. The loop
 # runs serially over every active run, so the driver default (60s) could make a
 # single hung kill blow the whole shutdown/cancel budget. Bound each kill and
@@ -2725,6 +2787,183 @@ def _retryable_driver_max_attempts(error_code: str | None) -> int:
         return default
 
 
+def _run_liveness_window_seconds() -> int:
+    """How recently a run must have logged execution activity to count as alive.
+
+    Durable-execution log rows (``DURABLE_EXECUTION_LOG_PREFIXES``) are written
+    by the sandbox driver and are visible to *every* process, unlike the
+    process-local ``_active_runs`` registry. They are therefore the only
+    cross-executor heartbeat available without a schema change.
+    """
+    raw = os.environ.get("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "")
+    if not raw:
+        return _RUN_LIVENESS_DEFAULT_WINDOW_SECONDS
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _RUN_LIVENESS_DEFAULT_WINDOW_SECONDS
+
+
+def _last_durable_activity_at(
+    repos_obj: Repositories, *, user_id: str, run_id: str
+) -> datetime | None:
+    """Newest durable-execution log timestamp for *run_id*, or None."""
+    try:
+        logs = repos_obj.runs.list_logs(user_id=user_id, run_id=run_id)
+    except Exception:
+        logger.warning("Liveness probe could not read logs for run %s", run_id, exc_info=True)
+        return None
+    newest: datetime | None = None
+    for log in logs or []:
+        message = str(log.get("message") or "")
+        if not message.startswith(DURABLE_EXECUTION_LOG_PREFIXES):
+            continue
+        raw_ts = log.get("timestamp") or log.get("created_at")
+        if not raw_ts:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(raw_ts))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if newest is None or parsed > newest:
+            newest = parsed
+    return newest
+
+
+def _effective_run_timeout_seconds(
+    repos_obj: Repositories,
+    row: dict[str, Any],
+    cache: dict[tuple[str, str], int],
+) -> int:
+    """Resolve the timeout the run was actually dispatched with.
+
+    Falls back to MAX_RUN_TIMEOUT_SECONDS (not the 300 s global default) when
+    the worker recipe cannot be loaded. Reaping a *live* run duplicates
+    outbound side effects (#1232 saw two GMAIL_SEND_EMAIL executions), whereas
+    reaping late only delays recovery, so the unresolvable case must err long
+    rather than short. It still errs finite, so a deleted worker cannot pin a
+    row in `running` forever.
+    """
+    from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
+
+    run_id = str(row.get("run_id") or row.get("id") or "")
+    worker_id = str(row.get("worker_id") or "")
+    user_id = str(row.get("user_id") or "")
+    if not worker_id:
+        return MAX_RUN_TIMEOUT_SECONDS
+
+    cache_key = (worker_id, user_id)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    resolved = MAX_RUN_TIMEOUT_SECONDS
+    try:
+        # Workspace `default_timeout_seconds` can raise the per-worker value, so
+        # resolve inside the run's own workspace scope exactly as dispatch does.
+        with _run_execution_context(run_id):
+            loaded = _load_worker_recipe(worker_id, repos=repos_obj, user_id=user_id or None)
+            config = loaded[1] if loaded else None
+            if config is not None:
+                resolved = _resolved_worker_timeout_seconds(config)
+    except Exception:
+        logger.warning(
+            "Reaper could not resolve the effective timeout for run %s (worker %s); "
+            "falling back to the %ss ceiling",
+            run_id,
+            worker_id,
+            MAX_RUN_TIMEOUT_SECONDS,
+            exc_info=True,
+        )
+        resolved = MAX_RUN_TIMEOUT_SECONDS
+
+    cache[cache_key] = resolved
+    return resolved
+
+
+def _protected_stale_run_ids(
+    repos_obj: Repositories,
+    *,
+    candidates: list[dict[str, Any]],
+    grace: int,
+    now_dt: datetime,
+    periodic_sweep: bool,
+) -> set[str]:
+    """Ids among *candidates* that must NOT be failed by the periodic reaper.
+
+    Two guards, both of which only make sense for the periodic sweep:
+
+    * deadline -- "should this have finished by now?" The sweep infers
+      staleness from a clock, so it must use each run's OWN effective timeout
+      rather than one global default (#1232).
+    * liveness -- "is something still driving it?" Durable execution rows are
+      written by the sandbox driver and are visible to every process, so they
+      are the one cross-executor signal available; the process-local
+      ``_active_runs`` registry says nothing about another executor's runs.
+
+    Both are skipped when *periodic_sweep* is False, i.e. when the caller
+    passed an explicit window. ``fail_interrupted_runs_on_startup`` passes 0/0
+    because the process has just booted: every ``running`` row belongs to a
+    dead predecessor, and a log written one second ago is then evidence of
+    recent death, not of life. Waiting there would regress #1434, which exists
+    to recover runs a deploy killed.
+    """
+    if not periodic_sweep:
+        return set()
+
+    protected: set[str] = set()
+    timeout_cache: dict[tuple[str, str], int] = {}
+    liveness_window = _run_liveness_window_seconds()
+
+    for row in candidates:
+        run_id = str(row.get("run_id") or row.get("id") or "")
+        if not run_id:
+            continue
+
+        started_raw = row.get("started_at") or row.get("created_at")
+        started_dt: datetime | None = None
+        if started_raw:
+            try:
+                started_dt = datetime.fromisoformat(str(started_raw))
+            except ValueError:
+                started_dt = None
+            if started_dt is not None and started_dt.tzinfo is None:
+                started_dt = started_dt.replace(tzinfo=timezone.utc)
+
+        run_timeout = _effective_run_timeout_seconds(repos_obj, row, timeout_cache)
+        if started_dt is not None and now_dt < started_dt + timedelta(
+            seconds=run_timeout + grace
+        ):
+            protected.add(run_id)
+            logger.info(
+                "Reaper skipping run %s: %ss into its own %ss timeout (+%ss grace)",
+                run_id,
+                int((now_dt - started_dt).total_seconds()),
+                run_timeout,
+                grace,
+            )
+            continue
+
+        user_id = str(row.get("user_id") or "")
+        if not user_id or liveness_window <= 0:
+            continue
+        last_activity = _last_durable_activity_at(repos_obj, user_id=user_id, run_id=run_id)
+        if last_activity is not None and (now_dt - last_activity) <= timedelta(
+            seconds=liveness_window
+        ):
+            protected.add(run_id)
+            logger.warning(
+                "Reaper skipping run %s: logged execution activity %ss ago, so an "
+                "executor is still driving it (effective timeout %ss)",
+                run_id,
+                int((now_dt - last_activity).total_seconds()),
+                run_timeout,
+            )
+    return protected
+
+
 def _fail_stale_running_rows(
     repos_obj: Repositories,
     *,
@@ -2733,14 +2972,46 @@ def _fail_stale_running_rows(
     now_dt: datetime,
     error: str = ABANDONED_RUN_ERROR,
     error_code: str = ABANDONED_RUN_ERROR_CODE,
+    periodic_sweep: bool = True,
 ) -> list[dict[str, Any]]:
-    """Status-gated fail of stale `running` rows; returns the rows it failed."""
+    """Status-gated fail of stale `running` rows; returns the rows it failed.
+
+    *timeout* is only the cheap pre-filter that selects candidates. The
+    authoritative decision is per run: #1232 showed that reaping on a single
+    global default fails long-but-healthy runs (an 1800 s worker killed 452 s
+    in) and then races a restart retry against the still-live original.
+    """
     cutoff_iso = (now_dt - timedelta(seconds=timeout + grace)).isoformat()
     active_ids = _active_run_ids()
 
+    exclude_ids: set[str] = set(active_ids)
+    list_candidates = getattr(repos_obj.runs, "list_stale_running", None)
+    if callable(list_candidates):
+        try:
+            candidates = list_candidates(cutoff_iso=cutoff_iso, exclude_run_ids=active_ids)
+        except Exception:
+            logger.warning(
+                "Reaper candidate listing failed; skipping this sweep rather than "
+                "failing rows on the global default timeout",
+                exc_info=True,
+            )
+            return []
+        exclude_ids |= _protected_stale_run_ids(
+            repos_obj,
+            candidates=list(candidates or []),
+            grace=grace,
+            now_dt=now_dt,
+            periodic_sweep=periodic_sweep,
+        )
+    else:
+        logger.warning(
+            "Repository has no list_stale_running; reaping on the global default "
+            "timeout only (see floomhq/workeros-cloud#1232)"
+        )
+
     failed = repos_obj.runs.fail_stale_running(
         cutoff_iso=cutoff_iso,
-        exclude_run_ids=active_ids,
+        exclude_run_ids=exclude_ids,
         error=error,
         error_code=error_code,
     )
@@ -2891,6 +3162,8 @@ def reap_abandoned_runs(
             now_dt=now_dt,
             error=error,
             error_code=error_code,
+            # An explicit window is the caller asserting its own deadline.
+            periodic_sweep=timeout_seconds is None,
         )
     )
 
@@ -3064,6 +3337,10 @@ def recover_abandoned_runs(
             now_dt=now_dt,
             error=error,
             error_code=error_code,
+            # An explicit window is the caller asserting its own deadline
+            # (startup recovery passes 0/0). The periodic loop passes None and
+            # therefore gets per-run deadline and liveness enforcement.
+            periodic_sweep=timeout_seconds is None,
         )
     )
     requeued = 0

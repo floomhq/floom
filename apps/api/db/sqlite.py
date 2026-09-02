@@ -3298,6 +3298,51 @@ class SqliteRunRepository:
                 )
         return [row["id"] for row in rows]
 
+    def list_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+    ) -> list[dict[str, Any]]:
+        """Read-only reap candidates: running rows older than *cutoff_iso*.
+
+        Mirrors :meth:`fail_stale_running`'s SELECT predicate exactly but makes
+        no writes. ``worker_id`` is included so the caller can resolve each
+        run's own effective timeout before any row is failed (#1232).
+        """
+        excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
+        exclude_clause = ""
+        params: list[Any] = [cutoff_iso]
+        if excluded:
+            placeholders = ",".join("?" for _ in excluded)
+            exclude_clause = f"AND r.id NOT IN ({placeholders})"
+            params.extend(excluded)
+
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.id, r.worker_id, r.started_at, r.created_at, w.owner_id AS user_id
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.status = 'running'
+                  AND COALESCE(r.started_at, r.created_at) < ?
+                  {exclude_clause}
+                ORDER BY COALESCE(r.started_at, r.created_at) ASC
+                """,
+                tuple(params),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "run_id": row["id"],
+                "worker_id": row["worker_id"],
+                "user_id": row["user_id"],
+                "started_at": row["started_at"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def fail_stale_running(
         self,
         *,

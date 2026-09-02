@@ -586,6 +586,17 @@ class RunRepository(Protocol):
 
     def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]: ...
 
+    # Read-only companion to fail_stale_running: the same candidate predicate
+    # WITHOUT the UPDATE, so the service layer can resolve each row's own
+    # effective timeout (and liveness) before deciding what may be failed.
+    # Rows carry worker_id so the caller can load the worker recipe.
+    def list_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+    ) -> list[RowDict]: ...
+
     def fail_stale_running(
         self,
         *,
