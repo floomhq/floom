@@ -3422,8 +3422,8 @@ class SqliteRunRepository:
                 JOIN workers w ON w.id = r.worker_id
                 WHERE r.status = 'running'
                   AND COALESCE(r.started_at, r.created_at) < ?
-                  {only_clause}
                   {exclude_clause}
+                  {only_clause}
                 ORDER BY COALESCE(r.started_at, r.created_at) ASC
                 """,
                 tuple(params),

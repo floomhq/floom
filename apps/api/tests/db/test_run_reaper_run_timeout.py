@@ -781,3 +781,32 @@ def test_indeterminate_liveness_still_yields_past_the_absolute_ceiling(
         repos.runs.get(user_id="user-a", run_id="run-stranded")["status"]
         == RunStatus.FAILED.value
     )
+
+
+def test_exclusions_and_allow_list_bind_correctly_together(repo_bundle):
+    """Both filters at once must not scramble the query parameters.
+
+    The allow-list and the exclusion list are separate SQL fragments with
+    separate bind parameters. Ordering them inconsistently silently matched the
+    wrong rows and reaped nothing, which only showed up when the process-local
+    active-run registry happened to be non-empty.
+    """
+    repos, _db, _manifest = repo_bundle
+    _worker(repos, "worker-300", timeout_seconds=300)
+    now = dt.datetime.now(dt.timezone.utc)
+    for run_id in ("run-a", "run-b", "run-c"):
+        _running_with_sandbox_log(
+            repos, run_id, "worker-300", started=now - dt.timedelta(seconds=5000)
+        )
+
+    failed = repos.runs.fail_stale_running(
+        cutoff_iso=(now - dt.timedelta(seconds=360)).isoformat(),
+        exclude_run_ids=["run-b"],
+        only_run_ids=["run-a", "run-b"],
+        error="executor lost mid-run",
+        error_code="executor_lost_mid_run",
+    )
+
+    assert {f["run_id"] for f in failed} == {"run-a"}
+    assert repos.runs.get(user_id="user-a", run_id="run-b")["status"] == RunStatus.RUNNING.value
+    assert repos.runs.get(user_id="user-a", run_id="run-c")["status"] == RunStatus.RUNNING.value
