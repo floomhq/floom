@@ -511,7 +511,13 @@ def _existing_sibling_retry_id(
     trigger_source: str,
 ) -> str | None:
     """Return a child id already persisted for this (run, attempt) under a
-    DIFFERENT trigger_source, if any (#1232)."""
+    DIFFERENT trigger_source, if any (#1232).
+
+    A read failure returns the id anyway, i.e. fails CLOSED. If we cannot see
+    whether a sibling exists, declining to add a second child costs one delayed
+    retry; adding one duplicates whatever side effects the lineage performs, and
+    in the reported incident those were outbound customer emails.
+    """
     for other_source in _RETRY_TRIGGER_SOURCES:
         if other_source == trigger_source:
             continue
@@ -519,7 +525,16 @@ def _existing_sibling_retry_id(
         try:
             sibling = repos.runs.get_any(run_id=sibling_id)
         except Exception:
-            continue
+            logger.warning(
+                "Could not check for a %s sibling of run %s attempt %d; refusing the "
+                "%s child rather than risk a duplicate lineage",
+                other_source,
+                original_run_id,
+                attempt,
+                trigger_source,
+                exc_info=True,
+            )
+            return sibling_id
         if _matching_retry_row(
             sibling,
             original_run_id=original_run_id,
@@ -2579,6 +2594,9 @@ _RESTART_RETRY_BACKOFF_SECONDS = 60
 # (~10 min in the reported lineage) so a slow model call is not mistaken for a
 # dead sandbox.
 _RUN_LIVENESS_DEFAULT_WINDOW_SECONDS = 600
+# Rows one worker's liveness probe may scan. A truncated answer cannot prove
+# silence, so it is treated as "assume live" rather than reaped.
+_RUN_LIVENESS_DEFAULT_LOG_SCAN_LIMIT = 1000
 # Per-sandbox control-plane kill timeout used inside the cancel loop. The loop
 # runs serially over every active run, so the driver default (60s) could make a
 # single hung kill blow the whole shutdown/cancel budget. Bound each kill and
@@ -2804,19 +2822,73 @@ def _run_liveness_window_seconds() -> int:
         return _RUN_LIVENESS_DEFAULT_WINDOW_SECONDS
 
 
-def _last_durable_activity_at(
-    repos_obj: Repositories, *, user_id: str, run_id: str
-) -> datetime | None:
-    """Newest durable-execution log timestamp for *run_id*, or None."""
+def _run_liveness_log_scan_limit() -> int:
+    """Row cap for one worker's liveness probe. Hitting it means 'assume live'."""
+    raw = os.environ.get("WORKEROS_RUN_LIVENESS_LOG_SCAN_LIMIT", "")
+    if not raw:
+        return _RUN_LIVENESS_DEFAULT_LOG_SCAN_LIMIT
     try:
-        logs = repos_obj.runs.list_logs(user_id=user_id, run_id=run_id)
+        return max(1, int(raw))
+    except ValueError:
+        return _RUN_LIVENESS_DEFAULT_LOG_SCAN_LIMIT
+
+
+def _live_run_ids_for_worker(
+    repos_obj: Repositories,
+    *,
+    user_id: str,
+    worker_id: str,
+    since_iso: str,
+    now_dt: datetime,
+    window_seconds: int,
+) -> set[str] | None:
+    """Run ids of *worker_id* that logged durable execution activity since *since_iso*.
+
+    One query per (user, worker), not per run: ``list_logs_for_worker`` filters
+    by ``since`` and orders newest-first, so it is both cheap and correct.
+    ``list_logs`` cannot be used here -- it returns the OLDEST 10 000 rows for a
+    run, so a chatty run's newest activity is exactly what it drops, which would
+    misreport a live run as silent and reap it.
+
+    Returns None when liveness could not be established (read error, or a
+    truncated response that may have hidden a candidate's newest row). The
+    caller treats None as "assume alive": over-protecting delays recovery by one
+    sweep, under-protecting duplicates outbound side effects (#1232).
+    """
+    limit = _run_liveness_log_scan_limit()
+    try:
+        rows = repos_obj.runs.list_logs_for_worker(
+            user_id=user_id,
+            worker_id=worker_id,
+            since=since_iso,
+            limit=limit,
+        )
     except Exception:
-        logger.warning("Liveness probe could not read logs for run %s", run_id, exc_info=True)
+        logger.warning(
+            "Liveness probe failed for worker %s; treating its stale runs as live",
+            worker_id,
+            exc_info=True,
+        )
         return None
-    newest: datetime | None = None
-    for log in logs or []:
+
+    rows = list(rows or [])
+    if len(rows) >= limit:
+        # Truncated: a candidate's newest durable row may be just past the cut.
+        logger.warning(
+            "Liveness probe for worker %s hit the %d-row scan limit; treating its "
+            "stale runs as live for this sweep",
+            worker_id,
+            limit,
+        )
+        return None
+
+    live: set[str] = set()
+    for log in rows:
         message = str(log.get("message") or "")
         if not message.startswith(DURABLE_EXECUTION_LOG_PREFIXES):
+            continue
+        run_id = str(log.get("run_id") or "")
+        if not run_id:
             continue
         raw_ts = log.get("timestamp") or log.get("created_at")
         if not raw_ts:
@@ -2827,9 +2899,13 @@ def _last_durable_activity_at(
             continue
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        if newest is None or parsed > newest:
-            newest = parsed
-    return newest
+        # Bounded on BOTH sides. `since` is applied by the repository, but a
+        # clock-skewed or corrupt future timestamp would otherwise satisfy
+        # "recent" for ever and pin the row in `running`.
+        age = (now_dt - parsed).total_seconds()
+        if -window_seconds <= age <= window_seconds:
+            live.add(run_id)
+    return live
 
 
 def _effective_run_timeout_seconds(
@@ -2837,14 +2913,20 @@ def _effective_run_timeout_seconds(
     row: dict[str, Any],
     cache: dict[tuple[str, str], int],
 ) -> int:
-    """Resolve the timeout the run was actually dispatched with.
+    """Resolve the deadline the run's DRIVER was actually given.
 
-    Falls back to MAX_RUN_TIMEOUT_SECONDS (not the 300 s global default) when
-    the worker recipe cannot be loaded. Reaping a *live* run duplicates
+    This must mirror dispatch, not merely the manifest. Agent-mode workers on a
+    schedule get their timeout raised to AGENT_SCHEDULED_TIMEOUT_SECONDS by
+    ``agent_driver._resolve_agent_timeout_seconds``, so a scheduled agent
+    declaring 300 s legitimately runs for 1800 s. Reading only
+    ``_resolved_worker_timeout_seconds`` here would leave exactly the #1232
+    defect in place for that (very common) worker shape.
+
+    Falls back to MAX_RUN_TIMEOUT_SECONDS -- never the 300 s global default --
+    whenever anything cannot be resolved. Reaping a *live* run duplicates
     outbound side effects (#1232 saw two GMAIL_SEND_EMAIL executions), whereas
-    reaping late only delays recovery, so the unresolvable case must err long
-    rather than short. It still errs finite, so a deleted worker cannot pin a
-    row in `running` forever.
+    reaping late only delays recovery. The fallback is still finite, so a broken
+    recipe cannot pin a row in `running` for ever.
     """
     from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
 
@@ -2861,13 +2943,30 @@ def _effective_run_timeout_seconds(
 
     resolved = MAX_RUN_TIMEOUT_SECONDS
     try:
-        # Workspace `default_timeout_seconds` can raise the per-worker value, so
-        # resolve inside the run's own workspace scope exactly as dispatch does.
-        with _run_execution_context(run_id):
+        from runner_sandbox import _resolve_mode_from_entry
+        from runner_sandbox.agent_driver import _is_scheduled_agent_worker
+        from runtime_limits import effective_agent_timeout_seconds
+
+        # strict=True: if the run's workspace scope cannot be restored we must
+        # NOT silently resolve a manifest-only (shorter) timeout and reap on it.
+        # Fail into the ceiling instead.
+        with _run_execution_context(run_id, strict=True):
             loaded = _load_worker_recipe(worker_id, repos=repos_obj, user_id=user_id or None)
             config = loaded[1] if loaded else None
             if config is not None:
                 resolved = _resolved_worker_timeout_seconds(config)
+                runtime = getattr(config, "runtime", None)
+                if runtime is not None:
+                    mode = (
+                        _resolve_mode_from_entry(runtime.entrypoint)
+                        or runtime.mode
+                        or "agent"
+                    )
+                    if mode == "agent":
+                        resolved = effective_agent_timeout_seconds(
+                            resolved,
+                            scheduled=_is_scheduled_agent_worker(config),
+                        )
     except Exception:
         logger.warning(
             "Reaper could not resolve the effective timeout for run %s (worker %s); "
@@ -2917,6 +3016,9 @@ def _protected_stale_run_ids(
     timeout_cache: dict[tuple[str, str], int] = {}
     liveness_window = _run_liveness_window_seconds()
 
+    # Guard 1: each run against its OWN deadline. Whatever survives that is a
+    # liveness candidate, grouped so the probe costs one query per worker.
+    past_deadline: dict[tuple[str, str], list[str]] = {}
     for row in candidates:
         run_id = str(row.get("run_id") or row.get("id") or "")
         if not run_id:
@@ -2947,20 +3049,41 @@ def _protected_stale_run_ids(
             continue
 
         user_id = str(row.get("user_id") or "")
-        if not user_id or liveness_window <= 0:
+        worker_id = str(row.get("worker_id") or "")
+        if not user_id or not worker_id or liveness_window <= 0:
             continue
-        last_activity = _last_durable_activity_at(repos_obj, user_id=user_id, run_id=run_id)
-        if last_activity is not None and (now_dt - last_activity) <= timedelta(
-            seconds=liveness_window
-        ):
-            protected.add(run_id)
-            logger.warning(
-                "Reaper skipping run %s: logged execution activity %ss ago, so an "
-                "executor is still driving it (effective timeout %ss)",
-                run_id,
-                int((now_dt - last_activity).total_seconds()),
-                run_timeout,
-            )
+        past_deadline.setdefault((user_id, worker_id), []).append(run_id)
+
+    if not past_deadline:
+        return protected
+
+    # Guard 2: is anything still driving it? One batched, since-filtered,
+    # newest-first probe per (user, worker).
+    since_iso = (now_dt - timedelta(seconds=liveness_window)).isoformat()
+    for (user_id, worker_id), run_ids in past_deadline.items():
+        live_ids = _live_run_ids_for_worker(
+            repos_obj,
+            user_id=user_id,
+            worker_id=worker_id,
+            since_iso=since_iso,
+            now_dt=now_dt,
+            window_seconds=liveness_window,
+        )
+        if live_ids is None:
+            # Liveness indeterminate: protect rather than risk reaping a live
+            # run. Recovery is delayed by one sweep; the alternative duplicates
+            # side effects that have already reached customers (#1232).
+            protected.update(run_ids)
+            continue
+        for run_id in run_ids:
+            if run_id in live_ids:
+                protected.add(run_id)
+                logger.warning(
+                    "Reaper skipping run %s: past its deadline but logged execution "
+                    "activity within %ss, so an executor is still driving it",
+                    run_id,
+                    liveness_window,
+                )
     return protected
 
 
@@ -2985,10 +3108,13 @@ def _fail_stale_running_rows(
     active_ids = _active_run_ids()
 
     exclude_ids: set[str] = set(active_ids)
+    only_run_ids: list[str] | None = None
     list_candidates = getattr(repos_obj.runs, "list_stale_running", None)
     if callable(list_candidates):
         try:
-            candidates = list_candidates(cutoff_iso=cutoff_iso, exclude_run_ids=active_ids)
+            candidates = list(
+                list_candidates(cutoff_iso=cutoff_iso, exclude_run_ids=active_ids) or []
+            )
         except Exception:
             logger.warning(
                 "Reaper candidate listing failed; skipping this sweep rather than "
@@ -2996,25 +3122,41 @@ def _fail_stale_running_rows(
                 exc_info=True,
             )
             return []
-        exclude_ids |= _protected_stale_run_ids(
+        protected = _protected_stale_run_ids(
             repos_obj,
-            candidates=list(candidates or []),
+            candidates=candidates,
             grace=grace,
             now_dt=now_dt,
             periodic_sweep=periodic_sweep,
         )
+        exclude_ids |= protected
+        # Fail ONLY what we actually evaluated. The candidate read and the
+        # update below are two separate, non-atomic queries whose populations
+        # can differ (PostgREST row caps), and a row that was never checked
+        # against its own deadline must not be reaped by the second one.
+        evaluated = {
+            str(row.get("run_id") or row.get("id") or "")
+            for row in candidates
+            if str(row.get("run_id") or row.get("id") or "")
+        }
+        only_run_ids = sorted(evaluated - exclude_ids)
+        if not only_run_ids:
+            return []
     else:
         logger.warning(
             "Repository has no list_stale_running; reaping on the global default "
             "timeout only (see floomhq/workeros-cloud#1232)"
         )
 
-    failed = repos_obj.runs.fail_stale_running(
-        cutoff_iso=cutoff_iso,
-        exclude_run_ids=exclude_ids,
-        error=error,
-        error_code=error_code,
-    )
+    fail_kwargs: dict[str, Any] = {
+        "cutoff_iso": cutoff_iso,
+        "exclude_run_ids": exclude_ids,
+        "error": error,
+        "error_code": error_code,
+    }
+    if only_run_ids is not None:
+        fail_kwargs["only_run_ids"] = only_run_ids
+    failed = repos_obj.runs.fail_stale_running(**fail_kwargs)
     for row in failed:
         run_id = str(row.get("run_id") or row.get("id") or "")
         user_id = row.get("user_id")

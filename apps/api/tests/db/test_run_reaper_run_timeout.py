@@ -472,3 +472,245 @@ def test_second_attempt_is_still_allowed_after_a_sibling_completes_its_attempt(
         is not False
     )
     assert repos.runs.get_any(run_id=run_service._retry_run_id("run-root", 2, "retry")) is not None
+
+
+# ---------------------------------------------------------------------------
+# D. the reaper deadline must equal the DRIVER's deadline, not the manifest's
+# ---------------------------------------------------------------------------
+
+
+def _scheduled_agent_manifest(worker_id: str, timeout_seconds: int) -> dict:
+    """A scheduled agent worker: `.md` entrypoint plus a cron trigger.
+
+    `agent_driver._resolve_agent_timeout_seconds` raises the effective timeout
+    of this shape to AGENT_SCHEDULED_TIMEOUT_SECONDS (1800), so the declared
+    300 s is NOT the deadline the driver enforces.
+    """
+    return {
+        "id": worker_id,
+        "name": worker_id,
+        "trigger": {"type": "schedule", "cron": "0 7 * * *"},
+        "runtime": {
+            "type": "python",
+            "entrypoint": "agent.md",
+            "runner": "e2b",
+            "mode": "agent",
+            "limits": {"timeout_seconds": timeout_seconds},
+        },
+        "inputs": [],
+        "outputs": [],
+        "secrets": [],
+        "connections": [],
+    }
+
+
+def test_reaper_matches_the_driver_deadline_for_scheduled_agent_workers(
+    repo_bundle, monkeypatch
+):
+    """A scheduled agent declaring 300 s is really allowed 1800 s.
+
+    Resolving only the manifest/workspace timeout here would leave exactly the
+    #1232 defect in place for the most common worker shape on the platform: the
+    reaper would fire at 360 s while the driver was still legitimately running.
+    """
+    import run_service
+    from runtime_limits import AGENT_SCHEDULED_TIMEOUT_SECONDS, effective_agent_timeout_seconds
+
+    assert AGENT_SCHEDULED_TIMEOUT_SECONDS == 1800
+    assert effective_agent_timeout_seconds(300, scheduled=True) == 1800
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "0")
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-sched-agent",
+        name="worker-sched-agent",
+        manifest_json=_scheduled_agent_manifest("worker-sched-agent", 300),
+        bundle_path="workers/worker-sched-agent",
+    )
+    now = dt.datetime.now(dt.timezone.utc)
+    _running_with_sandbox_log(
+        repos,
+        "run-sched-agent",
+        "worker-sched-agent",
+        started=now - dt.timedelta(seconds=600),
+    )
+    scheduled = _capture_retries(monkeypatch, run_service)
+
+    result = run_service.recover_abandoned_runs(repos=repos, now=now)
+
+    assert result == {"failed": 0, "requeued": 0}
+    assert (
+        repos.runs.get(user_id="user-a", run_id="run-sched-agent")["status"]
+        == RunStatus.RUNNING.value
+    )
+    assert scheduled == []
+
+
+# ---------------------------------------------------------------------------
+# E. safety properties of the two extra reads the reaper now performs
+# ---------------------------------------------------------------------------
+
+
+def test_only_evaluated_rows_can_be_failed(repo_bundle, monkeypatch):
+    """The candidate read and the failing update are two non-atomic queries.
+
+    If the candidate read returns a truncated population (PostgREST caps rows),
+    a row that was never checked against its own deadline must NOT be failed by
+    the second query.
+    """
+    import run_service
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "0")
+    _worker(repos, "worker-300", timeout_seconds=300)
+    now = dt.datetime.now(dt.timezone.utc)
+    for run_id in ("run-seen", "run-unseen"):
+        _running_with_sandbox_log(
+            repos, run_id, "worker-300", started=now - dt.timedelta(seconds=3000)
+        )
+
+    # Simulate a capped candidate read that only returns one of the two rows.
+    real_list = repos.runs.list_stale_running
+    monkeypatch.setattr(
+        repos.runs,
+        "list_stale_running",
+        lambda **kw: [r for r in real_list(**kw) if r["run_id"] == "run-seen"],
+    )
+    _capture_retries(monkeypatch, run_service)
+
+    result = run_service.recover_abandoned_runs(repos=repos, now=now)
+
+    assert result["failed"] == 1
+    assert repos.runs.get(user_id="user-a", run_id="run-seen")["status"] == RunStatus.FAILED.value
+    assert (
+        repos.runs.get(user_id="user-a", run_id="run-unseen")["status"] == RunStatus.RUNNING.value
+    ), "a row the reaper never evaluated must survive the sweep"
+
+
+def test_truncated_liveness_probe_protects_rather_than_reaps(repo_bundle, monkeypatch):
+    """A capped log scan cannot prove silence, so it must not authorise a reap.
+
+    A chatty sibling run of the same worker fills the scan budget, so the quiet
+    candidate's newest durable row may sit just past the cut. Treating "not
+    seen" as "silent" there would reap a possibly-live run.
+    """
+    import run_service
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "600")
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_LOG_SCAN_LIMIT", "1")
+    _worker(repos, "worker-300", timeout_seconds=300)
+    now = dt.datetime.now(dt.timezone.utc)
+    # The candidate: past its deadline, no activity inside the window.
+    _running_with_sandbox_log(
+        repos, "run-quiet", "worker-300", started=now - dt.timedelta(seconds=3000)
+    )
+    # A sibling run of the SAME worker, still inside its deadline, logging now.
+    # Its row alone fills the 1-row scan budget.
+    _running_with_sandbox_log(
+        repos,
+        "run-chatty",
+        "worker-300",
+        started=now - dt.timedelta(seconds=30),
+        last_activity=now - dt.timedelta(seconds=5),
+    )
+    scheduled = _capture_retries(monkeypatch, run_service)
+
+    result = run_service.recover_abandoned_runs(repos=repos, now=now)
+
+    assert result == {"failed": 0, "requeued": 0}
+    assert repos.runs.get(user_id="user-a", run_id="run-quiet")["status"] == RunStatus.RUNNING.value
+    assert scheduled == []
+
+
+def test_liveness_probe_failure_protects_rather_than_reaps(repo_bundle, monkeypatch):
+    """An unreadable log store cannot prove silence either."""
+    import run_service
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "600")
+    _worker(repos, "worker-300", timeout_seconds=300)
+    now = dt.datetime.now(dt.timezone.utc)
+    _running_with_sandbox_log(
+        repos, "run-unreadable", "worker-300", started=now - dt.timedelta(seconds=3000)
+    )
+    monkeypatch.setattr(
+        repos.runs,
+        "list_logs_for_worker",
+        lambda **_kw: (_ for _ in ()).throw(RuntimeError("log store down")),
+    )
+    _capture_retries(monkeypatch, run_service)
+
+    assert run_service.recover_abandoned_runs(repos=repos, now=now) == {
+        "failed": 0,
+        "requeued": 0,
+    }
+
+
+def test_future_dated_activity_cannot_protect_a_run_for_ever(repo_bundle, monkeypatch):
+    """Clock skew must not turn one corrupt timestamp into a permanent shield."""
+    import run_service
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "600")
+    _worker(repos, "worker-300", timeout_seconds=300)
+    now = dt.datetime.now(dt.timezone.utc)
+    _running_with_sandbox_log(
+        repos,
+        "run-future",
+        "worker-300",
+        started=now - dt.timedelta(seconds=3000),
+        # Far-future timestamp: `now - ts` is very negative and would satisfy a
+        # one-sided "<= window" comparison for ever.
+        last_activity=now + dt.timedelta(days=30),
+    )
+    _capture_retries(monkeypatch, run_service)
+
+    result = run_service.recover_abandoned_runs(repos=repos, now=now)
+
+    assert result["failed"] == 1
+    assert repos.runs.get(user_id="user-a", run_id="run-future")["status"] == RunStatus.FAILED.value
+
+
+def test_unreadable_sibling_check_refuses_the_second_retry_child(repo_bundle, monkeypatch):
+    """Fail closed: an unverifiable lineage must not gain a second child."""
+    import run_service
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    _worker(repos, "worker-1800", timeout_seconds=1800)
+    now = dt.datetime.now(dt.timezone.utc)
+    _running_with_sandbox_log(repos, "run-root", "worker-1800", started=now)
+
+    calls = {"n": 0}
+    real_get_any = repos.runs.get_any
+
+    def flaky_get_any(*, run_id):
+        # The first lookup (this source's own id) succeeds; the sibling lookup
+        # raises, which is the case that used to fail open.
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise RuntimeError("read failed")
+        return real_get_any(run_id=run_id)
+
+    monkeypatch.setattr(repos.runs, "get_any", flaky_get_any)
+
+    assert (
+        run_service._schedule_retry(
+            original_run_id="run-root",
+            worker_id="worker-1800",
+            inputs={},
+            attempt=1,
+            delay_seconds=0,
+            user_id="user-a",
+            repos=repos,
+            trigger_source="retry",
+        )
+        is False
+    )

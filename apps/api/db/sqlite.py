@@ -3348,6 +3348,7 @@ class SqliteRunRepository:
         *,
         cutoff_iso: str,
         exclude_run_ids: Iterable[str] = (),
+        only_run_ids: Iterable[str] | None = None,
         error: str,
         error_code: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -3356,6 +3357,11 @@ class SqliteRunRepository:
         The status predicate is repeated in the UPDATE so a concurrently
         finishing run is not overwritten by the reaper after it leaves
         `running`.
+
+        *only_run_ids*, when given, is an allow-list: nothing outside it is
+        failed. The reaper passes the exact set it evaluated against each run's
+        own deadline, so a row it never examined cannot be reaped here. An empty
+        allow-list therefore fails nothing.
         """
         completed_at = now_iso()
         excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
@@ -3366,6 +3372,15 @@ class SqliteRunRepository:
             exclude_clause = f"AND r.id NOT IN ({placeholders})"
             params.extend(excluded)
 
+        only_clause = ""
+        if only_run_ids is not None:
+            allowed = [str(run_id) for run_id in only_run_ids if str(run_id)]
+            if not allowed:
+                return []
+            placeholders = ",".join("?" for _ in allowed)
+            only_clause = f"AND r.id IN ({placeholders})"
+            params.extend(allowed)
+
         with get_db() as conn:
             rows = conn.execute(
                 f"""
@@ -3374,6 +3389,7 @@ class SqliteRunRepository:
                 JOIN workers w ON w.id = r.worker_id
                 WHERE r.status = 'running'
                   AND COALESCE(r.started_at, r.created_at) < ?
+                  {only_clause}
                   {exclude_clause}
                 ORDER BY COALESCE(r.started_at, r.created_at) ASC
                 """,

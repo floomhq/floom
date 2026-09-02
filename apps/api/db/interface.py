@@ -597,11 +597,17 @@ class RunRepository(Protocol):
         exclude_run_ids: Iterable[str] = (),
     ) -> list[RowDict]: ...
 
+    # ``only_run_ids`` restricts the UPDATE to an explicit allow-list. The
+    # reaper evaluates candidates in a separate read, and the two reads are
+    # neither atomic nor guaranteed to cover the same population (PostgREST
+    # caps rows). Passing the evaluated set means a row that was never checked
+    # against its own deadline cannot be failed by this second query.
     def fail_stale_running(
         self,
         *,
         cutoff_iso: str,
         exclude_run_ids: Iterable[str] = (),
+        only_run_ids: Iterable[str] | None = None,
         error: str,
         error_code: str | None = None,
     ) -> list[RowDict]: ...
