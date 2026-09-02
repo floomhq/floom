@@ -513,10 +513,15 @@ def _existing_sibling_retry_id(
     """Return a child id already persisted for this (run, attempt) under a
     DIFFERENT trigger_source, if any (#1232).
 
-    A read failure returns the id anyway, i.e. fails CLOSED. If we cannot see
-    whether a sibling exists, declining to add a second child costs one delayed
-    retry; adding one duplicates whatever side effects the lineage performs, and
-    in the reported incident those were outbound customer emails.
+    A read failure returns the id anyway, i.e. fails CLOSED.
+
+    Be precise about the cost: this DROPS that automatic retry outright. The
+    parent is already terminal, so no later sweep reconsiders it and the user
+    sees a failed run they must re-trigger. That is the deliberate trade: a lost
+    retry is visible and recoverable by hand, whereas a duplicate lineage
+    silently repeats whatever side effects the run performs, and in #1232 those
+    were outbound customer emails. Read failures here are rare; duplicated mail
+    is not acceptable at any rate.
     """
     for other_source in _RETRY_TRIGGER_SOURCES:
         if other_source == trigger_source:
@@ -2594,6 +2599,18 @@ _RESTART_RETRY_BACKOFF_SECONDS = 60
 # (~10 min in the reported lineage) so a slow model call is not mistaken for a
 # dead sandbox.
 _RUN_LIVENESS_DEFAULT_WINDOW_SECONDS = 600
+# Liveness uses a WIDER prefix set than DURABLE_EXECUTION_LOG_PREFIXES. That
+# tuple decides pre-dispatch-orphan vs executor-lost classification and must not
+# change here, but for "is anything still happening?" the E2B dependency-install
+# and command-exec markers are just as good evidence, and a long install was
+# otherwise invisible to the probe.
+_RUN_LIVENESS_EXTRA_LOG_PREFIXES = (
+    "[e2b] Installing requirements.txt",
+    "[e2b] Installing package.json",
+    "[e2b] Executing worker command",
+    "[e2b] Uploading",
+    "[e2b] Downloading",
+)
 # Rows one worker's liveness probe may scan. A truncated answer cannot prove
 # silence, so it is treated as "assume live" rather than reaped.
 _RUN_LIVENESS_DEFAULT_LOG_SCAN_LIMIT = 1000
@@ -2822,6 +2839,17 @@ def _run_liveness_window_seconds() -> int:
         return _RUN_LIVENESS_DEFAULT_WINDOW_SECONDS
 
 
+def _absolute_run_ceiling_seconds() -> int:
+    """Longest wall clock any run can legitimately occupy.
+
+    Used only as the backstop when liveness is indeterminate, so a permanently
+    failing log probe cannot strand rows in `running` for ever.
+    """
+    from runtime_limits import E2B_MAX_SANDBOX_LIFETIME_SECONDS, MAX_RUN_TIMEOUT_SECONDS
+
+    return max(MAX_RUN_TIMEOUT_SECONDS, E2B_MAX_SANDBOX_LIFETIME_SECONDS)
+
+
 def _run_liveness_log_scan_limit() -> int:
     """Row cap for one worker's liveness probe. Hitting it means 'assume live'."""
     raw = os.environ.get("WORKEROS_RUN_LIVENESS_LOG_SCAN_LIMIT", "")
@@ -2833,59 +2861,65 @@ def _run_liveness_log_scan_limit() -> int:
         return _RUN_LIVENESS_DEFAULT_LOG_SCAN_LIMIT
 
 
-def _live_run_ids_for_worker(
+def _liveness_log_prefixes() -> tuple[str, ...]:
+    return tuple(DURABLE_EXECUTION_LOG_PREFIXES) + _RUN_LIVENESS_EXTRA_LOG_PREFIXES
+
+
+def _live_run_ids(
     repos_obj: Repositories,
     *,
-    user_id: str,
-    worker_id: str,
+    run_ids: list[str],
     since_iso: str,
     now_dt: datetime,
     window_seconds: int,
 ) -> set[str] | None:
-    """Run ids of *worker_id* that logged durable execution activity since *since_iso*.
+    """Which of *run_ids* logged execution activity inside the liveness window.
 
-    One query per (user, worker), not per run: ``list_logs_for_worker`` filters
-    by ``since`` and orders newest-first, so it is both cheap and correct.
-    ``list_logs`` cannot be used here -- it returns the OLDEST 10 000 rows for a
-    run, so a chatty run's newest activity is exactly what it drops, which would
-    misreport a live run as silent and reap it.
+    ONE query for the whole sweep, scoped by run id. The alternatives are both
+    wrong here: ``list_logs`` returns the OLDEST rows of a single run (so it
+    drops exactly the newest activity being asked about), and
+    ``list_logs_for_worker`` narrows to a worker's 100 newest runs in cloud, so
+    a long-running candidate on a busy worker produced no evidence and looked
+    silent. The affected #1232 accounts have hundreds of runs per worker.
 
     Returns None when liveness could not be established (read error, or a
-    truncated response that may have hidden a candidate's newest row). The
-    caller treats None as "assume alive": over-protecting delays recovery by one
-    sweep, under-protecting duplicates outbound side effects (#1232).
+    truncated response that may hide a candidate's newest row). The caller
+    treats None as "assume alive", bounded by the absolute run ceiling.
     """
+    if not run_ids:
+        return set()
     limit = _run_liveness_log_scan_limit()
-    try:
-        rows = repos_obj.runs.list_logs_for_worker(
-            user_id=user_id,
-            worker_id=worker_id,
-            since=since_iso,
-            limit=limit,
+    probe = getattr(repos_obj.runs, "list_execution_logs_for_runs", None)
+    if not callable(probe):
+        logger.warning(
+            "Repository has no list_execution_logs_for_runs; cannot prove liveness, "
+            "protecting overdue runs this sweep (see floomhq/workeros-cloud#1232)"
         )
+        return None
+    try:
+        rows = list(probe(run_ids=run_ids, since_iso=since_iso, limit=limit) or [])
     except Exception:
         logger.warning(
-            "Liveness probe failed for worker %s; treating its stale runs as live",
-            worker_id,
+            "Liveness probe failed for %d run(s); treating them as live",
+            len(run_ids),
             exc_info=True,
         )
         return None
 
-    rows = list(rows or [])
     if len(rows) >= limit:
-        # Truncated: a candidate's newest durable row may be just past the cut.
         logger.warning(
-            "Liveness probe for worker %s hit the %d-row scan limit; treating its "
-            "stale runs as live for this sweep",
-            worker_id,
+            "Liveness probe hit the %d-row scan limit; treating the %d overdue run(s) "
+            "as live for this sweep",
             limit,
+            len(run_ids),
         )
         return None
 
+    prefixes = _liveness_log_prefixes()
     live: set[str] = set()
     for log in rows:
         message = str(log.get("message") or "")
-        if not message.startswith(DURABLE_EXECUTION_LOG_PREFIXES):
+        if not message.startswith(prefixes):
             continue
         run_id = str(log.get("run_id") or "")
         if not run_id:
@@ -2899,8 +2933,8 @@ def _live_run_ids_for_worker(
             continue
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        # Bounded on BOTH sides. `since` is applied by the repository, but a
-        # clock-skewed or corrupt future timestamp would otherwise satisfy
+        # Bounded on BOTH sides: `since` is applied by the repository, but a
+        # clock-skewed or corrupt future timestamp would otherwise read as
         # "recent" for ever and pin the row in `running`.
         age = (now_dt - parsed).total_seconds()
         if -window_seconds <= age <= window_seconds:
@@ -2967,6 +3001,20 @@ def _effective_run_timeout_seconds(
                             resolved,
                             scheduled=_is_scheduled_agent_worker(config),
                         )
+                # The command timeout is NOT the run's wall clock. E2B budgets a
+                # dependency install of up to the same duration BEFORE the
+                # command starts, and sizes the sandbox to cover both. Reaping on
+                # the command timeout alone would kill a pure-script run still
+                # inside its install phase. Reuse the driver's own helpers so
+                # there is one definition of the budget.
+                from runner_sandbox.e2b_driver import (
+                    _install_timeout_for_run,
+                    _sandbox_lifetime_timeout,
+                )
+
+                resolved = _sandbox_lifetime_timeout(
+                    resolved, _install_timeout_for_run(resolved)
+                )
     except Exception:
         logger.warning(
             "Reaper could not resolve the effective timeout for run %s (worker %s); "
@@ -3012,13 +3060,17 @@ def _protected_stale_run_ids(
     if not periodic_sweep:
         return set()
 
+    from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
+
     protected: set[str] = set()
     timeout_cache: dict[tuple[str, str], int] = {}
     liveness_window = _run_liveness_window_seconds()
+    absolute_ceiling = _absolute_run_ceiling_seconds()
 
-    # Guard 1: each run against its OWN deadline. Whatever survives that is a
-    # liveness candidate, grouped so the probe costs one query per worker.
-    past_deadline: dict[tuple[str, str], list[str]] = {}
+    # Guard 1: each run against its OWN deadline. Whatever survives becomes a
+    # liveness candidate; they are probed together in ONE run-scoped query.
+    past_deadline: list[str] = []
+    started_by_run: dict[str, datetime] = {}
     for row in candidates:
         run_id = str(row.get("run_id") or row.get("id") or "")
         if not run_id:
@@ -3048,42 +3100,56 @@ def _protected_stale_run_ids(
             )
             continue
 
-        user_id = str(row.get("user_id") or "")
-        worker_id = str(row.get("worker_id") or "")
-        if not user_id or not worker_id or liveness_window <= 0:
+        if liveness_window <= 0:
             continue
-        past_deadline.setdefault((user_id, worker_id), []).append(run_id)
+        past_deadline.append(run_id)
+        if started_dt is not None:
+            started_by_run[run_id] = started_dt
 
     if not past_deadline:
         return protected
 
-    # Guard 2: is anything still driving it? One batched, since-filtered,
-    # newest-first probe per (user, worker).
+    # Guard 2: is anything still driving it? One run-scoped, since-filtered,
+    # newest-first probe for the whole sweep.
     since_iso = (now_dt - timedelta(seconds=liveness_window)).isoformat()
-    for (user_id, worker_id), run_ids in past_deadline.items():
-        live_ids = _live_run_ids_for_worker(
-            repos_obj,
-            user_id=user_id,
-            worker_id=worker_id,
-            since_iso=since_iso,
-            now_dt=now_dt,
-            window_seconds=liveness_window,
-        )
-        if live_ids is None:
-            # Liveness indeterminate: protect rather than risk reaping a live
-            # run. Recovery is delayed by one sweep; the alternative duplicates
-            # side effects that have already reached customers (#1232).
-            protected.update(run_ids)
-            continue
-        for run_id in run_ids:
-            if run_id in live_ids:
-                protected.add(run_id)
+    live_ids = _live_run_ids(
+        repos_obj,
+        run_ids=past_deadline,
+        since_iso=since_iso,
+        now_dt=now_dt,
+        window_seconds=liveness_window,
+    )
+
+    if live_ids is None:
+        # Liveness indeterminate: protect rather than risk reaping a live run,
+        # because the alternative duplicates side effects that have already
+        # reached customers (#1232). Bounded by the absolute ceiling, though: a
+        # permanently failing probe must not strand a row in `running` for ever,
+        # and nothing can legitimately run past that ceiling.
+        for run_id in past_deadline:
+            started_dt = started_by_run.get(run_id)
+            if started_dt is not None and now_dt >= started_dt + timedelta(
+                seconds=absolute_ceiling + grace
+            ):
                 logger.warning(
-                    "Reaper skipping run %s: past its deadline but logged execution "
-                    "activity within %ss, so an executor is still driving it",
+                    "Reaper failing run %s despite an indeterminate liveness probe: "
+                    "it is past the absolute %ss ceiling",
                     run_id,
-                    liveness_window,
+                    absolute_ceiling,
                 )
+                continue
+            protected.add(run_id)
+        return protected
+
+    for run_id in past_deadline:
+        if run_id in live_ids:
+            protected.add(run_id)
+            logger.warning(
+                "Reaper skipping run %s: past its deadline but logged execution "
+                "activity within %ss, so an executor is still driving it",
+                run_id,
+                liveness_window,
+            )
     return protected
 
 

@@ -192,12 +192,16 @@ def test_reaper_still_reaps_run_past_its_own_manifest_deadline(repo_bundle, monk
     monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "0")
     _worker(repos, "worker-1800", timeout_seconds=1800)
     now = dt.datetime.now(dt.timezone.utc)
-    # 1800 s timeout + 60 s grace = 1860 s; 1900 s is genuinely abandoned.
+    # The deadline is the sandbox WALL CLOCK, not the command timeout: E2B
+    # budgets a dependency install of up to the same duration before the command
+    # starts, so 1800 s of command time means
+    # min(1800 + 1800 + 60, 3600) = 3600 s of legitimate lifetime. 3700 s is
+    # past that plus grace, so this one is genuinely abandoned.
     _running_with_sandbox_log(
         repos,
         "run-really-lost",
         "worker-1800",
-        started=now - dt.timedelta(seconds=1900),
+        started=now - dt.timedelta(seconds=3700),
     )
     scheduled = _capture_retries(monkeypatch, run_service)
 
@@ -605,17 +609,17 @@ def test_truncated_liveness_probe_protects_rather_than_reaps(repo_bundle, monkey
     monkeypatch.setenv("WORKEROS_RUN_LIVENESS_LOG_SCAN_LIMIT", "1")
     _worker(repos, "worker-300", timeout_seconds=300)
     now = dt.datetime.now(dt.timezone.utc)
-    # The candidate: past its deadline, no activity inside the window.
+    # Two overdue candidates probed in one query. The chatty one's single row
+    # fills the 1-row scan budget, so the quiet one's newest row may be just
+    # past the cut and its silence is unproven.
     _running_with_sandbox_log(
         repos, "run-quiet", "worker-300", started=now - dt.timedelta(seconds=3000)
     )
-    # A sibling run of the SAME worker, still inside its deadline, logging now.
-    # Its row alone fills the 1-row scan budget.
     _running_with_sandbox_log(
         repos,
         "run-chatty",
         "worker-300",
-        started=now - dt.timedelta(seconds=30),
+        started=now - dt.timedelta(seconds=3000),
         last_activity=now - dt.timedelta(seconds=5),
     )
     scheduled = _capture_retries(monkeypatch, run_service)
@@ -641,7 +645,7 @@ def test_liveness_probe_failure_protects_rather_than_reaps(repo_bundle, monkeypa
     )
     monkeypatch.setattr(
         repos.runs,
-        "list_logs_for_worker",
+        "list_execution_logs_for_runs",
         lambda **_kw: (_ for _ in ()).throw(RuntimeError("log store down")),
     )
     _capture_retries(monkeypatch, run_service)
@@ -713,4 +717,67 @@ def test_unreadable_sibling_check_refuses_the_second_retry_child(repo_bundle, mo
             trigger_source="retry",
         )
         is False
+    )
+
+
+def test_e2b_install_phase_counts_as_liveness(repo_bundle, monkeypatch):
+    """A long dependency install is activity, not silence.
+
+    `DURABLE_EXECUTION_LOG_PREFIXES` exists to classify pre-dispatch orphans and
+    does not include the E2B install/exec markers. Liveness uses a wider set, so
+    a run sitting in a 15-minute `pip install` is not mistaken for a dead
+    sandbox.
+    """
+    import run_service
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "600")
+    _worker(repos, "worker-300", timeout_seconds=300)
+    now = dt.datetime.now(dt.timezone.utc)
+    started = now - dt.timedelta(seconds=3000)
+    _running_with_sandbox_log(repos, "run-installing", "worker-300", started=started)
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id="run-installing",
+        level="info",
+        message="[e2b] Installing requirements.txt...",
+        timestamp=(now - dt.timedelta(seconds=30)).isoformat(),
+    )
+    scheduled = _capture_retries(monkeypatch, run_service)
+
+    result = run_service.recover_abandoned_runs(repos=repos, now=now)
+
+    assert result == {"failed": 0, "requeued": 0}
+    assert scheduled == []
+
+
+def test_indeterminate_liveness_still_yields_past_the_absolute_ceiling(
+    repo_bundle, monkeypatch
+):
+    """A permanently failing probe must not strand a row in `running` for ever."""
+    import run_service
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "600")
+    _worker(repos, "worker-300", timeout_seconds=300)
+    now = dt.datetime.now(dt.timezone.utc)
+    # Well past the 3600 s absolute ceiling: nothing can legitimately still run.
+    _running_with_sandbox_log(
+        repos, "run-stranded", "worker-300", started=now - dt.timedelta(seconds=9000)
+    )
+    monkeypatch.setattr(
+        repos.runs,
+        "list_execution_logs_for_runs",
+        lambda **_kw: (_ for _ in ()).throw(RuntimeError("log store down")),
+    )
+    _capture_retries(monkeypatch, run_service)
+
+    result = run_service.recover_abandoned_runs(repos=repos, now=now)
+
+    assert result["failed"] == 1
+    assert (
+        repos.runs.get(user_id="user-a", run_id="run-stranded")["status"]
+        == RunStatus.FAILED.value
     )

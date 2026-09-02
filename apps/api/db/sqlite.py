@@ -3298,6 +3298,39 @@ class SqliteRunRepository:
                 )
         return [row["id"] for row in rows]
 
+    def list_execution_logs_for_runs(
+        self,
+        *,
+        run_ids: Iterable[str],
+        since_iso: str,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Newest-first log rows for an explicit run-id set, at/after *since_iso*.
+
+        Scoped by run id rather than by worker or by a single run, so the
+        reaper's liveness probe cannot miss a candidate because the worker has
+        many newer runs or because the run itself is very chatty (#1232).
+        """
+        ids = [str(run_id) for run_id in run_ids if str(run_id)]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        params: list[Any] = [*ids, since_iso, RUN_LOG_DRAIN_MARKER_LEVEL, int(limit)]
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT l.run_id, l.message, l.timestamp
+                FROM logs l
+                WHERE l.run_id IN ({placeholders})
+                  AND l.timestamp >= ?
+                  AND l.level != ?
+                ORDER BY l.timestamp DESC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
     def list_stale_running(
         self,
         *,

@@ -586,6 +586,19 @@ class RunRepository(Protocol):
 
     def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]: ...
 
+    # Newest execution-log rows for an EXPLICIT set of run ids, at or after
+    # *since_iso*, newest first. The reaper's liveness probe uses this instead
+    # of list_logs (which returns the OLDEST rows of one run) or
+    # list_logs_for_worker (which in cloud only searches the worker's 100 newest
+    # runs, so a long-running candidate on a busy worker looked silent).
+    def list_execution_logs_for_runs(
+        self,
+        *,
+        run_ids: Iterable[str],
+        since_iso: str,
+        limit: int = 1000,
+    ) -> list[RowDict]: ...
+
     # Read-only companion to fail_stale_running: the same candidate predicate
     # WITHOUT the UPDATE, so the service layer can resolve each row's own
     # effective timeout (and liveness) before deciding what may be failed.
