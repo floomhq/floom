@@ -102,6 +102,19 @@ function checkMcpInstall(): Check {
   return warn("mcp_install", "Not found in any editor config", `Install: ${getCommandName()} mcp install`);
 }
 
+function checkNpxInvocation(): Check | undefined {
+  const scriptPath = process.argv[1] || "";
+  const execPath = process.env.npm_execpath || "";
+  const lifecycleEvent = process.env.npm_lifecycle_event || "";
+  const runningViaNpx = scriptPath.includes("_npx") || /(?:^|[/\\])npx(?:\.cmd)?$/i.test(execPath) || lifecycleEvent === "npx";
+  if (!runningViaNpx) return undefined;
+  return warn(
+    "invocation",
+    "Running from the npx cache",
+    "For repeated use, run: npm i -g @floomhq/floom@latest, then invoke floom directly",
+  );
+}
+
 async function checkRecentRuns(client: FloomApiClient): Promise<Check> {
   try {
     await client.requestJson("GET", "/runs", { query: { limit: 1 } });
@@ -144,6 +157,9 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
   const client = credentials ? new FloomApiClient(apiBase, credentials) : null;
 
   const checks: Check[] = [];
+
+  const invocationCheck = checkNpxInvocation();
+  if (invocationCheck) checks.push(invocationCheck);
 
   // Check 1: API reachable
   checks.push(await checkApiReachable(apiBase));
