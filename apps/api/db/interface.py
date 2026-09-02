@@ -586,11 +586,41 @@ class RunRepository(Protocol):
 
     def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]: ...
 
+    # Newest execution-log rows for an EXPLICIT set of run ids, at or after
+    # *since_iso*, newest first. The reaper's liveness probe uses this instead
+    # of list_logs (which returns the OLDEST rows of one run) or
+    # list_logs_for_worker (which in cloud only searches the worker's 100 newest
+    # runs, so a long-running candidate on a busy worker looked silent).
+    def list_execution_logs_for_runs(
+        self,
+        *,
+        run_ids: Iterable[str],
+        since_iso: str,
+        limit: int = 1000,
+    ) -> list[RowDict]: ...
+
+    # Read-only companion to fail_stale_running: the same candidate predicate
+    # WITHOUT the UPDATE, so the service layer can resolve each row's own
+    # effective timeout (and liveness) before deciding what may be failed.
+    # Rows carry worker_id so the caller can load the worker recipe.
+    def list_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+    ) -> list[RowDict]: ...
+
+    # ``only_run_ids`` restricts the UPDATE to an explicit allow-list. The
+    # reaper evaluates candidates in a separate read, and the two reads are
+    # neither atomic nor guaranteed to cover the same population (PostgREST
+    # caps rows). Passing the evaluated set means a row that was never checked
+    # against its own deadline cannot be failed by this second query.
     def fail_stale_running(
         self,
         *,
         cutoff_iso: str,
         exclude_run_ids: Iterable[str] = (),
+        only_run_ids: Iterable[str] | None = None,
         error: str,
         error_code: str | None = None,
     ) -> list[RowDict]: ...

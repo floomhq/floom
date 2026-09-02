@@ -3298,21 +3298,51 @@ class SqliteRunRepository:
                 )
         return [row["id"] for row in rows]
 
-    def fail_stale_running(
+    def list_execution_logs_for_runs(
+        self,
+        *,
+        run_ids: Iterable[str],
+        since_iso: str,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Newest-first log rows for an explicit run-id set, at/after *since_iso*.
+
+        Scoped by run id rather than by worker or by a single run, so the
+        reaper's liveness probe cannot miss a candidate because the worker has
+        many newer runs or because the run itself is very chatty (#1232).
+        """
+        ids = [str(run_id) for run_id in run_ids if str(run_id)]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        params: list[Any] = [*ids, since_iso, RUN_LOG_DRAIN_MARKER_LEVEL, int(limit)]
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT l.run_id, l.message, l.timestamp
+                FROM logs l
+                WHERE l.run_id IN ({placeholders})
+                  AND l.timestamp >= ?
+                  AND l.level != ?
+                ORDER BY l.timestamp DESC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def list_stale_running(
         self,
         *,
         cutoff_iso: str,
         exclude_run_ids: Iterable[str] = (),
-        error: str,
-        error_code: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Fail abandoned running runs older than *cutoff_iso*.
+        """Read-only reap candidates: running rows older than *cutoff_iso*.
 
-        The status predicate is repeated in the UPDATE so a concurrently
-        finishing run is not overwritten by the reaper after it leaves
-        `running`.
+        Mirrors :meth:`fail_stale_running`'s SELECT predicate exactly but makes
+        no writes. ``worker_id`` is included so the caller can resolve each
+        run's own effective timeout before any row is failed (#1232).
         """
-        completed_at = now_iso()
         excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
         exclude_clause = ""
         params: list[Any] = [cutoff_iso]
@@ -3324,12 +3354,76 @@ class SqliteRunRepository:
         with get_db() as conn:
             rows = conn.execute(
                 f"""
+                SELECT r.id, r.worker_id, r.started_at, r.created_at, w.owner_id AS user_id
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.status = 'running'
+                  AND COALESCE(r.started_at, r.created_at) < ?
+                  {exclude_clause}
+                ORDER BY COALESCE(r.started_at, r.created_at) ASC
+                """,
+                tuple(params),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "run_id": row["id"],
+                "worker_id": row["worker_id"],
+                "user_id": row["user_id"],
+                "started_at": row["started_at"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def fail_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        only_run_ids: Iterable[str] | None = None,
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail abandoned running runs older than *cutoff_iso*.
+
+        The status predicate is repeated in the UPDATE so a concurrently
+        finishing run is not overwritten by the reaper after it leaves
+        `running`.
+
+        *only_run_ids*, when given, is an allow-list: nothing outside it is
+        failed. The reaper passes the exact set it evaluated against each run's
+        own deadline, so a row it never examined cannot be reaped here. An empty
+        allow-list therefore fails nothing.
+        """
+        completed_at = now_iso()
+        excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
+        exclude_clause = ""
+        params: list[Any] = [cutoff_iso]
+        if excluded:
+            placeholders = ",".join("?" for _ in excluded)
+            exclude_clause = f"AND r.id NOT IN ({placeholders})"
+            params.extend(excluded)
+
+        only_clause = ""
+        if only_run_ids is not None:
+            allowed = [str(run_id) for run_id in only_run_ids if str(run_id)]
+            if not allowed:
+                return []
+            placeholders = ",".join("?" for _ in allowed)
+            only_clause = f"AND r.id IN ({placeholders})"
+            params.extend(allowed)
+
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
                 SELECT r.id, r.started_at, r.created_at, w.owner_id AS user_id
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 WHERE r.status = 'running'
                   AND COALESCE(r.started_at, r.created_at) < ?
                   {exclude_clause}
+                  {only_clause}
                 ORDER BY COALESCE(r.started_at, r.created_at) ASC
                 """,
                 tuple(params),
