@@ -192,16 +192,16 @@ def test_reaper_still_reaps_run_past_its_own_manifest_deadline(repo_bundle, monk
     monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "0")
     _worker(repos, "worker-1800", timeout_seconds=1800)
     now = dt.datetime.now(dt.timezone.utc)
-    # The deadline is the sandbox WALL CLOCK, not the command timeout: E2B
-    # budgets a dependency install of up to the same duration before the command
-    # starts, so 1800 s of command time means
-    # min(1800 + 1800 + 60, 3600) = 3600 s of legitimate lifetime. 3700 s is
-    # past that plus grace, so this one is genuinely abandoned.
+    # The deadline is the WALL CLOCK, not the command timeout. This worker is
+    # pure-script (`run.py`), so before the command runs E2B may upload the
+    # bundle and run several dependency installs, then refresh the sandbox
+    # lifetime. Budget = 1800 command + 2 * 1800 install + 60 = 5460 s.
+    # 5600 s is past that plus grace, so this one is genuinely abandoned.
     _running_with_sandbox_log(
         repos,
         "run-really-lost",
         "worker-1800",
-        started=now - dt.timedelta(seconds=3700),
+        started=now - dt.timedelta(seconds=5600),
     )
     scheduled = _capture_retries(monkeypatch, run_service)
 
@@ -763,9 +763,10 @@ def test_indeterminate_liveness_still_yields_past_the_absolute_ceiling(
     monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "600")
     _worker(repos, "worker-300", timeout_seconds=300)
     now = dt.datetime.now(dt.timezone.utc)
-    # Well past the 3600 s absolute ceiling: nothing can legitimately still run.
+    # Well past the absolute ceiling (the widest legitimate shape), so nothing
+    # can still be running and the backstop must fire.
     _running_with_sandbox_log(
-        repos, "run-stranded", "worker-300", started=now - dt.timedelta(seconds=9000)
+        repos, "run-stranded", "worker-300", started=now - dt.timedelta(seconds=20000)
     )
     monkeypatch.setattr(
         repos.runs,
@@ -810,3 +811,29 @@ def test_exclusions_and_allow_list_bind_correctly_together(repo_bundle):
     assert {f["run_id"] for f in failed} == {"run-a"}
     assert repos.runs.get(user_id="user-a", run_id="run-b")["status"] == RunStatus.RUNNING.value
     assert repos.runs.get(user_id="user-a", run_id="run-c")["status"] == RunStatus.RUNNING.value
+
+
+def test_deadline_model_matches_each_driver(repo_bundle, monkeypatch):
+    """Agent and pure-script have different wall clocks; the reaper must use each.
+
+    AgentDriver wraps the whole run in `asyncio.wait_for(resolved)`, so the
+    resolved agent timeout IS its wall clock. The E2B pure-script path instead
+    runs install phases first and then REFRESHES the sandbox lifetime before the
+    command, so the sandbox cap is not an upper bound on the run.
+    """
+    import run_service
+    from runtime_limits import SANDBOX_LIFETIME_BUFFER_SECONDS
+
+    # pure-script: command + two install phases + buffer, uncapped by the E2B
+    # sandbox ceiling (the pre-command refresh defeats that cap).
+    assert run_service._pure_script_wall_clock_seconds(300) == 300 + 2 * 300 + (
+        SANDBOX_LIFETIME_BUFFER_SECONDS
+    )
+    assert run_service._pure_script_wall_clock_seconds(3600) > 3600, (
+        "the E2B sandbox cap must not be treated as the run's wall clock"
+    )
+    # the indeterminate-liveness backstop must never be tighter than the widest
+    # deadline the reaper itself will grant
+    assert run_service._absolute_run_ceiling_seconds() >= (
+        run_service._pure_script_wall_clock_seconds(3600)
+    )

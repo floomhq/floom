@@ -2839,15 +2839,40 @@ def _run_liveness_window_seconds() -> int:
         return _RUN_LIVENESS_DEFAULT_WINDOW_SECONDS
 
 
+def _pure_script_wall_clock_seconds(command_timeout: int) -> int:
+    """Longest wall clock a pure-script E2B run can legitimately occupy.
+
+    The command timeout is NOT the run's wall clock. Before the command starts,
+    the driver uploads the bundle and may run several dependency installs (pip,
+    npm, boto3), each with its own install budget, and then REFRESHES the
+    sandbox lifetime immediately before executing. So the sandbox cap is not an
+    upper bound on the run either: a run can legitimately occupy the install
+    phases plus a full command timeout.
+
+    Budget two install phases plus the command plus the driver's buffer, and do
+    NOT apply the E2B sandbox cap, which the refresh defeats. Erring long only
+    delays recovery of a dead run; erring short reaps a live one and duplicates
+    its side effects, which is the #1232 harm.
+    """
+    from runner_sandbox.e2b_driver import _install_timeout_for_run
+    from runtime_limits import SANDBOX_LIFETIME_BUFFER_SECONDS
+
+    install = _install_timeout_for_run(command_timeout)
+    return int(command_timeout) + 2 * int(install) + SANDBOX_LIFETIME_BUFFER_SECONDS
+
+
 def _absolute_run_ceiling_seconds() -> int:
     """Longest wall clock any run can legitimately occupy.
 
     Used only as the backstop when liveness is indeterminate, so a permanently
     failing log probe cannot strand rows in `running` for ever.
     """
-    from runtime_limits import E2B_MAX_SANDBOX_LIFETIME_SECONDS, MAX_RUN_TIMEOUT_SECONDS
+    from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
 
-    return max(MAX_RUN_TIMEOUT_SECONDS, E2B_MAX_SANDBOX_LIFETIME_SECONDS)
+    # The widest legitimate shape: a pure-script run at the maximum command
+    # timeout, with its install phases. Must not be tighter than any deadline
+    # computed above, or the backstop would reap runs the deadline still allows.
+    return _pure_script_wall_clock_seconds(MAX_RUN_TIMEOUT_SECONDS)
 
 
 def _run_liveness_log_scan_limit() -> int:
@@ -2997,24 +3022,15 @@ def _effective_run_timeout_seconds(
                         or "agent"
                     )
                     if mode == "agent":
+                        # AgentDriver wraps the WHOLE run (sandbox setup
+                        # included) in asyncio.wait_for(this value), so it is
+                        # already the driver's own wall clock.
                         resolved = effective_agent_timeout_seconds(
                             resolved,
                             scheduled=_is_scheduled_agent_worker(config),
                         )
-                # The command timeout is NOT the run's wall clock. E2B budgets a
-                # dependency install of up to the same duration BEFORE the
-                # command starts, and sizes the sandbox to cover both. Reaping on
-                # the command timeout alone would kill a pure-script run still
-                # inside its install phase. Reuse the driver's own helpers so
-                # there is one definition of the budget.
-                from runner_sandbox.e2b_driver import (
-                    _install_timeout_for_run,
-                    _sandbox_lifetime_timeout,
-                )
-
-                resolved = _sandbox_lifetime_timeout(
-                    resolved, _install_timeout_for_run(resolved)
-                )
+                    else:
+                        resolved = _pure_script_wall_clock_seconds(resolved)
     except Exception:
         logger.warning(
             "Reaper could not resolve the effective timeout for run %s (worker %s); "
