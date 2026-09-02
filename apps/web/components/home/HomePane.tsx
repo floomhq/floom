@@ -18,8 +18,10 @@ import { useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { useIsDesktop } from "@/lib/use-is-desktop";
 import WorkersCollection from "@/app/workers/WorkersCollection";
 import { Avatar } from "@/components/ui/Avatar";
-import { useStreamedInitialData, qk } from "@/lib/query/hooks";
+import { useStreamedInitialData, useWorkers, qk } from "@/lib/query/hooks";
 import type { SystemOverview } from "@/lib/types";
+import { resolveWorkersGate } from "@/components/home/emily-home-empty";
+import { GoalOnboarding } from "@/components/home/GoalOnboarding";
 
 export function HomePane({
   // perf: the home page server-component streams GET /system/overview as an
@@ -35,14 +37,27 @@ export function HomePane({
   useStreamedInitialData(qk.overview, overviewPromise);
   const { fullscreen } = useEmilyFullscreen();
   const isDesktop = useIsDesktop();
+  const workersQuery = useWorkers();
+  const isFirstWorker = resolveWorkersGate({
+    workers: workersQuery.data,
+    isLoading: workersQuery.isLoading && !workersQuery.data,
+    isError: workersQuery.isError,
+  }).isFirstWorker;
 
   // MOBILE home (Federico 2026-06-19): on mobile, Emily is the bottom sheet
   // (EmilyMobileSheet) reached via a floating "Ask Emily" FAB — it owns its own
   // overlay and never hides this pane via the desktop `emilyFull` path. So this
-  // pane must ALWAYS show the Workers list on mobile (the same one /workers uses),
-  // never the aria-hidden radar placeholder. The FAB sits over this list; opening
-  // the sheet covers it, closing reveals it again — never a blank radar.
+  // pane shows first-open onboarding when the successfully loaded workspace has
+  // no real workers. Active workspaces keep the same Workers list used by
+  // /workers. The FAB sits over either surface; opening the sheet covers it.
   if (!isDesktop) {
+    if (isFirstWorker) {
+      return (
+        <div className="flex h-full w-full items-center justify-center overflow-y-auto py-8">
+          <GoalOnboarding />
+        </div>
+      );
+    }
     return <WorkersCollection initialWorkers={[]} />;
   }
 
