@@ -837,3 +837,38 @@ def test_deadline_model_matches_each_driver(repo_bundle, monkeypatch):
     assert run_service._absolute_run_ceiling_seconds() >= (
         run_service._pure_script_wall_clock_seconds(3600)
     )
+
+
+def test_unresolvable_recipe_gets_the_widest_budget_not_a_tighter_one(
+    repo_bundle, monkeypatch
+):
+    """An unresolvable worker must not be reaped EARLIER than a resolvable one.
+
+    The fallback says nothing about how long the run may legitimately take, so
+    it has to be the absolute ceiling. Using MAX_RUN_TIMEOUT_SECONDS (3600) here
+    was tighter than the pure-script deadline the same worker would have been
+    granted had its recipe loaded, so a live run could still be reaped early.
+    """
+    import run_service
+
+    repos, _db, _manifest = repo_bundle
+    _isolate_recipe_cache(monkeypatch)
+    monkeypatch.setenv("WORKEROS_RUN_LIVENESS_WINDOW_SECONDS", "0")
+    _worker(repos, "worker-broken2", timeout_seconds=3600)
+    monkeypatch.setattr(
+        run_service,
+        "_load_worker_recipe",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("recipe unavailable")),
+    )
+    now = dt.datetime.now(dt.timezone.utc)
+    # Past the old 3600 s fallback, but well inside the pure-script wall clock a
+    # resolvable 3600 s worker would have been granted.
+    _running_with_sandbox_log(
+        repos, "run-unresolvable-long", "worker-broken2", started=now - dt.timedelta(seconds=5000)
+    )
+    scheduled = _capture_retries(monkeypatch, run_service)
+
+    result = run_service.recover_abandoned_runs(repos=repos, now=now)
+
+    assert result == {"failed": 0, "requeued": 0}
+    assert scheduled == []

@@ -2981,26 +2981,29 @@ def _effective_run_timeout_seconds(
     ``_resolved_worker_timeout_seconds`` here would leave exactly the #1232
     defect in place for that (very common) worker shape.
 
-    Falls back to MAX_RUN_TIMEOUT_SECONDS -- never the 300 s global default --
-    whenever anything cannot be resolved. Reaping a *live* run duplicates
+    Falls back to the ABSOLUTE CEILING -- never the 300 s global default, and
+    never a value tighter than a deadline this function would grant a resolvable
+    worker. An unresolvable recipe tells us nothing about how long the run may
+    legitimately take, so it must get the widest legitimate budget; using
+    MAX_RUN_TIMEOUT_SECONDS here would reap an unresolvable pure-script run
+    earlier than the identical resolvable one. Reaping a *live* run duplicates
     outbound side effects (#1232 saw two GMAIL_SEND_EMAIL executions), whereas
     reaping late only delays recovery. The fallback is still finite, so a broken
     recipe cannot pin a row in `running` for ever.
     """
-    from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
 
     run_id = str(row.get("run_id") or row.get("id") or "")
     worker_id = str(row.get("worker_id") or "")
     user_id = str(row.get("user_id") or "")
     if not worker_id:
-        return MAX_RUN_TIMEOUT_SECONDS
+        return _absolute_run_ceiling_seconds()
 
     cache_key = (worker_id, user_id)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    resolved = MAX_RUN_TIMEOUT_SECONDS
+    resolved = _absolute_run_ceiling_seconds()
     try:
         from runner_sandbox import _resolve_mode_from_entry
         from runner_sandbox.agent_driver import _is_scheduled_agent_worker
@@ -3034,13 +3037,13 @@ def _effective_run_timeout_seconds(
     except Exception:
         logger.warning(
             "Reaper could not resolve the effective timeout for run %s (worker %s); "
-            "falling back to the %ss ceiling",
+            "falling back to the %ss absolute ceiling",
             run_id,
             worker_id,
-            MAX_RUN_TIMEOUT_SECONDS,
+            _absolute_run_ceiling_seconds(),
             exc_info=True,
         )
-        resolved = MAX_RUN_TIMEOUT_SECONDS
+        resolved = _absolute_run_ceiling_seconds()
 
     cache[cache_key] = resolved
     return resolved
