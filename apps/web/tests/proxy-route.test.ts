@@ -117,4 +117,69 @@ describe("api proxy route", () => {
       }),
     );
   });
+
+  it("restores workspace context from the persisted cookie for worker writes", async () => {
+    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ enabled: false }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+    const { POST } = await import("@/app/api/proxy/[...path]/route");
+
+    const res = await POST(
+      new NextRequest("https://workers.floom.dev/api/proxy/workers/report/pause", {
+        method: "POST",
+        headers: {
+          cookie: "workeros.activeWorkspaceId=ws_jonas; workeros_cloud_session=session",
+        },
+      }),
+      { params: Promise.resolve({ path: ["workers", "report", "pause"] }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://workers-api.floom.dev/workers/report/pause",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-workeros-workspace": "ws_jonas",
+        }),
+      }),
+    );
+  });
+
+  it("prefers explicit workspace context over query and cookie fallbacks", async () => {
+    process.env.FLOOM_API_BASE = "https://workers-api.floom.dev";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ enabled: false }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+    const { POST } = await import("@/app/api/proxy/[...path]/route");
+
+    await POST(
+      new NextRequest(
+        "https://workers.floom.dev/api/proxy/workers/report/pause?workspace_id=ws_query",
+        {
+          method: "POST",
+          headers: {
+            "x-workeros-workspace": "ws_header",
+            cookie: "workeros.activeWorkspaceId=ws_cookie",
+          },
+        },
+      ),
+      { params: Promise.resolve({ path: ["workers", "report", "pause"] }) },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://workers-api.floom.dev/workers/report/pause?workspace_id=ws_query",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-workeros-workspace": "ws_header",
+        }),
+      }),
+    );
+  });
 });

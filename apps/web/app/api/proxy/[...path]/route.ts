@@ -104,7 +104,16 @@ async function handler(
   if (req.headers.get("x-floom-do-not-track") === "1" || req.headers.get("dnt") === "1" || process.env.DO_NOT_TRACK === "1") {
     forwardHeaders["X-Floom-Do-Not-Track"] = "1";
   }
-  const activeWorkspace = req.headers.get("x-workeros-workspace");
+  // Worker writes require an explicit workspace at the API boundary. Most
+  // browser calls send the header directly, but a navigation, stale bundle, or
+  // server-originated request can arrive with only the workspace query/cookie.
+  // Preserve that already-selected workspace instead of dropping it in the
+  // same-origin proxy. Explicit request state wins over persisted browser
+  // state so a stale cookie cannot override a deliberate target.
+  const activeWorkspace =
+    req.headers.get("x-workeros-workspace")?.trim() ||
+    req.nextUrl.searchParams.get("workspace_id")?.trim() ||
+    req.cookies.get("workeros.activeWorkspaceId")?.value.trim();
   if (activeWorkspace) forwardHeaders["x-workeros-workspace"] = activeWorkspace;
   // Multi-member/cloud: forward the browser's backend session cookies so
   // per-user identity reaches the API. Prod cloud may use deployment-specific
