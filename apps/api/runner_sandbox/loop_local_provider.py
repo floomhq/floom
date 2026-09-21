@@ -109,6 +109,16 @@ class _FallbackModel:
             self._fallback = self._fallback_factory()
         return self._fallback
 
+    @property
+    def served_model_name(self) -> str:
+        """Model that actually served the last call, resolved through the chain."""
+        if self._fallback_active and self._fallback is not None:
+            inner = getattr(self._fallback, "served_model_name", None)
+            if isinstance(inner, str) and inner:
+                return inner
+            return self._fallback_name
+        return self._primary_name
+
     def get_retry_advice(self, request: Any) -> Any:
         model = (
             self._fallback
@@ -404,6 +414,15 @@ class LoopLocalModelProvider:
         )
         self._fallback_models[model_name] = model
         return model
+
+    @property
+    def served_model_name(self) -> str | None:
+        """Model that actually served this run, or None when no chain was built."""
+        for model in self._fallback_models.values():
+            name = getattr(model, "served_model_name", None)
+            if isinstance(name, str) and name:
+                return name
+        return None
 
     @property
     def openai_provider(self) -> Any:

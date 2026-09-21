@@ -41,7 +41,12 @@ _PROVIDER_FALLBACK_RE = _re.compile(
     r"invalid api key|api[_ -]?key|authentication|permission|unauthorized|forbidden"
     r"|billing|quota|exceeded your current quota|rate.?limit|resource_exhausted"
     r"|credential|access.?denied|unrecognizedclient|expiredtoken|security token"
-    r"|429|401|403",
+    r"|429|401|403"
+    # Server-side capacity/overload is as safe to retry on another model or key
+    # as a quota failure, and is the dominant outage shape for on-demand Bedrock
+    # and Gemini. Without these the chat fallback never engaged on capacity.
+    r"|\b(?:502|503|529)\b|service.?unavailable|overloaded|insufficient capacity"
+    r"|no capacity|\bunavailable\b",
     _re.IGNORECASE,
 )
 

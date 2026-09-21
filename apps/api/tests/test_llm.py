@@ -39,6 +39,21 @@ def test_chat_model_fallback_does_not_retry_application_errors():
     assert not llm.should_retry_chat_with_fallback(RuntimeError("invalid response format"))
 
 
+@pytest.mark.parametrize(
+    "error",
+    (
+        "litellm.InternalServerError: VertexAIException - 503 The model is overloaded",
+        "litellm.ServiceUnavailableError: BedrockException - Service Unavailable",
+        "BedrockException - Model has insufficient capacity, please retry",
+        "AnthropicException - 529 overloaded_error",
+        "OpenAIException - The engine is currently overloaded",
+    ),
+)
+def test_chat_model_fallback_retries_server_side_capacity(error):
+    """#2340: overload is as safe to retry on another model/key as a quota error."""
+    assert llm.should_retry_chat_with_fallback(RuntimeError(error))
+
+
 def test_is_litellm_model():
     assert llm.is_litellm_model("gpt-5.5") is False
     assert llm.is_litellm_model("gpt-5.4-mini") is False
