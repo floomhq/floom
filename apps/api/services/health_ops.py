@@ -117,10 +117,28 @@ def _health_check_scheduler() -> Dict[str, Any]:
     if deploy != "local":
         return {"ok": True, "enabled": False, "deploy": deploy}
     try:
-        from scheduler import scheduler_status
-        return scheduler_status()
+        import scheduler
+        payload = dict(scheduler.scheduler_status())
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:300]}
+    # Surface heartbeat staleness ADDITIVELY: a thread that is alive but wedged
+    # inside a tick still reports is_alive() True, so nothing here used to show
+    # that it stopped firing. `ok` deliberately keeps the scheduler_status()
+    # meaning, because a long recovery tick is not proof of death and flipping
+    # `ok` would change health semantics for every consumer. Leader-aware health
+    # is a separate follow-up. Read through getattr and never fail the whole
+    # check on it: several tests inject a minimal scheduler stub.
+    heartbeat_status = getattr(scheduler, "scheduler_heartbeat_status", None)
+    if heartbeat_status is None:
+        return payload
+    try:
+        heartbeat = heartbeat_status()
+    except Exception:
+        return payload
+    for key in ("alive", "heartbeat_age_seconds", "stale_after_seconds", "stale"):
+        if key in heartbeat:
+            payload[key] = heartbeat[key]
+    return payload
 
 
 def _run_health_checks() -> Dict[str, Any]:
