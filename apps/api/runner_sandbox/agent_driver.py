@@ -2258,7 +2258,14 @@ class AgentDriver(SandboxDriver):
             return {"ok": False, "error": "E2B_API_KEY is not configured"}
 
         from e2b import Sandbox
+        from runner_sandbox.e2b_connect_hardening import (
+            install_e2b_connect_error_hardening,
+        )
         from runner_sandbox.e2b_driver import _e2b_network_policy
+
+        # Same reason as the e2b_driver call site: keep a non-object connect
+        # error payload from surfacing as an opaque AttributeError.
+        install_e2b_connect_error_hardening()
 
         sandbox = Sandbox.create(
             api_key=api_key,
