@@ -36,6 +36,7 @@ import { tokenisePrompt } from "@/lib/prompt-detect";
 import { isMachineLabel } from "@/lib/workspace/display-name";
 import { Sparkline } from "@/components/Sparkline";
 import { resolveWorkersGate } from "./emily-home-empty";
+import { GoalOnboarding } from "./GoalOnboarding";
 
 // ── small helpers ─────────────────────────────────────────────────────────────
 
@@ -337,6 +338,7 @@ export function EmilyHomeEmpty({
   initialData = null,
   onSeed,
   onPickMcp,
+  onGoalOnboardingChange,
   createMode = false,
 }: {
   /** Server-rendered overview for the pulse, hydrates without a round-trip. */
@@ -345,6 +347,8 @@ export function EmilyHomeEmpty({
   onSeed: (text: string) => void;
   /** Open the MCP-server browse modal. */
   onPickMcp: () => void;
+  /** Tell the chat host when the first-open flow owns the surface. */
+  onGoalOnboardingChange?: (active: boolean) => void;
   /** New-worker entry: show worker-building prompts, not ops/status prompts. */
   createMode?: boolean;
 }) {
@@ -368,6 +372,12 @@ export function EmilyHomeEmpty({
   });
   const isFirstWorker = gate.isFirstWorker;
   const showCreatePrompts = createMode || isFirstWorker;
+  const showGoalOnboarding = isFirstWorker && !createMode;
+
+  useEffect(() => {
+    onGoalOnboardingChange?.(showGoalOnboarding);
+    return () => onGoalOnboardingChange?.(false);
+  }, [onGoalOnboardingChange, showGoalOnboarding]);
 
   // Fix-as-prompt: needs-attention items + per-worker fix pills.
   const attention = useMemo(() => overview?.needs_attention ?? [], [overview]);
@@ -396,6 +406,10 @@ export function EmilyHomeEmpty({
     },
     [onSeed],
   );
+
+  if (showGoalOnboarding) {
+    return <GoalOnboarding />;
+  }
 
   return (
     <div className="flex w-full max-w-[760px] flex-col items-center px-6">
