@@ -981,6 +981,62 @@ def _slack_binding_user_id(team_id: str, slack_user_id: str) -> Optional[str]:
     return None
 
 
+def _slack_binding_for_owner(owner_id: str) -> Optional[tuple[str, str]]:
+    """Reverse-lookup a run owner's active Slack sender binding.
+
+    Given a Floom ``user_id`` (the run owner), return the
+    ``(slack_user_id, team_id)`` of their active binding so an approval DM can be
+    delivered, or ``None`` when the owner has no active binding.
+
+    This is the single overridable seam for the owner->Slack reverse lookup used
+    by ``notify_pending_approval_via_slack``. OSS/single-tenant reads the local
+    ``slack_sender_bindings`` table here; in cloud this function is monkeypatched
+    (``startup.apply_cloud_slack_overrides``) to read the Supabase-backed
+    bindings instead — the local sqlite sidecar is always empty in cloud, so the
+    lookup MUST route through this helper, not a raw ``get_db()`` (bug: the
+    approval DM never fired in cloud because the inline query hit empty sqlite).
+
+    Mirrors the bootstrap<->admin uuid aliasing in ``_slack_binding_user_id`` and
+    the WhatsApp notifier: an admin/FLOOM_SECRET-created run is owned by the
+    bootstrap id ('local-user'), while the human's binding may be keyed to their
+    real user uuid (or vice-versa), so both are considered.
+    """
+    from db import get_db
+
+    if not owner_id:
+        return None
+    bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
+    candidate_ids = [owner_id]
+    try:
+        with get_db() as conn:
+            if owner_id == bootstrap_id:
+                try:
+                    admin_rows = conn.execute(
+                        "SELECT id FROM users WHERE role = 'admin'"
+                    ).fetchall()
+                    candidate_ids += [str(r["id"]) for r in admin_rows]
+                except Exception:
+                    pass  # no users table (legacy single-user) — owner_id alone is fine
+            else:
+                candidate_ids.append(bootstrap_id)
+            seen: set[str] = set()
+            candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
+            placeholders = ",".join("?" * len(candidate_ids))
+            row = conn.execute(
+                f"""
+                SELECT slack_user_id, slack_team_id FROM slack_sender_bindings
+                WHERE user_id IN ({placeholders}) AND status = 'active'
+                LIMIT 1
+                """,
+                tuple(candidate_ids),
+            ).fetchone()
+        if row and row["slack_user_id"] and row["slack_team_id"]:
+            return str(row["slack_user_id"]), str(row["slack_team_id"])
+    except Exception:
+        logger.exception("Slack approval notify: binding lookup failed for owner %s", owner_id)
+    return None
+
+
 def _slack_create_claim(team_id: str, slack_user_id: str, profile_name: str = "") -> Dict[str, str]:
     """Issue a new claim token for an unbound (team_id, slack_user_id) pair.
 
