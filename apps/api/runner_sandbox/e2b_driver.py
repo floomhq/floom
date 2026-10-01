@@ -1071,7 +1071,113 @@ _TRANSIENT_E2B_TRANSPORT_MARKERS = (
     "writetimeout",
     "pooltimeout",
     "json could not be generated",
+    # h2/hpack header-compression state corruption on the SDK's shared HTTP/2
+    # connection ("Encoder exceeded max allowable table size", 2026-10-01).
+    "encoder exceeded max allowable table size",
+    "invalidtablesizeerror",
+    "hpack",
 )
+
+
+# ---------------------------------------------------------------------------
+# E2B SDK transport hardening (2026-10-01 alert flood root cause).
+#
+# e2b 2.x caches ONE long-lived httpx transport per thread (sync) or per event
+# loop (async) and opens it with http2=True. When the h2/hpack header table on
+# that shared connection gets out of sync ("Encoder exceeded max allowable
+# table size"), every later request on the poisoned connection fails the same
+# way, so scheduled workers fail run after run (reltix-poll-oxygen, Offer
+# Fulfilment Generate). We force HTTP/1.1 for every SDK transport (no HPACK
+# state at all) and drop the cached transports after any transport-level
+# error so the next attempt opens a fresh connection.
+# Set WORKEROS_E2B_HTTP2=1 to restore the SDK's HTTP/2 default.
+# ---------------------------------------------------------------------------
+_E2B_TRANSPORT_FACTORIES = ("get_transport", "get_envd_transport")
+_e2b_transport_lock = threading.Lock()
+_e2b_transport_configured = False
+
+
+def _e2b_http2_enabled() -> bool:
+    return (os.environ.get("WORKEROS_E2B_HTTP2") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _http1_transport_factory(original: Callable[..., Any]) -> Callable[..., Any]:
+    def factory(config: Any, http2: bool = True, *args: Any, **kwargs: Any) -> Any:
+        return original(config, False, *args, **kwargs)
+
+    factory.__wrapped__ = original  # type: ignore[attr-defined]
+    factory._floom_http1 = True  # type: ignore[attr-defined]
+    return factory
+
+
+def _configure_e2b_transport() -> bool:
+    """Make every e2b SDK transport HTTP/1.1. Idempotent and best-effort: a
+    failure here logs and leaves the SDK default rather than failing the run.
+    Returns True when HTTP/1.1 is in force."""
+    global _e2b_transport_configured
+    if _e2b_http2_enabled():
+        return False
+    with _e2b_transport_lock:
+        if _e2b_transport_configured:
+            return True
+        try:
+            import e2b  # noqa: F401  (imports every SDK submodule that binds a factory)
+            from e2b.api import client_async, client_sync
+
+            originals: dict[int, Callable[..., Any]] = {}
+            for module in (client_sync, client_async):
+                for name in _E2B_TRANSPORT_FACTORIES:
+                    fn = getattr(module, name, None)
+                    if callable(fn) and not getattr(fn, "_floom_http1", False):
+                        originals[id(fn)] = fn
+            if not originals:
+                logger.warning("e2b transport factories not found; HTTP/2 left enabled")
+                return False
+            wrapped = {key: _http1_transport_factory(fn) for key, fn in originals.items()}
+            # Rebind the factory in every e2b module that imported it by name
+            # (e.g. `from e2b.api.client_sync import get_envd_transport`).
+            for mod_name, module in list(sys.modules.items()):
+                if module is None or not (mod_name == "e2b" or mod_name.startswith("e2b.")):
+                    continue
+                for attr, value in list(vars(module).items()):
+                    replacement = wrapped.get(id(value))
+                    if replacement is not None and originals[id(value)] is value:
+                        setattr(module, attr, replacement)
+            _reset_e2b_transport_caches()
+            _e2b_transport_configured = True
+            logger.info("e2b SDK transports forced to HTTP/1.1 (HPACK fault hardening)")
+            return True
+        except Exception:
+            logger.warning("Could not force e2b transports to HTTP/1.1", exc_info=True)
+            return False
+
+
+def _reset_e2b_transport_caches() -> None:
+    """Drop every cached e2b transport (all threads / event loops) so the next
+    request opens a fresh connection instead of reusing a poisoned one.
+    Best-effort; never raises."""
+    try:
+        from e2b.api import client_async, client_sync
+    except Exception:
+        return
+    for cls_name in ("TransportWithLogger", "EnvdTransportWithLogger"):
+        cls = getattr(client_sync, cls_name, None)
+        if cls is None:
+            continue
+        try:
+            if "_thread_local" in vars(cls):
+                cls._thread_local = threading.local()
+        except Exception:
+            logger.debug("Could not reset e2b %s cache", cls_name, exc_info=True)
+    for cls_name in ("AsyncTransportWithLogger", "AsyncEnvdTransportWithLogger"):
+        cls = getattr(client_async, cls_name, None)
+        if cls is None:
+            continue
+        try:
+            if "_instances" in vars(cls):
+                cls._instances = type(vars(cls)["_instances"])()
+        except Exception:
+            logger.debug("Could not reset e2b %s cache", cls_name, exc_info=True)
 
 
 def _is_transient_e2b_transport_error(exc: Exception) -> bool:
@@ -2268,6 +2374,10 @@ class E2BSandboxDriver(SandboxDriver):
                         )
                     else:
                         raise
+                    # Never reuse a connection that just failed at the transport
+                    # level: the next attempt (or the next run on this thread)
+                    # must open a fresh one.
+                    _reset_e2b_transport_caches()
                     if run_cancel_requested(run_id):
                         logger.info("E2B sandbox terminated by user cancel for run %s", run_id)
                         log_fn("[e2b] Sandbox terminated - run cancelled by user", "info")
@@ -2465,6 +2575,7 @@ class E2BSandboxDriver(SandboxDriver):
     ) -> WorkerResult:
         perf = _E2BPerfTimer()
         from e2b import Sandbox  # e2b 2.x
+        _configure_e2b_transport()
         perf.mark("import_e2b")
 
         api_keys = _configured_e2b_api_keys()

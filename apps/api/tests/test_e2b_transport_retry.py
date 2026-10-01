@@ -300,3 +300,102 @@ def test_sandbox_create_pacing_waits_between_creates(monkeypatch):
 
     assert sleeps == [0.5]
     assert e2b_driver._last_sandbox_create_at == 100.5
+
+
+# --- 2026-10-01: HPACK "Encoder exceeded max allowable table size" hardening ---
+
+
+@pytest.fixture
+def _fresh_e2b_transport_state(monkeypatch):
+    monkeypatch.delenv("WORKEROS_E2B_HTTP2", raising=False)
+    monkeypatch.setattr(e2b_driver, "_e2b_transport_configured", False)
+    yield
+
+
+def test_hpack_table_size_error_is_transient():
+    assert _is_transient_e2b_transport_error(
+        RuntimeError("Encoder exceeded max allowable table size")
+    ) is True
+
+    class InvalidTableSizeError(Exception):
+        pass
+
+    wrapped = RuntimeError("sandbox create failed")
+    wrapped.__cause__ = InvalidTableSizeError("table size 8192 > 4096")
+    assert _is_transient_e2b_transport_error(wrapped) is True
+
+
+def test_configure_forces_http1_on_every_sdk_transport(_fresh_e2b_transport_state):
+    from e2b.api import client_sync
+    from e2b.connection_config import ConnectionConfig
+    from e2b.sandbox_sync.commands import command as sync_command
+    from e2b.sandbox_sync.filesystem import filesystem as sync_filesystem
+
+    assert e2b_driver._configure_e2b_transport() is True
+    config = ConnectionConfig(api_key="e2b-test")
+
+    def check(_index):
+        # Control-plane API client transport (Sandbox.create / kill / is_running).
+        api_transport = client_sync.get_transport(config)
+        # envd transports as bound by name inside the SDK modules that use them.
+        command_transport = sync_command.get_envd_transport(config)
+        fs_transport = sync_filesystem.get_envd_transport(config)
+        return [t.pool._http2 for t in (api_transport, command_transport, fs_transport)]
+
+    # Fresh threads build fresh transports, so the cached ones cannot mask the result.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        assert executor.submit(check, 0).result() == [False, False, False]
+    # Idempotent: a second call does not double-wrap.
+    assert e2b_driver._configure_e2b_transport() is True
+    assert getattr(sync_command.get_envd_transport, "__wrapped__", None) is not None
+    assert getattr(sync_command.get_envd_transport.__wrapped__, "_floom_http1", False) is False
+
+
+def test_http2_can_be_restored_by_env(monkeypatch):
+    monkeypatch.setattr(e2b_driver, "_e2b_transport_configured", False)
+    monkeypatch.setenv("WORKEROS_E2B_HTTP2", "1")
+    assert e2b_driver._configure_e2b_transport() is False
+
+
+def test_reset_drops_cached_transports_for_a_fresh_connection():
+    from e2b.api.client_sync import get_envd_transport, get_transport
+    from e2b.connection_config import ConnectionConfig
+
+    config = ConnectionConfig(api_key="e2b-test")
+
+    def ids(_index):
+        before = (get_transport(config), get_envd_transport(config))
+        assert get_transport(config) is before[0]  # cached per thread
+        e2b_driver._reset_e2b_transport_caches()
+        after = (get_transport(config), get_envd_transport(config))
+        return before[0] is after[0], before[1] is after[1]
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        assert executor.submit(ids, 0).result() == (False, False)
+
+
+def test_transport_drop_recycles_cached_transports_before_retry(monkeypatch):
+    monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_MAX_ATTEMPTS", "3")
+    monkeypatch.setenv("WORKEROS_E2B_TRANSPORT_RETRY_BASE_SECONDS", "0")
+    monkeypatch.setattr(e2b_driver, "run_cancel_requested", lambda _run_id: False)
+    resets: list[int] = []
+    monkeypatch.setattr(e2b_driver, "_reset_e2b_transport_caches", lambda: resets.append(1))
+
+    driver = _RetryDriver(
+        [
+            RuntimeError("Error decoding header block: Encoder exceeded max allowable table size"),
+            WorkerResult(status="success", outputs={"ok": True}),
+        ]
+    )
+    result = driver.run(
+        worker_id="worker-hpack",
+        run_id="run-hpack",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_args, **_kwargs: None,
+        trace_id="trace-hpack",
+    )
+
+    assert result.status == "success"
+    assert driver.calls == 2
+    assert resets == [1]
