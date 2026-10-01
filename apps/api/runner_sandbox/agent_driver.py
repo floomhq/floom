@@ -2258,7 +2258,9 @@ class AgentDriver(SandboxDriver):
             return {"ok": False, "error": "E2B_API_KEY is not configured"}
 
         from e2b import Sandbox
-        from runner_sandbox.e2b_driver import _e2b_network_policy
+        from runner_sandbox.e2b_driver import _configure_e2b_transport, _e2b_network_policy
+
+        _configure_e2b_transport()
 
         sandbox = Sandbox.create(
             api_key=api_key,
