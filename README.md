@@ -2,6 +2,8 @@
 
 <p align="center"><strong>The loop engineering harness. AI workers that run on a loop.</strong></p>
 
+Floom is an open-source runtime for teams building scheduled AI workers with human approvals, run logs, and MCP access. [Use Floom Cloud](https://floom.dev) or [run it locally](#quick-start-run-floom-locally). To connect the hosted service from an MCP client, run `npx -y @floomhq/floom mcp install --target claude`.
+
 <p align="center">
   Schedule them, trigger them, require approvals, and keep every run on the record.<br>
   A worker is a folder: <code>worker.yml</code> + <code>SKILL.md</code> or <code>run.py</code>. Deploy it from Claude Code, Codex, or the CLI. Run it from the UI, REST, or MCP.
