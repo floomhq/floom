@@ -9,6 +9,7 @@
 - [Getting Started](docs/GETTING-STARTED.md): local development setup and first worker.
 - [Authoring Agents](docs/AUTHORING.md): full `worker.yml` schema, script mode, agent mode, triggers, secrets, connections, and approvals.
 - [Agent Cookbook](docs/AGENT-COOKBOOK.md): end-to-end recipes for agents building Floom workers through CLI and MCP.
+- [Scheduled work with human review](docs/AGENT-COOKBOOK.md#scheduled-work-with-human-review): schedule a worker, produce an output or approval preview, and run an approved action.
 - [Floom CLI + MCP](apps/mcp/README.md): CLI commands, MCP installation, HTTP MCP endpoint, and tool list.
 
 ## Build Contract
