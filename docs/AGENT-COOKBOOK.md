@@ -428,6 +428,34 @@ curl -X POST "$WEBHOOK_URL" \
 
 ## 6. Recipe: "Approval-gated worker"
 
+### Scheduled work with human review
+
+An AI worker can run on a schedule and prepare a result for review. Put the
+schedule in `worker.yml`:
+
+```yaml
+trigger:
+  type: schedule
+  cron: "0 9 * * *"
+  timezone: "UTC"
+```
+
+This is the trigger used by the [GitHub Digest example](../workers/github-digest/worker.yml).
+Its input is connected GitHub pull requests and assigned issues; its output is
+`out/digest.md`. It does not send an external message or require approval.
+
+If the scheduled worker proposes an external action, declare an approval gate
+and make the first run produce a preview. A reviewer can approve, edit, or
+reject it. Only the resumed run should perform the approved action. The
+[outbound approval demo](../workers/outbound-approval-demo/worker.yml) shows
+this two-run flow with a manual trigger. Its side effect is a local context-file
+write, so it does not demonstrate actual message delivery.
+
+For a scheduled client follow-up worker, the workflow is: scheduled check for
+new call notes, draft a follow-up, request review, then act only on an approved
+draft. Build and validate the worker against the [authoring contract](../BUILDING.md)
+before connecting a real sending tool.
+
 For workers that send external messages, delete data, or spend money. The run pauses; the user approves in /approvals or by ID.
 
 ```yaml

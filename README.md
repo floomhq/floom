@@ -2,6 +2,8 @@
 
 <p align="center"><strong>The loop engineering harness. AI workers that run on a loop.</strong></p>
 
+Floom is an open-source runtime for teams building scheduled AI workers with human approvals, run logs, and MCP access. [Use Floom Cloud](https://floom.dev) or [run it locally](#quick-start-run-floom-locally). To connect the hosted service from an MCP client, run `npx -y @floomhq/floom mcp install --target claude`.
+
 <p align="center">
   Schedule them, trigger them, require approvals, and keep every run on the record.<br>
   A worker is a folder: <code>worker.yml</code> + <code>SKILL.md</code> or <code>run.py</code>. Deploy it from Claude Code, Codex, or the CLI. Run it from the UI, REST, or MCP.
@@ -230,6 +232,10 @@ data/         SQLite DB + run artifacts
 ```
 
 ## FAQ: AI Agents, MCP, And Deploying Python Scripts
+
+### How do I run an AI worker on a schedule with human review?
+
+Define a schedule in `worker.yml`, then give the worker the tools and output it needs. Floom runs the worker at the specified time and records the result. For work that sends a message, deletes data, or spends money, add an approval gate so a person reviews the proposed action before it happens. The [GitHub Digest example](workers/github-digest/worker.yml) runs every day at 09:00 UTC and writes a markdown digest. The [outbound approval demo](workers/outbound-approval-demo/worker.yml) shows the separate review step; it is a manual-trigger example, not a scheduled sender. See the [schedule and approval recipe](docs/AGENT-COOKBOOK.md#scheduled-work-with-human-review) to combine these patterns for your own worker.
 
 ### What is Floom in one sentence?
 
