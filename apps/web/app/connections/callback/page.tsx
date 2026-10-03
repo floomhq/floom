@@ -3,11 +3,21 @@
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
+import { refetchConnectionReads } from "@/lib/query/connection-status";
+
+// #1209/#1206: refetch the same connection-status read path the
+// /connections/redirect poll refetches. This page is the OTHER live
+// completion point (the OAuth provider's actual redirect_uri, set server-side
+// to {base}/connections/callback), and it lands in its own window/tab with
+// the SAME localStorage-persisted TanStack cache, so it needs the same fix,
+// not a per-surface patch. The shared helper includes inactive persisted reads.
 
 function CallbackInner() {
   const router = useRouter();
   const params = useSearchParams();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     // If this page was opened as a popup from the inline OAuth flow,
@@ -22,10 +32,14 @@ function CallbackInner() {
 
     const connected = params.get("connected");
     if (connected === "1") {
-      // Opened in popup: close it. Opened in main window: go to connections.
+      // Opened in popup: close it (the opener window has its own cache and
+      // handles invalidation via its own postMessage/poll path, see
+      // lib/oauth-popup.ts). Opened in main window: this tab is where the
+      // user actually lands, so invalidate this tab's cache before navigating.
       if (window.opener) {
         window.close();
       } else {
+        void refetchConnectionReads(queryClient);
         const qs = new URLSearchParams();
         const cid = params.get("connection_id");
         const sel = params.get("sel") || cid;
@@ -114,6 +128,12 @@ function CallbackInner() {
         if (window.opener) {
           window.close();
         } else {
+          // Invalidate before navigating whether the backend reported success
+          // or failure: on success the destination must show the fresh
+          // connected state; on failure the query simply refetches and
+          // confirms the (unchanged) not-connected state. Either way this tab
+          // never renders a stale pre-callback read.
+          void refetchConnectionReads(queryClient);
           router.replace(dest);
         }
       }
@@ -135,7 +155,7 @@ function CallbackInner() {
         })
         .catch(() => navigateAfterCallback(undefined, true));
     }
-  }, [params, router]);
+  }, [params, router, queryClient]);
 
   return (
     <div className="flex items-center justify-center min-h-[60vh]">

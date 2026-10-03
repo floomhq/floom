@@ -96,6 +96,7 @@ from services.chat_worker_tools import (
     _list_viewable_workers,
     _resolve_runnable_worker,
     _tool_workers_get,
+    _agent_worker_visibility_role,
 )
 
 # Emily worker authoring (codegen + smoke gating) moved to services.chat_worker_authoring.
@@ -1881,24 +1882,29 @@ def _build_capabilities_snapshot(user_id: str) -> str:
             pass
 
         # --- workers ---
+        # #1205: this used to hand-roll repos.workers.list(user_id=user_id) with
+        # its own filtering, a THIRD worker-enumeration path alongside the grid
+        # (list_operator_workers) and Emily's workers__list_all tool (also
+        # list_operator_workers, #2270). A raw repos.workers.list(user_id=...)
+        # call passes no role, so the repo falls back to its "legacy default"
+        # (owner-only) filter: a different visibility rule than the grid/tool
+        # use for the same caller, and one that also never excluded archived
+        # workers. That mismatch is exactly how Emily described workers/flows
+        # that do not exist in the grid: her snapshot was answering a different
+        # question. Route through list_operator_workers, the same single
+        # source of truth _tool_workers_list_all already uses, so the
+        # capabilities snapshot and the grid can never disagree again.
         worker_count = 0
         notable_workers: list[str] = []
         try:
-            all_workers = repos.workers.list(user_id=user_id)
-            # Seed-all: example/starter workers are real workers Emily owns and
-            # acts on. Exclude only what the worker grid hides — canonical
-            # system/internal workers (_worker_hidden_from_api) + manifest
-            # system_worker — so this count matches workers.list_all.
-            from services.worker_access import (
-                _worker_hidden_from_api,
-                _build_owned_tracked_ids,
+            from services.worker_access import list_operator_workers
+
+            visibility_user_id = _effective_worker_visibility_user_id(user_id)
+            non_system, _hidden_count = list_operator_workers(
+                user_id=visibility_user_id,
+                repos=repos,
+                role=_agent_worker_visibility_role(visibility_user_id),
             )
-            _owned_tracked = _build_owned_tracked_ids()
-            non_system = [
-                w for w in all_workers
-                if not _worker_hidden_from_api(str(w.get("id") or ""), _owned_tracked)
-                and not (w.get("manifest") or {}).get("system_worker")
-            ]
             worker_count = len(non_system)
             enabled = [w for w in non_system if w.get("enabled")]
             notable_workers = [
