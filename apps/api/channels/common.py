@@ -178,47 +178,38 @@ def notify_pending_approval_via_slack(
     or when Slack is not configured.  Always best-effort — never raises.
     """
     try:
-        from db import get_db
         import requests as _requests
 
-        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
-        candidate_ids = [owner_id]
-        slack_user_id: Optional[str] = None
-        team_id: Optional[str] = None
-
+        # Resolve the owner -> Slack binding through the overridable helper so
+        # the correct store is used per deployment. OSS single-tenant reads the
+        # local DB; cloud overrides _slack_binding_for_owner (via
+        # startup.apply_cloud_slack_overrides) to read the Supabase-backed
+        # slack_sender_bindings. Import lazily by module attribute so the cloud
+        # monkeypatch is picked up at call time (a raw inline get_db() here
+        # would always hit cloud's empty local sqlite sidecar — #the-bug).
         try:
-            with get_db() as conn:
-                if owner_id == bootstrap_id:
-                    try:
-                        admin_rows = conn.execute(
-                            "SELECT id FROM users WHERE role = 'admin'"
-                        ).fetchall()
-                        candidate_ids += [str(r["id"]) for r in admin_rows]
-                    except Exception:
-                        pass
-                else:
-                    candidate_ids.append(bootstrap_id)
-                seen: set[str] = set()
-                candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
-                placeholders = ",".join("?" * len(candidate_ids))
-                row = conn.execute(
-                    f"""
-                    SELECT slack_user_id, slack_team_id FROM slack_sender_bindings
-                    WHERE user_id IN ({placeholders}) AND status = 'active'
-                    LIMIT 1
-                    """,
-                    tuple(candidate_ids),
-                ).fetchone()
-            if row:
-                slack_user_id = str(row["slack_user_id"])
-                team_id = str(row["slack_team_id"])
+            from channels.slack import _slack_binding_for_owner
         except Exception:
-            logger.exception(
-                "Slack approval notify: binding lookup failed for owner %s", owner_id
-            )
+            logger.exception("Slack approval notify: could not import binding helper")
             return
 
+        binding = _slack_binding_for_owner(owner_id)
+        if not binding:
+            logger.info(
+                "Slack approval notify: no active Slack binding for owner %s (run %s); "
+                "skipping DM",
+                owner_id,
+                run_id,
+            )
+            return
+        slack_user_id, team_id = binding
         if not slack_user_id or not team_id:
+            logger.info(
+                "Slack approval notify: incomplete Slack binding for owner %s (run %s); "
+                "skipping DM",
+                owner_id,
+                run_id,
+            )
             return
 
         try:
@@ -229,6 +220,13 @@ def notify_pending_approval_via_slack(
 
         bot_token = _slack_bot_token_for_team(team_id)
         if not bot_token:
+            logger.info(
+                "Slack approval notify: no Slack bot token/install for team %s "
+                "(owner %s, run %s); skipping DM",
+                team_id,
+                owner_id,
+                run_id,
+            )
             return
 
         short_id = approval_id[-6:] if len(approval_id) >= 6 else approval_id
@@ -276,6 +274,12 @@ def notify_pending_approval_via_slack(
             )
             dm_channel = (resp.json() or {}).get("channel", {}).get("id") if resp.ok else None
             if not dm_channel:
+                logger.warning(
+                    "Slack approval notify: conversations.open returned no DM channel "
+                    "for slack_user %s (run %s)",
+                    slack_user_id,
+                    run_id,
+                )
                 return
             _requests.post(
                 "https://slack.com/api/chat.postMessage",
@@ -290,6 +294,13 @@ def notify_pending_approval_via_slack(
                     "unfurl_links": False,
                 },
                 timeout=10,
+            )
+            logger.info(
+                "Slack approval notify: sent Approve/Reject DM to slack_user %s "
+                "(team %s, run %s)",
+                slack_user_id,
+                team_id,
+                run_id,
             )
         except Exception:
             logger.exception(

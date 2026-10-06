@@ -163,6 +163,99 @@ def test_slack_notify_sends_block_kit_dm(monkeypatch, tmp_path):
     )
 
 
+def test_slack_notify_routes_through_overridable_helper(monkeypatch, tmp_path):
+    """The owner->binding lookup MUST go through channels.slack._slack_binding_for_owner
+    (the cloud-overridable seam), NOT a raw local-DB query.
+
+    Regression for the cloud approval-DM bug: in cloud the local sqlite sidecar
+    is always empty, so the binding lives only in Supabase. When the cloud
+    override replaces _slack_binding_for_owner + _slack_bot_token_for_team, the
+    DM must still fire with the Approve/Reject blocks — even though NOTHING is
+    seeded in the local DB here.
+    """
+    main = _load_api(monkeypatch, tmp_path, with_slack=True)
+    import channels.common as _common_mod
+    import channels.slack as _slack_mod
+
+    SLACK_USER = "U_CLOUD_BIND"
+    TEAM = "T_CLOUD_BIND"
+    OWNER = "cloud-owner-uuid"
+    RUN_ID = "run-cloud-binding-1"
+
+    # Simulate the cloud override: binding resolved from Supabase (not local DB),
+    # bot token resolved from the Supabase-backed installation.
+    monkeypatch.setattr(
+        _slack_mod, "_slack_binding_for_owner",
+        lambda owner_id: (SLACK_USER, TEAM) if owner_id == OWNER else None,
+    )
+    monkeypatch.setattr(
+        _slack_mod, "_slack_bot_token_for_team",
+        lambda team_id: "xoxb-cloud-token" if team_id == TEAM else "",
+    )
+
+    messages_posted: list[dict] = []
+    conversations_opened: list[str] = []
+
+    class _FakeResp:
+        ok = True
+        def json(self):
+            if "conversations.open" in self._url:
+                return {"channel": {"id": "D_CLOUD_DM"}}
+            return {"ok": True}
+
+    def _fake_post(url, *, headers=None, json=None, timeout=None):
+        r = _FakeResp()
+        r._url = url
+        if "conversations.open" in url:
+            conversations_opened.append(str(json or {}))
+        elif "chat.postMessage" in url:
+            messages_posted.append(json or {})
+        return r
+
+    import requests as _requests_mod
+    monkeypatch.setattr(_requests_mod, "post", _fake_post)
+
+    # NOTE: no local DB seeding — proves the raw get_db() path is not used.
+    _common_mod.notify_pending_approval_via_slack(
+        owner_id=OWNER,
+        run_id=RUN_ID,
+        worker_name="Cloud Worker",
+        label="Send a report",
+        approval_id="apr_cloud00112233",
+    )
+
+    assert any(SLACK_USER in s for s in conversations_opened), (
+        f"Expected {SLACK_USER!r} in conversations.open payload; got {conversations_opened!r}"
+    )
+    assert len(messages_posted) == 1, f"Expected 1 chat.postMessage; got {messages_posted!r}"
+    msg = messages_posted[0]
+    assert msg.get("channel") == "D_CLOUD_DM"
+    action_ids = [
+        elem.get("action_id")
+        for block in (msg.get("blocks") or [])
+        for elem in (block.get("elements") or [])
+    ]
+    assert "workeros_approval_approve" in action_ids, "Approve button missing"
+    assert "workeros_approval_reject" in action_ids, "Reject button missing"
+
+
+def test_slack_binding_for_owner_reads_local_binding(monkeypatch, tmp_path):
+    """OSS single-tenant path: _slack_binding_for_owner returns the local binding."""
+    main = _load_api(monkeypatch, tmp_path, with_slack=True)
+    import channels.slack as _slack_mod
+
+    SLACK_USER = "U_LOCAL_BIND"
+    TEAM = "T_LOCAL_BIND"
+    OWNER = "local-bound-owner"
+
+    with main.get_db() as conn:
+        now = main.now_iso()
+        _seed_slack_bound_user(conn, SLACK_USER, TEAM, OWNER, now)
+
+    assert _slack_mod._slack_binding_for_owner(OWNER) == (SLACK_USER, TEAM)
+    assert _slack_mod._slack_binding_for_owner("nobody-here") is None
+
+
 def test_slack_notify_no_binding_is_noop(monkeypatch, tmp_path):
     """notify_pending_approval_via_slack does nothing when the owner has no Slack binding."""
     main = _load_api(monkeypatch, tmp_path, with_slack=True)
