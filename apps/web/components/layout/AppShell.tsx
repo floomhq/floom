@@ -80,7 +80,12 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
     || pathMatchesPrefixes(pathname, standalonePrefixes)
     || pathMatchesPrefixes(pathname, noSidebarPaths);
   const noDock = pathMatchesPrefixes(pathname, noDockPrefixes);
-  const fullBleed = pathMatchesPrefixes(pathname, fullBleedCollectionPaths);
+  // `/runs` is a collection that owns a full-height split layout, while
+  // `/runs/[id]` is a standard detail page. Prefix matching alone classified
+  // both as full-bleed, stripping the detail page's gutters and scroll pane.
+  const isDedicatedRunDetail = /^\/runs\/[^/]+\/?$/.test(pathname);
+  const fullBleed = !isDedicatedRunDetail
+    && pathMatchesPrefixes(pathname, fullBleedCollectionPaths);
 
   if (standalone) {
     return (
