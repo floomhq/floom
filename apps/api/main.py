@@ -839,6 +839,18 @@ async def _hourly_sweep_loop() -> None:
             _expire_stale_approvals()  # #798
         except Exception as exc:
             logger.warning("Approval expiry sweep error: %s", exc)
+        try:
+            # Coarse backstop for a dead or wedged scheduler thread. It only ever
+            # RE-starts a scheduler this process already started, so a web-role
+            # process never grows one here.
+            from scheduler import ensure_scheduler_running
+
+            # In a worker thread: a restart joins the outgoing generation for up
+            # to a few seconds and must not stall the event loop.
+            if await asyncio.to_thread(ensure_scheduler_running):
+                logger.warning("Scheduler watchdog restarted a dead or stale scheduler thread")
+        except Exception as exc:
+            logger.warning("Scheduler watchdog error: %s", exc)
         await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
 
 
