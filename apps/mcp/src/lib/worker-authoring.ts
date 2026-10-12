@@ -39,6 +39,7 @@ export type WorkerDraftValidationResult = {
 type JsonObject = Record<string, unknown>;
 
 const SUPPORTED_RUNTIMES = new Set(["python311", "node22", "typescript", "ts", "bash", "skill", "none"]);
+const RUNNER_INJECTED_ENV = new Set(["WORKEROS_API_URL", "FLOOM_RUN_ID", "WORKEROS_RUN_TOKEN"]);
 
 export const WORKER_AUTHORING_CONTRACT = {
   schema_version: "0.3",
@@ -76,6 +77,25 @@ export const WORKER_AUTHORING_CONTRACT = {
     "Use allowed_tools when the worker should only call specific Composio tools.",
     "Mirror connection names under capabilities.connections when the YAML includes a capabilities block.",
   ],
+  run_proxy: {
+    environment: {
+      WORKEROS_API_URL: "Base URL of the Floom API handling the active run.",
+      FLOOM_RUN_ID: "ID of the active Floom run.",
+      WORKEROS_RUN_TOKEN: "Run-scoped token sent as the X-Floom-Run-Token header.",
+    },
+    connections_file: {
+      path: "connections.json in the worker root",
+      shape: '{"gmail":"<connected_account_id>"}',
+      source: "Injected automatically by the Floom runner from the run's active connections.",
+    },
+    request: {
+      method: "POST",
+      url: "${WORKEROS_API_URL}/runs/${FLOOM_RUN_ID}/composio-execute/${slug}",
+      header: "X-Floom-Run-Token: ${WORKEROS_RUN_TOKEN}",
+      body: '{"connected_account_id":"<connection_id>","arguments":{...}}',
+    },
+    template: "See the composio-proxy template: floom workers templates get composio-proxy",
+  },
   validation_order: [
     "Start from workers.templates.get.",
     "Fill in worker.yml plus run.py, run.ts, or SKILL.md.",
@@ -95,6 +115,10 @@ export const WORKER_TEMPLATES: WorkerTemplate[] = [
 name: text-normalizer
 title: Text Normalizer
 description: Normalize a text input and return the normalized value.
+use_cases:
+  - Normalize whitespace before storing user-provided text.
+  - Clean text fields before sending them to another system.
+  - Produce consistent text for deterministic comparisons.
 version: "0.1.0"
 entrypoint: run.py
 trigger:
@@ -157,6 +181,10 @@ if __name__ == "__main__":
 name: gmail-summary-agent
 title: Gmail Summary Agent
 description: Summarize recent Gmail messages into a concise markdown brief.
+use_cases:
+  - Create a morning brief from recent email.
+  - Surface important messages that need attention.
+  - Summarize a Gmail search into a shareable report.
 version: "0.1.0"
 entrypoint: SKILL.md
 trigger:
@@ -216,6 +244,10 @@ Call the Gmail runtime tool once with the declared allowed tool, summarize the r
 name: approval-script
 title: Approval Script
 description: Build an approval payload for a proposed outbound action.
+use_cases:
+  - Review an outbound message before it is sent.
+  - Approve a proposed external system update.
+  - Present a side-effecting action for human sign-off.
 version: "0.1.0"
 entrypoint: run.py
 trigger:
@@ -274,6 +306,151 @@ if __name__ == "__main__":
     notes: [
       "Use approvals.required when a human must review before publication or side effects.",
       "Do not require secrets during the approval-plan phase unless the plan truly needs private API data.",
+    ],
+  },
+  {
+    id: "composio-proxy",
+    title: "Composio Run-Proxy Worker (Gmail)",
+    description: "Pure-script worker that calls Gmail through Floom's run-scoped Composio proxy.",
+    mode: "pure-script",
+    worker_yml: `schema_version: "0.3"
+name: gmail-proxy-summary
+title: Gmail Proxy Summary
+description: Fetch recent Gmail messages through the Floom run proxy and write a markdown summary.
+use_cases:
+  - Summarize recent messages from a connected Gmail inbox.
+  - Verify a Gmail connection with a safe read-only request.
+  - Build a markdown brief from a Gmail search.
+version: "0.1.0"
+entrypoint: run.py
+trigger:
+  type: manual
+connections:
+  - app: gmail
+    allowed_tools:
+      - GMAIL_FETCH_EMAILS
+exec:
+  mode: pure-script
+  entry: run.py
+  runtime: python311
+  runner: e2b
+  command: python run.py
+  inputs:
+    - name: query
+      label: Gmail query
+      type: string
+      kind: scalar
+      required: false
+      default: newer_than:1d
+  outputs:
+    - name: summary
+      label: Gmail summary
+      kind: file
+      media_type: text/markdown
+      path: out/summary.md
+      required: true
+capabilities:
+  network:
+    egress: true
+  secrets: []
+  connections:
+    - gmail
+`,
+    run_py: `import json
+import os
+from pathlib import Path
+from urllib import request as urlrequest
+from urllib.error import HTTPError, URLError
+
+
+WORKEROS_API_URL = os.environ.get("WORKEROS_API_URL", "https://localhost:8000").rstrip("/")
+FLOOM_RUN_ID = os.environ.get("FLOOM_RUN_ID", "")
+WORKEROS_RUN_TOKEN = os.environ.get("WORKEROS_RUN_TOKEN", "")
+
+
+def _read_connection_id() -> str:
+    try:
+        connections = json.loads(Path("connections.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return ""
+    return str(connections.get("gmail") or "").strip()
+
+
+def _write_result(status: str, *, outputs=None, artifacts=None, error=None) -> None:
+    result = {
+        "status": status,
+        "outputs": outputs or {},
+        "artifacts": artifacts or [],
+        "error": error,
+    }
+    Path("result.json").write_text(json.dumps(result), encoding="utf-8")
+
+
+def composio_execute(slug: str, payload: dict) -> dict:
+    if not FLOOM_RUN_ID:
+        return {"successful": False, "error": "FLOOM_RUN_ID is not set"}
+    connection_id = _read_connection_id()
+    if not connection_id:
+        return {"successful": False, "error": "Gmail connection is not active"}
+
+    url = f"{WORKEROS_API_URL}/runs/{FLOOM_RUN_ID}/composio-execute/{slug}"
+    body = {"connected_account_id": connection_id, "arguments": payload}
+    headers = {"Content-Type": "application/json"}
+    if WORKEROS_RUN_TOKEN:
+        headers["X-Floom-Run-Token"] = WORKEROS_RUN_TOKEN
+    req = urlrequest.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=120) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        return {"successful": False, "error": f"Floom proxy HTTP {exc.code}: {detail}"}
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return {"successful": False, "error": str(exc)}
+
+
+def main() -> None:
+    try:
+        inputs_path = Path("inputs.json")
+        inputs = json.loads(inputs_path.read_text(encoding="utf-8")) if inputs_path.exists() else {}
+        query = str(inputs.get("query") or "newer_than:1d")
+        response = composio_execute("GMAIL_FETCH_EMAILS", {"query": query, "max_results": 10})
+        if not response.get("successful"):
+            raise RuntimeError(str(response.get("error") or "Gmail request failed"))
+
+        if response.get("storedInFile"):
+            output_path = Path(str(response.get("outputFilePath") or ""))
+            if not output_path.exists():
+                raise RuntimeError("Gmail proxy response file was not found")
+            response = json.loads(output_path.read_text(encoding="utf-8"))
+        messages = response.get("data", {}).get("messages", [])
+        lines = ["# Gmail summary", "", f"Found {len(messages)} message(s) for \`{query}\`."]
+        for message in messages[:10]:
+            subject = message.get("subject") or "(no subject)"
+            sender = message.get("sender") or "Unknown sender"
+            lines.append(f"- **{subject}** from {sender}")
+
+        summary_path = Path("out/summary.md")
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+        artifact = {"name": "summary.md", "path": str(summary_path), "type": "text/markdown"}
+        _write_result("success", outputs={"summary": str(summary_path)}, artifacts=[artifact], error=None)
+    except Exception as exc:
+        _write_result("error", outputs={}, artifacts=[], error=str(exc))
+
+
+if __name__ == "__main__":
+    main()
+`,
+    notes: [
+      "Use this template for script workers that call Composio tools through a Floom run.",
+      "The runner injects connections.json and WORKEROS_API_URL, FLOOM_RUN_ID, and WORKEROS_RUN_TOKEN automatically; worker authors never set them.",
+      "Keep allowed_tools restricted to the exact Composio slugs the worker calls.",
     ],
   },
 ];
@@ -454,6 +631,7 @@ export function validateWorkerDraft(input: WorkerDraftValidationInput): WorkerDr
 
     const capSecrets = collectCapabilityList(manifest, "secrets");
     for (const key of envReads) {
+      if (RUNNER_INJECTED_ENV.has(key)) continue;
       if (!capSecrets.includes(key)) {
         errors.push(`${scriptLabel} reads env ${key}, but worker.yml does not declare it under capabilities.secrets`);
       }

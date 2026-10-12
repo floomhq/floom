@@ -43,6 +43,8 @@ or `--target generic` for other clients.
 
 For CLI use outside an MCP client:
 
+> **For agents and automation:** Install once with `npm i -g @floomhq/floom@latest`, then invoke `floom <command>` directly for repeated or scripted calls. Running `npx -y @floomhq/floom@latest <command>` each time re-resolves the package and adds avoidable cold-start latency.
+
 ```bash
 npm i -g @floomhq/floom@latest
 floom login

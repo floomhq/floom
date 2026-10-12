@@ -193,6 +193,8 @@ Not ready to self-host? [**floom.dev**](https://floom.dev) is the hosted version
 npx -y @floomhq/floom mcp install --target claude
 ```
 
+For repeated agent or automation calls, [install the CLI globally once](apps/mcp/README.md#quickstart--hand-it-to-your-agent) instead of invoking it through `npx` each time.
+
 The `.env`, model-provider, and E2B keys above are for running your own local or
 self-hosted runtime, not for using Floom Cloud.
 

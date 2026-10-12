@@ -683,6 +683,14 @@ export async function workersContractCommand(options: { json?: boolean }): Promi
   log.kv("Required files", WORKER_AUTHORING_CONTRACT.required_files.join(", "));
   log.kv("Required fields", WORKER_AUTHORING_CONTRACT.required_top_level_fields.join(", "));
   log.blank();
+  log.info("Run-proxy (Composio/Gmail) contract:");
+  log.info(`  Environment: ${Object.keys(WORKER_AUTHORING_CONTRACT.run_proxy.environment).join(", ")} (injected by the Floom runner)`);
+  log.info(`  Connections: ${WORKER_AUTHORING_CONTRACT.run_proxy.connections_file.path} shaped as ${WORKER_AUTHORING_CONTRACT.run_proxy.connections_file.shape}`);
+  log.info(`  Request: ${WORKER_AUTHORING_CONTRACT.run_proxy.request.method} ${WORKER_AUTHORING_CONTRACT.run_proxy.request.url}`);
+  log.info(`  Header: ${WORKER_AUTHORING_CONTRACT.run_proxy.request.header}`);
+  log.info(`  Body: ${WORKER_AUTHORING_CONTRACT.run_proxy.request.body}`);
+  log.info(`  ${WORKER_AUTHORING_CONTRACT.run_proxy.template}`);
+  log.blank();
   log.info("Recommended flow:");
   for (const step of WORKER_AUTHORING_CONTRACT.validation_order) {
     log.info(`  - ${step}`);
