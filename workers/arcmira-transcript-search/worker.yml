@@ -1,0 +1,38 @@
+schema_version: "0.3"
+name: arcmira-transcript-search
+title: Arcmira YouTube Transcript Search
+description: Find spoken passages about one topic with timestamps and source links. Account access limits apply. A paid read uses credits from your plan, then your on-demand budget.
+version: 0.1.0
+entrypoint: run.py
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  inputs:
+    - name: query
+      kind: scalar
+      type: string
+      required: true
+      label: Topic or phrase
+    - name: limit
+      kind: scalar
+      type: number
+      required: false
+      default: 5
+      label: Maximum passages (1 to 20)
+  outputs:
+    - name: results
+      kind: file
+      media_type: application/json
+      path: out/results.json
+      required: true
+      label: Timestamped transcript search results
+  secrets:
+    - ARCMIRA_API_KEY
+capabilities:
+  secrets:
+    - ARCMIRA_API_KEY
+  network:
+    egress: true
+trigger:
+  type: manual
